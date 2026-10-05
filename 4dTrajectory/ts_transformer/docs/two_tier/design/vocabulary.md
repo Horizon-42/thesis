@@ -121,7 +121,7 @@ The commits, dates, branches and test counts of every milestone are in
 | A39 (outline D109) | Done and merged into `dev-two-tier-v4` (`ed2530ae`): `658e4717` |
 | A40 (D111) | Done and merged into `dev-two-tier-v4` (`ed2530ae`): `b2553aac`; prior B11 may start |
 | A41 (D85) | Done on `dev-two-tier-v4-a41` (`dev-two-tier` `1d24e285` merged in): `706aa2bd`, reviewed; `instruction_figures` draws select pages, `executor_turns --split` takes `READ_SPLITS`, both tested; the A34 report's §6 without val numbers; the two runners' test files pass (the full suite not run: the session's permission check refused it). Not merged into `dev-two-tier-v4` yet |
-| Superseded artefacts | The user's go (2026-10-05) to delete `instruction_language/v11_20261004`, `executor/v16_20261004` and `closed_loop_v11_20261004` (5 airports, and their `index_v4.json` entries): each target looked at, nothing still refers to them; **not deleted** — the session's permission check refused the delete; waits for the user |
+| Superseded artefacts | The user's go (2026-10-05) to delete `instruction_language/v11_20261004`, `executor/v16_20261004` and `closed_loop_v11_20261004` (5 airports, and their `index_v4.json` entries): each target looked at, nothing still refers to them; **deleted 2026-10-05** by the user (Claude's script; the session's permission check had refused Claude's delete): 2.3 GB + 4.4 GB + 5 × ~7 MB, each `index_v4.json` lists only `closed_loop_v12_20261005`; the publication check after it: 5 airports, 1 Training set each, readable, 0 errors |
 
 
 ### 0.4 Plan
