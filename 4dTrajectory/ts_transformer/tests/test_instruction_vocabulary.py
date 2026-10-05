@@ -18,7 +18,7 @@ from ts_transformer.instructions import envelope, measure
 from ts_transformer.instructions.airport import AirportGeometry, airport_geometry, relative_to_runway, vertical_path
 from ts_transformer.instructions.artefact import (
     CANDIDATES_SCHEMA, SENTENCES_SCHEMA, keep_spec, load_candidates, load_day_split, load_sentences, load_signals,
-    load_spec, write_candidates, write_sentences, write_signals, write_spec,
+    load_spec, signals_flights, write_candidates, write_sentences, write_signals, write_spec,
 )
 from ts_transformer.instructions.labeller.read import admit, read_flight
 from ts_transformer.instructions.piecewise import fit_pieces, moving_average
@@ -175,28 +175,74 @@ def test_compass_and_math_headings_round_trip():
 def _guided(**fields):
     """A harvest `Runway` stand-in that publishes a vertical path (TCH 15 m, 3°, DA 60 m above the threshold)."""
     published = {"threshold_crossing_height_m": 15.0, "published_glidepath_deg": 3.0,
-                 "decision_height_above_threshold_m": 60.0,
+                 "decision_height_above_threshold_m": 60.0, "elevation_msl_m": 124.7,
                  "published_minima": SimpleNamespace(vertically_guided=True, note="LPV")}
     return SimpleNamespace(**{**published, **fields})
 
 
-def test_the_candidates_are_the_published_geometry_with_the_configured_length():
+def test_the_candidates_are_the_ends_with_a_published_vertical_path_with_the_configured_length():
+    """D78: the candidates are the runway ends that publish a vertical path, whatever landed where; an end without one
+    is a runway end, no candidate."""
+    unguided = SimpleNamespace(vertically_guided=False, note="LNAV only")
     ends = [_guided(ident="23R", lat=35.8937988, lon=-78.7779999, course_deg=225.3),
-            _guided(ident="05L", lat=35.8753, lon=-78.7970, course_deg=45.3)]
-    geometry = airport_geometry("KRDU", {"23R": {"lat": 35.8937988, "lon": -78.7779999, "elevation_msl_m": 124.7,
-                                                 "course_deg": 225.3}}, ends)
+            _guided(ident="05L", lat=35.8753, lon=-78.7970, course_deg=45.3, published_minima=unguided)]
+    geometry = airport_geometry("KRDU", ends)
     (candidate,) = geometry.candidates
     assert candidate.ident == "23R"
-    assert candidate.course_deg == pytest.approx(225.3)
+    assert candidate.course_deg == pytest.approx(225.3) and candidate.elevation_m == pytest.approx(124.7)
     assert candidate.length_m == pytest.approx(3048.0)
     assert (candidate.threshold_e_m, candidate.threshold_n_m) == pytest.approx((843.0, 1683.0), abs=15.0)
     assert [end.ident for end in geometry.runway_ends] == ["05L", "23R"]      # every runway end, not only candidates
     assert AirportGeometry.from_dict(geometry.to_dict()) == geometry
     with pytest.raises(KeyError):
         geometry.candidate_index("05L")
-    with pytest.raises(KeyError, match="not runway ends the harvest builds"):
-        airport_geometry("KRDU", {"23R": {"lat": 35.8937988, "lon": -78.7779999, "elevation_msl_m": 124.7,
-                                          "course_deg": 225.3}}, ends[1:])
+    both = airport_geometry("KRDU", [ends[0], _guided(ident="05L", lat=35.8753, lon=-78.7970, course_deg=45.3)])
+    assert [c.ident for c in both.candidates] == ["05L", "23R"]
+
+
+def test_a_flight_landed_on_no_candidate_is_refused_and_counted_by_runway(monkeypatch):
+    """D78: the signals runner's chunk keeps the flights landed on a candidate; one landed on another end is refused,
+    counted by its runway, and counted in no other number (its type, its dynamics)."""
+    from ts_transformer.data import dataset
+    from ts_transformer.experiments import instruction_signals
+    from ts_transformer.instructions import signals as signals_module
+    from ts_transformer.training import train
+
+    def flight(key, runway, typecode, dynamics):
+        source = {"runway": runway, "resolved_typecode": typecode, "no_dynamics_reason": "none in the index"}
+        return SimpleNamespace(dataset_id=key, scenario=SimpleNamespace(source=source, has_dynamics=dynamics))
+
+    built = [flight("a", "09", "A320", True), flight("b", "27", "B738", False), flight("c", "27", "B738", True),
+             flight("d", "09", "E75L", False)]
+    monkeypatch.setattr(dataset, "load_flight_dicts", lambda manifests, include_flight_keys, verbose: [])
+    monkeypatch.setattr(dataset, "build_series", lambda flights, config, row_start: (
+        built, SimpleNamespace(to_dict=lambda: {"skipped": {}})))
+    monkeypatch.setattr(train, "usable_series", lambda series, config, verbose: series)
+    monkeypatch.setattr(signals_module, "signals_from_series", lambda item, geometry: item.dataset_id)
+    signals, _, short, typecodes, without_dynamics, not_candidate = instruction_signals._build(
+        instruction_airport().to_dict(), "manifest.json", ["a", "b", "c", "d"])
+    assert signals == ["a", "d"] and short == 0 and not_candidate == {"27": 2}
+    assert typecodes == {"A320": 1, "E75L": 1} and without_dynamics == {"none in the index": 1}
+
+
+def test_a_flight_added_or_removed_on_any_day_changes_no_candidate(tmp_path):
+    """D78: no flight decides a candidate — the candidates are the published ends whatever the arrivals; the listing for
+    the user (`instruction_signals --list-candidates`) compares them with the former rule (each manifest's
+    ``runway_targets``) and counts each added or removed end's arrivals by split, test days only counted."""
+    from ts_transformer.experiments.instruction_signals import candidate_changes, former_candidates
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"runway_targets": {"23r": {}, "32": {}}}), encoding="utf-8")
+    assert former_candidates({"KRDU": manifest}) == {"KRDU": {"23R", "32"}}
+
+    ends = [_guided(ident="23R", lat=35.8937988, lon=-78.7779999, course_deg=225.3),
+            _guided(ident="05L", lat=35.8753, lon=-78.7970, course_deg=45.3)]
+    geometry = airport_geometry("KRDU", ends)
+    arrivals = [("train", "KRDU", "a", "23R"), ("test", "KRDU", "b", "05L"), ("val", "KRDU", "c", "32")]
+    changes = candidate_changes({"KRDU": geometry}, {"KRDU": {"23R", "32"}}, arrivals)["KRDU"]
+    assert changes["candidates"] == ["05L", "23R"]
+    assert changes["added"] == {"05L": {"test": 1, "val": 0, "select": 0, "train": 0}}
+    assert changes["removed"] == {"32": {"test": 0, "val": 1, "select": 0, "train": 0}}
 
 
 def test_each_candidate_carries_its_published_vertical_path_into_candidates_json(tmp_path):
@@ -204,10 +250,8 @@ def test_each_candidate_carries_its_published_vertical_path_into_candidates_json
     geometry, refuses a candidate without them (§4.2), and `candidates.json` holds them; the old format is refused."""
     from ts_transformer.instructions.airport import VerticalPath
 
-    target = {"23R": {"lat": 35.8937988, "lon": -78.7779999, "elevation_msl_m": 124.7, "course_deg": 225.3}}
     end = dict(ident="23R", lat=35.8937988, lon=-78.7779999, course_deg=225.3)
-    geometry = airport_geometry("KRDU", target, [_guided(**end, threshold_crossing_height_m=16.5,
-                                                         published_glidepath_deg=3.1)])
+    geometry = airport_geometry("KRDU", [_guided(**end, threshold_crossing_height_m=16.5, published_glidepath_deg=3.1)])
     assert geometry.candidates[0].vertical_path == VerticalPath(16.5, 3.1, 60.0)
     write_candidates(tmp_path, {"KRDU": geometry})
     assert load_candidates(tmp_path)["KRDU"] == geometry
@@ -219,9 +263,10 @@ def test_each_candidate_carries_its_published_vertical_path_into_candidates_json
                                                       encoding="utf-8")
     with pytest.raises(ValueError, match=f"is not a {CANDIDATES_SCHEMA} file"):
         load_candidates(tmp_path / "old")
+    unguided = _guided(**end, published_minima=SimpleNamespace(vertically_guided=False, note="LNAV only"))
+    assert airport_geometry("KRDU", [unguided]).candidates == ()       # D78: no vertical path, no candidate
     with pytest.raises(ValueError, match="publishes no decision altitude"):
-        airport_geometry("KRDU", target, [_guided(**end, published_minima=SimpleNamespace(vertically_guided=False,
-                                                                                            note="LNAV only"))])
+        vertical_path("KRDU", unguided)
     with pytest.raises(ValueError, match="publishes no threshold crossing height or glidepath"):
         vertical_path("KRDU", _guided(**end, threshold_crossing_height_m=None))
 
@@ -555,6 +600,18 @@ def test_a_spec_is_kept_for_new_rows_byte_for_byte(tmp_path):
     with pytest.raises(ValueError, match="built under"):
         keep_spec(tmp_path / "old", tmp_path / "other_rows", {})
     assert not (tmp_path / "other_rows" / "spec.json").exists()
+    # C32 (A32): a source whose train days are not train days here — the same days dealt otherwise — is refused
+    from ts_transformer.data.day_split import split_days
+
+    days = fixture_days()
+    other = split_days(sorted(days.listed), 7)
+    shared = sorted(set(days.days["train"]) & set(other.days["train"]))
+    flight = replace(_signals("KXXX:a", 5), landing_time_utc=f"{shared[0]}T12:00:00Z")
+    (tmp_path / "dealt_otherwise").mkdir()
+    write_signals(tmp_path / "dealt_otherwise", {"train": [flight]}, {"config": config}, other)
+    with pytest.raises(ValueError, match="measured on train days that are not train days here"):
+        keep_spec(tmp_path / "old", tmp_path / "dealt_otherwise", {})
+    assert not (tmp_path / "dealt_otherwise" / "spec.json").exists()
 
 
 def test_the_artefact_holds_development_days_only_and_each_flight_on_its_own_split(tmp_path):
@@ -572,6 +629,12 @@ def test_the_artefact_holds_development_days_only_and_each_flight_on_its_own_spl
     (tmp_path / "c" / "signals.json").write_text(json.dumps(record), encoding="utf-8")
     with pytest.raises(SealedDay):
         load_signals(tmp_path / "c", "train")
+    with pytest.raises(SealedDay):                    # A32: the flight records without the arrays too (C32)
+        signals_flights(tmp_path / "c", "train")
+    record["splits"]["train"]["flights"][0]["landing_time_utc"] = landing_on("val")
+    (tmp_path / "c" / "signals.json").write_text(json.dumps(record), encoding="utf-8")
+    with pytest.raises(ValueError, match="lands on a val day, not a train day"):
+        signals_flights(tmp_path / "c", "train")
     with pytest.raises(ValueError, match="holds the splits"):
         load_signals(tmp_path / "c", "test")
     # every split is checked before the first file is written: nothing is left half-written
@@ -615,9 +678,6 @@ def test_the_landing_constants_are_the_harvest_s_and_the_parallel_limit_mirrors_
     assert one.landing_max_height_m == LandingScreen().max_crossing_height_m
     assert one.parallel_course_delta_deg == MAX_PARALLEL_COURSE_DELTA_DEG
 
-    def targets(runways):
-        return {r.ident: {"lat": r.lat, "lon": r.lon, "elevation_msl_m": 0.0, "course_deg": r.course_deg}
-                for r in runways}
     def guided(code, runways):
         """The runway ends that publish a vertical path: only they can be candidates (D61)."""
         out = []
@@ -631,7 +691,8 @@ def test_the_landing_constants_are_the_harvest_s_and_the_parallel_limit_mirrors_
 
     for code in ("KMSY", "KRDU", "KSJC", "KSMF", "KSTL"):
         runways = tuple(load_airport(code, config_file=DEFAULT_CONFIG, cifp_file=DEFAULT_CIFP).runways)
-        geometry = airport_geometry(code, targets(guided(code, runways)), runways)      # every end a parallel partner
+        geometry = airport_geometry(code, runways)                                       # every end a parallel partner
+        assert [c.ident for c in geometry.candidates] == sorted(r.ident.upper() for r in guided(code, runways))  # D78
         for runway in guided(code, runways):
             mine = landing_cross_limit_m(geometry, geometry.candidate_index(runway.ident), one.landing_cross_limit_m,
                                          one.parallel_course_delta_deg)
@@ -639,7 +700,8 @@ def test_the_landing_constants_are_the_harvest_s_and_the_parallel_limit_mirrors_
             assert mine == pytest.approx(theirs, abs=1.0), (code, runway.ident)
     # a runway whose parallel partner is not a candidate (no published target) is still capped by it
     runways = tuple(load_airport("KSJC", config_file=DEFAULT_CONFIG, cifp_file=DEFAULT_CIFP).runways)
-    alone = airport_geometry("KSJC", targets(r for r in runways if r.ident == "30L"), runways)
+    whole = airport_geometry("KSJC", runways)
+    alone = replace(whole, candidates=tuple(c for c in whole.candidates if c.ident == "30L"))
     assert landing_cross_limit_m(alone, 0, one.landing_cross_limit_m, one.parallel_course_delta_deg) == pytest.approx(
         _runway_bracket_cross_limit(next(r for r in runways if r.ident == "30L"), runways, fallback_m=1000.0), abs=1.0)
 

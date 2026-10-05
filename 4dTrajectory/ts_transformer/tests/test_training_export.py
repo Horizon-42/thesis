@@ -15,28 +15,36 @@ import pytest
 from ts_transformer.experiments import training_export as export
 from ts_transformer.instructions import training_files as files
 from ts_transformer.instructions.spec import READING_RULE
-from ts_transformer.instructions.words import UNCHANGED
+from ts_transformer.instructions.words import RUNWAY, RUNWAY_GO_AROUND, UNCHANGED
 
 
-def _rows(airport, strata):
-    """Formal replay rows: ``strata`` a list of (stratum, count) for ``airport``, ids F0, F1, …"""
-    out, k = {}, 0
+def _strata(airport, strata):
+    """The sentence file's strata by signal index — ``strata`` a list of (stratum, count) for ``airport`` — and the
+    split's flight records, ids F0, F1, … (and G0, another airport's)."""
+    by_index, records = {}, []
     for stratum, count in strata:
         for _ in range(count):
-            out[f"F{k}"] = {"airport": airport, "stratum": stratum, "kind": "without go-around"}
-            k += 1
-    return out
+            by_index[len(records)] = stratum
+            records.append({"dataset_id": f"F{len(records)}", "airport": airport})
+    by_index[len(records)] = "vectored"
+    records.append({"dataset_id": "G0", "airport": "KBBB"})
+    return by_index, records
 
 
-def test_each_split_draws_per_stratum_flights_flown_at_every_row_interval_seeded():
-    two = _rows("KAAA", [("straight-in", 6), ("vectored", 5)])
-    rows = {2.0: two, 4.0: dict(two), 8.0: {k: v for k, v in two.items() if k != "F0"}}   # F0 not flown at 8 s
-    chosen = export.choose(rows, "KAAA", 3, 1337)
-    assert len(chosen) == 6 and "F0" not in chosen
-    assert [rows[2.0][d]["stratum"] for d in chosen] == ["straight-in"] * 3 + ["vectored"] * 3
-    assert export.choose(rows, "KAAA", 3, 1337) == chosen != export.choose(rows, "KAAA", 3, 7)
-    with pytest.raises(ValueError, match="5 straight-in flights flown at every row interval, 6 asked"):
-        export.choose(rows, "KAAA", 6, 1337)
+def test_each_split_draws_per_stratum_flights_with_a_sentence_at_every_row_interval_seeded():
+    """D86: the flights with a closed-loop sentence at every Δ, by the sentence file's stratum (D70), in a seeded
+    permutation — no formal replay row."""
+    strata, records = _strata("KAAA", [("straight-in", 6), ("vectored", 5)])
+    every = set(strata)
+    indices = [every, every, every - {0}]                                  # F0 has no sentence at 8 s
+    chosen = export.choose(indices, strata, records, "KAAA", 3, 1337)
+    assert len(chosen) == 6 and "F0" not in chosen and "G0" not in chosen
+    by_id = {r["dataset_id"]: strata[k] for k, r in enumerate(records)}
+    assert [by_id[d] for d in chosen] == ["straight-in"] * 3 + ["vectored"] * 3
+    assert export.choose(indices, strata, records, "KAAA", 3, 1337) == chosen \
+        != export.choose(indices, strata, records, "KAAA", 3, 7)
+    with pytest.raises(ValueError, match="5 straight-in flights with a closed-loop sentence at every row interval, 6"):
+        export.choose(indices, strata, records, "KAAA", 6, 1337)
 
 
 def test_the_words_of_a_sentence_are_its_events_decoded_with_the_corrections_marked():
@@ -173,7 +181,7 @@ def stage_a_fixture() -> tuple[dict, dict]:
 
     flights = {interval: closed_loop_flight(interval) for interval in export.ROW_INTERVALS_S}
     one = flights[2.0]
-    assert one.sentence.first_row == 0   # the observed rows from the flight's first: the open-loop sentence's own
+    assert one.sentence.rows.first_row == 0   # the observed rows from the flight's first: the open-loop sentence's own
     signals, geometry, words = one.signals, one.geometry, one.words
     attitude = {"headingDeg": signals.track_deg,
                 "pathAngleDeg": np.degrees(np.arctan2(signals.vertical_rate_mps, signals.ground_speed_mps)),
@@ -182,7 +190,7 @@ def stage_a_fixture() -> tuple[dict, dict]:
                                 "own", one.reading, geometry, attitude, words)
     for interval, item in flights.items():
         flown, (verdict,) = replay.fly_batch(item.batch, item.params, words, device=torch.device("cpu"))
-        replayed = export.replay_payload(flown, 0, verdict, item.batch, item.sentence, {"outcome": verdict.outcome},
+        replayed = export.replay_payload(flown, 0, verdict, item.batch, item.sentence,
                                          item.inputs.aero_params[0].numpy(), words.spec, words)
         flight["closedLoop"][f"{interval:g}"] = export.closed_loop_payload(item.sentence, replayed, interval, geometry,
                                                                               words)
@@ -217,58 +225,63 @@ def test_the_frontend_fixtures_are_what_the_export_writes():
     assert any(event["correction"] for event in flight["closedLoop"]["2"]["events"])
 
 
-def test_split_flights_gives_the_row_intervals_asked_and_reads_the_stratum_off_the_first(monkeypatch, tmp_path):
-    """`split_flights` (A36, stage B's export calls it with its own Δ): only the Δ given are set up and flown, in their
-    order, and the flight's stratum and kind are its rows' at the first Δ given; ``formal_rows`` reads the Δ asked."""
+def test_split_flights_gives_the_row_intervals_asked_of_any_split_from_the_stored_sentences(monkeypatch):
+    """`split_flights` (A36; D86): only the Δ given are set up and flown, in their order, one at a time, for any split —
+    val included, no formal replay row read — the flight's stratum its stored sentence's at the first Δ given (the
+    sentence file's, D70) and its kind whether that closed-loop sentence says a go-around, each sentence checked against
+    its stored outcome."""
+    from dataclasses import replace
     from types import SimpleNamespace
 
     import torch
 
-    from ts_transformer.autopilot import replay
     from ts_transformer.experiments import training_flights
     from ts_transformer.tests.support import closed_loop_flight
 
     flown = {interval: closed_loop_flight(interval) for interval in (4.0, 8.0)}
     one = flown[4.0]
     signals, geometry, words = one.signals, one.geometry, one.words
-    outcomes = {interval: replay.fly_batch(item.batch, item.params, words, device=torch.device("cpu"))[1][0].outcome
-                for interval, item in flown.items()}
+    said = one.sentence.rows.grid.copy()
+    said[-1, RUNWAY] = RUNWAY_GO_AROUND                                     # the 4 s sentence says a go-around
+    stored = {4.0: {0: replace(one.sentence, rows=replace(one.sentence.rows, grid=said),
+                               withheld=replace(one.sentence.withheld, stratum="straight-in"))},
+              8.0: {0: replace(flown[8.0].sentence, withheld=replace(flown[8.0].sentence.withheld, stratum="vectored",
+                                                                     go_around_rows=np.array([5])))}}
     series = SimpleNamespace(scenario=SimpleNamespace(source={"flight_key": f"{signals.dataset_id}_key"}))
-    flights = SimpleNamespace(drawn=SimpleNamespace(signals=[signals], series=[series], groups=["own"],
+    flights = SimpleNamespace(drawn=SimpleNamespace(indices=[0], signals=[signals], series=[series], groups=["own"],
                                                     geometries={geometry.code: geometry}),
                               readings=[one.reading])
     asked = []
     monkeypatch.setattr(training_flights, "open_flights", lambda *args: flights)
-    monkeypatch.setattr(training_flights, "stored_closed_loop", lambda *args: {})
-    monkeypatch.setattr(training_flights, "closed_loop_batch", lambda drawn, stored, interval, words: (
-        asked.append(interval) or (flown[interval].batch, [flown[interval].sentence])))
+    monkeypatch.setattr(training_flights, "stored_closed_loop", lambda instructions, split, interval, words: (
+        stored[interval]))
+    monkeypatch.setattr(export, "closed_loop_indices", lambda instructions, split, interval, spec: set(stored[interval]))
+    monkeypatch.setattr(training_flights, "closed_loop_batch", lambda instructions, split, drawn, by_index, interval,
+                        params, words: asked.append((split, interval)) or (flown[interval].batch, [by_index[0]]))
     monkeypatch.setattr(export, "observed_attitude", lambda series: {
         "headingDeg": signals.track_deg, "bankRightDeg": None, "attackDeg": None,
         "pathAngleDeg": np.degrees(np.arctan2(signals.vertical_rate_mps, signals.ground_speed_mps))})
-    rows = {4.0: {signals.dataset_id: {"stratum": "straight-in", "kind": "with go-around", "outcome": outcomes[4.0]}},
-            8.0: {signals.dataset_id: {"stratum": "vectored", "kind": "without go-around", "outcome": outcomes[8.0]}}}
-    (flight,), got = export.split_flights(Path("artefact"), "train", [signals.dataset_id], rows, one.params, words,
-                                          device=torch.device("cpu"))
-    assert asked == [4.0, 8.0] and list(flight["closedLoop"]) == ["4", "8"] and got is geometry
-    assert [flight["closedLoop"][k]["replay"]["outcome"] for k in ("4", "8")] == [outcomes[4.0], outcomes[8.0]]
+    cpu = torch.device("cpu")
+    (flight,), got = export.split_flights(Path("artefact"), "train", [signals.dataset_id], (4.0, 8.0), one.params, words,
+                                          device=cpu)
+    assert asked == [("train", 4.0), ("train", 8.0)] and list(flight["closedLoop"]) == ["4", "8"] and got is geometry
+    assert [flight["closedLoop"][k]["replay"]["outcome"] for k in ("4", "8")] == [
+        stored[4.0][0].withheld.outcome, stored[8.0][0].withheld.outcome]
     assert (flight["stratum"], flight["kind"]) == ("straight-in", "with go-around")
-    (flight,), _ = export.split_flights(Path("artefact"), "train", [signals.dataset_id], {8.0: rows[8.0]}, one.params,
-                                        words, device=torch.device("cpu"))
-    assert asked[2:] == [8.0] and list(flight["closedLoop"]) == ["8"] and flight["stratum"] == "vectored"
+    (flight,), _ = export.split_flights(Path("artefact"), "val", [signals.dataset_id], (8.0,), one.params, words,
+                                        device=cpu)                                             # D86: val too
+    assert asked[2:] == [("val", 8.0)] and list(flight["closedLoop"]) == ["8"]
+    assert (flight["split"], flight["stratum"], flight["kind"]) == ("val", "vectored", "without go-around")
     with pytest.raises(ValueError, match="at least one row interval"):
-        export.split_flights(Path("artefact"), "train", [signals.dataset_id], {}, one.params, words,
-                             device=torch.device("cpu"))
-
-    replays = tmp_path / "replay-closed-train-4s"
-    replays.mkdir()
-    (replays / "replay.json").write_text(json.dumps({"closed_loop": True, "row_interval_s": 4.0, "split": "train",
-                                                     "flights": [{"dataset_id": "F0"}]}), encoding="utf-8")
-    assert export.formal_rows(tmp_path, "train", (4.0,)) == {4.0: {"F0": {"dataset_id": "F0"}}}
-    with pytest.raises(FileNotFoundError):                       # the default reads every Δ of the ablation
-        export.formal_rows(tmp_path, "train")
+        export.split_flights(Path("artefact"), "train", [signals.dataset_id], (), one.params, words, device=cpu)
+    del stored[8.0][0]                                                  # no sentence at a Δ asked: refused by name
+    with pytest.raises(ValueError, match="have no closed-loop sentence at every row interval of \\[4.0, 8.0\\]"):
+        export.split_flights(Path("artefact"), "train", [signals.dataset_id], (4.0, 8.0), one.params, words, device=cpu)
 
 
-def test_a_flight_flown_again_is_refused_unless_it_gives_its_stored_states_and_its_formal_outcome():
+def test_a_flight_flown_again_is_refused_unless_it_gives_its_stored_states_and_its_stored_outcome():
+    """D86: a closed-loop sentence flown again must give its stored states on every 2 s row and its stored outcome
+    (D74) — no formal replay row is read."""
     import dataclasses
 
     import torch
@@ -279,23 +292,18 @@ def test_a_flight_flown_again_is_refused_unless_it_gives_its_stored_states_and_i
     one = closed_loop_flight(4.0)
     flown, (verdict,) = replay.fly_batch(one.batch, one.params, one.words, device=torch.device("cpu"))
     aero = one.inputs.aero_params[0].numpy()
-    states = one.sentence.states.copy()
+    sentence = one.sentence
+    export.replay_payload(flown, 0, verdict, one.batch, sentence, aero, one.words.spec, one.words)
+    states = sentence.rows.states.copy()
     states[-1, 2] += 1e-3                                       # a stored height a millimetre off
-    moved = dataclasses.replace(one.sentence, states=states)
-    with pytest.raises(ValueError, match="from its closed-loop states"):
-        export.replay_payload(flown, 0, verdict, one.batch, moved, {"outcome": verdict.outcome}, aero, one.words.spec,
-                              one.words)
-    states[-1, 2] = float("nan")
-    with pytest.raises(ValueError, match="from its closed-loop states"):
-        export.replay_payload(flown, 0, verdict, one.batch, dataclasses.replace(one.sentence, states=states),
-                              {"outcome": verdict.outcome}, aero, one.words.spec, one.words)
-    with pytest.raises(ValueError, match="the formal replay to landed"):
-        export.replay_payload(flown, 0, verdict, one.batch, one.sentence, {"outcome": "landed"}, aero, one.words.spec,
-                              one.words)
+    for off in (states, np.where(np.arange(len(states))[:, None] == len(states) - 1, np.nan, states)):
+        moved = dataclasses.replace(sentence, rows=dataclasses.replace(sentence.rows, states=off))
+        with pytest.raises(ValueError, match="from its closed-loop states"):
+            export.replay_payload(flown, 0, verdict, one.batch, moved, aero, one.words.spec, one.words)
     other = "timeout" if verdict.outcome != "timeout" else "landed"                 # D74: the stored outcome
-    with pytest.raises(ValueError, match=f"stored {other}"):
-        export.replay_payload(flown, 0, verdict, one.batch, dataclasses.replace(one.sentence, outcome=other),
-                              {"outcome": verdict.outcome}, aero, one.words.spec, one.words)
+    judged = dataclasses.replace(sentence, withheld=dataclasses.replace(sentence.withheld, outcome=other))
+    with pytest.raises(ValueError, match=f"flown again to {verdict.outcome}, stored {other}"):
+        export.replay_payload(flown, 0, verdict, one.batch, judged, aero, one.words.spec, one.words)
 
 
 def test_a_set_whose_directory_exists_is_refused_before_any_airport_is_written(tmp_path):
@@ -316,13 +324,16 @@ def test_a_kept_flight_owns_its_arrays():
     signals = training_flights.owned_signals(one.signals)
     sentence = training_flights.owned_sentence(one.sentence)
     assert not np.shares_memory(signals.e_m, one.signals.e_m) and np.array_equal(signals.e_m, one.signals.e_m)
-    assert not np.shares_memory(sentence.states, one.sentence.states)
-    assert np.array_equal(sentence.grid, one.sentence.grid) and sentence.start == one.sentence.start
+    assert not np.shares_memory(sentence.rows.states, one.sentence.rows.states)
+    assert not np.shares_memory(sentence.withheld.lateral_m, one.sentence.withheld.lateral_m)
+    assert np.array_equal(sentence.rows.grid, one.sentence.rows.grid) and sentence.rows.start == one.sentence.rows.start
+    assert sentence.withheld.outcome == one.sentence.withheld.outcome
 
 
 def test_the_set_s_batch_holds_no_view_into_the_loaded_closed_loop_file(monkeypatch):
     """`closed_loop_batch` gives the batch and the sentences arrays of their own — a words grid kept as a view would keep
-    the split's whole file (72 MB of words at train, Δ = 2 s, an airport) — and refuses a flight without a sentence."""
+    the split's whole file (72 MB of words at train, Δ = 2 s, an airport) — refuses a flight without a sentence, and runs
+    the start's refusals on the set's sentences (`start.require_startable`, D67)."""
     import dataclasses
     from types import SimpleNamespace
 
@@ -335,14 +346,24 @@ def test_the_set_s_batch_holds_no_view_into_the_loaded_closed_loop_file(monkeypa
     before, _, _ = test_closed_loop._batch(2.0)                  # the batch `replay.batch_of` would build
     before.drawn = {"refused_on_interval": {}}
     monkeypatch.setattr(replay, "batch_of", lambda *args: before)
-    whole = np.concatenate([one.sentence.grid, one.sentence.grid])   # the file's words: this sentence is a view of it
-    stored = {0: dataclasses.replace(one.sentence, grid=whole[: len(one.sentence.grid)])}
-    flights = SimpleNamespace(drawn=None, readings=before.readings)
-    batch, (sentence,) = training_flights.closed_loop_batch(flights, stored, 2.0, one.words)
-    assert np.array_equal(batch.sentences[0].grid, one.sentence.grid) and np.array_equal(sentence.grid, one.sentence.grid)
-    assert not np.shares_memory(batch.sentences[0].grid, whole) and not np.shares_memory(sentence.grid, whole)
+    grid = one.sentence.rows.grid
+    whole = np.concatenate([grid, grid])                          # the file's words: this sentence is a view of it
+    stored = {0: dataclasses.replace(one.sentence, rows=dataclasses.replace(one.sentence.rows, grid=whole[: len(grid)]))}
+    flights = SimpleNamespace(drawn=SimpleNamespace(indices=[7], signals=before.observed, geometries={}),
+                              readings=before.readings)
+    before.indices = [7]
+    stored = {7: stored[0]}
+    started = []
+    monkeypatch.setattr(training_flights, "require_startable", lambda instructions, split, interval_s, sentences, signals,
+                        geometries, params, words: started.append((instructions, split, interval_s, sorted(sentences),
+                                                                   signals, params)))
+    batch, (sentence,) = training_flights.closed_loop_batch(Path("artefact"), "train", flights, stored, 2.0, one.params,
+                                                            one.words)
+    assert started == [(Path("artefact"), "train", 2.0, [7], {7: before.observed[0]}, one.params)]   # by signal index
+    assert np.array_equal(batch.sentences[0].grid, grid) and np.array_equal(sentence.rows.grid, grid)
+    assert not np.shares_memory(batch.sentences[0].grid, whole) and not np.shares_memory(sentence.rows.grid, whole)
     with pytest.raises(ValueError, match="1 of the set's flights have no closed-loop sentence at 2 s"):
-        training_flights.closed_loop_batch(flights, {}, 2.0, one.words)
+        training_flights.closed_loop_batch(Path("artefact"), "train", flights, {}, 2.0, one.params, one.words)
 
 
 def test_a_flight_is_drawn_to_its_outcome_s_state_but_a_dynamics_failure_s_state_before_it():

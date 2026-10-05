@@ -90,9 +90,10 @@ def observed_decision(signals: FlightSignals, reading: Reading, geometry: Airpor
 def final_descents(sentence: ClosedLoopSentence, words: Words) -> dict[str, int]:
     """A closed-loop sentence's final descents (runs of said rows with "no level-off" in force, D66), their rows, and
     the angle correction words said in them and in the whole sentence."""
-    final = in_force(sentence.grid)[:, ALTITUDE] == words.altitude_no_level_off
+    rows = sentence.rows
+    final = in_force(rows.grid)[:, ALTITUDE] == words.altitude_no_level_off
     starts = final & ~np.concatenate(([False], final[:-1]))
-    angle = sentence.correction[:, ANGLE]
+    angle = rows.correction[:, ANGLE]
     return {"final_descents": int(starts.sum()), "final_descent_rows": int(final.sum()),
             "final_descent_angle_corrections": int((angle & final).sum()), "angle_corrections": int(angle.sum())}
 

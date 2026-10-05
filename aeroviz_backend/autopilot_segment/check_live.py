@@ -9,9 +9,12 @@ compared with what the set's sample shows of the same flight —
   to the sample's replay.
 
     python -m aeroviz_backend.autopilot_segment.check_live --set-id <set> --out <directory> [--airport KRDU …]
+        [--flights-per-airport N --seed S]
 
-Writes ``check.json`` (every differing segment named) and prints the summary; exits 1 when any differs. Read-only:
-nothing is written outside ``--out``.
+``--flights-per-airport N`` flies every word of N flights of each airport, drawn in a permutation seeded by ``--seed``
+(the user, 2026-10-05: a set is checked on a sample, not on every word; 0, the default: every flight); the sample is in
+the summary. Writes ``check.json`` (every differing segment named) and prints the summary; exits 1 when any differs.
+Read-only: nothing is written outside ``--out``.
 """
 
 from __future__ import annotations
@@ -73,13 +76,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--airport", nargs="+", default=list(AIRPORTS))
     parser.add_argument("--root", type=Path, default=COMPARISON_AIRPORTS_ROOT)
+    parser.add_argument("--flights-per-airport", type=int, default=0, help="a seeded sample of each airport's flights "
+                                                                           "(0: every flight)")
+    parser.add_argument("--seed", type=int, default=1337)
     args = parser.parse_args(argv)
+    if args.flights_per_airport < 0:
+        parser.error(f"--flights-per-airport {args.flights_per_airport}: a number of flights, 0 for every one")
     args.out.mkdir(parents=True, exist_ok=False)
     backend = AutopilotSegmentBackend(airports_root=args.root)
-    started, seq, segments, differing, by_end = time.perf_counter(), 0, 0, [], {}
+    started, seq, segments, differing, by_end, flown = time.perf_counter(), 0, 0, [], {}, {}
     for airport in args.airport:
         _, sample = backend.training_set(airport, args.set_id)
-        for flight in sample["flights"]:
+        flights = sample["flights"]
+        if args.flights_per_airport:
+            order = np.random.default_rng(args.seed).permutation(len(flights))[:args.flights_per_airport]
+            flights = [flights[k] for k in sorted(order.tolist())]
+        flown[airport] = [flight["flightKey"] for flight in flights]
+        for flight in flights:
             for interval, closed in flight["closedLoop"].items():
                 last = {}
                 for event in closed["events"]:
@@ -98,10 +111,12 @@ def main(argv: list[str] | None = None) -> int:
                                           "column": COLUMNS[event["column"]], "row": event["row"], "differ": differ})
         print(f"{airport}: {segments} segments so far, {len(differing)} differing, "
               f"{time.perf_counter() - started:.0f} s", flush=True)
-    summary = {"checkedUtc": utc_now(), "setId": args.set_id, "airports": args.airport, "segments": segments,
+    summary = {"checkedUtc": utc_now(), "setId": args.set_id, "airports": args.airport,
+               "flightsPerAirport": args.flights_per_airport or "every flight", "seed": args.seed,
+               "flights": {airport: len(keys) for airport, keys in flown.items()}, "segments": segments,
                "differing": len(differing), "ends": by_end, "roundingM": ROUNDING_M, "stateBoundM": STATE_BOUND_M,
                "seconds": round(time.perf_counter() - started, 1)}
-    write_json_atomic(args.out / "check.json", {**summary, "segmentsDiffering": differing})
+    write_json_atomic(args.out / "check.json", {**summary, "flightKeys": flown, "segmentsDiffering": differing})
     print(json.dumps(summary))
     return 1 if differing else 0
 

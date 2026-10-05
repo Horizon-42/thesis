@@ -48,7 +48,7 @@ class Segment:
 def segment_of(sentence: ClosedLoopSentence, column: int, row: int, interval_s: float, params: ExecutorParams,
                words: Words) -> Segment:
     """The segment of the word said at Δ row ``row`` of ``column`` (module docstring); refused when none is said there."""
-    grid = sentence.grid
+    grid = sentence.rows.grid
     if not 0 <= row < len(grid) or grid[row, column] == UNCHANGED:
         raise RequestRefused(f"the closed-loop sentence says no word of column {column} at Δ row {row}")
     every = int(round(interval_s / params.cycle_s))
@@ -57,7 +57,8 @@ def segment_of(sentence: ClosedLoopSentence, column: int, row: int, interval_s: 
     if len(later):
         lead = int(round(words.spec.heading_lead_s / params.cycle_s)) if column == HEADING else 0
         stop = (row + 1 + int(later[0])) * every + lead
-    return Segment(column=column, row=row, word=int(grid[row, column]), correction=bool(sentence.correction[row, column]),
+    return Segment(column=column, row=row, word=int(grid[row, column]),
+                   correction=bool(sentence.rows.correction[row, column]),
                    start_cycle=row * every, stop_cycle=stop)
 
 
@@ -101,7 +102,7 @@ def apart_from_stored(result: FlownSegment, sentence: ClosedLoopSentence, batch:
     """The live flight against the artefact's stored flown states on the 2 s rows both have (from the first predicted
     step to the last state flown): how many and the largest horizontal and vertical distance."""
     step_cycles = int(round(step_s / result.flown.cycle_s))
-    stored = sentence.flown_states
+    stored = sentence.rows.flown_states
     rows = min(len(stored), last_state(result) // step_cycles + 1)
     cycles = np.arange(rows) * step_cycles
     track = flown_track(result.flown.states[0, : cycles[-1] + 1].cpu().numpy(), batch.geometries[j])

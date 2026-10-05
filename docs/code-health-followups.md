@@ -144,6 +144,7 @@ added three entries (the rows after the performance index's).
 | The edge and executor fingerprints hash row-placement and data-plane code (10-02) | open | new; see the entry | no: a check — but the fix changes what the stored checkpoints and passed records name |
 | Readout headers mix configuration, data and code version in one file under one format version (10-03) | partly | the window readout split (multi-aircraft design 9.9, branch `dev-step9-one-commanded` `1e3bd470`; shared `experiments/code_version.py`); the other readouts open, see the entry | no: readouts only |
 | Two ATC constants in `instructions/spec.py` that nothing reads (2026-10-04) | open | delete `ATC_SPEED_COMPLIANCE_MPS` and `ATC_MIN_DESCENT_RATE_MPS` | no: nothing reads them |
+| Two runway ends on one centreline halve the landing screen to float noise (2026-10-05) | open | compare the across-course spacing with a tolerance in `landing_cross_limit_m` and its harvest original, together | yes: the candidates' landing screens (a rebuild); none of the five airports has such a pair today (not checked on every end) |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
 the executor `autopilot/` and its replay, `prior_train` / `prior_select` / `prior_free_generation`, the land-by-reward
@@ -763,3 +764,14 @@ D9); the masks can take the d²/(2R) term with their next procedure set.
 regulation comments, and no module, runner or test reads them (`command grep -rn` over `4dTrajectory/` and
 `aeroviz_backend/`). **Judgement**: delete them with the next change of `instructions/spec.py`; a constant that binds
 nothing reads as a rule the vocabulary applies.
+
+## Two runway ends on one centreline halve the landing screen to float noise (2026-10-05)
+
+**Verified** (found while writing A32's test of D79, `dev-two-tier-v4-a32`): `instructions/airport.landing_cross_limit_m`
+skips a parallel end whose across-course spacing is exactly 0, but for two ends on one centreline with the same course
+the spacing computed through `relative_to_runway` comes out about 1e-13 m, not 0, so half of it caps the landing screen
+— a synthetic airport with "09" and "09B" 3 km apart on one line gave a limit of 9.2e-14 m, and the judge saw no
+crossing of either. The harvest's `_runway_bracket_cross_limit`, which it mirrors, has the same test. **Judgement**: a
+real airport has no two candidate ends on one centreline with one course, so no flight is judged otherwise today; the
+fix (a spacing tolerance, in both places at once, since they are mirrors) changes no real geometry but belongs with the
+harvest's owner.

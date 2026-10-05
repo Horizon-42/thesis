@@ -41,8 +41,9 @@ import { readAttitude, type TrainingAttitude } from "./trainingAttitude";
 export const TRAINING_INDEX_SCHEMA = "aeroviz-training-index-v2";
 /** MIRROR of `INDEX_FILE`: a NEW index beside the old view's `index.json`, which this view never reads. */
 export const TRAINING_INDEX_FILE = "index_v4.json";
-/** MIRROR of `SAMPLE_SCHEMA`: a set's sample. */
-export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v9";
+/** MIRROR of `SAMPLE_SCHEMA`: a set's sample (v10, A32: the same shape from the closed-loop format v8; a v9 set is
+ *  refused by name). */
+export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v10";
 /** MIRROR of `SET_KIND`: a stage-A set — flights read back through the closed loop. */
 export const TRAINING_SET_KIND = "closed-loop-readback";
 /** MIRROR of `instructions.spec.READING_RULE`: what a word MEANS, which no field can say. */

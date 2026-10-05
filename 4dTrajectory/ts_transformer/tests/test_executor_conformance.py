@@ -152,23 +152,27 @@ def test_a_changed_law_is_found():
 
 def test_every_way_of_flying_gives_the_same_flown_states(monkeypatch):
     """D57, executor design §12.4: the single-aircraft batch, the multi-aircraft batch (each flight from its own seeded
-    start) and the single-flight executor say the words on the sentence's own rows and fly the same states."""
+    start) and the single-flight executor say the words on the sentence's own rows and fly the same states — and so does
+    the batch with every vertical path changed and the chart moved (``moved``, D81; its verdict not compared)."""
     from ts_transformer.tests.support import instruction_airport
 
     signals, reading = _downwind()
     one = _batch(signals, reading, 4.0)
     batch = replace(one, **{name: getattr(one, name) * 2 for name in (
-        "indices", "signals", "readings", "sentences", "geometries", "groups")}, approach_ias_mps=[])
+        "indices", "signals", "observed", "readings", "sentences", "geometries", "groups")}, approach_ias_mps=[])
     inputs, _, _, approach = _physics(batch.signals[0], instruction_airport())
     batch.approach_ias_mps = [float(approach[0])] * 2
-    monkeypatch.setattr(type(batch), "inputs", lambda self, device: FlightInputs(
+    monkeypatch.setattr(type(batch), "inputs", lambda self, rule, device: FlightInputs(
         *(torch.cat([getattr(inputs, f.name)] * 2) for f in dataclasses.fields(FlightInputs))))
     words = Words(instruction_spec())
     flown = {mode: fly(batch, _params(), words) for mode, fly in conformance.MODES.items()}
-    assert set(flown) == {"batch", "staggered", "single"}
-    for mode in ("staggered", "single"):
+    assert set(flown) == {"batch", "staggered", "single", "moved"} and conformance.UNJUDGED == ("moved",)
+    for mode in ("staggered", "single", "moved"):
         for j in range(2):
-            difference = _compare(flown["batch"][j], flown[mode][j])
+            ours = flown[mode][j]
+            if mode in conformance.UNJUDGED:
+                ours = replace(ours, verdict=flown["batch"][j].verdict)
+            difference = _compare(flown["batch"][j], ours)
             assert difference.passed, (mode, j, difference.mismatches)
             assert difference.horizontal_m < 1e-6 and difference.vertical_m < 1e-6
 

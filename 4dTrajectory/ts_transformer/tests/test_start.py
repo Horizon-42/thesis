@@ -13,14 +13,14 @@ from ts_transformer.autopilot.conformance import STATE_BOUND_M
 from ts_transformer.autopilot.judge import outcome_of
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.speed import approach_speed_ias_mps
-from ts_transformer.autopilot.start import GoAroundBeyondMost, Loop, start
+from ts_transformer.autopilot.start import GoAroundBeyondMost, Loop, RowRefused, start
 from ts_transformer.autopilot.spec import params_sha256
 from ts_transformer.instructions.artefact import (
-    CLOSED_LOOP_DIRECTORY, ClosedLoopSentence, closed_loop_path, closed_loop_sentences, load_candidates, load_closed_loop,
+    CLOSED_LOOP_DIRECTORY, ClosedLoopSentence, closed_loop_path, closed_loop_sentences, load_candidates,
     load_signals, write_closed_loop,
 )
 from ts_transformer.instructions.labeller.read import read_flight
-from ts_transformer.instructions.words import ALTITUDE, ANGLE, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words
+from ts_transformer.instructions.words import ALTITUDE, ANGLE, HEADING, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words
 from ts_transformer.tests.support import executor_inputs, labelled_instruction_artefact
 
 CPU = torch.device("cpu")
@@ -31,7 +31,7 @@ def _params():
     from ts_transformer.experiments.executor_spec import ROLL_RATE_DEG_S
 
     return ExecutorParams(cycle_s=1.0, bank_rate_deg_s=ROLL_RATE_DEG_S, path_time_constant_s=2.0, path_rate_factor=2.0,
-                          timeout_factor=1.5)
+                          timeout_factor=1.5, start_rule="trailing-fit-8s")
 
 
 def _executor(directory, artefact, params, vocabulary_sha256, *, reference=True):
@@ -61,7 +61,8 @@ def _artefact(tmp_path, monkeypatch, interval_s):
     every = int(round(interval_s / spec.step_s))
     anchor = sentence.first_row + start_module.start_row(interval_s) * every
     inputs = executor_inputs(signals, geometry, anchor)
-    batch = replay.Batch(indices=[0], signals=[replay.from_row(signals, sentence.first_row)], series=[None],
+    batch = replay.Batch(indices=[0], signals=[replay.from_row(signals, sentence.first_row)], observed=[signals],
+                         series=[None],
                          readings=[reading], sentences=[sentence], row_interval_s=interval_s, geometries=[geometry],
                          approach_ias_mps=[A320_IAS], groups=[replay.OWN], drawn={})
     (read,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
@@ -70,20 +71,21 @@ def _artefact(tmp_path, monkeypatch, interval_s):
     path = closed_loop_path(directory, "train", interval_s)
     write_closed_loop(path, spec, executor_params_sha256=params_sha256(_params()), row_interval_s=interval_s,
                       start_row=start_module.start_row(interval_s), sentences={0: read})
-    (stored,) = closed_loop_sentences(load_closed_loop(path, spec)).values()
+    (stored,) = closed_loop_sentences(directory, "train", interval_s, spec).values()
     monkeypatch.setattr(start_module, "rebuild_series", lambda d, flights: [None] * len(flights))
     monkeypatch.setattr(replay, "group_of", lambda series: replay.OWN)
     monkeypatch.setattr(replay, "flight_approach_ias_mps", lambda series, group: A320_IAS)
-    monkeypatch.setattr(start_module, "flight_inputs",
-                        lambda series, anchors, device: executor_inputs(signals, geometry, anchors[0]))
-    monkeypatch.setattr(replay.Batch, "inputs", lambda self, device: inputs)
+    monkeypatch.setattr(start_module, "flight_inputs", lambda series, flights, anchors, airports, rule, device:
+                        executor_inputs(signals, geometry, anchors[0], rule=rule))
+    monkeypatch.setattr(replay.Batch, "inputs", lambda self, rule, device: inputs)
     from ts_transformer.autopilot import conformance
     from ts_transformer.instructions import conformance as labeller
 
     labeller.write_reference(directory, [signals], [labeller.labelled_record(reading)], [reading],
                              git={"head": "x", "dirty": False})
     flown = replay.sentence_on_interval(reading, signals, spec.step_s, geometry, words)
-    reference = replay.Batch(indices=[0], signals=[signals], series=[None], readings=[reading], sentences=[flown],
+    reference = replay.Batch(indices=[0], signals=[signals], observed=[signals], series=[None], readings=[reading],
+                             sentences=[flown],
                              row_interval_s=spec.step_s, geometries=[geometry], approach_ias_mps=[A320_IAS],
                              groups=[replay.OWN], drawn={"split": "train"})
     monkeypatch.setattr(conformance, "draw_reference_batch", lambda instructions, words, draw: reference)
@@ -103,14 +105,14 @@ def test_a_stored_sentence_said_through_the_start_gives_its_states_and_its_outco
     limit = (len(batch.readings[0].words) - anchor) * words.spec.step_s * params.timeout_factor   # §5.8, written out
     assert float(loop.executor.time_limit_s[0]) == limit
     flown = [loop.rows()[0]]
-    for k, row in enumerate(stored.grid):
+    for k, row in enumerate(stored.rows.grid):
         rows, done = loop.step(row[None, :])
-        if k < len(stored.grid) - 1:
+        if k < len(stored.rows.grid) - 1:
             assert not done[0]
             flown += list(rows[0])
     assert done[0]                                     # done in the row the sentence ends with
     every = int(round(interval_s / words.spec.step_s))
-    expected = stored.states[stored.start * every:]
+    expected = stored.rows.states[stored.rows.start * every:]
     assert len(flown) == len(expected)
     assert np.abs(np.array(flown)[:, :3] - expected[:, :3]).max() <= STATE_BOUND_M     # the conformance tolerance
     assert np.array_equal(np.array(flown), expected)                                   # and here, the same code: exact
@@ -118,8 +120,8 @@ def test_a_stored_sentence_said_through_the_start_gives_its_states_and_its_outco
     replayed = outcome_of(replay.fly_sentences(moved, params, words, device=CPU), 0, batch.geometries[0], words.spec)
     assert loop.outcome(0).outcome == replayed.outcome
     assert loop.outcome(0).crossing == replayed.crossing
-    assert stored.outcome == replayed.outcome           # D74: the reading's outcome, stored, is the replay's and the start's
-    assert bool(loop.timed_out()[0]) == stored.timed_out
+    assert stored.withheld.outcome == replayed.outcome           # D74: the reading's outcome, stored, is the replay's and the start's
+    assert bool(loop.timed_out()[0]) == stored.withheld.timed_out
 
 
 def test_a_go_around_beyond_the_most_given_is_refused_by_name(tmp_path, monkeypatch):
@@ -132,7 +134,7 @@ def test_a_go_around_beyond_the_most_given_is_refused_by_name(tmp_path, monkeypa
     again[0, RUNWAY] = 0
     for most in (0, 1):
         loop, _ = start(directory, "train", 2.0, {0: stored}, tmp_path / "executor", most_go_arounds=most, device=CPU)
-        loop.step(stored.grid[:1])
+        loop.step(stored.rows.grid[:1])
         before = float(loop.executor.time_limit_s[0])
         if most == 0:
             with pytest.raises(GoAroundBeyondMost, match="beyond the most 0"):
@@ -147,7 +149,7 @@ def test_a_go_around_beyond_the_most_given_is_refused_by_name(tmp_path, monkeypa
         assert loop.go_arounds[0] == 1
     # a halted flight's words are not heard either
     loop, _ = start(directory, "train", 2.0, {0: stored}, tmp_path / "executor", most_go_arounds=0, device=CPU)
-    loop.step(stored.grid[:1])
+    loop.step(stored.rows.grid[:1])
     loop.halt(np.array([True]))
     loop.step(climb)
     assert loop.go_arounds[0] == 0
@@ -155,11 +157,41 @@ def test_a_go_around_beyond_the_most_given_is_refused_by_name(tmp_path, monkeypa
     loop, _ = start(directory, "train", 2.0, {0: stored}, tmp_path / "executor", most_go_arounds=0, device=CPU)
     with pytest.raises(ValueError, match="not done"):
         loop.outcome(0)
-    for row in stored.grid:
+    for row in stored.rows.grid:
         loop.step(row[None, :])
     ended = loop.outcome(0)
     loop.step(climb)
     assert loop.go_arounds[0] == 0 and loop.outcome(0) == ended
+
+
+def test_a_row_the_grammar_refuses_is_refused_by_name_with_nothing_changed(tmp_path, monkeypatch):
+    """D80: before anything changes, `Loop.step` checks each flying flight's row with the grammar at the height above E of
+    the executor's state: "go-around" while G is true, a word outside its column, and "no level-off" while G is true are
+    refused by name, and the loop is as it was — the words in force, the go-arounds counted, the time limit, the cycles."""
+    directory, words, _, stored, _ = _artefact(tmp_path, monkeypatch, 2.0)
+    climb = np.full((1, 5), UNCHANGED, dtype=np.int64)
+    climb[0, [RUNWAY, ALTITUDE, ANGLE]] = RUNWAY_GO_AROUND, words.altitude_index(1500.0), words.angle_climb
+    loop, _ = start(directory, "train", 2.0, {0: stored}, tmp_path / "executor", most_go_arounds=2, device=CPU)
+    loop.step(stored.rows.grid[:1])
+    loop.step(climb)                                                   # G true now
+    outside = np.full((1, 5), UNCHANGED, dtype=np.int64)
+    outside[0, HEADING] = words.n_heading                              # no heading word
+    no_level_off = np.full((1, 5), UNCHANGED, dtype=np.int64)
+    no_level_off[0, ALTITUDE] = words.altitude_no_level_off
+    for row, reason in ((climb, "runway word not permitted"), (outside, "word outside its column"),
+                        (no_level_off, "no level-off")):
+        before = (loop.steps, loop.executor.count, loop.go_arounds.copy(), list(loop.grammar),
+                  float(loop.executor.time_limit_s[0]), len(loop.spoken.grid), loop.spoken.value.clone())
+        with pytest.raises(RowRefused, match="flight 0 at row 2") as refused:
+            loop.step(row)
+        assert refused.value.reason.startswith(reason), refused.value.reason
+        after = (loop.steps, loop.executor.count, loop.go_arounds.copy(), list(loop.grammar),
+                 float(loop.executor.time_limit_s[0]), len(loop.spoken.grid), loop.spoken.value.clone())
+        assert after[:2] == before[:2] and np.array_equal(after[2], before[2]) and after[3:6] == before[3:6]
+        assert torch.equal(after[6], before[6])                         # the words said: unchanged too
+    # a halted flight's words are not read by the grammar ("go-around" while G is true passes)
+    loop.halt(np.array([True]))
+    loop.step(climb)
 
 
 def test_the_start_refuses_sentences_not_read_under_its_artefact_split_and_executor(tmp_path, monkeypatch):
@@ -175,7 +207,8 @@ def test_the_start_refuses_sentences_not_read_under_its_artefact_split_and_execu
                              words.spec.sha256)
     with pytest.raises(ValueError, match="flown by executor parameters"):
         start(directory, "train", 4.0, {0: stored}, other_params, most_go_arounds=0, device=CPU)
-    moved = replace(stored, states=stored.states + np.array([1.0, 0, 0, 0, 0, 0]))     # another flight's rows
+    moved = ClosedLoopSentence(rows=replace(stored.rows, states=stored.rows.states + np.array([1.0, 0, 0, 0, 0, 0])),
+                               withheld=stored.withheld)                              # another flight's rows
     with pytest.raises(ValueError, match="its observed rows differ"):
         start(directory, "train", 4.0, {0: moved}, tmp_path / "executor", most_go_arounds=0, device=CPU)
     # D71, D73: the start opens the spec itself — one measured against another vocabulary, or one whose reference tracks

@@ -46,13 +46,13 @@ def flight(interval: float):
 
 def words_said(sentence) -> list[tuple[int, int]]:
     """Every ``(row, column)`` a closed-loop sentence says a word at."""
-    return [(int(r), int(c)) for r, c in zip(*np.nonzero(sentence.grid != UNCHANGED))]
+    return [(int(r), int(c)) for r, c in zip(*np.nonzero(sentence.rows.grid != UNCHANGED))]
 
 
 class SegmentTest(unittest.TestCase):
     def test_a_word_runs_to_the_next_word_of_its_column_a_heading_word_a_lead_later_and_the_last_to_the_outcome(self):
         one = flight(4.0)
-        grid, every = one.sentence.grid, 4
+        grid, every = one.sentence.rows.grid, 4
         lead = int(round(one.words.spec.heading_lead_s / one.params.cycle_s))
         for row, column in words_said(one.sentence):
             segment = segment_of(one.sentence, column, row, 4.0, one.params, one.words)
@@ -60,16 +60,16 @@ class SegmentTest(unittest.TestCase):
             expected = None if not later else later[0] * every + (lead if column == HEADING else 0)
             self.assertEqual((segment.start_cycle, segment.stop_cycle, segment.word),
                              (row * every, expected, int(grid[row, column])))
-            self.assertEqual(segment.correction, bool(one.sentence.correction[row, column]))
+            self.assertEqual(segment.correction, bool(one.sentence.rows.correction[row, column]))
 
     def test_a_row_that_says_no_word_of_the_column_is_refused(self):
         one = flight(2.0)
-        silent = [(r, c) for r in range(len(one.sentence.grid)) for c in range(len(COLUMNS))
-                  if one.sentence.grid[r, c] == UNCHANGED][0]
+        silent = [(r, c) for r in range(len(one.sentence.rows.grid)) for c in range(len(COLUMNS))
+                  if one.sentence.rows.grid[r, c] == UNCHANGED][0]
         with self.assertRaisesRegex(RequestRefused, "says no word"):
             segment_of(one.sentence, silent[1], silent[0], 2.0, one.params, one.words)
         with self.assertRaisesRegex(RequestRefused, "says no word"):
-            segment_of(one.sentence, 0, len(one.sentence.grid), 2.0, one.params, one.words)
+            segment_of(one.sentence, 0, len(one.sentence.rows.grid), 2.0, one.params, one.words)
 
 
 class LiveEqualsExportTest(unittest.TestCase):
@@ -79,7 +79,7 @@ class LiveEqualsExportTest(unittest.TestCase):
         for interval in (2.0, 4.0, 8.0):
             one = flight(interval)
             batch, (verdict,) = replay.fly_batch(one.batch, one.params, one.words, device=CPU)
-            exported = export.replay_payload(batch, 0, verdict, one.batch, one.sentence, {"outcome": verdict.outcome},
+            exported = export.replay_payload(batch, 0, verdict, one.batch, one.sentence,
                                              one.inputs.aero_params[0].numpy(), one.words.spec, one.words)
             reference = flown_track(batch.states[0].numpy(), one.geometry)
             last = {column: row for row, column in words_said(one.sentence)}
@@ -151,9 +151,9 @@ class SyntheticBackend(AutopilotSegmentBackend):
         one = flight(2.0)
         return Path("fixture/instruction_language"), Path("fixture/executor"), one.params, {"sha256": "fixture"}, one.words
 
-    def set_flown(self, sample, split, interval_s, instructions, words, opened=None):
+    def set_flown(self, sample, split, interval_s, instructions, params, words, opened=None):
         one = flight(interval_s)
-        return SetFlown(one.batch, [one.sentence])
+        return SetFlown(one.batch, [one.sentence], params)
 
 
 class BackendTest(unittest.TestCase):
@@ -250,7 +250,7 @@ class SetUpTest(unittest.TestCase):
             drawn.append((split, tuple(ids)))
             return f"flights of {split}"
 
-        def closed_loop_batch(flights, stored, interval, words):
+        def closed_loop_batch(instructions, split, flights, stored, interval, params, words):
             built.append((flights, interval))
             one = flight(interval)
             return one.batch, [one.sentence]
@@ -272,6 +272,30 @@ class SetUpTest(unittest.TestCase):
                                   "flightKey": self.sample["flights"][0]["flightKey"], "rowIntervalS": 4,
                                   "column": "heading", "row": 0})
             self.assertEqual((len(drawn), len(built), answer["rowIntervalS"]), (2, 6, 4.0))   # kept, not drawn again
+
+
+class RefusalTest(unittest.TestCase):
+    def test_a_failed_check_is_kept_and_refused_at_once_and_a_val_flight_is_refused(self):
+        """A23 (A32): a check that fails is kept for its (artefact, executor spec), and every later request for them is
+        refused at once with its reason, the checks not run again; a set's flight of a split other than train and
+        select is refused (outline §6 item 4)."""
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as name:
+            sample = set_up_set(Path(name))
+            backend = AutopilotSegmentBackend(airports_root=Path(name))
+            failing = mock.Mock(side_effect=ValueError("the executor flies v17's reference tracks otherwise"))
+            with mock.patch("ts_transformer.autopilot.closed_loop.require_conforming_closed_loop", failing):
+                with self.assertRaisesRegex(ValueError, "reference tracks otherwise"):
+                    backend.executor_for(sample)
+                for _ in range(2):
+                    with self.assertRaisesRegex(RequestRefused, "failed its checks in this process: ValueError: the "
+                                                                "executor flies v17's reference tracks otherwise"):
+                        backend.executor_for(sample)
+            self.assertEqual(failing.call_count, 1)
+            one = flight(2.0)
+            with self.assertRaisesRegex(RequestRefused, "not 'val'"):
+                backend.set_flown(sample, "val", 2.0, Path("i"), one.params, one.words)
 
 
 class FakeAutopilot:

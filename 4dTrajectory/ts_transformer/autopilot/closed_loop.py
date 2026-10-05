@@ -3,8 +3,9 @@ words, `instructions.labeller`) with the executor and adds CORRECTION WORDS wher
 one; the prior trains on the flown states of these sentences (prior §2).
 
 THE FLIGHT. A batch of sentences on one row interval Δ (`replay.batch_of`) is flown from the FIRST PREDICTED STEP, Δ row
-``OBSERVATION_S / Δ`` (16 s after the sentence's first Δ row), from the observed state there; the rows before it stay
-observed and say nothing. The words are said a step at a time, as in free generation (`sentence.Spoken`): at each Δ row
+``OBSERVATION_S / Δ`` (16 s after the sentence's first Δ row), from its start state there (`flights.start_state`: the
+row's position and height, its velocity by the executor spec's start rule from the rows at or before it, D77); the rows
+before it stay observed and say nothing, their velocity by the same rule (`flights.observed_rows`). The words are said a step at a time, as in free generation (`sentence.Spoken`): at each Δ row
 the reading finds the matched point, decides the row's words — the observed words the matched point has reached, with
 the corrections — and the executor hears them on the cycle that starts the row (the sentence's own clock: a row is Δ
 seconds). The flight ends at the end of the cycle in which the executor is done (a crossing, the ground, the dynamics,
@@ -32,8 +33,9 @@ THE COMPARISON (`ObservedPath.match`). The observed path is the observed flight 
 as observed and its height and track as the labeller reads them (`labeller.read.smooth`). The matched point is the point
 of the path nearest the flown position, searched forward from the row before's: the matched segment advances while the
 next segment is no farther from the flown position, so a path that crosses itself does not jump. At the matched point
-the lateral error e_y is the flown position's distance from the path perpendicular to the observed track there (right
-positive), the vertical error e_h the flown height minus the observed height. A difference along the path (in time) is
+the lateral error e_y is the flown position's distance from the path — from the matched segment, not from its line
+beyond it, so a position on the outside of a turn is as far from the path as it is from the turn's vertex (D83) — on
+the right positive, the vertical error e_h the flown height minus the observed height. A difference along the path (in time) is
 not corrected, so the speed words stay the observed ones. PAST THE END of the observed path (D44: an observed slice stops
 short of the threshold, the flown aircraft flies on to it) the path goes on along its last segment's line and e_y is
 measured against that line, for the readouts only; e_h is NaN there (no observed height: the slope of one 2 s segment
@@ -88,18 +90,21 @@ import torch
 
 from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.conformance import DEVICE, ROUNDOFF, STATE_BOUND_M
-from ts_transformer.autopilot.flights import FlightInputs, flight_inputs
+from ts_transformer.autopilot.flights import FlightInputs, flight_inputs, observed_rows
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.replay import Batch, subset
 from ts_transformer.autopilot.spec import params_sha256
-from ts_transformer.autopilot.start import Loop, observed_rows, start_row
-from ts_transformer.instructions.artefact import CLOSED_LOOP_DIRECTORY, STATE_COLUMNS, ClosedLoopSentence
+from ts_transformer.autopilot.start import Loop, start_row
+from ts_transformer.instructions.artefact import (
+    CLOSED_LOOP_DIRECTORY, STATE_COLUMNS, ClosedLoopSentence, SentenceRows, Withheld,
+)
 from ts_transformer.instructions.grammar import InForce, Ungrammatical, apply
 from ts_transformer.instructions.labeller.interval import (
     in_force, interval_rows, last_heard_row, on_interval_rows,
 )
 from ts_transformer.instructions.labeller.read import Reading, smooth, truncated
 from ts_transformer.instructions.labeller.records import Refused
+from ts_transformer.instructions.readout import stratum
 from ts_transformer.instructions.words import (
     ALTITUDE, ANGLE, COLUMNS, HEADING, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words, same_track, wrap180,
 )
@@ -150,8 +155,11 @@ class ObservedPath:
             self.segment, t, distance = self.segment + 1, t_next, next_distance
         i = self.segment
         de, dn = self.e[i + 1] - self.e[i], self.n[i + 1] - self.n[i]
-        lateral = ((e_m - self.e[i]) * dn - (n_m - self.n[i]) * de) / math.hypot(de, dn)   # right of the track positive
+        across = ((e_m - self.e[i]) * dn - (n_m - self.n[i]) * de) / math.hypot(de, dn)    # right of the track positive
         last = i == len(self.e) - 2 and t >= 1.0
+        # the distance from the path's segment (D83), on the side of the path the position is; past the end, from the
+        # last segment's line (D44)
+        lateral = across if last else math.copysign(distance, across)
         row = float(self.left[-1]) if last else float(self.left[i] + t * (self.arrived[i + 1] - self.left[i]))
         if last:                       # past the end: on along the last segment's line, no height (module docstring)
             t = ((e_m - self.e[i]) * de + (n_m - self.n[i]) * dn) / (de * de + dn * dn)
@@ -180,9 +188,10 @@ def heading_lateness_rows(sentence: ClosedLoopSentence, observed: np.ndarray) ->
     open-loop reading's words from the sentence's first row (a correction is no observed word)."""
     rows = np.arange(len(observed))
     word_row = np.maximum.accumulate(np.where(observed[:, HEADING] != UNCHANGED, rows, 0))
-    says = (sentence.grid[:, HEADING] != UNCHANGED) & ~sentence.correction[:, HEADING]
+    rows, withheld = sentence.rows, sentence.withheld
+    says = (rows.grid[:, HEADING] != UNCHANGED) & ~rows.correction[:, HEADING]
     says[0] = False
-    return sentence.matched_row[says] - word_row[sentence.observed_row[says]]
+    return withheld.matched_row[says] - word_row[withheld.observed_row[says]]
 
 
 def observed_tracks(observed: np.ndarray, words: Words, courses_deg: Sequence[float]) -> tuple[np.ndarray, ...]:
@@ -207,24 +216,25 @@ def outside_rows(sentence: ClosedLoopSentence, observed: np.ndarray, first_row: 
     path's side of the observed word's (said in the frame of the word in force), the angle in force is steeper than the observed class when too high and
     shallower when too low. By column, ``lateral`` and ``vertical``, each ``[3, M]``."""
     _, _, track = observed_tracks(observed, words, courses_deg)
-    seen = sentence.observed_row + first_row
-    rows = np.arange(len(sentence.grid))
-    runway = sentence.grid[np.maximum.accumulate(np.where(sentence.grid[:, RUNWAY] >= 0, rows, 0)), RUNWAY]
-    heading_row = np.maximum.accumulate(np.where(sentence.grid[:, HEADING] != UNCHANGED, rows, 0))
+    grid, withheld = sentence.rows.grid, sentence.withheld
+    seen = withheld.observed_row + first_row
+    rows = np.arange(len(grid))
+    runway = grid[np.maximum.accumulate(np.where(grid[:, RUNWAY] >= 0, rows, 0)), RUNWAY]
+    heading_row = np.maximum.accumulate(np.where(grid[:, HEADING] != UNCHANGED, rows, 0))
     course = np.asarray(courses_deg, dtype=np.float64)[runway[heading_row]]    # the frame of the word in force
-    said = course + np.array([words.heading_relative_deg(int(c)) for c in in_force(sentence.grid)[:, HEADING]])
+    said = course + np.array([words.heading_relative_deg(int(c)) for c in in_force(grid)[:, HEADING]])
     # the observed word as that frame says it (D46: a word moved across a runway word is up to half a class off its
     # observed track, which is no correction)
     plain = np.array([words.heading_track_deg(words.heading_class(float(a), float(c)), float(c))
                       for a, c in zip(track[seen], course)])
     # right of the path (e_y > 0): a track left of the observed word's; too high (e_h > 0): a steeper class
-    toward = (np.sign(np.round(wrap180(said - plain), 9)) == -np.sign(sentence.lateral_m),
-              np.sign(in_force(sentence.grid)[:, ANGLE].astype(int) - in_force(observed)[seen, ANGLE].astype(int))
-              == np.sign(np.nan_to_num(sentence.vertical_m)))
-    tolerances = (words.spec.closed_loop_lateral_m, vertical_tolerance_m(words, in_force(sentence.grid)[:, ALTITUDE]))
+    toward = (np.sign(np.round(wrap180(said - plain), 9)) == -np.sign(withheld.lateral_m),
+              np.sign(in_force(grid)[:, ANGLE].astype(int) - in_force(observed)[seen, ANGLE].astype(int))
+              == np.sign(np.nan_to_num(withheld.vertical_m)))
+    tolerances = (words.spec.closed_loop_lateral_m, vertical_tolerance_m(words, in_force(grid)[:, ALTITUDE]))
     out = {}
-    for k, (name, errors) in enumerate((("lateral", sentence.lateral_m), ("vertical", sentence.vertical_m))):
-        correctable = ~sentence.uncorrectable[:, k]
+    for k, (name, errors) in enumerate((("lateral", withheld.lateral_m), ("vertical", withheld.vertical_m))):
+        correctable = ~withheld.uncorrectable[:, k]
         outside = correctable & (np.nan_to_num(np.abs(errors)) > tolerances[k])
         out[name] = np.stack((correctable, outside, outside & ~toward[k]))
     return out
@@ -348,10 +358,12 @@ class Corrector:
         return word
 
 
-def start_inputs(batch: Batch, step_s: float, *, device: torch.device) -> FlightInputs:
-    """Every flight's physical context at its first predicted step (`flights.flight_inputs` at that 2 s row)."""
+def start_inputs(batch: Batch, params: ExecutorParams, step_s: float, *, device: torch.device) -> FlightInputs:
+    """Every flight's physical context at its first predicted step (`flights.flight_inputs` at that 2 s row, its start
+    state by the executor spec's start rule, D77)."""
     every, start = interval_rows(batch.row_interval_s, step_s), start_row(batch.row_interval_s)
-    return flight_inputs(batch.series, [s.first_row + start * every for s in batch.sentences], device=device)
+    return flight_inputs(batch.series, batch.observed, [s.first_row + start * every for s in batch.sentences],
+                         batch.geometries, params.start_rule, device=device)
 
 
 def _rows(inputs: FlightInputs, flights: list[int]) -> FlightInputs:
@@ -398,7 +410,9 @@ def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Word
         correctors.append(Corrector(reading.words, sentence.first_row, start * every, every, words,
                                     [candidate.course_deg for candidate in batch.geometries[j].candidates]))
         limits.append(replay.time_limit_s(len(reading.words), sentence.first_row + start * every, params, spec.step_s))
-        states.append([*observed_rows(signals, np.arange(start * every))])     # the observed 2 s rows (D51)
+        # the observed 2 s rows (D51), their velocity by the start rule (D77)
+        states.append([*observed_rows(batch.observed[j], sentence.first_row + np.arange(start * every),
+                                      params.start_rule, batch.geometries[j])])
         said.append([])
         added.append([])
         blocked.append([])
@@ -458,15 +472,21 @@ def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Word
         if out[j] is not None:
             continue
         lateral, vertical = (np.array([e[c] for e in errors[f]]) for c in (0, 1))
-        out[j] = ClosedLoopSentence(first_row=batch.sentences[j].first_row, grid=np.array(said[f], dtype=np.int16),
-                                    correction=np.array(added[f], dtype=bool),
-                                    states=np.array(states[f], dtype=np.float64),
-                                    on_interval=on_interval_rows(len(states[f]), every), lateral_m=lateral,
-                                    vertical_m=vertical, uncorrectable=np.array(blocked[f], dtype=bool),
-                                    observed_row=np.array(reached[f], dtype=np.int64),
-                                    matched_row=np.array(matched[f], dtype=np.float64), start=start,
-                                    timed_out=bool(timed_out[f]),
-                                    outcome=loop.outcome(f).outcome)      # the judge's, on what it flew (D74)
+        reading, signals = batch.readings[j], batch.observed[j]
+        out[j] = ClosedLoopSentence(
+            rows=SentenceRows(first_row=batch.sentences[j].first_row, start=start,
+                              grid=np.array(said[f], dtype=np.int16), correction=np.array(added[f], dtype=bool),
+                              states=np.array(states[f], dtype=np.float64),
+                              on_interval=on_interval_rows(len(states[f]), every)),
+            withheld=Withheld(runway=signals.runway, runway_index=reading.runway_index,
+                              landing_time_utc=signals.landing_time_utc, capture_row=reading.capture_row,
+                              go_around_rows=np.asarray(reading.go_around_rows, dtype=np.int64),
+                              stratum=stratum(reading),
+                              outcome=loop.outcome(f).outcome,      # the judge's, on what it flew (D74)
+                              timed_out=bool(timed_out[f]), lateral_m=lateral, vertical_m=vertical,
+                              uncorrectable=np.array(blocked[f], dtype=bool),
+                              observed_row=np.array(reached[f], dtype=np.int64),
+                              matched_row=np.array(matched[f], dtype=np.float64)))
     return out  # type: ignore[return-value]
 
 
@@ -478,8 +498,8 @@ def read_chunked(batch: Batch, params: ExecutorParams, words: Words, *, chunk: i
     for first in range(0, len(flying), chunk):
         members = flying[first: first + chunk]
         part = subset(batch, members)
-        for j, result in zip(members, read(part, start_inputs(part, words.spec.step_s, device=device), params, words,
-                                           device=device)):
+        for j, result in zip(members, read(part, start_inputs(part, params, words.spec.step_s, device=device), params,
+                                           words, device=device)):
             out[j] = result
     return out  # type: ignore[return-value]
 
@@ -492,9 +512,12 @@ def read_chunked(batch: Batch, params: ExecutorParams, words: Words, *, chunk: i
 # no further apart than the executor's conformance bound. It runs in every process that reads closed-loop sentences or
 # flies them again, before its work (`require_conforming_closed_loop`, D69, D73), with the labeller's and the executor's
 # checks; a difference refuses by name. There is no passed record and no digest of code.
-#: v5: A20 (D58), the words above E; v6 (A29, D73): no digest of code; v7 (A31, D74): each flight's outcome compared.
-REFERENCE_SCHEMA = "ts-closed-loop-conformance-reference-v7"
+#: v5: A20 (D58), the words above E; v6 (A29, D73): no digest of code; v7 (A31, D74): each flight's outcome compared;
+#: v8 (A32): the closed-loop format v8 (D77–D83), and the train flights with a labelled go-around added (§7.2 #2).
+REFERENCE_SCHEMA = "ts-closed-loop-conformance-reference-v8"
 REFERENCE_SPLIT, REFERENCE_PER_AIRPORT, REFERENCE_SEED = "train", 10, 1337
+#: Besides them, up to this many of each airport with a labelled go-around (§7.2 #2).
+REFERENCE_GO_AROUND_PER_AIRPORT = 10
 CONFORMANCE = "conformance"
 
 
@@ -502,7 +525,8 @@ def _reference_results(instructions: Path, params: ExecutorParams, words: Words,
                        device: torch.device) -> dict[float, tuple[list[str], list[ClosedLoopSentence | Refused]]]:
     drawn, readings = replay.draw_readings(instructions, REFERENCE_SPLIT, words.spec, words,
                                            per_airport=REFERENCE_PER_AIRPORT, seed=REFERENCE_SEED,
-                                           groups=(replay.OWN, replay.STAND_IN))
+                                           groups=(replay.OWN, replay.STAND_IN),
+                                           go_around_per_airport=REFERENCE_GO_AROUND_PER_AIRPORT)
     out = {}
     for interval in intervals:
         batch = replay.batch_of(drawn, list(range(len(readings))), readings, interval, words)
@@ -514,7 +538,7 @@ def _reference_results(instructions: Path, params: ExecutorParams, words: Words,
 def _result_json(result: ClosedLoopSentence | Refused) -> dict[str, Any]:
     if isinstance(result, Refused):
         return {"refused": result.reason}
-    return {"rows": len(result.grid), "timed_out": result.timed_out, "outcome": result.outcome}
+    return {"rows": len(result.rows.grid), "timed_out": result.withheld.timed_out, "outcome": result.withheld.outcome}
 
 
 def write_reference(instructions: Path, params: ExecutorParams, words: Words, intervals: Sequence[float], *,
@@ -525,7 +549,8 @@ def write_reference(instructions: Path, params: ExecutorParams, words: Words, in
     payload: dict[str, Any] = {"schema": REFERENCE_SCHEMA, "written_utc": utc_now(), "git": git,
                                "python": platform.python_version(),
                                "spec_sha256": words.spec.sha256, "executor_params_sha256": params_sha256(params),
-                               "split": REFERENCE_SPLIT, "per_airport": REFERENCE_PER_AIRPORT, "seed": REFERENCE_SEED,
+                               "split": REFERENCE_SPLIT, "per_airport": REFERENCE_PER_AIRPORT,
+                               "go_around_per_airport": REFERENCE_GO_AROUND_PER_AIRPORT, "seed": REFERENCE_SEED,
                                "intervals": {}}
     for interval, (flights, results) in _reference_results(instructions, params, words, intervals,
                                                            device=DEVICE).items():
@@ -539,7 +564,7 @@ def write_reference(instructions: Path, params: ExecutorParams, words: Words, in
 
 def _stacked(results: Sequence[ClosedLoopSentence]) -> dict[str, np.ndarray]:
     def cat(name: str, width: int, dtype: Any) -> np.ndarray:
-        rows = [getattr(r, name) for r in results]
+        rows = [getattr(r.rows if hasattr(r.rows, name) else r.withheld, name) for r in results]
         return np.concatenate(rows).astype(dtype) if rows else np.zeros((0, width) if width else 0, dtype=dtype)
 
     return {"words": cat("grid", 5, np.int16), "correction": cat("correction", 5, bool),
@@ -642,10 +667,11 @@ def replay_batch(batch: Batch, stored: dict[int, ClosedLoopSentence], words: Wor
     kept = [j for j, index in enumerate(batch.indices) if index in stored]
     out = subset(batch, kept)
     for position, j in enumerate(kept):
-        grid = stored[batch.indices[j]].grid
-        if stored[batch.indices[j]].first_row != batch.sentences[j].first_row:
+        rows = stored[batch.indices[j]].rows
+        grid = rows.grid
+        if rows.first_row != batch.sentences[j].first_row:
             raise ValueError(f"{batch.signals[j].dataset_id}: the closed-loop sentence starts at 2 s row "
-                             f"{stored[batch.indices[j]].first_row}, the labelled one at {batch.sentences[j].first_row}")
+                             f"{rows.first_row}, the labelled one at {batch.sentences[j].first_row}")
         out.sentences[position] = replay.Sentence(
             grid=grid, instructions=replay.instructions_of(grid, batch.geometries[j], words),
             first_row=batch.sentences[j].first_row + start * every)

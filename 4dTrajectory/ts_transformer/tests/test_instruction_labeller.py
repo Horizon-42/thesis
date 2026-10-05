@@ -259,6 +259,22 @@ def test_the_speed_is_unspecified_from_the_capture_row_unless_a_hold_ends_far_en
     assert read_speed(time, speed, near, 100, one, words).unspecified_row == 100
 
 
+def test_unspecified_past_the_approach_s_last_row_is_refused_by_name():
+    """A32: a hold that runs to the approach's last row and ends far enough out would put "unspecified" after its last
+    row; it is refused by name — and an instruction outside the sentence's rows is refused by name by the assembly —
+    never an `IndexError`."""
+    from ts_transformer.instructions.labeller.sentence import assemble
+
+    one, words = spec(), Words(spec())
+    speed = np.full(200, 90.0)
+    time = np.arange(len(speed)) * INSTRUCTION_STEP_S
+    with pytest.raises(Refused, match="unspecified past the approach: row 200 of an approach of 200 rows"):
+        read_speed(time, speed, np.linspace(40000.0, 20000.0, len(speed)), 60, one, words)
+    first = [Instruction(column, 0, 0, "initial") for column in range(5)]
+    with pytest.raises(Refused, match="instruction outside the sentence: speed at row 3 of 3"):
+        assemble(3, [*first, Instruction(4, 1, 3, "unspecified")], np.full(3, 900.0), words, [90.0])
+
+
 # ---- speed words in steps (D43)
 def _speeds(reading, words):
     return [(i.row, words.speed_mps(i.value)) for i in reading.instructions]
