@@ -49,7 +49,8 @@ from ts_transformer.io_utils import utc_now, write_bytes_atomic, write_json_atom
 #: v6 (A29, D73): no digest of the labeller's code.
 SENTENCES_SCHEMA = "ts-instruction-sentences-v6"
 #: v3 (A22, D61): each candidate carries its published vertical path (TCH, glidepath angle, DA above the threshold).
-CANDIDATES_SCHEMA = "ts-instruction-candidates-v3"
+#: v4 (A32, D78): the candidates are the airport's runway ends with a published vertical path; no flight decides one.
+CANDIDATES_SCHEMA = "ts-instruction-candidates-v4"
 #: The splits an artefact holds: the development operating days (the internal selection set is its
 #: own split, so no reader carves it out of train by another rule).
 SPLITS = DEVELOPMENT_SPLITS
@@ -61,12 +62,15 @@ def _fresh(path: Path) -> Path:
     return path
 
 
-def _require_split_days(days: DaySplit, split: str, flights: Sequence[FlightSignals]) -> None:
-    """Every flight lands on a day of ``split``; a test day's flight is refused by name (`SealedDay`)."""
+def require_split_days(days: DaySplit, split: str, flights: Sequence[FlightSignals | Mapping[str, Any]]) -> None:
+    """Every flight (its signals, or its record, `signals_flights`) lands on a day of ``split``; a test day's flight is
+    refused by name (`SealedDay`, C32)."""
     for flight in flights:
-        found = days.development_split(landing_day(flight.landing_time_utc))
+        dataset_id, landing = ((flight["dataset_id"], flight["landing_time_utc"]) if isinstance(flight, Mapping)
+                               else (flight.dataset_id, flight.landing_time_utc))
+        found = days.development_split(landing_day(landing))
         if found != split:
-            raise ValueError(f"{flight.dataset_id} lands on a {found} day, not a {split} day")
+            raise ValueError(f"{dataset_id} lands on a {found} day, not a {split} day")
 
 
 def write_signals(directory: Path, items: dict[str, Sequence[FlightSignals]], record: dict[str, Any],
@@ -76,7 +80,7 @@ def write_signals(directory: Path, items: dict[str, Sequence[FlightSignals]], re
     for split, flights in items.items():
         if split not in SPLITS:
             raise ValueError(f"an instruction artefact holds the splits {SPLITS}, not {split!r}")
-        _require_split_days(days, split, flights)
+        require_split_days(days, split, flights)
     splits = {}
     for split, flights in items.items():
         arrays, meta = pack_signals(flights)
@@ -105,16 +109,20 @@ def load_signals(directory: Path, split: str) -> list[FlightSignals]:
     record = _signals_record(directory)
     with np.load(directory / f"signals_{split}.npz") as arrays:
         flights = unpack_signals({name: arrays[name] for name in arrays.files}, record["splits"][split]["flights"])
-    _require_split_days(DaySplit.from_dict(record["day_split"]), split, flights)
+    require_split_days(DaySplit.from_dict(record["day_split"]), split, flights)
     return flights
 
 
 def signals_flights(directory: Path, split: str) -> list[dict[str, Any]]:
     """One split's flight records — identity, airport, runway, type, entry and landing times — in signal order, without
-    the signal arrays (a sentence's ``signal_index`` indexes this list)."""
+    the signal arrays (a sentence's ``signal_index`` indexes this list); each is checked to land on a day of that split
+    (C32)."""
     if split not in SPLITS:
         raise ValueError(f"an instruction artefact holds the splits {SPLITS}, not {split!r}")
-    return _signals_record(directory)["splits"][split]["flights"]
+    record = _signals_record(directory)
+    flights = record["splits"][split]["flights"]
+    require_split_days(DaySplit.from_dict(record["day_split"]), split, flights)
+    return flights
 
 
 def write_candidates(directory: Path, geometries: dict[str, AirportGeometry]) -> None:
@@ -142,11 +150,17 @@ def keep_spec(source: Path, directory: Path, provenance: dict[str, Any]) -> Voca
     words keep it, never measure it again): its ``spec.json`` and ``measurements.json`` copied byte for byte — the spec
     and the git state that measured it, on ``source``'s train signals — and ``spec_from.json`` saying so
     (``provenance``: the caller's name for ``source`` and the git state that kept it).
-    Refused unless the two artefacts' signals were built under one configuration."""
+    Refused unless the two artefacts' signals were built under one configuration, and every train day of ``source`` (the
+    days the spec was measured on) is a train day of ``directory``'s split (C32: no select, val or test day measured the
+    spec)."""
     spec = load_spec(source)
     built = {path: _signals_record(path)["config"] for path in (source, directory)}
     if built[source] != built[directory]:
         raise ValueError(f"{source}'s signals were built under {built[source]}, {directory}'s under {built[directory]}")
+    others = sorted(set(load_day_split(source).days["train"]) - set(load_day_split(directory).days["train"]))
+    if others:
+        raise ValueError(f"{source}'s spec was measured on train days that are not train days here: {others[:5]}"
+                         f"{' …' if len(others) > 5 else ''} ({len(others)})")
     copies = {name: _fresh(directory / name) for name in ("spec.json", "measurements.json")}
     record = _fresh(directory / "spec_from.json")         # all three refused before any is written
     for name, path in copies.items():
@@ -200,11 +214,13 @@ def write_sentences(directory: Path, split: str, spec: VocabularySpec, readings:
     )
 
 
-def load_sentences(directory: Path, split: str, spec: VocabularySpec) -> dict[str, np.ndarray]:
-    """One split's sentences, refused unless they are this schema's, were read with ``spec`` and name every stratum
-    among `STRATA`."""
+def load_sentences(directory: Path, split: str, spec: VocabularySpec,
+                   fields: Sequence[str] | None = None) -> dict[str, np.ndarray]:
+    """One split's sentences (only the arrays ``fields`` when given), refused unless they are this schema's, were read
+    with ``spec`` and name every stratum among `STRATA`."""
     with np.load(directory / f"sentences_{split}.npz") as arrays:
-        data = {name: arrays[name] for name in arrays.files}
+        wanted = arrays.files if fields is None else {"schema", "spec_sha256", "stratum", *fields}
+        data = {name: arrays[name] for name in wanted}
     if str(data["schema"]) != SENTENCES_SCHEMA:
         raise ValueError(f"sentences_{split}.npz is not a {SENTENCES_SCHEMA} file")
     if str(data["spec_sha256"]) != spec.sha256:
@@ -229,7 +245,10 @@ def load_sentences(directory: Path, split: str, spec: VocabularySpec) -> dict[st
 #: v6 (A29, D73): the directory's summary records no digest of code (the files and the summary share the name).
 #: v7 (A31, D74): each sentence's outcome by its name — the judge's (`autopilot.judge.outcome_of`, vocabulary §5.8) on what
 #: the reading's executor flew to its end; for readouts and selection, never an input.
-CLOSED_LOOP_SCHEMA = "ts-instruction-closed-loop-v7"
+#: v8 (A32, D77–D83): the observed rows' track, ground speed and vertical rate by the executor spec's start rule, the
+#: track in [0°, 360°) on every row; the flight ends where the judge ends it (D79); e_y to the path's segments (D83); read
+#: as the rows apart from the withheld fields (`closed_loop_sentences`, D82).
+CLOSED_LOOP_SCHEMA = "ts-instruction-closed-loop-v8"
 #: Every array a closed-loop file holds.
 CLOSED_LOOP_FIELDS = {"schema", "spec_sha256", "executor_params_sha256", "row_interval_s", "start_row", "signal_index",
                       "first_row", "offsets", "state_offsets", "words", "correction", "states", "on_interval",
@@ -249,19 +268,41 @@ STATE_COLUMNS = ("e_m", "n_m", "height_m", "track_deg", "ground_speed_mps", "ver
 
 
 @dataclass(frozen=True)
-class ClosedLoopSentence:
-    """One flight's closed-loop sentence on its row interval Δ (vocabulary §4.9, §6 item 3): what the closed-loop
-    reading (`autopilot.closed_loop`) writes and `closed_loop_sentences` reads back."""
+class SentenceRows:
+    """What a model may read of a closed-loop sentence (vocabulary §6 item 3, D82): its rows — the words said, each
+    correction word marked (targets), and the states."""
 
     first_row: int              # the signals' 2 s row of the sentence's first row on the Δ grid
     start: int                  # the first predicted step's Δ row (16 s after the first row)
     grid: np.ndarray            # [M, 5] int16: the words said from the first predicted step (row 0: every column)
     correction: np.ndarray      # [M, 5] bool: a word the closed-loop reading added
     #: [(start + M − 1)·every + 1, 6] `STATE_COLUMNS` on every 2 s row from the sentence's first row to its last said
-    #: row: observed before the first predicted step, flown from it (D51)
+    #: row: observed before the first predicted step (the track, ground speed and vertical rate by the executor spec's
+    #: start rule, D77), flown from it (D51); the track in [0°, 360°)
     states: np.ndarray
     on_interval: np.ndarray     # [rows of ``states``] bool: the Δ rows among them (`on_interval_rows`)
-    lateral_m: np.ndarray       # [M] e_y at each said row
+
+    @property
+    def flown_states(self) -> np.ndarray:
+        """The flown 2 s rows: ``states`` from the first predicted step's row on."""
+        return self.states[int(np.flatnonzero(self.on_interval)[self.start]):]
+
+
+@dataclass(frozen=True)
+class Withheld:
+    """What a model must not read of a closed-loop sentence (vocabulary §6 item 3, D82): the fields that use later rows
+    or the observed path — for readouts, strata and selection, never an input."""
+
+    runway: str                 # the landed runway (the flight's), and its candidate index
+    runway_index: int
+    landing_time_utc: str
+    capture_row: int            # the open-loop reading's (2 s rows of the signals)
+    go_around_rows: np.ndarray  # [G] the open-loop reading's go-around rows (2 s rows of the signals)
+    stratum: str                # `readout.STRATA` (D70)
+    #: the judge's outcome of what the reading's executor flew, from the first predicted step to its end, by name (D74)
+    outcome: str
+    timed_out: bool             # the executor was done in the cycle that reached its time limit
+    lateral_m: np.ndarray       # [M] e_y at each said row (D83)
     vertical_m: np.ndarray      # [M] e_h at each said row (NaN past the end of the observed path, D44)
     #: [M, 2] bool: the rows where §4.9 makes no heading / angle correction (the readings of D34)
     uncorrectable: np.ndarray
@@ -271,15 +312,16 @@ class ClosedLoopSentence:
     #: [M] the matched point's observed time at each said row, in 2 s rows from the sentence's first row (the first
     #: predicted step: its own observed time, D42)
     matched_row: np.ndarray
-    timed_out: bool             # the executor was done in the cycle that reached its time limit
-    #: the judge's outcome of what the reading's executor flew, from the first predicted step to its end, by name
-    #: (vocabulary §5.8, D74: later rows decide it — for readouts and selection, never an input)
-    outcome: str
 
-    @property
-    def flown_states(self) -> np.ndarray:
-        """The flown 2 s rows: ``states`` from the first predicted step's row on."""
-        return self.states[int(np.flatnonzero(self.on_interval)[self.start]):]
+
+@dataclass(frozen=True)
+class ClosedLoopSentence:
+    """One flight's closed-loop sentence on its row interval Δ (vocabulary §4.9, §6 item 3): what the closed-loop
+    reading (`autopilot.closed_loop`) writes and `closed_loop_sentences` reads back — its rows apart from what is
+    withheld from a model (D82)."""
+
+    rows: SentenceRows
+    withheld: Withheld
 
 
 def write_closed_loop(path: Path, spec: VocabularySpec, *, executor_params_sha256: str, row_interval_s: float,
@@ -290,7 +332,8 @@ def write_closed_loop(path: Path, spec: VocabularySpec, *, executor_params_sha25
     `closed_loop_sentences`)."""
     if not sentences:
         raise ValueError(f"no closed-loop sentence for {path.name}: nothing to write")
-    kept = list(sentences.values())
+    kept = [sentence.rows for sentence in sentences.values()]
+    withheld = [sentence.withheld for sentence in sentences.values()]
     lengths = np.array([len(r.grid) for r in kept], dtype=np.int64)
     state_lengths = np.array([len(r.states) for r in kept], dtype=np.int64)
     every = interval_rows(row_interval_s, spec.step_s)
@@ -311,13 +354,13 @@ def write_closed_loop(path: Path, spec: VocabularySpec, *, executor_params_sha25
         words=np.concatenate([r.grid for r in kept]).astype(np.int16),
         correction=np.concatenate([r.correction for r in kept]).astype(bool),
         states=np.concatenate([r.states for r in kept]).astype(np.float64), on_interval=np.concatenate(marks),
-        lateral_m=np.concatenate([r.lateral_m for r in kept]).astype(np.float64),
-        vertical_m=np.concatenate([r.vertical_m for r in kept]).astype(np.float64),
-        uncorrectable=np.concatenate([r.uncorrectable for r in kept]).astype(bool),
-        observed_row=np.concatenate([r.observed_row for r in kept]).astype(np.int64),
-        matched_row=np.concatenate([r.matched_row for r in kept]).astype(np.float64),
-        timed_out=np.asarray([r.timed_out for r in kept], dtype=bool),
-        outcome=np.asarray([r.outcome for r in kept], dtype=np.str_))
+        lateral_m=np.concatenate([w.lateral_m for w in withheld]).astype(np.float64),
+        vertical_m=np.concatenate([w.vertical_m for w in withheld]).astype(np.float64),
+        uncorrectable=np.concatenate([w.uncorrectable for w in withheld]).astype(bool),
+        observed_row=np.concatenate([w.observed_row for w in withheld]).astype(np.int64),
+        matched_row=np.concatenate([w.matched_row for w in withheld]).astype(np.float64),
+        timed_out=np.asarray([w.timed_out for w in withheld], dtype=bool),
+        outcome=np.asarray([w.outcome for w in withheld], dtype=np.str_))
 
 
 def load_closed_loop(path: Path, spec: VocabularySpec) -> dict[str, np.ndarray]:
@@ -332,18 +375,55 @@ def load_closed_loop(path: Path, spec: VocabularySpec) -> dict[str, np.ndarray]:
     return data
 
 
-def closed_loop_sentences(data: dict[str, np.ndarray]) -> dict[int, ClosedLoopSentence]:
-    """A loaded closed-loop file's sentences (`load_closed_loop`) by their flight's place in the split's signals
-    (vocabulary §6 item 3): each its first row, its words and correction marks, all its states on the 2 s rows from its
-    first row with the Δ rows marked, its readings and its outcome (D74)."""
+def closed_loop_indices(directory: Path, split: str, row_interval_s: float, spec: VocabularySpec) -> set[int]:
+    """The flights (signal indices of ``split``) with a closed-loop sentence at ``row_interval_s``: only the file's index
+    read, refused unless the file is this schema's and was read with ``spec``."""
+    path = closed_loop_path(directory, split, row_interval_s)
+    with np.load(path) as arrays:
+        schema, sha, index = str(arrays["schema"]), str(arrays["spec_sha256"]), arrays["signal_index"]
+        interval = float(arrays["row_interval_s"])
+    if schema != CLOSED_LOOP_SCHEMA or sha != spec.sha256:
+        raise ValueError(f"{path} is not a {CLOSED_LOOP_SCHEMA} file read with spec {spec.sha256[:12]}")
+    if interval != row_interval_s:
+        raise ValueError(f"{path} holds sentences at {interval:g} s, not {row_interval_s:g} s")
+    return set(index.tolist())
+
+
+def closed_loop_sentences(directory: Path, split: str, row_interval_s: float, spec: VocabularySpec, *,
+                          path: Path | None = None) -> dict[int, ClosedLoopSentence]:
+    """The artefact's closed-loop sentences of ``split`` at ``row_interval_s`` (`load_closed_loop`) by their flight's
+    place in the split's signals (vocabulary §6 item 3, D82): each its rows (its first row, its words and correction
+    marks, all its states on the 2 s rows from its first row with the Δ rows marked) apart from what is withheld from a
+    model — its landed runway and landing time (the signals' records), its capture row, go-around rows and stratum (the
+    sentence file, D70), its outcome (D74), whether it timed out, and the closed-loop reading's errors, matched and
+    observed rows and the rows without a correction. ``path``: a file of these sentences outside the artefact's
+    ``closed_loop/`` (a part being put together, `experiments/instruction_closed_loop.py`)."""
+    path = closed_loop_path(directory, split, row_interval_s) if path is None else path
+    data = load_closed_loop(path, spec)
+    if float(data["row_interval_s"]) != row_interval_s:
+        raise ValueError(f"{path} holds sentences at {float(data['row_interval_s']):g} s, not {row_interval_s:g} s")
+    labelled = load_sentences(directory, split, spec, ("signal_index", "runway_index", "capture_row",
+                                                     "go_around_offsets", "go_around_row"))
+    records = signals_flights(directory, split)
+    at = {int(index): k for k, index in enumerate(labelled["signal_index"])}
     out = {}
     for k, index in enumerate(data["signal_index"].tolist()):
         rows = slice(int(data["offsets"][k]), int(data["offsets"][k + 1]))
         states = slice(int(data["state_offsets"][k]), int(data["state_offsets"][k + 1]))
+        if index not in at:
+            raise ValueError(f"{split} flight {index} has a closed-loop sentence at {row_interval_s:g} s and no labelled one")
+        n = at[index]
+        go_arounds = slice(int(labelled["go_around_offsets"][n]), int(labelled["go_around_offsets"][n + 1]))
         out[index] = ClosedLoopSentence(
-            first_row=int(data["first_row"][k]), start=int(data["start_row"]), grid=data["words"][rows],
-            correction=data["correction"][rows], states=data["states"][states], on_interval=data["on_interval"][states],
-            lateral_m=data["lateral_m"][rows], vertical_m=data["vertical_m"][rows],
-            uncorrectable=data["uncorrectable"][rows], observed_row=data["observed_row"][rows],
-            matched_row=data["matched_row"][rows], timed_out=bool(data["timed_out"][k]), outcome=str(data["outcome"][k]))
+            rows=SentenceRows(first_row=int(data["first_row"][k]), start=int(data["start_row"]),
+                              grid=data["words"][rows], correction=data["correction"][rows],
+                              states=data["states"][states], on_interval=data["on_interval"][states]),
+            withheld=Withheld(runway=str(records[index]["runway"]), runway_index=int(labelled["runway_index"][n]),
+                              landing_time_utc=str(records[index]["landing_time_utc"]),
+                              capture_row=int(labelled["capture_row"][n]),
+                              go_around_rows=labelled["go_around_row"][go_arounds], stratum=str(labelled["stratum"][n]),
+                              outcome=str(data["outcome"][k]), timed_out=bool(data["timed_out"][k]),
+                              lateral_m=data["lateral_m"][rows], vertical_m=data["vertical_m"][rows],
+                              uncorrectable=data["uncorrectable"][rows], observed_row=data["observed_row"][rows],
+                              matched_row=data["matched_row"][rows]))
     return out

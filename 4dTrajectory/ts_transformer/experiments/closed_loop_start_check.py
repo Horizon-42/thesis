@@ -32,7 +32,7 @@ from ts_transformer.autopilot import closed_loop
 from ts_transformer.autopilot.conformance import ROUNDOFF, STATE_BOUND_M
 from ts_transformer.autopilot.start import start
 from ts_transformer.instructions.artefact import (
-    SPLITS, closed_loop_path, closed_loop_sentences, load_closed_loop, load_signals,
+    SPLITS, closed_loop_sentences, load_signals,
 )
 from ts_transformer.instructions.labeller.interval import interval_rows
 from ts_transformer.instructions.words import RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, wrap180
@@ -65,7 +65,7 @@ def sample(airports: list[str], per_airport: int, seed: int) -> list[int]:
 def check_interval(instructions: Path, split: str, interval_s: float, executor: Path, words: Any, *, per_airport: int,
                    seed: int, chunk: int, device: torch.device) -> list[dict[str, Any]]:
     """One row interval's flights said through the start (module docstring), ``chunk`` at a time: one row each."""
-    stored = closed_loop_sentences(load_closed_loop(closed_loop_path(instructions, split, interval_s), words.spec))
+    stored = closed_loop_sentences(instructions, split, interval_s, words.spec)
     signals = load_signals(instructions, split)
     keys = sorted(stored)
     chosen = [keys[k] for k in sample([signals[i].airport for i in keys], per_airport, seed)]
@@ -78,25 +78,25 @@ def check_interval(instructions: Path, split: str, interval_s: float, executor: 
 
 def _check_chunk(instructions: Path, split: str, interval_s: float, chosen: dict[int, Any], signals: list[Any],
                  executor: Path, *, device: torch.device) -> list[dict[str, Any]]:
-    most = max(int((s.grid[:, RUNWAY] == RUNWAY_GO_AROUND).sum()) for s in chosen.values())
+    most = max(int((s.rows.grid[:, RUNWAY] == RUNWAY_GO_AROUND).sum()) for s in chosen.values())
     loop, order = start(instructions, split, interval_s, chosen, executor, most_go_arounds=most, device=device)
     every = interval_rows(interval_s, loop.words.spec.step_s)
     flown: list[list[np.ndarray]] = [[row] for row in loop.rows()]
     done_at = np.full(len(order), -1)
-    for k in range(max(len(chosen[i].grid) for i in order)):
+    for k in range(max(len(chosen[i].rows.grid) for i in order)):
         said = np.full((len(order), 5), UNCHANGED, dtype=np.int64)
         for f, i in enumerate(order):
-            if k < len(chosen[i].grid):
-                said[f] = chosen[i].grid[k]
+            if k < len(chosen[i].rows.grid):
+                said[f] = chosen[i].rows.grid[k]
         rows, done = loop.step(said)
         for f, i in enumerate(order):
-            if k < len(chosen[i].grid) - 1 and not done[f]:       # kept while it flies: an early end shows
+            if k < len(chosen[i].rows.grid) - 1 and not done[f]:       # kept while it flies: an early end shows
                 flown[f] += list(rows[f])
         done_at = np.where(done & (done_at < 0), k, done_at)
     timed_out = loop.timed_out()
     out = []
     for f, i in enumerate(order):
-        sentence = chosen[i]
+        sentence, withheld = chosen[i].rows, chosen[i].withheld
         expected = sentence.states[sentence.start * every:]
         got = np.array(flown[f])
         same_shape = got.shape == expected.shape
@@ -108,8 +108,8 @@ def _check_chunk(instructions: Path, split: str, interval_s: float, chosen: dict
                     "position_m": float(np.abs(apart[:, :3]).max()) if same_shape else None,
                     "other_columns": float(np.abs(apart[:, 3:]).max()) if same_shape else None,
                     "done_at_last_row": bool(done_at[f] == len(sentence.grid) - 1),
-                    "timed_out_as_stored": bool(timed_out[f]) == sentence.timed_out,
-                    "outcome_as_stored": bool(done[f]) and loop.outcome(f).outcome == sentence.outcome})
+                    "timed_out_as_stored": bool(timed_out[f]) == withheld.timed_out,
+                    "outcome_as_stored": bool(done[f]) and loop.outcome(f).outcome == withheld.outcome})
     return out
 
 

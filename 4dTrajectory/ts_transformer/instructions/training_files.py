@@ -31,10 +31,13 @@ from ts_transformer.io_utils import utc_now
 #: `TRAINING_SAMPLE_SCHEMA`, `TRAINING_SET_KIND`); the reader refuses anything else by name, so these move together. A
 #: name changes with its file's shape, on both sides, in the same change. Index v2 / sample v9 (A23, 2026-10-04): the
 #: stage-A view — five columns, the open-loop sentence on the 2 s rows and the closed-loop sentences at Δ = 2, 4, 8 s with
-#: their correction words, flown states, judge's outcome and decision-altitude check.
+#: their correction words, flown states, judge's outcome and decision-altitude check. Sample v10 (A32, 2026-10-05): the
+#: same shape from the closed-loop format v8 — the observed rows by the start rule (D77), a flight ending where the judge
+#: ends it (D79), the flights drawn from the closed-loop files and checked against the stored outcome (D86) — so that a
+#: view of this code never reads a v9 set.
 INDEX_SCHEMA = "aeroviz-training-index-v2"
 INDEX_FILE = "index_v4.json"
-SAMPLE_SCHEMA = "aeroviz-training-sample-v9"
+SAMPLE_SCHEMA = "aeroviz-training-sample-v10"
 SAMPLE_FILE = "sample.json"
 SET_KIND = "closed-loop-readback"
 #: The splits a set draws from (outline §6 item 4): train and select; val only from a readout a plan already makes.

@@ -2,7 +2,8 @@
 
 When `instruction_labels` writes an artefact it also writes ``conformance/``: a REFERENCE — a fixed sample of the train
 split's flights (`draw`: a seeded permutation, `PER_AIRPORT` labelled flights and `REFUSED_PER_AIRPORT` refused ones of
-every airport) with their signals and what the labeller made of each: the sentence (words, runway, capture row,
+every airport, and up to `GO_AROUND_PER_AIRPORT` more labelled flights with a go-around, vocabulary §7.2 #2) with their
+signals and what the labeller made of each: the sentence (words, runway, capture row,
 "unspecified" row, go-around rows, stratum — D70) or the refusal's reason — and each labelled sentence also on its UTC Δ grid at every
 row interval of `INTERVALS_S` (`labeller.interval.on_utc_grid`, the rule of D45 and D46; D49), or why that grid refuses
 it. The reference is written only in the run that writes the labels it pins. The CHECK (`check`) reads the reference's
@@ -25,7 +26,7 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from ts_transformer.instructions.artefact import load_candidates, load_spec
+from ts_transformer.instructions.artefact import load_candidates, load_day_split, load_spec, require_split_days
 from ts_transformer.instructions.labeller.interval import on_utc_grid
 from ts_transformer.instructions.labeller.read import Reading, read_flight
 from ts_transformer.instructions.labeller.records import Refused
@@ -37,11 +38,15 @@ from ts_transformer.io_utils import utc_now
 #: v3 (A20, D58): the sentences' altitude words are levels above the airport elevation E.
 #: v4 (A27, D70): a labelled flight's record holds its stratum.
 #: v5 (A29, D73): no digest of the labeller's code.
-REFERENCE_SCHEMA = "ts-instruction-conformance-reference-v5"
+#: v6 (A32, §7.2 #2): the train flights with a labelled go-around added (`GO_AROUND_PER_AIRPORT`).
+REFERENCE_SCHEMA = "ts-instruction-conformance-reference-v6"
 DIRECTORY = "conformance"
 #: The reference's flights: the train split, every airport alike (A3: 250 labelled train flights, seed 1337, at five
 #: airports), and a few refusals of each so that a refusal that moves is found too.
 SPLIT, SEED, PER_AIRPORT, REFUSED_PER_AIRPORT = "train", 1337, 50, 10
+#: Besides them, the labelled flights with a go-around, up to this many of each airport (§7.2 #2): so that the go-around
+#: words are read in every check.
+GO_AROUND_PER_AIRPORT = 10
 #: The row intervals whose Δ grid the reference holds beside the 2 s rows (D49: the ablation's coarser intervals, D25).
 INTERVALS_S = (4.0, 8.0)
 def labelled_record(reading: Reading) -> dict[str, Any]:
@@ -91,18 +96,27 @@ def outcome(flight: FlightSignals, geometry: Any, spec: Any,
     return {**labelled_record(reading), "interval_refusals": refusals}, grids
 
 
-def draw(flights: Sequence[FlightSignals], statuses: Sequence[str]) -> list[int]:
-    """The reference's flights among ``flights`` (each one's labeller status alongside): in a permutation seeded by
-    `SEED`, the first `PER_AIRPORT` labelled and the first `REFUSED_PER_AIRPORT` refused of each airport, in signal
-    order."""
+def draw(flights: Sequence[FlightSignals], statuses: Sequence[str], go_arounds: Sequence[bool]) -> list[int]:
+    """The reference's flights among ``flights`` (each one's labeller status alongside, and whether its sentence has a
+    go-around): in a permutation seeded by `SEED`, the first `PER_AIRPORT` labelled and the first `REFUSED_PER_AIRPORT`
+    refused of each airport; then, in the same permutation, the first `GO_AROUND_PER_AIRPORT` labelled ones with a
+    go-around of each airport not drawn already (as many as there are); in signal order."""
     wanted: dict[tuple[str, str], int] = {}
     for flight in flights:
         wanted[(flight.airport, "labelled")] = PER_AIRPORT
         wanted[(flight.airport, "refused")] = REFUSED_PER_AIRPORT
+        wanted[(flight.airport, "go-around")] = GO_AROUND_PER_AIRPORT
+    order = np.random.default_rng(SEED).permutation(len(flights)).tolist()
     chosen = []
-    for index in np.random.default_rng(SEED).permutation(len(flights)).tolist():
+    for index in order:
         key = (flights[index].airport, statuses[index])
         if wanted[key]:
+            wanted[key] -= 1
+            chosen.append(index)
+    taken = set(chosen)
+    for index in order:
+        key = (flights[index].airport, "go-around")
+        if go_arounds[index] and index not in taken and wanted[key]:
             wanted[key] -= 1
             chosen.append(index)
     return sorted(chosen)
@@ -118,7 +132,8 @@ def write_reference(directory: Path, flights: Sequence[FlightSignals], records: 
         raise FileExistsError(f"{target} exists: an artefact's reference is written once")
     spec = load_spec(directory)
     words, geometries = Words(spec), load_candidates(directory)
-    chosen = draw(flights, [record["status"] for record in records])
+    chosen = draw(flights, [record["status"] for record in records],
+                  [record["status"] == "labelled" and bool(record["go_around_rows"]) for record in records])
     outcomes, grids = [], {name: [] for name in interval_names(words)}
     for i in chosen:
         if readings[i] is None:
@@ -139,7 +154,8 @@ def write_reference(directory: Path, flights: Sequence[FlightSignals], records: 
         np.savez_compressed(handle, **{f"signal_{name}": value for name, value in arrays.items()}, **word_arrays)
     payload = {"schema": REFERENCE_SCHEMA, "written_utc": utc_now(), "git": git, "python": platform.python_version(),
                "spec_sha256": spec.sha256, "split": SPLIT, "seed": SEED, "per_airport": PER_AIRPORT,
-               "refused_per_airport": REFUSED_PER_AIRPORT, "intervals": interval_names(words),
+               "refused_per_airport": REFUSED_PER_AIRPORT, "go_around_per_airport": GO_AROUND_PER_AIRPORT,
+               "intervals": interval_names(words),
                "flights": meta, "outcomes": outcomes}
     (staging / "reference.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
     staging.rename(target)
@@ -175,6 +191,7 @@ def check(directory: Path) -> Checked:
         arrays = {name: data[name] for name in data.files}
     flights = unpack_signals({name[len("signal_"):]: value for name, value in arrays.items() if name.startswith("signal_")},
                              payload["flights"])
+    require_split_days(load_day_split(directory), SPLIT, flights)           # C32: the reference's flights are train's
     checked = Checked(flights=len(flights))
     labelled = 0
     for flight, expected in zip(flights, payload["outcomes"], strict=True):

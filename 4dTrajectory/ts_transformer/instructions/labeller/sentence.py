@@ -6,7 +6,8 @@ copy of one word in one step) — in the runway column the last word is "go-arou
 said again after it is kept; in the heading column a word is its absolute track (its class under the course of the
 runway in force at its row, §3.3), so after a change of course the class in force is said again (D48). Two different instructions of one column in one step — checked on the full list, before
 anything is dropped — refuse the flight, and so does any row the grammar refuses (`instructions.grammar.apply`, read at
-each row's height above the airport elevation E, D58), an incomplete step 0 included.
+each row's height above the airport elevation E, D58), an incomplete step 0 included, and an instruction outside the
+sentence's rows.
 """
 
 from __future__ import annotations
@@ -26,6 +27,8 @@ def assemble(n_rows: int, instructions: list[Instruction], height: np.ndarray, w
     candidates' courses, by candidate."""
     issued: dict[tuple[int, int], int] = {}
     for item in instructions:
+        if not 0 <= item.row < n_rows:
+            raise Refused("instruction outside the sentence", f"{COLUMNS[item.column]} at row {item.row} of {n_rows}")
         cell = (item.row, item.column)
         if cell in issued and issued[cell] != item.value:
             raise Refused("two instructions in one step",

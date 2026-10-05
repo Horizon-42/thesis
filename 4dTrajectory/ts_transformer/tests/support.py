@@ -216,6 +216,25 @@ def stand_in_checks(monkeypatch):
         conformance.Checked({mode: conformance.Difference(expected=0) for mode in conformance.MODES})))
 
 
+def closed_loop_artefact(directory, batch, spec, *, copies=1, split="train"):
+    """A tmp instruction artefact at ``directory`` (created) of a synthetic batch's first flight, ``copies`` times over (at
+    signal indices 0 … copies − 1): signals, candidates, spec and sentences — what the reader of closed-loop sentences
+    joins a closed-loop file with (`artefact.closed_loop_sentences`, D82); its ``closed_loop/`` directory, empty."""
+    from ts_transformer.instructions.artefact import (
+        CLOSED_LOOP_DIRECTORY, write_candidates, write_sentences, write_signals, write_spec,
+    )
+
+    directory.mkdir(parents=True)
+    write_signals(directory, {split: [batch.observed[0]] * copies},
+                  {"counts": {split: {"built_usable": copies}}, "test_days": {"flights_not_opened": 0},
+                   "sources": [{"airport": "KXXX", "arrival_manifest_sha256": "0" * 64}]}, fixture_days())
+    write_candidates(directory, {batch.geometries[0].code: batch.geometries[0]})
+    write_spec(directory, spec, {"n": 1}, {"git": {"head": "test", "dirty": False}})
+    write_sentences(directory, split, spec, [batch.readings[0]] * copies, list(range(copies)))
+    (directory / CLOSED_LOOP_DIRECTORY).mkdir()
+    return directory
+
+
 def labelled_instruction_artefact(directory, split="train"):
     """A tmp instruction artefact at ``directory`` (created) holding one synthetic ``split`` flight onto
     `instruction_airport`'s runway 09 — a downwind, a base, a final on a 3° descent — labelled by the labeller:
@@ -239,30 +258,28 @@ def labelled_instruction_artefact(directory, split="train"):
     return spec
 
 
-def executor_inputs(signals, geometry, row=0, mass_kg=62000.0):
-    """`autopilot.flights.FlightInputs` of one A320 flown from ``signals``' 2 s row ``row`` (a synthetic flight has no
-    data-plane series to rebuild): its state there, the airframe, the chart at the first candidate's threshold."""
-    import math
+#: The start rule of the tests' executor parameters (`test_autopilot._params` and the others): a formal rule (D77).
+START_RULE = "trailing-fit-8s"
 
+
+def executor_inputs(signals, geometry, row=0, mass_kg=62000.0, rule=START_RULE):
+    """`autopilot.flights.FlightInputs` of one A320 flown from ``signals``' 2 s row ``row`` (``signals`` from the flight's
+    row 0; a synthetic flight has no data-plane series to rebuild): its start state there by the start rule
+    (`flights.start_state`, D77), the airframe, the airport's chart (`flights.frame_params`, D81)."""
+    import numpy as np
     import torch
 
     from aircraft.aero_params import aero_params_for_aircraft
     from flight_scenarios.scenario import aircraft_for_code
-    from ts_transformer.autopilot.flights import FlightInputs
+    from ts_transformer.autopilot.flights import FlightInputs, frame_params, start_state
 
     aircraft = aircraft_for_code("A320")
     aero = aero_params_for_aircraft(aircraft)
-    lat, lon = geometry.frame.latlon_from_horizontal(signals.e_m[row], signals.n_m[row])
-    gamma = math.atan2(signals.vertical_rate_mps[row], signals.ground_speed_mps[row])
-    state = [lat, lon, signals.altitude_m[row], signals.ground_speed_mps[row] / math.cos(gamma),
-             math.radians(90.0 - signals.track_deg[row]), gamma, mass_kg]
-    candidate = geometry.candidates[0]
-    tlat, tlon = geometry.frame.latlon_from_horizontal(candidate.threshold_e_m, candidate.threshold_n_m)
     f64 = torch.float64
     return FlightInputs(
-        initial_state=torch.tensor([state], dtype=f64),
+        initial_state=torch.tensor(np.array([start_state(signals, row, rule, geometry, mass_kg)]), dtype=f64),
         aero_params=torch.tensor([[aero.S, aero.Cl_max, aero.Cd0, aero.k, aero.stall_threshold, aero.k_stall]], dtype=f64),
-        frame_params=torch.tensor([[tlat, tlon, candidate.elevation_m, 0.0]], dtype=f64),
+        frame_params=torch.tensor(np.array([frame_params(geometry)]), dtype=f64),
         max_thrust_n=torch.tensor([aircraft.engine.max_thrust_total_n], dtype=f64))
 
 
@@ -434,7 +451,7 @@ def closed_loop_flight(interval_s: float = 2.0):
     class FixedInputs(replay.Batch):
         fixed: object = None
 
-        def inputs(self, device):
+        def inputs(self, rule, device):
             return self.fixed
 
     fixed = FixedInputs(**{f.name: getattr(replayed, f.name) for f in dataclasses.fields(replay.Batch)}, fixed=inputs)

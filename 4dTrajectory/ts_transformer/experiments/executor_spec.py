@@ -14,9 +14,13 @@ constants below. Writes ``spec.json`` + ``measurements.json`` into
 the same run, the spec's reference tracks, flown by that code (`autopilot.conformance`) — every process that opens the
 spec flies them again first and is refused by name off them (executor design §12.3, D73).
 
+The start rule (D77: how the start state reads the observed rows before the row it starts at) is the user's choice from
+A33's measurement, given with ``--start-rule``; only the rules of `params.FORMAL_START_RULES` are written (the data
+plane's centred fit, which reads up to 7.5 s after the row, is A33's comparison only).
+
     python run_ts.py executor_spec \\
         --instructions 4dTrajectory/outputs/POOLED/instruction_language/<artefact> \\
-        --dir 4dTrajectory/outputs/POOLED/executor/<name>
+        --dir 4dTrajectory/outputs/POOLED/executor/<name> --start-rule <rule>
 """
 
 from __future__ import annotations
@@ -28,7 +32,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from ts_transformer.autopilot import conformance
-from ts_transformer.autopilot.params import ExecutorParams
+from ts_transformer.autopilot.params import FORMAL_START_RULES, ExecutorParams
 from ts_transformer.autopilot.speed import speed_change_mps2
 from ts_transformer.autopilot.spec import params_sha256, write_spec
 from ts_transformer.instructions.artefact import load_candidates, load_spec
@@ -56,6 +60,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--instructions", type=Path, required=True, help="the instruction artefact the executor flies")
     parser.add_argument("--dir", type=Path, required=True, help="the new executor spec directory")
+    parser.add_argument("--start-rule", required=True, choices=FORMAL_START_RULES,
+                        help="how the start state reads the observed rows before it (D77; the user's choice, A33)")
     args = parser.parse_args(argv)
     # normalised (".." resolved, links kept): a worktree's data trees are links to the main tree's
     instructions = Path(os.path.normpath(args.instructions if args.instructions.is_absolute()
@@ -75,7 +81,7 @@ def main(argv: list[str] | None = None) -> int:
 
     params = ExecutorParams(cycle_s=CYCLE_S, bank_rate_deg_s=ROLL_RATE_DEG_S,
                             path_time_constant_s=PATH_TIME_CONSTANT_S, path_rate_factor=PATH_RATE_FACTOR,
-                            timeout_factor=TIMEOUT_FACTOR)
+                            timeout_factor=TIMEOUT_FACTOR, start_rule=args.start_rule)
     params.check(spec, spec.step_s)
     print(f"the standards' roll rate p {ROLL_RATE_DEG_S:g}°/s", flush=True)
 
@@ -100,6 +106,9 @@ def main(argv: list[str] | None = None) -> int:
         },
         "fixed": {"cycle_s": CYCLE_S, "path_time_constant_s": PATH_TIME_CONSTANT_S, "path_rate_factor": PATH_RATE_FACTOR,
                   "timeout_factor": TIMEOUT_FACTOR},
+        "chosen": {"start_rule": {"value": args.start_rule,
+                                  "rule": "the user's choice from the measurement of A33 (D77): how the start state "
+                                          "takes its velocity from the observed rows at or before its row"}},
     }
     source = {"python": platform.python_version(), "instructions": artefact_name, "git": git,
               "labeller_check": {"flights": labeller.flights, "read_otherwise": len(labeller.mismatches)}}

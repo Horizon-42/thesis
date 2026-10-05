@@ -17,6 +17,12 @@ flight with its reference up to the cycle it was done at:
 - every limit and mode each cycle, the done cycle, the outcome, the end row and every word's verdict the same;
 - every flight of the reference flown.
 
+THE LAWS READ NO VERTICAL PATH (vocabulary §5.2, D81), checked the same way: the way ``moved`` flies the reference's
+flights as a single-aircraft batch with every candidate's vertical path changed (`MOVED_PATH`: its threshold crossing
+height, glidepath angle and decision altitude) and the dynamics' chart moved (`MOVED_ORIGIN`: its origin north, east
+and up), and requires the same states, commands, limits and end cycles; only the judge's verdict, which reads the
+vertical paths, may differ.
+
 Before flying, each flight's INPUTS are compared with the reference's digests (`input_digests`: the state it starts
 from, its airframe, frame, thrust and approach speed, its time limit, its words and runway, the runways' geometry and
 vertical paths): inputs that moved are refused by name — the data under the
@@ -42,9 +48,9 @@ from typing import Any, Callable, Mapping, Sequence
 import numpy as np
 import torch
 
-from geokit import METRES_PER_DEG_LAT
+from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon
 from ts_transformer.autopilot import replay, single
-from ts_transformer.autopilot.executor import LIMITS, MODES as EXECUTOR_MODES, Executor, Flown
+from ts_transformer.autopilot.executor import LIMITS, MODES as EXECUTOR_MODES, Executor, Flown, fly
 from ts_transformer.autopilot.flights import FlightInputs
 from ts_transformer.autopilot.frame import ALT, LAT, LON, PSI, AirportCharts
 from ts_transformer.autopilot.judge import Verdict, judge
@@ -52,6 +58,7 @@ from ts_transformer.autopilot.lateral import Runways
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.sentence import Sentences
 from ts_transformer.autopilot.spec import CONFORMANCE_DIRECTORY as DIRECTORY
+from ts_transformer.instructions.airport import AirportGeometry, VerticalPath
 from ts_transformer.instructions.words import Words
 from ts_transformer.io_utils import utc_now
 from ts_transformer.repo_layout import git_state, repo_relative
@@ -59,9 +66,13 @@ from ts_transformer.repo_layout import git_state, repo_relative
 #: v2 (two-tier v4): the flights' runway in force per cycle, the five-column words, the go-around's time reserve.
 #: v3 (A19, A20): no word clock's observed rows in a flight's input digest; the airport elevation E in it (D58).
 #: v4 (A29, D73): no digest of the executor's code or of this checker.
-REFERENCE_SCHEMA = "ts-executor-conformance-reference-v4"
-#: The reference's flights: the replay gate's draw on the training days, every airport alike.
+#: v5 (A32): the train flights with a labelled go-around added (§7.2 #3); the frame at the airport reference (D81).
+REFERENCE_SCHEMA = "ts-executor-conformance-reference-v5"
+#: The reference's flights: the replay gate's draw on the training days, every airport alike, and up to
+#: `GO_AROUND_PER_AIRPORT` more of each airport with a labelled go-around, so that the go-around climb and the held
+#: airspeed are flown (vocabulary §7.2 #3).
 SPLIT, PER_AIRPORT, SEED, GROUPS = "train", 50, 1337, (replay.OWN,)
+GO_AROUND_PER_AIRPORT = 10
 #: How far apart two flown states may be, metres, horizontally or vertically — the single-flight executor's bound
 #: against the batched one (instruction-v3's fleet check, 7,426 live segments within 1.6e-8 m; now the spec's reference).
 STATE_BOUND_M = 1e-6
@@ -144,7 +155,8 @@ def fly_staggered(batch: replay.Batch, params: ExecutorParams, words: Words) -> 
     starts = np.random.default_rng(SEED).integers(0, STAGGER_STEPS + 1, size=len(batch.sentences)) * step_rows
     limits = torch.tensor(replay.time_limits_s(batch, params, words.spec.step_s), dtype=f64, device=DEVICE)
     sentences = Sentences([s.grid for s in batch.sentences], words, step_s=batch.row_interval_s, device=DEVICE)
-    executor = Executor(batch.inputs(DEVICE), Runways.of(batch.geometries, words.spec, dtype=f64, device=DEVICE),
+    executor = Executor(batch.inputs(params.start_rule, DEVICE),
+                        Runways.of(batch.geometries, words.spec, dtype=f64, device=DEVICE),
                         AirportCharts.of(batch.geometries, dtype=f64, device=DEVICE),
                         torch.tensor(batch.approach_ias_mps, dtype=f64, device=DEVICE), params, words,
                         step_s=batch.row_interval_s, time_limit_s=limits, start_cycle=torch.as_tensor(starts, device=DEVICE),
@@ -160,32 +172,65 @@ def fly_staggered(batch: replay.Batch, params: ExecutorParams, words: Words) -> 
 
 
 def fly_single(batch: replay.Batch, params: ExecutorParams, words: Words) -> list[FlightResult]:
-    """Single flight: each flight alone in the single-flight executor (`autopilot.single`), driven as `executor.fly`
-    drives a batch — a step's words heard on the cycle that starts it."""
+    """Single flight: each flight alone in the single-flight executor (`autopilot.single.fly`, the one single-flight
+    loop), driven as `executor.fly` drives a batch — a step's words heard on the cycle that starts it."""
     spec = words.spec
-    inputs = batch.inputs(DEVICE)
+    inputs = batch.inputs(params.start_rule, DEVICE)
     limits, reserve = replay.time_limits_s(batch, params, words.spec.step_s), replay.reserve_s(batch)
     out = []
     for j, sentence_flown in enumerate(batch.sentences):
         flight = FlightInputs(**{f.name: getattr(inputs, f.name)[j: j + 1] for f in dataclasses.fields(FlightInputs)})
-        executor = single.SingleExecutor(flight, batch.geometries[j], batch.approach_ias_mps[j], params, words,
-                                         step_s=batch.row_interval_s, time_limit_s=limits[j], reserve_s=reserve)
-        sentence = single.Sentence(sentence_flown.grid, words, step_s=batch.row_interval_s)
-        for cycle in range(executor.cycles):
-            sentence_s = cycle * params.cycle_s
-            executor.cycle(sentence.at(sentence_s), sentence_s)
-            if executor.done:
-                break
-        flown = executor.flown()
+        flown, _ = single.fly(flight, batch.geometries[j], batch.approach_ias_mps[j], sentence_flown.grid, params, words,
+                              step_s=batch.row_interval_s, time_limit_s=limits[j], reserve_s=reserve)
         verdict = judge(flown, 0, batch.geometries[j], sentence_flown.instructions,
                         batch.row_interval_s, batch.signals[j], spec, words)
         out += flight_results(flown, [verdict])
     return out
 
 
-#: Every way the executor flies, each checked against the reference (executor design §12.4).
+#: D81: how ``moved`` changes each candidate's vertical path (threshold crossing height m, glidepath angle deg, decision
+#: altitude m, each added) and moves the dynamics' chart (its origin north m, east m, up m).
+MOVED_PATH = (15.0, 0.5, 20.0)
+MOVED_ORIGIN = (3000.0, 3000.0, 15.0)
+
+
+def moved_geometry(geometry: AirportGeometry) -> AirportGeometry:
+    """``geometry`` with every candidate's vertical path changed by `MOVED_PATH`."""
+    tch, angle, da = MOVED_PATH
+    return dataclasses.replace(geometry, candidates=tuple(
+        dataclasses.replace(c, vertical_path=VerticalPath(c.vertical_path.crossing_height_m + tch,
+                                                          c.vertical_path.glidepath_deg + angle,
+                                                          c.vertical_path.decision_height_m + da))
+        for c in geometry.candidates))
+
+
+def fly_moved(batch: replay.Batch, params: ExecutorParams, words: Words) -> list[FlightResult]:
+    """Single-aircraft batch (`fly_batch`) with every candidate's vertical path changed and the dynamics' chart moved
+    (module docstring, D81)."""
+    north, east, up = MOVED_ORIGIN
+    inputs = batch.inputs(params.start_rule, DEVICE)
+    frame = inputs.frame_params.clone()
+    frame[:, 0] += north / METRES_PER_DEG_LAT
+    frame[:, 1] += east / torch.as_tensor([metres_per_deg_lon(float(lat)) for lat in frame[:, 0]], dtype=frame.dtype)
+    frame[:, 2] += up
+    moved = dataclasses.replace(batch, geometries=[moved_geometry(g) for g in batch.geometries])
+    f64 = torch.float64
+    flown = fly(dataclasses.replace(inputs, frame_params=frame),
+                Sentences([s.grid for s in moved.sentences], words, step_s=moved.row_interval_s, device=DEVICE),
+                Runways.of(moved.geometries, words.spec, dtype=f64, device=DEVICE),
+                AirportCharts.of(moved.geometries, dtype=f64, device=DEVICE),
+                torch.tensor(moved.approach_ias_mps, dtype=f64, device=DEVICE), params, words,
+                time_limit_s=torch.tensor(replay.time_limits_s(moved, params, words.spec.step_s), dtype=f64,
+                                          device=DEVICE),
+                reserve_s=replay.reserve_s(moved))
+    return flight_results(flown, replay.judge_batch(moved, flown, words))
+
+
+#: Every way the executor flies, each checked against the reference (executor design §12.4), and ``moved`` (D81).
 MODES: dict[str, Callable[[replay.Batch, ExecutorParams, Words], list[FlightResult]]] = {
-    "batch": fly_batch, "staggered": fly_staggered, "single": fly_single}
+    "batch": fly_batch, "staggered": fly_staggered, "single": fly_single, "moved": fly_moved}
+#: The ways whose verdict is not compared: ``moved`` changes what the judge reads.
+UNJUDGED = ("moved",)
 
 
 # ---- the reference on disk
@@ -348,7 +393,7 @@ def compare(reference: FlightResult, flown: FlightResult, difference: Difference
 def input_digests(batch: replay.Batch, params: ExecutorParams, words: Words) -> list[str]:
     """Each flight's inputs as one sha256 (module docstring): what `replay.fly_sentences` flies it from, and what the
     judge reads it against."""
-    inputs = batch.inputs(DEVICE)
+    inputs = batch.inputs(params.start_rule, DEVICE)
     limits, reserve = replay.time_limits_s(batch, params, words.spec.step_s), replay.reserve_s(batch)
     out = []
     for j, sentence in enumerate(batch.sentences):
@@ -378,7 +423,8 @@ def spec_identity(executor_dir: Path, record: Mapping[str, Any], instructions: P
 
 def draw_reference_batch(instructions: Path, words: Words, draw: Mapping[str, Any]) -> replay.Batch:
     return replay.draw(instructions, draw["split"], words.spec, words, per_airport=draw["per_airport"],
-                       seed=draw["seed"], groups=tuple(draw["groups"]), row_interval_s=draw["row_interval_s"])
+                       seed=draw["seed"], groups=tuple(draw["groups"]), row_interval_s=draw["row_interval_s"],
+                       go_around_per_airport=draw["go_around_per_airport"])
 
 
 def keys_of(batch: replay.Batch) -> list[str]:
@@ -393,8 +439,8 @@ def write_reference(executor_dir: Path, instructions: Path, *, batch: replay.Bat
     directory = executor_dir / DIRECTORY
     if directory.exists():
         raise FileExistsError(f"{directory} exists: a spec's reference is written once")
-    draw = {"split": SPLIT, "per_airport": PER_AIRPORT, "seed": SEED, "groups": list(GROUPS),
-            "row_interval_s": words.spec.step_s}
+    draw = {"split": SPLIT, "per_airport": PER_AIRPORT, "go_around_per_airport": GO_AROUND_PER_AIRPORT, "seed": SEED,
+            "groups": list(GROUPS), "row_interval_s": words.spec.step_s}
     batch = draw_reference_batch(instructions, words, draw) if batch is None else batch
     results = MODES["batch"](batch, params, words)
     payload = {"schema": REFERENCE_SCHEMA, "written_utc": utc_now(), "git": git, "python": platform.python_version(),
@@ -454,6 +500,8 @@ def check(executor_dir: Path, instructions: Path, *, modes: Sequence[str] | None
         flown = MODES[mode](batch, params, words)
         if len(flown) != len(reference):
             raise ValueError(f"{mode} flew {len(flown)} of the reference's {len(reference)} flights")
+        if mode in UNJUDGED:
+            flown = [dataclasses.replace(result, verdict=ref.verdict) for result, ref in zip(flown, reference)]
         for name, ref, result in zip(payload["flights"], reference, flown, strict=True):
             compare(ref, result, difference, name)
         out[mode] = difference

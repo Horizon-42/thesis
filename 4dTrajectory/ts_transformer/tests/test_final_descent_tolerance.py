@@ -96,14 +96,14 @@ def _flown(monkeypatch, final_vertical_m, interval_s):
     sentence = replay.sentence_on_interval(reading, flight, interval_s, geometry, words)
     start = sentence.first_row + closed_loop.start_row(interval_s) * int(round(interval_s / one.step_s))
     inputs = executor_inputs(flight, geometry, start)
-    monkeypatch.setattr(closed_loop, "start_inputs", lambda part, step_s, device: inputs)
-    monkeypatch.setattr(replay.Batch, "inputs", lambda self, device: inputs)
+    monkeypatch.setattr(closed_loop, "start_inputs", lambda part, params, step_s, device: inputs)
+    monkeypatch.setattr(replay.Batch, "inputs", lambda self, rule, device: inputs)
     observed = {5: readout.observed_decision(flight, reading, geometry, one)}
     from ts_transformer.experiments.executor_spec import ROLL_RATE_DEG_S
     from ts_transformer.autopilot.params import ExecutorParams
 
     params = ExecutorParams(cycle_s=1.0, bank_rate_deg_s=ROLL_RATE_DEG_S, path_time_constant_s=2.0,
-                            path_rate_factor=2.0, timeout_factor=1.5)
+                            path_rate_factor=2.0, timeout_factor=1.5, start_rule="trailing-fit-8s")
     return readout.read_interval(drawn, [reading], observed, interval_s, params, words, chunk=8, device=CPU)
 
 

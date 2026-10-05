@@ -31,6 +31,7 @@ from typing import Sequence
 import torch
 
 from aerodynamic_model.torch_dynamics import GRAVITY_MPS2
+from ts_transformer.autopilot.ends import runway_lateral_limit_m
 from ts_transformer.autopilot.frame import Kinematics, wrap180
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.instructions.airport import AirportGeometry, landing_cross_limit_m
@@ -61,15 +62,17 @@ def word_rate(error_deg: torch.Tensor, to_go_s: torch.Tensor, speed_mps: torch.T
 
 @dataclass(frozen=True)
 class Runways:
-    """Each flight's candidate runways, padded to the batch's widest airport: ``[B, C]`` each — the threshold, the
-    course, the elevation, and how far off the centreline a crossing may lie and still be a landing on it (the
-    landing screen's lateral limit, `instructions.airport.landing_cross_limit_m`: the approach crossing's)."""
+    """Each flight's candidate runways, padded to the batch's widest airport (NaN): ``[B, C]`` each — the threshold, the
+    course, the elevation, how far off the centreline a crossing may lie and be an approach crossing (the landing
+    screen's lateral limit, `instructions.airport.landing_cross_limit_m`) and how far a crossing of another candidate
+    may lie and end the flight (its runway limit, `ends.runway_lateral_limit_m`, D79)."""
 
     threshold_e_m: torch.Tensor
     threshold_n_m: torch.Tensor
     course_deg: torch.Tensor
     elevation_m: torch.Tensor
     landing_limit_m: torch.Tensor
+    on_runway_m: torch.Tensor
 
     @classmethod
     def of(cls, geometries: Sequence[AirportGeometry], spec: VocabularySpec, *, dtype: torch.dtype,
@@ -86,13 +89,23 @@ class Runways:
                    course_deg=table("course_deg"), elevation_m=table("elevation_m"),
                    landing_limit_m=padded([[landing_cross_limit_m(g, index, spec.landing_cross_limit_m,
                                                                   spec.parallel_course_delta_deg)
-                                            for index in range(len(g.candidates))] for g in geometries]))
+                                            for index in range(len(g.candidates))] for g in geometries]),
+                   on_runway_m=padded([[runway_lateral_limit_m(g, index, spec) for index in range(len(g.candidates))]
+                                       for g in geometries]))
 
     def pointed(self, index: torch.Tensor) -> tuple[torch.Tensor, ...]:
-        """``(threshold e, threshold n, course, elevation, landing limit)`` of each flight's runway ``index``."""
+        """``(threshold e, threshold n, course, elevation)`` of each flight's runway ``index``."""
         rows = index[:, None]
         return tuple(t.gather(1, rows)[:, 0] for t in (self.threshold_e_m, self.threshold_n_m, self.course_deg,
-                                                        self.elevation_m, self.landing_limit_m))
+                                                        self.elevation_m))
+
+    def relative(self, state: Kinematics) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """`relative` to every candidate, ``[B, C]`` each (NaN past an airport's last candidate)."""
+        course = torch.deg2rad(self.course_deg)
+        de, dn = state.e_m[:, None] - self.threshold_e_m, state.n_m[:, None] - self.threshold_n_m
+        before = -(de * torch.sin(course) + dn * torch.cos(course))
+        right = de * torch.cos(course) - dn * torch.sin(course)
+        return before, right, wrap180(state.track_deg[:, None] - self.course_deg)
 
 
 def relative(state: Kinematics, threshold_e_m: torch.Tensor, threshold_n_m: torch.Tensor,

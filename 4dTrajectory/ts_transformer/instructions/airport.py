@@ -5,10 +5,11 @@ origin at the airport reference point) — the one projection the data plane alr
 A candidate runway is one landing threshold, described by geometry only: the model points at a
 candidate, it never learns an identifier.
 
-The threshold position and the course are the arrival manifest's ``runway_targets`` — the FAA
-CIFP runway geometry the modeling plane's own target is built from
-(`flight_scenarios.runway_target.threshold_target_state`), so the line a sentence joins is the
-line the models are judged against. The runway length comes from the runway configuration. Each
+The candidates are the airport's runway ends with a published vertical path in the FAA CIFP (D78: the LPV line, or the
+LNAV/VNAV line where no LPV line is published, D61), decided by no flight; their threshold position, course and elevation
+are the harvest's runway geometry (`trajectory_data_process.harvest.airports.load_airport`), the same that the arrival
+manifest's ``runway_targets`` — the modeling plane's own target — is written from, so the line a sentence joins is the
+line the models are judged against (`instructions.signals.signals_from_series` checks a flight's target against it). The runway length comes from the runway configuration. Each
 candidate also carries its published vertical path (`VerticalPath`: the threshold crossing height,
 the glidepath angle and the decision altitude, D61), read once from the harvest's runway data when the
 geometry is built: the judge's decision-altitude check reads it, the executor's laws never do (D9). Beside the candidates the geometry keeps
@@ -127,28 +128,34 @@ def vertical_path(code: str, runway: Any) -> VerticalPath:
                         decision_height_m=float(runway.decision_height_above_threshold_m))
 
 
-def airport_geometry(code: str, runway_targets: dict[str, dict[str, Any]], harvest_runways: Sequence[Any]) -> AirportGeometry:
-    """The airport frame, every landing threshold of ``code`` that the arrival manifest's
-    ``runway_targets`` publishes (sorted by ident) with its published vertical path (`vertical_path`, D61), and every
-    runway end of ``harvest_runways`` (the harvest's `Runway` objects; sorted by ident)."""
+def publishes_vertical_path(runway: Any) -> bool:
+    """Whether a harvest `Runway` publishes a vertical path a candidate needs (D78, D61): a threshold crossing height, a
+    glidepath and vertically guided minima (`vertical_path`)."""
+    return (runway.threshold_crossing_height_m is not None and runway.published_glidepath_deg is not None
+            and bool(runway.published_minima.vertically_guided))
+
+
+def airport_geometry(code: str, harvest_runways: Sequence[Any]) -> AirportGeometry:
+    """The airport frame; its candidates — every runway end of ``harvest_runways`` (the harvest's `Runway` objects) that
+    publishes a vertical path (`publishes_vertical_path`, D78), with it (`vertical_path`, D61), sorted by ident; and every
+    runway end of ``harvest_runways`` (sorted by ident)."""
     code = code.upper()
     point = airport_reference_point(code)
     frame = AirportENUFrame.for_airport(AirportReference(code=code, lat=point["lat"], lon=point["lon"],
                                                          elevation_msl_m=point["elevation_m"]))
     lengths = {str(threshold["ident"]).upper(): ft_to_m(float(runway["length_ft"]))
                for runway in airport_runways(code) for threshold in runway["thresholds"]}
-    by_ident = {str(runway.ident).upper(): runway for runway in harvest_runways}
     candidates = []
-    for ident, target in runway_targets.items():
-        e, n = frame.horizontal_from_latlon(float(target["lat"]), float(target["lon"]))
-        if ident.upper() not in lengths:
+    for runway in harvest_runways:
+        if not publishes_vertical_path(runway):
+            continue
+        ident = str(runway.ident).upper()
+        if ident not in lengths:
             raise KeyError(f"{code} runway {ident} is published but not in the runway configuration")
-        if ident.upper() not in by_ident:
-            raise KeyError(f"{code} candidates {[ident.upper()]} are not runway ends the harvest builds")
+        e, n = frame.horizontal_from_latlon(float(runway.lat), float(runway.lon))
         candidates.append(RunwayCandidate(
-            ident=ident.upper(), threshold_e_m=float(e), threshold_n_m=float(n),
-            course_deg=float(target["course_deg"]) % 360.0, elevation_m=float(target["elevation_msl_m"]),
-            length_m=lengths[ident.upper()], vertical_path=vertical_path(code, by_ident[ident.upper()])))
+            ident=ident, threshold_e_m=float(e), threshold_n_m=float(n), course_deg=float(runway.course_deg) % 360.0,
+            elevation_m=float(runway.elevation_msl_m), length_m=lengths[ident], vertical_path=vertical_path(code, runway)))
     candidates.sort(key=lambda item: item.ident)
     ends = []
     for runway in harvest_runways:

@@ -10,7 +10,9 @@ and the executor spec it was exported from, and the flight's split. Which senten
 ``rowIntervalS`` (one of the set's Δ). Which word: Δ row ``row`` of ``column`` (`fly.segment_of`). The set's executor
 spec opens, and its closed-loop sentences are flown again, only after the labeller's, the executor's (the single-flight
 executor included) and the closed loop's checks pass in this process (`closed_loop.require_conforming_closed_loop`, D73),
-run at the warm-up.
+run at the warm-up; a check that fails is kept for its (artefact, executor spec) and every later request for them is
+refused at once with its reason (the checks are not run again for each click). A flight of a split other than train and
+select is refused (outline §6 item 4: a set's flights are train's and select's).
 
 WARMED UP AT START (`warm_up`, which the server runs in a thread): every stage-A set is opened ahead of the first
 request — its flights drawn and read again, each Δ's closed-loop sentences set up — which a first request would
@@ -63,10 +65,10 @@ class SetFlown:
     """A set's flights of one split at one Δ, set up as the export set them up: the batch, each flight's stored
     closed-loop sentence, and where each dataset id sits in them."""
 
-    def __init__(self, batch: replay.Batch, sentences: list[ClosedLoopSentence]) -> None:
+    def __init__(self, batch: replay.Batch, sentences: list[ClosedLoopSentence], params: ExecutorParams) -> None:
         self.batch, self.sentences = batch, sentences
         self.position = {flight.dataset_id: j for j, flight in enumerate(batch.signals)}
-        self.inputs = batch.inputs(training_flights.CPU)
+        self.inputs = batch.inputs(params.start_rule, training_flights.CPU)
         self.aero = self.inputs.aero_params.cpu().numpy()
 
 
@@ -81,6 +83,8 @@ class AutopilotSegmentBackend:
         self._latest: dict[str, int] = {}
         self._claims = threading.Lock()
         self._executors: dict[tuple[Path, Path], tuple[ExecutorParams, dict[str, Any], Words]] = {}
+        #: the checks that failed, by (artefact, executor spec): their reason, given back at once
+        self._failed: dict[tuple[Path, Path], str] = {}
         self._flown: dict[tuple[Path, str, tuple[str, ...], float], SetFlown] = {}
         # the Training sets of stage B (``index_prior_v1.json``), flown on this backend's caches and lock
         self.prior = PriorSegments(self)
@@ -100,18 +104,29 @@ class AutopilotSegmentBackend:
         instructions = REPO_ROOT / sample["source"]["instructions"]
         executor = REPO_ROOT / sample["source"]["executor"]
         key = (instructions, executor)
+        if key in self._failed:
+            raise RequestRefused(f"{instructions.name} with {executor.name} failed its checks in this process: "
+                                 f"{self._failed[key]}")
         if key not in self._executors:
-            self._executors[key] = closed_loop.require_conforming_closed_loop(instructions, executor)
+            try:
+                self._executors[key] = closed_loop.require_conforming_closed_loop(instructions, executor)
+            except ValueError as error:     # a check's refusal (by name), kept and given back at once from now on; any
+                self._failed[key] = f"{type(error).__name__}: {error}"      # other error (memory, a file) is not kept
+                raise
         params, record, words = self._executors[key]
         if record["sha256"] != sample["source"]["executorSpecSha256"]:
             raise ValueError(f"{executor.name} is spec {record['sha256'][:12]}, the set was exported with "
                              f"{sample['source']['executorSpecSha256'][:12]}")
         return instructions, executor, params, record, words
 
-    def set_flown(self, sample: dict[str, Any], split: str, interval_s: float, instructions: Path, words: Words,
-                  opened: dict[tuple[Path, str, tuple[str, ...]], training_flights.SetFlights] | None = None) -> SetFlown:
+    def set_flown(self, sample: dict[str, Any], split: str, interval_s: float, instructions: Path, params: ExecutorParams,
+                  words: Words, opened: dict[tuple[Path, str, tuple[str, ...]], training_flights.SetFlights] | None = None
+                  ) -> SetFlown:
         """The set's flights of ``split`` on their closed-loop sentences at ``interval_s``, set up the first time they
-        are asked for (``opened``: the flights drawn for another Δ of the same warm-up, reused)."""
+        are asked for (``opened``: the flights drawn for another Δ of the same warm-up, reused); refused for a split
+        other than train and select."""
+        if split not in training_files.SPLITS:          # outline §6 item 4
+            raise RequestRefused(f"a set's flights are of {training_files.SPLITS}, not {split!r}")
         ids = tuple(item["datasetId"] for item in sample["flights"] if item["split"] == split)
         key = (instructions, split, ids, interval_s)
         if key not in self._flown:
@@ -121,7 +136,8 @@ class AutopilotSegmentBackend:
                 if opened is not None:
                     opened[key[:3]] = drawn
             stored = training_flights.stored_closed_loop(instructions, split, interval_s, words)
-            self._flown[key] = SetFlown(*training_flights.closed_loop_batch(drawn, stored, interval_s, words))
+            self._flown[key] = SetFlown(*training_flights.closed_loop_batch(instructions, split, drawn, stored,
+                                                                             interval_s, params, words), params)
         return self._flown[key]
 
     def warm_up(self, log: Callable[[str], None] = print) -> None:
@@ -141,11 +157,11 @@ class AutopilotSegmentBackend:
                 with self._lock:
                     try:
                         _, sample = self.training_set(airport, entry["id"])
-                        instructions, _, _, _, words = self.executor_for(sample)
+                        instructions, _, params, _, words = self.executor_for(sample)
                         opened: dict = {}
                         for split in training_files.SPLITS:
                             for interval in sample["vocabulary"]["rowIntervalsS"]:
-                                self.set_flown(sample, split, float(interval), instructions, words, opened)
+                                self.set_flown(sample, split, float(interval), instructions, params, words, opened)
                     except Exception as error:   # noqa: BLE001 — a prefetch: logged by type; a request gets it whole
                         log(f"autopilot warm-up: {airport} {entry['id']} skipped — {type(error).__name__}: "
                             f"{str(error).split('; ')[0]}")
@@ -191,7 +207,7 @@ class AutopilotSegmentBackend:
                 raise NotListed(f"Training set {set_id} at {airport} has no flight {flight_key}")
             item = items[0]
             instructions, executor, params, record, words = self.executor_for(sample)
-            flown_set = self.set_flown(sample, item["split"], float(interval), instructions, words)
+            flown_set = self.set_flown(sample, item["split"], float(interval), instructions, params, words)
             opened = time.perf_counter()
             j = flown_set.position[item["datasetId"]]
             sentence = flown_set.sentences[j]

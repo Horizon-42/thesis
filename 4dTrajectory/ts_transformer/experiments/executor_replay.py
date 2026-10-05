@@ -62,11 +62,11 @@ from ts_transformer.data.lateral_eligibility import default_evaluation_report_pa
 from ts_transformer.inference.export import build_prediction_record, observed_series_metrics, write_batch
 from ts_transformer.inference.forecast import Forecast
 from ts_transformer.instructions.artefact import (
-    SPLITS, ClosedLoopSentence, closed_loop_path, closed_loop_sentences, load_closed_loop,
+    SPLITS, ClosedLoopSentence, closed_loop_path, closed_loop_sentences,
 )
 from ts_transformer.instructions.labeller.interval import in_force
 from ts_transformer.instructions.words import COLUMNS, SPEED, UNCHANGED, Words
-from ts_transformer.instructions.readout import STRATA, stratum
+from ts_transformer.instructions.readout import KINDS, STRATA, stratum
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.outputs.envelope import control_contract
 from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, git_state
@@ -79,8 +79,6 @@ HORIZON = "sentence"
 #: v8 (A29, D73): the checks the run ran before its work (``checks``: the labeller's, the executor's and, for closed-loop
 #: sentences, the closed loop's largest differences), as information.
 REPLAY_SCHEMA = "ts-executor-replay-v8"
-#: The kinds of sentence the readout reads apart.
-KINDS = ("without go-around", "with go-around")
 #: A closed-loop flight that goes farther than this from its observed path, laterally, LEFT the path: a reading of the
 #: A9 smoke build (vocabulary §9.7) that A10 compares against (§12.1 A10), not a criterion (D7).
 LEFT_THE_PATH_M = 300.0
@@ -219,7 +217,7 @@ def fly_airport(batch: replay.Batch, members: list[int], params: Any, words: Any
     for start in range(0, len(members), chunk):
         part = replay.subset(batch, members[start: start + chunk])
         flown, verdicts = replay.fly_batch(part, params, words, device=device)
-        inputs = part.inputs(device)
+        inputs = part.inputs(params.start_rule, device)
         aligned = replay.flight_alignment(part, flown, verdicts)
         more = per_flight(part, flown, verdicts)
         for j, verdict in enumerate(verdicts):
@@ -297,7 +295,7 @@ def closed_loop_columns(stored: dict[int, ClosedLoopSentence], step_s: float
     def columns(part: replay.Batch, flown: Flown, verdicts: list[Verdict]) -> list[dict[str, Any]]:
         out = []
         for j, index in enumerate(part.indices):
-            sentence = stored[index]
+            sentence, withheld = stored[index].rows, stored[index].withheld
             flown_states = sentence.flown_states
             rows = np.arange(len(flown_states)) * int(round(step_s / flown.cycle_s))
             track = flown_track(flown.states[j, : rows[-1] + 1].cpu().numpy(), part.geometries[j])
@@ -305,15 +303,15 @@ def closed_loop_columns(stored: dict[int, ClosedLoopSentence], step_s: float
             apart = float(np.abs(again - flown_states[:, :3]).max())
             if apart > STATE_BOUND_M:
                 raise ValueError(f"{part.signals[j].dataset_id}: flown {apart:.3g} m from its closed-loop states")
-            if verdicts[j].outcome != sentence.outcome:
+            if verdicts[j].outcome != withheld.outcome:
                 raise ValueError(f"{part.signals[j].dataset_id}: flown again to {verdicts[j].outcome}, stored "
-                                 f"{sentence.outcome}")
-            out.append({"largest_lateral_m": closed_loop.largest_m(sentence.lateral_m),
-                        "largest_vertical_m": closed_loop.largest_m(sentence.vertical_m),
-                        "uncorrected_lateral_m": closed_loop.uncorrected_m(sentence.lateral_m,
-                                                                           sentence.uncorrectable[:, 0]),
-                        "uncorrected_vertical_m": closed_loop.uncorrected_m(sentence.vertical_m,
-                                                                            sentence.uncorrectable[:, 1]),
+                                 f"{withheld.outcome}")
+            out.append({"largest_lateral_m": closed_loop.largest_m(withheld.lateral_m),
+                        "largest_vertical_m": closed_loop.largest_m(withheld.vertical_m),
+                        "uncorrected_lateral_m": closed_loop.uncorrected_m(withheld.lateral_m,
+                                                                           withheld.uncorrectable[:, 0]),
+                        "uncorrected_vertical_m": closed_loop.uncorrected_m(withheld.vertical_m,
+                                                                            withheld.uncorrectable[:, 1]),
                         "correction_words": dict(zip(COLUMNS, sentence.correction.sum(axis=0).tolist()))})
         return out
 
@@ -358,11 +356,12 @@ def main(argv: list[str] | None = None) -> int:
         if not path.exists():
             parser.error(f"{path} does not exist: the closed-loop reading wrote no sentence there "
                          f"({path.parent / 'summary.json'} says why)")
-        data = load_closed_loop(path, spec)
-        if str(data["executor_params_sha256"]) != params_sha256(params):
-            parser.error(f"the closed-loop sentences were flown by executor parameters "
-                         f"{str(data['executor_params_sha256'])[:12]}, {executor} holds {params_sha256(params)[:12]}")
-        stored = closed_loop_sentences(data)
+        with np.load(path) as data:                           # the parameters only: the reader loads the file
+            flown_by = str(data["executor_params_sha256"])
+        if flown_by != params_sha256(params):
+            parser.error(f"the closed-loop sentences were flown by executor parameters {flown_by[:12]}, {executor} holds "
+                         f"{params_sha256(params)[:12]}")
+        stored = closed_loop_sentences(instructions, args.split, args.row_interval_s, spec)
         batch, missing = closed_loop.replay_batch(batch, stored, words)
         batch.drawn["without_a_closed_loop_sentence"] = missing
         print(f"{len(batch.sentences)} closed-loop sentences flown from the first predicted step, {missing} flights "
