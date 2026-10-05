@@ -9,7 +9,8 @@
   Sidecars record each attempt (`rows_next` / `rows_retry`, `retried_branches`, `retry_error`, `next_solve_s` per
   attempt): schemas renamed `optimization-traffic-v2` / `optimization-traffic-block-v2`.
 - T5 again (50 KRDU windows): 43 separated at baseline, 4 separated (the retry saved 1, landing +101 s), 3
-  solve_failed (both attempts at the IPOPT cap). F12 step 2 (a reused solver): not now (the user).
+  solve_failed (both attempts at the IPOPT cap). T8 again (five 1-h blocks, 77 aircraft): 58 / 6 separated,
+  1 unresolved, 9 solve_failed, 3 slot_failed; 10 retries, 3 solved. F12 step 2 (a reused solver): not now (the user).
 
 ### 2026-10-05 — Multi-aircraft optimization M2: a block of arrivals, scheduled, then flown in slot order
 

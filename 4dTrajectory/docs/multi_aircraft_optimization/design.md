@@ -415,13 +415,12 @@ branch and worktree, with a review before each commit.
 - `W` = 15 s and `W` = 60 s gave the same outcomes (before the margin doubling and the retry).
 - The outputs are in a scratch directory, not in `4dTrajectory/outputs`: a measurement of the method, not a published result.
 
-### 8.2 T8 readout (KRDU, five 1-hour blocks from 2026-05-21 15:00 UTC; the reviewed M2 code, scratch output)
+### 8.2 T8 readout (KRDU, five 1-hour blocks from 2026-05-21 15:00 UTC; the reviewed M2 code with the retry of MD13, scratch output)
 
-- Cost: 5 blocks on 5 workers in 5 min 41 s wall time (one worker per block; inside a block the aircraft fly in slot order, so a block is serial); the largest resident memory is 4.2 GB (the parent).
+- Cost: 5 blocks on 3 workers at the lowest CPU priority (`nice -n 19`, beside a two-tier campaign) in 9 min 47 s wall time (one worker per block; inside a block the aircraft fly in slot order, so a block is serial); the largest resident memory is 4.2 GB (the parent).
 - 77 aircraft (9 to 24 per block), all scheduled. Delay: median 0 s, largest 252 s; 17 aircraft delayed by more than 60 s.
-- Outcomes: 58 `separated_at_baseline` (the CTA solve alone keeps separation); 4 `separated` after re-solves; 1 `unresolved`; 11 `solve_failed` (5 at no delay, 6 delayed: IPOPT's cap, as in M1, MD13); 3 `slot_failed` (the CTA solve on the ETA's IAF failed; no other IAF is tried).
-- After the block's final check, 19 flown aircraft have a VISUAL loss they answer for and 6 a VISUAL loss they do not answer for; IFR: 29 and 18.
-- Before the review fixes of §5.6 (records frozen into the schedule, a warm CTA solve, no wake row in fixed time) the same blocks gave 53 `separated_at_baseline`, 15 `solve_failed` and 3 failed slot or ETA solves.
+- Outcomes: 58 `separated_at_baseline` (the CTA solve alone keeps separation); 6 `separated` after re-solves; 1 `unresolved`; 9 `solve_failed` (3 at no delay, 6 delayed; IPOPT's cap, as in M1); 3 `slot_failed` (the CTA solve on the ETA's IAF failed; no other IAF is tried). 10 re-solves failed and were retried with the other branch (MD13); 3 retries solved.
+- After the block's final check, 16 flown aircraft have a VISUAL loss they answer for and 6 a VISUAL loss they do not answer for; IFR: 27 and 19.
 - The outputs are in a scratch directory: a measurement of the method, not a published result.
 
 ## 9. Outputs and records
