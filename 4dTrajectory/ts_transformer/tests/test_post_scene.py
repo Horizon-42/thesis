@@ -187,6 +187,9 @@ def test_the_census_runner_writes_its_census_and_the_edge_reference(built, tmp_p
     assert record["edges_reference"]["max_difference"] == 0.0 and (out / "conformance" / "edges.npz").is_file()
     lost = record["splits"]["train"]["lost_at_first_step"]["KXXX"]
     assert lost["without_runway"] == lost["with_recorded_runway"] == 0          # 120 s apart: no loss
+    augmented = record["splits"]["train"]["augmented"]["KXXX"]
+    assert augmented["real_kept"] == 4 and augmented["A"] == 4 and augmented["D"] == 2       # the draw's order pinned
+    assert augmented["A_kept"] <= augmented["A"] and augmented["D_kept"] <= augmented["D"]
     sampled = tmp_path / "sampled"
     post_windows.main(["--instructions", str(directory), "--interval-s", "4", "--out", str(sampled),
                        "--splits", "train", "--sample", "2"])
@@ -264,7 +267,7 @@ def test_a_window_that_opens_inside_a_loss_of_separation_is_found(built):
     """C1's census for the user: the commanded aircraft, on its record, at its first predicted step — a copy of itself
     8 s ahead is inside 3 NM and 1,000 ft; the stream 120 s apart is not."""
     from ts_transformer.post.scene import MovedScene
-    from ts_transformer.post.traffic import loss_at_first_step
+    from ts_transformer.post.traffic import loss_at_first_step, opens_inside_loss
 
     directory, spec, scenes, signals, geometries = built
     separation, fin = airport_separation(geometries["KXXX"]), finals(geometries["KXXX"])
@@ -279,3 +282,5 @@ def test_a_window_that_opens_inside_a_loss_of_separation_is_found(built):
     for with_runway in (False, True):
         loss = loss_at_first_step(ahead, separation, fin, INSTRUCTION_STEP_S, recorded_runway=with_runway)
         assert loss is not None and 0 in loss.responsible
+    assert opens_inside_loss(ahead, separation, fin, INSTRUCTION_STEP_S)                   # left out of the draw
+    assert not opens_inside_loss(windows[1], separation, fin, INSTRUCTION_STEP_S)

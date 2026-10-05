@@ -4,7 +4,8 @@ with a leader in the air, the windows that admit window D, those near the cut be
 that open inside a loss of separation (at the first predicted step, on the record); and,
 with the train split, the reference of the edge features (post-training §4 item 1), read again at once.
 
-The user chooses the count of each kind of window in a round from this census (§2 item 4). It writes nothing under
+The user chooses the count of each kind of window in a round from this census (§2 item 4); a window that opens inside
+a loss of separation is left out of the draw (the ``_kept`` counts, the user 2026-10-05). It writes nothing under
 `4dTrajectory/outputs/`: ``--out`` is a new directory (a scratch directory for the census of all train days).
 ``--sample N``: N windows of each airport and split, drawn at random with seed 1337 (D55) — a smoke.
 
@@ -27,7 +28,7 @@ from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.post.conformance import REFERENCE_SEED, reference_steps, require_conforming_edges, write_edge_reference
 from ts_transformer.post.runways import airport_separation
 from ts_transformer.post.scene import airport_scenes, census, inserted_window, leader_moved_window, real_windows
-from ts_transformer.post.traffic import loss_at_first_step
+from ts_transformer.post.traffic import loss_at_first_step, opens_inside_loss
 from ts_transformer.prior.procedure import airport_finals
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
@@ -63,15 +64,22 @@ def first_step_losses(windows, separations, finals, step_s: float) -> dict:
             for code, counted in out.items()}
 
 
-def draw_checks(windows, separations, seed: int) -> dict:
-    """For each airport: how many windows a draw of A and of D gives (the drawing run once over every window)."""
+def draw_checks(windows, separations, finals, step_s: float, seed: int) -> dict:
+    """For each airport: how many windows a draw of A and of D gives (the drawing run once over every window), and how
+    many of them the draw keeps — those that do not open inside a loss (`post.traffic.opens_inside_loss`); the same for
+    the real windows."""
     rng = np.random.default_rng(seed)
     out: dict[str, dict] = {}
     for window in windows:
         code = window.scene.geometry.code
-        counted = out.setdefault(code, {"A": 0, "D": 0})
-        counted["A"] += inserted_window(window, rng, landing_shift_s=A_LANDING_SHIFT_S, apart_s=A_APART_S) is not None
-        counted["D"] += leader_moved_window(window, separations[code], rng, shift_s=D_SHIFT_S) is not None
+        counted = out.setdefault(code, {"real_kept": 0, "A": 0, "A_kept": 0, "D": 0, "D_kept": 0})
+        counted["real_kept"] += not opens_inside_loss(window, separations[code], finals[code], step_s)
+        drawn = {"A": inserted_window(window, rng, landing_shift_s=A_LANDING_SHIFT_S, apart_s=A_APART_S),
+                 "D": leader_moved_window(window, separations[code], rng, shift_s=D_SHIFT_S)}
+        for kind, augmented in drawn.items():
+            if augmented is not None:
+                counted[kind] += 1
+                counted[f"{kind}_kept"] += not opens_inside_loss(augmented, separations[code], finals[code], step_s)
     return out
 
 
@@ -111,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
                 chosen += [mine[int(k)] for k in sorted(rng.choice(len(mine), min(args.sample, len(mine)), replace=False))]
             windows = chosen
         record["splits"][split] = {"airports": census(windows, separations, days),
-                                   "augmented": draw_checks(windows, separations, SAMPLE_SEED),
+                                   "augmented": draw_checks(windows, separations, finals, spec.step_s, SAMPLE_SEED),
                                    "lost_at_first_step": first_step_losses(windows, separations, finals, spec.step_s)}
         if split == "train":
             path = out / "conformance" / "edges.npz"

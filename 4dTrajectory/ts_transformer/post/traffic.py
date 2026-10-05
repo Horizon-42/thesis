@@ -98,3 +98,11 @@ def loss_at_first_step(window: Window, separation: Separation, finals: Sequence[
                       window.scene.others_at(time_s, own.key))
     scene = traffic(aircraft, window.scene.geometry, separation, finals, step_s)
     return commanded_loss(scene, aircraft.last_step, separation)
+
+
+def opens_inside_loss(window: Window, separation: Separation, finals: Sequence[Final], step_s: float) -> bool:
+    """Whether ``window`` opens inside a loss of separation that its commanded aircraft answers for: at its first
+    predicted step, on its record, with no runway in force — the loop's state there (`loss_at_first_step`). Such a
+    window is left out of the draw, real or augmented: whatever the model says, it is judged lost at the first row
+    flown (the user, 2026-10-05; on A34's artefact 58 of 40,530 train windows)."""
+    return loss_at_first_step(window, separation, finals, step_s, recorded_runway=False) is not None
