@@ -91,13 +91,14 @@ The decision numbers are shared by all documents (outline §3).
 | D86 | A23's export, and stage B's through `split_flights` (A36), read no formal replay row. They draw their flights from the flights of the closed-loop sentence files (at every Δ that the set shows), take each flight's stratum from the sentence file (D70), and check each sentence flown again against its stored states on the 2 s rows and its stored outcome (D74), for every split. Why: the formal replays are of train and select only (the replay of the val days waits for the user), so the export could not give the val flights of the base model's one validation readout (outline §6 item 4); the stored outcome is the one definition of a sentence's outcome (D74), and it equals the replay's on 8,195 of 8,195 replayed flights (A30) | Decided | User, 2026-10-05, on stage B's request (vocabulary O11 until then) |
 | D87 | The readings of A32, accepted by the user: (1) a start rule's slope, in metres of the airport frame, is turned into metres on the ground with the WGS84 radii of curvature at the row (D77); (2) the row of a flight that is done or halted is not checked by the grammar and is stored as given (D80); (3) a flight's kind in the export is whether its closed-loop sentence at the first Δ says "go-around" (D86); (4) of the val days, the closed loop's summary keeps the flights drawn and the sentences written, and no reading (D85); (5) the backend keeps an error of the checks (a `ValueError`) and refuses with it until it restarts | Decided | User, 2026-10-05, on the readings of A32 |
 | D88 | The readings of A33, accepted by the user: (1) R55 flies no replay: the outcome of each start rule is the closed-loop reading's own (D74); (2) a climb piece is in G when G is true at its first row (D54); (3) in a flight with a go-around whose vertical reading the labeller refuses, G is not known, and its climb pieces are left out of the fit and counted (D54); (4) the measurement reads G under the provisional spec's altitude grid (D22's) in its first pass (D54); (5) the way `moved` of the behaviour check keeps the executor conformance tolerance (1e-6 m) vertically (D81) | Decided | User, 2026-10-05, on the readings of A33 |
+| D89 | The positions and heights of the observed 2 s rows stay interpolated between the raw samples around each row (O10 until then). A row reads the sample after it: p50 0.81 s, p99 1.69 s, at most 13.1 s later (KRDU, 300 train flights). The position of a row is where the aircraft was at that time, not a prediction, and on 99 % of the rows the next sample is less than one row away | Decided | User, 2026-10-05, on the second review of stage A |
+| D90 | The start's `Loop` gives its caller the states of the rows flown and the flights done, and no time limit: the time limit is a function of the observed landing time (§5.8). A caller reads why a flight ended from the judge's outcome (§6, items 5 and 6). Why: the second review of A32–A36 found the time limit readable through `Loop.executor.time_limit_s` and `Loop.timed_out()`; no input read it, but a speaker that holds the loop could (review guide, principle 5) | Decided | User, 2026-10-05, on the second review of stage A |
 
 ### 0.2 Open items
 
 | # | Item | Proposal | §  |
 |---|---|---|---|
 | O8 | Speed words in ground speed: wind can make speed words at turns | A check on data, later | 3.6 |
-| O10 | The positions and heights of the observed 2 s rows are interpolated between the raw samples around each row, so a row reads the sample after it: p50 0.81 s, p99 1.69 s, at most 13.1 s later (KRDU, 300 train flights; Claude's review, 2026-10-05). Across a gap, the interpolation draws a line toward a later sample | Keep: the position of a row is where the aircraft was at that time, not a prediction, and the next sample is less than one row away on 99 % of the rows. A check on data of the rows whose next sample is more than one row away, later; the user decides | 4.1, 6 |
 
 ### 0.3 Implementation
 
@@ -135,7 +136,9 @@ The decision numbers are shared by all documents (outline §3).
       reads train and select only (D85).
    5. A35: A23's Training sets again, from A34's artefact. Then the user merges, and `v11_20261004`,
       `v16_20261004` and the sets of `closed_loop_v11_20261004` are deleted with the user's go.
-   6. Claude's check of A32–A36 (§12.2, item 8).
+   6. A37: the corrections of the second review of A32–A36 (§12.1), code and tests only; no artefact is built again.
+      It runs beside A34 and A35 (the user, 2026-10-05).
+   7. Claude's check of A32–A37 (§12.2, item 8).
 3. D86 (the export reads no formal replay row, so it can give val flights) goes into A32's code.
 4. The replay of the val days waits for the user.
 
@@ -1034,7 +1037,7 @@ fixed inputs, data by their flights.
 | # | What | Its identity |
 |---|---|---|
 | 1 | The vocabulary (grids, classes, tolerances, reading name) | The spec sha. It is the format |
-| 2 | The labeller, open-loop and closed-loop reading | The labeller conformance: the artefact holds a reference sample (`conformance/`; train, seed 1337, 50 labelled and 10 refused flights for each airport, with their signals); `instruction_conformance` labels it again with the code on disk and requires the same words, the same strata (D70) and the same refusals, on the 2 s rows and on the Δ grid at Δ = 4 and 8 s (D49). The closed-loop reading (D32) has its own reference sample (train, seed 1337, 10 flights for each airport and the train flights with a labelled go-around, up to 5 for each airport, at each Δ of the artefact): with the artefact's executor spec, the same correction words and the same flown states on the 2 s rows (D51), within the tolerance of the executor conformance. Each check runs where it is needed, every time (D73): a runner that labels, reads the closed loop or replays sentences runs the checks of the code it uses before its work and refuses on a difference (the closed loop's: `require_conforming_closed_loop`, D69). No digest of code. The artefact records the commit that wrote it, as information |
+| 2 | The labeller, open-loop and closed-loop reading | The labeller conformance: the artefact holds a reference sample (`conformance/`; train, seed 1337, 50 labelled and 10 refused flights for each airport and up to 10 train flights with a labelled go-around for each airport, with their signals); `instruction_conformance` labels it again with the code on disk and requires the same words, the same strata (D70) and the same refusals, on the 2 s rows and on the Δ grid at Δ = 4 and 8 s (D49). The closed-loop reading (D32) has its own reference sample (train, seed 1337, 10 flights for each airport and up to 10 train flights with a labelled go-around for each airport, at each Δ of the artefact): with the artefact's executor spec, the same correction words and the same flown states on the 2 s rows (D51), within the tolerance of the executor conformance. Each check runs where it is needed, every time (D73): a runner that labels, reads the closed loop or replays sentences runs the checks of the code it uses before its work and refuses on a difference (the closed loop's: `require_conforming_closed_loop`, D69). No digest of code. The artefact records the commit that wrote it, as information |
 | 3 | The executor | The sha of the spec's parameters and the conformance of its reference tracks (C33): the spec's labelled train flights, with the train flights that have a labelled go-around (up to 10 for each airport, so that the go-around climb and the held airspeed are flown), flown again in every way the executor flies (single-aircraft batch, multi-aircraft batch, single flight) within 1e-6 m, flown again before each use (D73); and the behaviour check of D81: the same tracks with every candidate's vertical path changed and the frame's origin moved. The open-loop sentences of these flights are said on their own rows (D57) |
 | 4 | The flights of an artefact | The stored signals. A consumer that rebuilds a flight from the harvest compares it row by row with them (`autopilot/flights.py` `require_same_flight`). No byte hash of an arrival manifest |
 | 5 | The day split and the sealed test days (C32) | The day split file. It is a data rule |
@@ -1717,6 +1720,33 @@ no artefact and no published set changes.
   gone from its scratchpad: `/tmp/claude-1000/-home-supercomputing-studys-thesis/7767b9f9-586d-4d01-9b82-2949db171a8a/scratchpad/split_flights.patch`;
   13 export tests passed with it).
 
+**A37. The corrections of the second review of A32–A36 (D85, D90; the review guide).** On the user's word
+(2026-10-05), beside A34 and A35, on a new branch `dev-two-tier-v4-a37` from `dev-two-tier-v4` (`58fd8a2b`). Code and
+tests only; no format of a sentence, a closed-loop file or a spec changes, and no artefact is built again.
+
+- D85: the labeller's readout (`experiments/instruction_labels.py`: `readout.json`, `readout.md`, the printed text) gives
+  counts only for the val days (labelled, refused); the readouts that serve a choice (`final_descent_tolerance`,
+  `executor_replay`, `closed_loop_start_check`) take `--split` train or select only. Then, on the user's go, the two
+  readout files of A34's artefact are written again by the corrected code (val counts only) and its `SHA256SUMS` is
+  written again; no other file of the artefact changes.
+- D80: `Loop.step` checks every flight's row against the values of its columns, a done or halted flight's row
+  included, before anything changes (D87 item 2 exempts such a row from the grammar, not from the values).
+- D90: `Loop` gives no time limit; the closed-loop reading's `timed_out` comes from the judge's outcome.
+- D83: at a vertex, e_y is the smaller distance to the two segments around the matched point, and its side comes from
+  the sum of their normals; the matched point does not move back.
+- The export: a candidate's height offset (HAE − MSL) from published data, or a refusal by name, not from the
+  manifest's `runway_targets` (D78: a candidate can have no arrival). The backend refuses a split other than train and
+  select before it runs a check.
+- Small points: a track of exactly 360° written as 0°; the day check before the reference's arrays are opened; R55's
+  text "the same whatever the parts" said to rounding.
+- Tests that can fail: D77 with the stored track, ground speed and vertical rate changed on every row, for every
+  formal rule; D81 with a test law that reads the frame; D82's field names of the rows and the withheld fields; D85's
+  printed text; the draw of the references' go-around flights; `build_airport`'s draw with signal indices not in row
+  order; `check_live`; the backend's refusal order.
+- The check that nothing changes: with A37's code, the labeller, executor and closed-loop checks of A34's artefact
+  pass, and the closed-loop sentences of every split and Δ of A34's artefact read again in memory equal the stored
+  ones. If any differs, stop and report: the artefact would need a build again.
+
 ### 12.2 Claude's check of stage A
 
 The check of A0–A14 is done (`readouts/2026-10-04_stage_a_check.zh.md`, at `ab295b18`; its points became D48–D52).
@@ -1744,7 +1774,7 @@ Done at `9a986c09`: all five items pass (`readouts/2026-10-04_stage_a_check_a15_
    code index); the spec of the formal artefact holds the chosen H_final and its measurement records the choice;
    the readings of D34 exist for every Δ, split and airport and equal A25's; the artefacts of A21 and A25 deleted
    with the user's go.
-8. After A32–A36: D77–D86 against the code; A36's sample equal to A23's byte for byte; A32's tests fail on the code before it (`dev-two-tier-v4` at `cf549e47`);
+8. After A32–A37: D77–D90 against the code; A36's sample equal to A23's byte for byte; A32's tests fail on the code before it (`dev-two-tier-v4` at `cf549e47`);
    the behaviour check of D81 passes on A34's executor spec; A34's candidates are the published ends of each airport;
    no start state and no stored observed row reads a sample after the first predicted step (on A34's artefact: the
    observed samples after it changed, the start the same); no reading of the val days in A34's report or summaries;
