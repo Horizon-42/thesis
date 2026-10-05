@@ -18,8 +18,8 @@ Branch `dev-two-tier-v4-post`, worktree `.claude/worktrees/two-tier-v4-post`, ma
 | C0: the package `post/`, its import rules | Done, `1b4d3cea` (reviewed) |
 | C1: windows and scenes, the census runner `post_windows` | Done on synthetic artefacts, `1b4d3cea` (reviewed); smoke and census on A34's artefact (§3) |
 | C2: the edge features and their conformance | Done on synthetic artefacts, `1b4d3cea` (reviewed); its reference on A34's train windows (§3) |
-| C3: "established", the separation judge on v4, the speed-word mask, the regulation text | Code `1b4d3cea` (reviewed); the text `86fc86d6` (`docs/literature/arrival_separation/README.md` §8) |
-| The user's choices from C1's census | Open: the count of each kind of window in a round (§2 item 4, D55); the shifts of A and D (§4 P7) |
+| C3: "established", the separation judge on v4, the speed-word mask, the regulation text | Code `1b4d3cea` (reviewed); the text `86fc86d6` (`docs/literature/arrival_separation/README.md` §8); the user's decisions of 2026-10-05 (§7) in `ca15a2e5` (reviewed) |
+| The user's choices from C1's census | Decided: real : A : D = 1 : 1 : 1 in a round (§7). Open: the shifts of A and D (§4 P7) |
 | C4–C7 | Wait for B9 (prior D96) and the parts of A38 (vocabulary D97) on this branch |
 | C8–C12 | Wait for B5's base, Claude's check of stage B, the moved start (C9) and the user's criteria (D7) |
 
@@ -134,9 +134,35 @@ definition (the earlier readout's definition is not this one; not compared).
    before the threshold): KMSY 11,286–11,387; KRDU 9,505–10,336; KSJC 9,926–15,068; KSMF 17L 10,603, 17R 10,022, 35L
    7,687, 35R 7,663; KSTL 8,362–10,963. So the band is 0.1–2 km at most runways (5.8 km at KSJC 30L), and the mask
    never acts at KSMF 35L/35R and KSTL 30L/30R (FAF inside 5 NM).
-3. P3 (a recorded aircraft's G), P9 (the reference's place), P10 (the interface names) above.
+3. P9 (the reference's place), P10 (the interface names) above. (P3, items 1 and 2: decided, §7.)
 
 ## 6 The full ts suite
 
 At `86fc86d6` (`1b4d3cea` + the regulation text), one test at a time, detached (outline §5 rule 4; stage A's A37
 check and a stage B `prior_train` were running, rule 13): 1,688 passed, 1 skipped, 22 min 33 s.
+
+After `ca15a2e5`: see §8.
+
+## 7 Decided by the user (2026-10-05)
+
+The user's answers to §5 and to the census. The design text of these decisions is the design author's to write (outline
+§5 rule 10); until then this log records them, and the code follows them.
+
+| Question | Decision | Code |
+|---|---|---|
+| The count of each kind of window in a round (§2 item 4, D55) | Real : A : D = 1 : 1 : 1 | C10 (the rounds) |
+| The angle of "established" (D92 says 30°, the judge's lined-up angle) | **20°**: 7110.65BB 5-9-2 a, TBL 5-9-1, the row for an interception less than 2 NM from the approach gate, which holds inside the FAF. The judge's lined-up angle (30°) and the turned-in rule of the visual reading (7-4-4 c, 30°) do not change | `post/established.py` `ESTABLISHED_MAX_ANGLE_DEG`, `ca15a2e5` |
+| The speed-word mask acts only between 5 NM and the FAF (§5 item 2) | Kept as designed; a stated limit: the readouts report how often it acts | — (C8 and the readouts report it) |
+| A recorded aircraft's G (P3) | **From its labelled sentence**: G true at the rows after each labelled go-around row up to and including the row where the runway is said again (a word in force from the next row, as for the commanded aircraft); a flight without a sentence has G false. The labelled rows are a withheld field: only the separation judge and the masks read G. The commanded aircraft's G is its words', never its labelled one (a window refuses a commanded record with G). On A34's train days: 80 flights carry G, 3,656 rows | `post/scene.py` `go_around_rows`, `Recorded.go_around`, `AircraftAt.go_around`, `ca15a2e5` |
+
+Why recorded aircraft had no G (for the record): D92 defines "established" through G and D31 makes it the same for
+every aircraft; D93 and D98 make every other aircraft a recorded flight that no one speaks to. The labeller's reading of
+a recorded flight (its sentence, for 44,338 of the 44,703 train flights) has the go-around rows; the user chose to read
+G from them.
+
+## 8 After the decisions
+
+`ca15a2e5` on `dev-two-tier-v4-post`, reviewed by an independent reviewer (its findings fixed in the same commit: the
+commanded record's labelled G stripped and refused, a row past the record refused, G checked as bool, the
+signal-index mapping and the G of a shifted record tested). The four stage C test files: 59 passed. The full ts
+suite at `ca15a2e5`, one test at a time (rule 13): 1,690 passed, 1 skipped, 18 min 11 s.

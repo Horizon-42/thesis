@@ -50,8 +50,8 @@ A proposal is a reading where the design says nothing; it holds only until the u
 | Part | State |
 |---|---|
 | The log | `readouts/2026-10-05_stage_c_implementation_log.md` |
-| C0–C3 | Done on synthetic artefacts, reviewed: `1b4d3cea` (code), `86fc86d6` (the regulation text of C3) |
-| C1, C2 on A34's artefact | Smoke and the census of all train days done (log §3); the user chooses the counts of each kind of window |
+| C0–C3 | Done on synthetic artefacts, reviewed: `1b4d3cea` (code), `86fc86d6` (the regulation text of C3); the user's decisions of 2026-10-05 (20°, a recorded aircraft's G, real : A : D = 1 : 1 : 1; log §7) in `ca15a2e5` |
+| C1, C2 on A34's artefact | Smoke and the census of all train days done (log §3); the counts chosen (log §7) |
 | C4–C7 | Wait for B9 (prior D96) and A38 (vocabulary D97) on this branch |
 | C8–C12 | Wait for B5's base, Claude's check of stage B, the moved start (C9) and the user's criteria (D7) |
 
