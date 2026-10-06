@@ -9,7 +9,9 @@
 1. 换分支（用户 2026-10-06，outline §5 规则 1）：
    - 三个阶段的主体已合进 dev-two-tier，dev-two-tier-v4-post 已全部在里面；
    - 以后 C 的开发都在 dev-two-tier-v4 上，工作树 .claude/worktrees/two-tier-v4，开工前先和 dev-two-tier 对齐；
-   - 现在删掉 two-tier-v4-post 工作树和 dev-two-tier-v4-post 分支（先确认它没有不在 dev-two-tier 里的提交）；
+   - C10 正在 two-tier-v4-post 工作树里跑：C10 结束之前不要删这个工作树，也不要改它里面的任何文件。
+     C10 结束、数据设为只读以后，再删 two-tier-v4-post 工作树和 dev-two-tier-v4-post 分支
+     （先确认它没有不在 dev-two-tier 里的提交）；
    - 更新 post_training.md §0.3 表头那一行的分支和工作树。
 2. 共用工作树：B 正在里面做统一布局。只改 C 自己的文件，用显式路径暂存，
    每次提交前看 git diff --cached --stat，不提交别人的文件。
