@@ -106,13 +106,13 @@ they came from. Each document lists the identities of its parts.
 | Document | Decisions | Open items |
 |---|---|---|
 | Outline | D7, D20, D21, D55, D85, D95, D131, D138, D139, D158 | — |
-| Training view (`frontend.md`) | D109, D133–D136, D154–D156 | — |
+| Training view (`frontend.md`) | D109, D133–D136, D154–D156, D159 | — |
 | Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62, D66, D67, D69–D71, D73, D74, D77–D84, D86–D90, D97, D102, D111, D126 | O8 |
 | Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60, D63–D65, D68, D72, D75, D96, D105–D108, D111, D118–D122, D126–D128 | — |
 | Post-training | D29–D31, D36, D37, D76, D91–D94, D98–D101, D103–D105, D107, D110, D112–D117, D123–D125, D129, D130, D132, D137, D157 | O15 |
 | Multi-aircraft control | D140–D153 | O16, O18 |
 
-The next free numbers: D159, O19.
+The next free numbers: D160, O19.
 
 ---
 
