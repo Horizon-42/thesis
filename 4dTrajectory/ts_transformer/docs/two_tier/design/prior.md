@@ -59,7 +59,7 @@ The decision numbers are shared by all documents (outline §3).
 | D122 | The procedure masks keep, for each candidate, whether the aircraft has joined (been inside its region) and whether it has been below its entry height before the join, from its row 0 or from its last go-around (D64), whatever runway was in force at those rows: a change of runway outside a go-around starts neither again, and the new runway has the rows flown under the one before. Why: on the select days, none of the 5,861 sentences of `landed` at Δ = 4 s changes its runway outside a go-around, and the two readings differ on 0 rows (Claude's second check, §3 item 5): it bears on free generation | Decided | User, 2026-10-05, on Claude's second check of stage B |
 | D126 | §7 item 8 lists the function of stage B's Training export that the post-training's window export imports (`procedure_block`); the post-training imports exactly this name. Names only: no code changes. (The part of the vocabulary: D126 there) | Decided | User, 2026-10-05, on stage C's request |
 | D127 | The live segment of a prior sentence (B6, outline D109) is checked as stage A's segments are (vocabulary D73): the export writes each prior sentence's flown track unrounded, in its own sample format, and the backend refuses an answer whose states lie farther than the executor's bound (`STATE_BOUND_M`) from them (stage A's `fly.refuse_past_bound`), or whose outcome or end cycle differs from the sentence's (exact). Why: the export wrote the track to 0.1 m, so the 1e-6 m bound could not be applied and the prior's live answer was never refused, and it had no check of the outcome (stage B's request, checked in Claude's check of B12); a value that a later step computes from is not rounded for display (the user's rule) | Decided | User, 2026-10-06 |
-| D128 | A rerun of a val read (D119) repeats the same read: the claim records the reader's options (free generation: its airports, flights of each airport, samples, seed and chunk; the validation readout: its split), and a rerun with other options is refused by name. A runner that finds its output with its readout written while the claim is not marked spent marks it spent, then refuses. The claim file is written whole (atomically) and held under an exclusive lock while the reader runs, so two runs to one output cannot both read. B5's claims (written by B12's code, spent when its readouts are written) need no options: the export and the backend read only their output. Why: free generation writes its val sentences before its readout, so a run stopped between them leaves val results on disk while the claim may be run again; with the same options a rerun computes the same read, so nothing can be chosen after val has been seen; a kill between the readout and the spent mark left the claim open for good (Claude's check of B12, `readouts/2026-10-06_stage_b_b12_check.zh.md` §2 items 1, 2, 6, 7) | Decided | User, 2026-10-06, on Claude's check of B12 |
+| D128 | A rerun of a val read (D119) repeats the same read: the claim records the reader's options (free generation: its airports, flights of each airport, samples, seed, chunk, device, temperature and bound of go-arounds; the validation readout: its split and device), and a rerun with other options is refused by name. An error that a reader can find only after its claim (free generation: an airport with no val sentence) locks that val read for good: it cannot be run again with other options. A runner that finds its output with its readout written while the claim is not marked spent marks it spent, then refuses. The claim file is written whole (atomically) and held under an exclusive lock while the reader runs, so two runs to one output cannot both read. B5's claims (written by B12's code, spent when its readouts are written) need no options: the export and the backend read only their output. Why: free generation writes its val sentences before its readout, so a run stopped between them leaves val results on disk while the claim may be run again; with the same options a rerun computes the same read, so nothing can be chosen after val has been seen; a kill between the readout and the spent mark left the claim open for good (Claude's check of B12, `readouts/2026-10-06_stage_b_b12_check.zh.md` §2 items 1, 2, 6, 7) | Decided | User, 2026-10-06, on Claude's check of B12; the options and the lock after an error: user, 2026-10-06, on stage B's readings of B13 |
 
 ### 0.2 Open items
 
@@ -75,9 +75,9 @@ The commits, test counts and measurements of every milestone are in `readouts/20
 | B0–B4, B8–B12 | Done, each reviewed. The code is on `dev-two-tier-v4-prior` (worktree `.claude/worktrees/two-tier-v4-prior`) and in `dev-two-tier` (B12 merged at `2190fe0a`). B9: `1204fd8f`–`5313b6cd`; B10: `e4e7ba42`; B11 and outline D109: `df68c927`; B12: `39d02ef8`; stage A's line A37–A43 followed: `c072e355`, `89845fa6`, `5818fbbf`, `1777b3ec` |
 | B6 | The export, the frontend and the live segment are done and checked on smoke sets (`b079ebef`, `ce601bd7`, `aac93945`, `201b4afd`, `a280d984`; the claimed val set `df68c927`). The publication of B5's sets waits for B5 |
 | B5 | Running since 2026-10-05 22:40 UTC: `4dTrajectory/outputs/POOLED/prior/prior_base_20261006` (`ts-prior-campaign-v3`), on the artefact `v12_20261005` and the executor `v17_20261005` at Δ = 4 s, from `dev-two-tier` at `278ffcfc` (B12's code). The first campaign, `prior_base_20261005`, was stopped by the user at its step 17, to run on B12's code |
-| B13 | Ordered (`notes/stage_b.md`); on `dev-two-tier-v4-prior`, merged into `dev-two-tier` after B5 |
+| B13 | Done (`142272f0`, reviewed twice) on `dev-two-tier-v4-prior`; merged into `dev-two-tier` after B5. B5's results stay valid under it: the input, model, training, speaker, loop, selection, draw and choice code is byte-identical, and free generation and two epochs of training give byte-identical outputs under both |
 | B7 | After B5, B13 and B6's publication |
-| Claude's checks | At `5313b6cd` (`readouts/2026-10-05_stage_b_check.zh.md`; corrections B10, D105–D108) at `44f6000f` (`readouts/2026-10-05_stage_b_check_2.zh.md`; corrections B12, D119–D122), and of B12 at `2190fe0a` (`readouts/2026-10-06_stage_b_b12_check.zh.md`; corrections B13, D127, D128). None found a leak into an input, a mask or a choice |
+| Claude's checks | At `5313b6cd` (`readouts/2026-10-05_stage_b_check.zh.md`; corrections B10, D105–D108) at `44f6000f` (`readouts/2026-10-05_stage_b_check_2.zh.md`; corrections B12, D119–D122), of B12 at `2190fe0a` (`readouts/2026-10-06_stage_b_b12_check.zh.md`; corrections B13, D127, D128), and of B13 at `142272f0` (`readouts/2026-10-06_stage_b_b13_check.zh.md`: no S1, no correction; its findings on the behaviour check's coverage are dropped, outline D131). None found a leak into an input, a mask or a choice |
 
 Proposals (where the design says nothing): none open.
 
@@ -85,9 +85,9 @@ Proposals (where the design says nothing): none open.
 
 1. **B5** (running, §12). A report of it reads no val count of a run's identity (D120). A val readout that stops before
    it writes its readout is run again to the same output (D119; B5 runs B12's code).
-2. **B13** (now, §12), on stage B's branch. No code goes into `dev-two-tier` while B5 runs: B13's behaviour check gives
-   another answer, which would stop B5 before its next step, and a resume of B5 needs B12's code. B5's results stay
-   valid under B13: it changes no input, model, training, draw or choice.
+2. **B13** is done on stage B's branch. After B5 ends, stage B merges it into `dev-two-tier` and runs the full suite;
+   no code goes into `dev-two-tier` while B5 runs (B13's behaviour check gives another answer, which would stop
+   B5, and a resume of B5 needs B12's code).
 3. **B6's publication**, after B5 and B13 (the export of D127): the set of each fold at its held-out airport and the
    base's claimed val set (outline D109).
 4. **B7**, after B5, B13 and B6's publication.
@@ -402,7 +402,7 @@ its report gives the names that change, and Claude writes them here.
 
 | # | Item | What it gives | Code |
 |---|---|---|---|
-| 1 | The checkpoint | A trained prior in a format with its own name; its identity (§8); the set of procedure masks that it speaks under (§8 item 2); one function that opens a prior run: the checkpoint, the identity of its data and the check of its procedure masks (D106) | `prior/checkpoint.py` `load_checkpoint`, `CHECKPOINT_SCHEMA`; `prior/model.py` `Prior`; `prior/procedure.py` `PROCEDURE_MASKS`, `procedure_digests`; `prior/checkpoint.py` `open_prior`, `OpenedPrior` (the function that opens a prior run); the identity as a readout shows it and the one val read (D85, D118, D119, D128): `prior/checkpoint.py` `readable_identity`, `validation_claim`, `holds_claim`, `written_claim`, `spend_validation_claim`, `CLAIM_SPENT_BY`; `prior/source.py` `require_selection_of` |
+| 1 | The checkpoint | A trained prior in a format with its own name; its identity (§8); the set of procedure masks that it speaks under (§8 item 2); one function that opens a prior run: the checkpoint, the identity of its data and the check of its procedure masks (D106) | `prior/checkpoint.py` `load_checkpoint`, `CHECKPOINT_SCHEMA`; `prior/model.py` `Prior`; `prior/procedure.py` `PROCEDURE_MASKS`, `procedure_digests`; `prior/checkpoint.py` `open_prior`, `OpenedPrior` (the function that opens a prior run); the identity as a readout shows it and the one val read (D85, D118, D119, D128): `prior/checkpoint.py` `readable_identity`, `validation_claim`, `lock_val_read`, `claim_validation_read(prior_dir, reader, out, options)`, `settle_written_claim`, `spend_validation_claim`, `written_claim`, `holds_written_claim`, `CLAIM_SPENT_BY`; `prior/source.py` `require_selection_of` |
 | 2 | The inputs of a row | One function from the states on the data's 2 s rows (observed before the first predicted step, flown from it), the words said, the candidates and the landings before the step to the inputs of a row (§2). Training, free generation and a loop of several aircraft use the same function: for the sentences of the artefact; and in a loop, from each aircraft's states, its own landings (D105) and the speaker's words in force, the inputs of the next Δ row and the position that the masks read (D96). The landings: from the tracks roster, less the sealed test days (the index refuses them, D105), counted before a time without a given flight's own landing (D63). The motion of rows: the 2 s displacement, with the velocities east and north (D106) | `prior/inputs.py` `state_inputs`, `sentence_rows`, `own_flight_key`, `motion` (the motion of rows); `prior/loop.py` `LoopRows` (`select`; one `LandingIndex` for each aircraft; one first predicted step for the batch, an int); `prior/landings.py` `Landing`, `LandingIndex`; `prior/source.py` `airport_landings` |
 | 3 | The speaker | Says one row from the inputs of the row, column by column, with a cache from row to row; under the masks of §4, the masks of a caller included; draws each word with the caller's random numbers at a temperature (§4, D96, D121); refuses a row whose mark of the first predicted step is not the aircraft's own (no word in force), before it changes anything; gives the row's words to the caller's last step (`accept`: a closed loop's executor) before it keeps the row, so a row the caller refuses leaves the speaker as it was; passes the caller's input of the added modules to the model; records the permitted words of each row and column; gives a copy of chosen aircraft (D96); refuses a model with any module in training mode (D107). A loop reads, and does not change, the words in force, the go-arounds said and the number of candidates (D106) | `prior/speaker.py` `Speaker` (`observe(rows, positions, extra)`, `speak(row, at, numbers, caller, extra, accept)`, `permitted`, `copy`; `heard`, `in_force`, `go_arounds`, `n_candidates`: read only), `Position`, `Permitted` (`select`, `join`: the join of several records), `draw`, `go_around_bound`, `MOST_GO_AROUNDS` |
 | 4 | The teacher-forced loss | The loss of each step and each column for a batch of sentences (§5); the sentences of a split under a selection rule (D75) as batches; the log-probability of given words under the speaker's records of the permitted words, with the input of the added modules, with gradients (D96), refused for a model with any module in training mode (D107); the rows of a sentence that a loop said, with its words as targets, as one batch (D106) | `prior/train.py` `batch_nll`, `masked_log_probability`; `prior/source.py` `ArtefactSource`; `prior/selection.py` `require_rule`, `kept(rule, outcome, faulty)`, `left_out`, `side`, `SIDES`, `REASONS`, `CELL` (a record's cells `kept`, `left_out_fault`, `left_out_outcome`; D111); `prior/batch.py` `collate`, `RowTensors`; the rows of a sentence a loop said: `SpeakingLoop.sentences` (item 7) |
@@ -513,7 +513,7 @@ The formal runs read `v12_20261005` / `v17_20261005` at Δ = 4 s. The rules of o
 | B11 | The selection leaves out flights with a faulty observed track | D111, D118 | Done |
 | B5 | Cross-validation and the base | D39–D41, D75, D108 | Running |
 | B12 | The corrections of Claude's second check of stage B | D108, D119–D122 | Done |
-| B13 | The corrections of Claude's check of B12 | D108, D127, D128 | Ordered |
+| B13 | The corrections of Claude's check of B12 | D108, D127, D128 | Done; merged after B5 |
 | B6 | The Training view of stage B | Outline §6, D109, D127 | The view done; the publication after B5 and B13 |
 | B7 | The close of stage B | — | After B5, B13, B6 |
 
@@ -530,38 +530,6 @@ The specifications of the milestones that are done are in `readouts/2026-10-05_s
 - Every run reads the sentences of the selection `landed` (D75, D111). For each fold: the held-out loss, the first-step
   runway at the held-out airport, the free generation at the held-out airport (§5).
 - No criterion is applied: the user reads the results (D7).
-
-**B13. The corrections of Claude's check of B12** (`readouts/2026-10-06_stage_b_b12_check.zh.md`; D108, D127,
-D128). On stage B's branch, on synthetic artefacts; merged into `dev-two-tier` only after B5 has ended: its behaviour
-check gives another answer, so B5 would stop under it. It changes no input, model, training, draw or choice, so B5's
-results stay valid. The report gives the changed names for §7.
-
-- D128: the claim records the reader's options (free generation: its airports, flights of each airport, samples, seed
-  and chunk; the validation readout: its split); a rerun to the same output with other options is refused by name; a
-  runner that finds its output with its readout written and the claim not marked spent marks it spent, then refuses;
-  the claim file is written whole (a temporary file linked to its name) and held under an exclusive lock while the
-  reader runs. Free generation refuses a negative seed and a repeated airport before it claims. A spent claim without
-  options (B5's, written by B12's code) is read for its output only.
-- D108's guard: in the behaviour check, the fixed sentence has landings in the 30 min before its rows on two or more
-  candidates, its own landing between two of its rows and another landing at the same second on another runway; the
-  speaking loop's aircraft each have their own landing index, with landings before their rows; the answer also holds
-  `kept` and `side` over every rule × outcome × mark, the campaign's plan of steps for a fixed record (each step's
-  runner and arguments) and free generation's draw of flights from a fixed set. On a resume, the campaign's refusal
-  names what differs from its start record. The comment of the choice's fixed table says which configurations are
-  within.
-- D127: the export writes each prior sentence's flown track unrounded (its sample format gets a new name; the
-  frontend's reader and fixtures follow); the backend's `apart_from_exported` calls stage A's
-  `fly.refuse_past_bound(…, "the readout's flown states")` and refuses an outcome or an end cycle that differs from the
-  sentence's. The export calls `checkpoint.written_claim` (one definition of a written claim) and refuses by name a val
-  output without its readout before it reads any of its files.
-- Tests: a kill between the readout and the spent mark (both readers); free generation's val path to its end on a
-  synthetic artefact with val days (the spent mark, a rerun after a crash with the same and with other options, the
-  recount after the claim); a second run to one output refused while the first holds the lock; the backend against a
-  real claim file (no stand-in for `written_claim`); the val set opened once by two threads; D127's refusals (a state
-  past the bound, another outcome, another end cycle); `LoopRows`' refusal of a start that is not one int; a change of
-  each new part of the behaviour answer changes the answer.
-- Not ordered: tying the observed rows to the `Loop` that the start returns (a change of stage A's start); stage C
-  passes them as the start gives them.
 
 **B6. The Training view of stage B (outline §6).** The user sees what the prior says and how the executor flies it.
 

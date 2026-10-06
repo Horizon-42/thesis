@@ -88,7 +88,23 @@ voice, one meaning for each word. The words were not checked one by one against 
 5. **Verify.** Read the source line of each important finding. Reproduce it on data where you can (a count, a value).
    Check that a finding is not the design's own decision.
 6. **Classify.** Put each finding into one class: leak, latent leak, split (a day or a sample), boundary, end of a
-   flight, design mismatch, bug, test gap.
+   flight, design mismatch, bug, test gap. Then give it one severity (outline D131; the user, 2026-10-06: the same standard in every
+   round, so that a later round does not dig into corner cases):
+
+   | Severity | What | Action |
+   |---|---|---|
+   | S1 | A leak into an input, a target selection or a choice (the future of a flight, a sealed day, a second read of the validation days, an identity of the airport); a split violation; a defect that changes a number the user will read (a reward, an outcome, a loss, a count in a readout) on real data by more than its stated tolerance; a design mismatch that changes behaviour on real data | Corrected before any formal run. Reported with its size |
+   | S2 | A latent leak (a forbidden value held but not read); a boundary that does not refuse; a decided rule with no test; a defect whose effect on real data is not measured and not bounded | Corrected before the formal run when the correction is cheap; else listed as an open item of the stage's design document (§0.2, an O number) — no milestone, no order, not reviewed again — until the user decides |
+   | S3 | A case that real data reach in less than 0.1 % of the windows (or steps) and that changes no reported number beyond its tolerance; a difference within a stated bound (`STATE_BOUND_M`, a float tolerance); a case that needs an input the pipeline cannot make; style, names, wording | Listed in one line, no action. Not reported again in a later round |
+
+   **No finding against common sense** (outline D131): a scenario that needs the code to change while a run of it goes
+   on, an input that no step of the pipeline makes, a file moved or edited by hand to defeat a rule, or a person working
+   against the project is not a finding, whatever its correction costs. A reviewer does not look for it, and a review
+   does not list it.
+
+   A finding states its size on real data, or a bound on it; without a size or a bound it is S2 until measured. A
+   finding needs a concrete scenario on inputs that the pipeline can make. The design's own decisions (the D numbers)
+   and the readings that the user accepted are not findings, unless new evidence makes them S1.
 7. **Report to the user.** Give the findings, the most severe first. For each: what, where (`path:line`), the size on
    data, what a correction changes (a format, a rebuild of an artefact, a retraining) and its cost. Then the list of
    the channels that are clean. Ask the decisions that the user must make as questions.
@@ -98,6 +114,11 @@ voice, one meaning for each word. The words were not checked one by one against 
    the details are in the design.
 10. **After each milestone of the corrections.** Read the agent's log (§0.3). Read the key code of the correction. Write
     the user's choices into the design text. List the agent's proposals for the user.
+
+**Later rounds of a review.** A later round of the same stage reads: the code changed since the last round (its
+commits); the channels of §4 or §5 again for S1 only; and the corrections of the last round. It does not report again
+an S3 of an earlier round, a decision, or an accepted reading. A round ends when it has no S1 and no S2 without the
+user's word.
 
 ---
 
@@ -185,8 +206,9 @@ Use the design `post_training.md` and the public interfaces of the vocabulary (�
 
 ## 6 Report format of a reviewer
 
-- **Findings, the most severe first.** For each: the class (§3 step 6); `path:line`; the defect in one sentence; a
-  concrete scenario (inputs, then what goes wrong); how it was verified (read only, or run, with the scratch path).
+- **Findings, the most severe first.** For each: the class and the severity (§3 step 6); `path:line`; the defect in
+  one sentence; a concrete scenario (inputs, then what goes wrong); its size on real data or a bound on it; how it was
+  verified (read only, or run, with the scratch path). S3 findings in one line each, at the end.
 - **Checked and clean.** Each channel traced and found clean, with its evidence line.
 - No points of style or names.
 - Length: at most approximately 1,500 words.
