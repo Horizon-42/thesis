@@ -25,7 +25,7 @@ repository root; `readouts/` is `docs/two_tier/readouts/`. The documents of the 
 | `vocabulary.md` | The words, the labeller (open-loop and closed-loop reading), the executor, the judge; their Training view | A | A0–A43 done and merged into `dev-two-tier`; the formal artefact `v12_20261005` / `v17_20261005` and the Training view (`closed_loop_v12_20261005`) done, the superseded artefacts deleted; Claude's check of A32–A40 done; no milestone open; the replay of the val days waits for the user (vocabulary §0.4) |
 | `prior.md` | The prior: inputs, outputs, decoding and its masks, training, a new airport; its Training view | B | Closed (B0–B13 done, B7 on 2026-10-06): B5's campaign `prior_base_20261006` done (configuration C, variant `full`, the base and its one validation readout); B6's sets published (`prior_sets_20261006`); `dev-two-tier` = `dev-two-tier-v4` = `dev-two-tier-v4-prior` (the code at `d14a2f76`) |
 | `post_training.md` | The post-training in windows of traffic; the multi-aircraft work; its Training view | C | Merged into `dev-two-tier` (2026-10-06); C0–C9 and C11 (the window view) done (C8 on B5's base); C10 and its validation readout built, the formal run waits for O13 and the user's criteria; C12 left. Further work on `dev-two-tier-v4` (§5 rule 1) |
-| `multi_control.md` | The multi-aircraft control: every arrival of a window's span commanded; the window's reward and its credit by one varied aircraft; what it needs of the other stages' public interfaces; its Training view | D | Written 2026-10-06; every decision proposed, none decided; nothing built. Waits for the user's decisions, and its formal runs for C10's chosen round |
+| `multi_control.md` | The multi-aircraft control: every arrival of a window's span commanded; the window's reward and its credit by one varied aircraft; what it needs of the other stages' public interfaces; its Training view | D | Written 2026-10-06; D141 (the window's reward, the sum) and D142 (credit by one varied aircraft) decided, the rest proposed; nothing built. Waits for the user's decisions, and its formal runs for C10's chosen round |
 | This outline | The principles, the shared rules, the plan; the rules of each stage's Training view and the one layout of the three views (§6) | — | The one layout (§6.2, D133–D135): its first part built (stage B's `dev-training-layout`, to be merged into `dev-two-tier-v4`); the results page and the envelopes not built |
 
 How a stage is reviewed against its design (leaks, what each consumer may read, the procedure, a checklist for each
@@ -110,7 +110,7 @@ they came from. Each document lists the identities of its parts.
 | Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62, D66, D67, D69–D71, D73, D74, D77–D84, D86–D90, D97, D102, D111, D126 | O8 |
 | Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60, D63–D65, D68, D72, D75, D96, D105–D108, D111, D118–D122, D126–D128 | — |
 | Post-training | D29–D31, D36, D37, D76, D91–D94, D98–D101, D103–D105, D107, D110, D112–D117, D123–D125, D129, D130, D132, D137 | O15 |
-| Multi-aircraft control | D139–D151 (proposed) | O16–O18 |
+| Multi-aircraft control | D139–D151 (D141, D142 decided; the rest proposed) | O16–O18 |
 
 The next free numbers: D152, O19.
 
