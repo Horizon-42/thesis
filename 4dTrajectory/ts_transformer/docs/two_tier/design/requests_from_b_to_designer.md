@@ -5,9 +5,7 @@ A must change for stage B, and the design text that stage B's work now needs. It
 rewritten in full each time, never appended to, and an item leaves when it is done. The evidence and the commits are in
 the implementation log (`readouts/2026-10-05_stage_b_implementation_log.md` §1).
 
-State of 2026-10-06. B5 runs from the main tree on B12's code (`prior_base_20261006`, started 2026-10-05 22:40Z).
-Branch `dev-two-tier-v4-prior` at `142272f0`: B13 done and reviewed twice; not merged into `dev-two-tier` before B5
-ends (its behaviour check gives another answer).
+State of 2026-10-06. B5 done (`prior_base_20261006`, 07:12Z); B13 merged (`dev-two-tier` = `dev-two-tier-v4` = `dev-two-tier-v4-prior` at `d14a2f76`, full suite passed); B6 published (the five folds of configuration C and the base's val set, `prior_sets_20261006`). Left: B7.
 
 ## 1 Readings for the user to decide
 
@@ -32,7 +30,7 @@ None.
 
 ## 4 The plan
 
-- **B5** runs (`prior_base_20261006`); after it ends, B13 is merged into `dev-two-tier`, then the full suite.
-- **B6's publication** of the folds and the base after B5 (on B13's sample format v3).
-- **B7** adds `docs/reference/runners.md` entries for the new runner `prior_behaviour` and the changes to
-  `prior_campaign`, `prior_free_generation`, `prior_validation`, `prior_select` and `prior_training_export`.
+- **B7** closes stage B: `docs/reference/runners.md` entries for the new runner `prior_behaviour` and the changes to
+  `prior_campaign`, `prior_free_generation`, `prior_validation`, `prior_select` and `prior_training_export`; the code
+  index for §11; the report to the user (the commits, the readings of each fold and of the base, the choice and its
+  rule, what stage C needs).
