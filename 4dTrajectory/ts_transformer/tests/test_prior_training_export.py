@@ -39,6 +39,11 @@ def stored_of(generated, flight, sample=0):
                    "go_arounds": generated.go_arounds, "rows": len(generated.words)})
 
 
+def _bytes(directory):
+    """Every file under ``directory`` by its relative path, with its bytes."""
+    return {p.relative_to(directory): p.read_bytes() for p in sorted(directory.rglob("*")) if p.is_file()}
+
+
 @pytest.mark.parametrize("interval_s", [2.0, 4.0])
 def test_a_sentence_flown_again_gives_its_readout_s_states_and_outcome(tmp_path, monkeypatch, interval_s):
     spy = {}
@@ -381,7 +386,9 @@ def test_the_runner_writes_a_set_and_refuses_what_it_cannot_trust(tmp_path, monk
         export.main(argv[:-1])
     build, built = export.build_airport, []
     monkeypatch.setattr(export, "build_airport", lambda *a, **k: built.append(build(*a, **k)) or built[-1])
+    prior_bytes = _bytes(prior)
     assert export.main(argv) == 0
+    assert _bytes(prior) == prior_bytes                 # outline §6.2 item 8: the export leaves the prior's directory as it was
     training = root / geometry.code / "training"
     entry, sample = files.FILES.listed_set(training, geometry.code, "one")
     assert entry["sentences"] == 2 and [s["sample"] for s in sample["flights"][0]["prior"]] == [0, 1]
@@ -411,7 +418,9 @@ def test_the_runner_writes_a_set_and_refuses_what_it_cannot_trust(tmp_path, monk
     # the claimed one, written, is exported (its flights as the train readout's: the synthetic artefact has no val
     # sentences)
     monkeypatch.setattr(export, "build_airport", lambda *a, **k: built[0])
+    prior_bytes = _bytes(prior)
     assert export.main([*argv[:3], "val", *argv[4:]]) == 0
+    assert _bytes(prior) == prior_bytes
 
 
 def finals_of(geometry):

@@ -351,6 +351,34 @@ def test_a_flight_flown_again_is_refused_unless_it_gives_its_stored_states_and_i
         export.replay_payload(flown, 0, verdict, one.batch, judged, aero, one.words.spec, one.words)
 
 
+def test_an_envelope_past_the_flown_track_is_refused(monkeypatch):
+    """Outline §6.2 item 8 (D135): `flown_sentence` refuses envelopes that end past the flight's flown track — the
+    judge's envelopes replaced by ones whose altitude tube ends one row past the track's rows; one ending at the track's
+    end is kept."""
+    import torch
+
+    from ts_transformer.autopilot import replay
+    from ts_transformer.tests.support import closed_loop_flight
+
+    one = closed_loop_flight(4.0)
+    flown, (verdict,) = replay.fly_batch(one.batch, one.params, one.words, device=torch.device("cpu"))
+    aero = one.inputs.aero_params[0].numpy()
+    block = export.replay_payload(flown, 0, verdict, one.batch, one.sentence, aero, one.words.spec, one.words)
+    rows = block["track"]["rows"]
+    real = export.envelopes
+
+    def past(*args, **kwargs):
+        judged = real(*args, **kwargs)
+        return {**judged, "altitude": [{**tube, "endRow": rows + 1} for tube in judged["altitude"]] or
+                [{"endRow": rows + 1}]}
+
+    monkeypatch.setattr(export, "envelopes", past)
+    with pytest.raises(ValueError, match=f"an envelope ends at row {rows + 1}, past the flown track's {rows} rows"):
+        export.replay_payload(flown, 0, verdict, one.batch, one.sentence, aero, one.words.spec, one.words)
+    rows -= 1                                                    # an end at the track's own end (exclusive): kept
+    assert export.replay_payload(flown, 0, verdict, one.batch, one.sentence, aero, one.words.spec, one.words)
+
+
 def test_a_set_whose_directory_exists_is_refused_before_any_airport_is_written(tmp_path):
     training = tmp_path / "training"
     (training / "set_a").mkdir(parents=True)                    # a leftover directory, not listed
