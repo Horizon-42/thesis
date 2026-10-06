@@ -366,9 +366,14 @@ def main(argv: list[str] | None = None) -> int:
         from ts_transformer.experiments.post_train import CAMPAIGN_SCHEMA, settings_of
 
         campaign = args.campaign if args.campaign.is_absolute() else REPO_ROOT / args.campaign
+        from ts_transformer.experiments.training_export import this_checkout
+
         record = json.loads((campaign / "campaign.json").read_text(encoding="utf-8"))
         if record["schema"] != CAMPAIGN_SCHEMA:
             parser.error(f"{campaign} is a {record['schema']} campaign, not {CAMPAIGN_SCHEMA}")
+        # the campaign's paths as this checkout reads them (a campaign run in the main checkout, timed from a worktree)
+        record = {**record, "inputs": {**record["inputs"], **{key: str(this_checkout(record["inputs"][key])) for key in (
+            "instructions", "executor", "prior", "windows", "procedure_root")}}}
         require_conforming_closed_loop(Path(record["inputs"]["instructions"]),
                                        Path(record["inputs"]["executor"]))     # D69: the checks run here (D73)
         seed = settings_of(record).seed

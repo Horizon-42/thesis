@@ -469,3 +469,26 @@ def test_the_flown_block_of_every_stage_is_its_earlier_one_with_the_envelopes():
         assert [_digest({key: s[key] for key in (*_BLOCK, "timedOut", "goArounds")}) for s in sentences] \
             == EARLIER_BLOCKS[stage], stage
         assert all(s["envelopes"] is not None and s["envelopes"]["heading"] for s in sentences), stage
+
+
+def test_a_path_recorded_in_another_checkout_is_read_through_the_live_data_link(tmp_path):
+    """Outline §5 rule 1: each checkout's linked data trees are links to the live ones; a path recorded under one of them
+    — in the main checkout or in any worktree, which lie under the main one, even one deleted since — is the same path
+    under this checkout's tree; a relative path is the repository's; others as recorded."""
+    main = tmp_path / "thesis"
+    live = main / "4dTrajectory" / "outputs"
+    (live / "POOLED").mkdir(parents=True)
+    (main / "aeroviz-4d" / "public" / "data" / "airports").mkdir(parents=True)
+    worktree = main / ".claude" / "worktrees" / "v4"
+    for tree in export.LINKED_TREES:
+        (worktree / tree).parent.mkdir(parents=True, exist_ok=True)
+        (worktree / tree).symlink_to(main / tree)
+    other = main / ".claude" / "worktrees" / "v4-post"            # recorded there, deleted since: never resolved
+    for here in (worktree, main):
+        assert export.this_checkout(live / "POOLED" / "x", here) == here / "4dTrajectory/outputs/POOLED/x"
+        assert export.this_checkout(other / "4dTrajectory/outputs/POOLED/x", here) == here / "4dTrajectory/outputs/POOLED/x"
+        assert export.this_checkout(other / "aeroviz-4d/public/data/airports", here) == here / "aeroviz-4d/public/data/airports"
+        assert export.this_checkout("4dTrajectory/outputs/POOLED/x", here) == here / "4dTrajectory/outputs/POOLED/x"
+        assert export.this_checkout(main / "aeroviz-4d" / "src", here) == main / "aeroviz-4d" / "src"   # not a linked tree
+        assert export.this_checkout(tmp_path / "elsewhere", here) == tmp_path / "elsewhere"
+        assert export.this_checkout(f"{live}/../../x", here) == main / "x"                  # normalised, not rewritten

@@ -59,7 +59,8 @@ from ts_transformer.experiments.model_speed import speed_source
 from ts_transformer.experiments.post_window_loop import WindowLoop, WindowResult, checked_edges, moved_commanded
 from ts_transformer.experiments.prior_training_export import procedure_block
 from ts_transformer.experiments.training_export import (
-    FORMATS, candidate_hae_minus_msl_m, candidates_block, events, flown_sentence, split_flights, vocabulary_block,
+    FORMATS, candidate_hae_minus_msl_m, candidates_block, events, flown_sentence, split_flights, this_checkout,
+    vocabulary_block,
 )
 from ts_transformer.instructions import training_files as stage_a_files
 from ts_transformer.instructions.spec import READING_RULE
@@ -304,7 +305,9 @@ def main(argv: list[str] | None = None) -> int:
     if speed["smoke"] and not args.smoke:
         parser.error(f"{args.speed} is a smoke speed readout: only a --smoke set names it")
     rounds = [r if r == START else int(r) for r in args.rounds]
-    inputs = record["inputs"]
+    # the campaign's paths as this checkout reads them (a campaign run in the main checkout, exported from a worktree)
+    inputs = {**record["inputs"], **{key: str(this_checkout(record["inputs"][key]))
+                                     for key in ("instructions", "executor", "prior", "windows", "procedure_root")}}
     instructions, executor = Path(inputs["instructions"]), Path(inputs["executor"])
     params, opened, words = require_conforming_closed_loop(instructions, executor)   # D69: the checks run here (D73)
     edges_reference = Path(inputs["windows"]) / "conformance" / "edges.npz"

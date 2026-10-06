@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -330,6 +331,33 @@ def candidates_block(geometry: AirportGeometry, hae_minus_msl_m: dict[str, float
                     "verticalPath": {"crossingHeightM": path.crossing_height_m, "glidepathDeg": path.glidepath_deg,
                                      "decisionHeightM": path.decision_height_m}})
     return out
+
+
+#: The data trees every checkout links to the live data (outline §5 rule 1), by their place in a checkout.
+LINKED_TREES = ("4dTrajectory/outputs", "aeroviz-4d/public/data/airports")
+
+
+def this_checkout(recorded: str | Path, root: Path = REPO_ROOT) -> Path:
+    """A path a runner recorded — perhaps in another checkout — as this checkout reads it. The linked data trees
+    (`LINKED_TREES`) of the main checkout and of every worktree (``<main>/.claude/worktrees/<name>``) are links to the
+    live data (outline §5 rule 1), so a path under one of them, in whichever checkout recorded it, is the same path under
+    this checkout's tree (the name its checks and the sets it writes give it) — mapped by its place, never through the
+    recording checkout's links, which go when that worktree is deleted. A relative path is the repository's; any other
+    path as recorded. The main checkout is the parent of the live outputs tree's parent."""
+    path = Path(os.path.normpath(recorded))
+    if not path.is_absolute():
+        return root / path
+    main = (root / LINKED_TREES[0]).resolve().parent.parent
+    if not path.is_relative_to(main):
+        return path
+    parts = path.relative_to(main).parts
+    if parts[:2] == (".claude", "worktrees") and len(parts) > 3:
+        parts = parts[3:]                                     # the same place in the worktree that recorded it
+    inside = Path(*parts) if parts else Path()
+    for tree in LINKED_TREES:
+        if inside.is_relative_to(tree):
+            return root / tree / inside.relative_to(tree)
+    return path
 
 
 FORMATS = {"spec": SPEC_SCHEMA, "sentences": SENTENCES_SCHEMA, "closedLoop": CLOSED_LOOP_SCHEMA,

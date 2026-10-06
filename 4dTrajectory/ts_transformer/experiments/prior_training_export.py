@@ -48,7 +48,8 @@ from ts_transformer.experiments import training_flights
 from ts_transformer.experiments.model_speed import speed_source
 from ts_transformer.experiments.prior_free_generation import FREE_GENERATION_SCHEMA, Stored, read_sentences
 from ts_transformer.experiments.training_export import (
-    FORMATS, candidate_hae_minus_msl_m, candidates_block, events, flown_sentence, split_flights, vocabulary_block,
+    FORMATS, candidate_hae_minus_msl_m, candidates_block, events, flown_sentence, split_flights, this_checkout,
+    vocabulary_block,
 )
 from ts_transformer.instructions import training_files as stage_a_files
 from ts_transformer.instructions.airport import AirportGeometry, RunwayCandidate
@@ -334,6 +335,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"{readout_dir} holds no {CLAIM_SPENT_BY}: a readout that stopped before it was written; only a "
                      f"written readout is exported")
     readout, stored = read_sentences(readout_dir)
+    # the readout's paths as this checkout reads them (a readout run in the main checkout, exported from a worktree)
+    readout = {**readout, **{key: str(this_checkout(readout[key])) for key in ("instructions", "executor", "prior")}}
     if readout["smoke"] and not args.smoke:
         parser.error(f"{readout_dir} is a smoke readout: only a --smoke set is made from it")
     readout_airports = sorted({s.row["airport"] for s in stored})
