@@ -35,6 +35,7 @@ project rule. A decided row says "Decided" with the option, the person and the d
 | MD10 | A window that starts in a loss (the record already has the loss at the first check step) | (a) No rows for that pair until its first step without loss; count the window. (b) Refuse the window | (a), built; the readout counts these windows |
 | MD11 | Recorded aircraft with a faulty observed point (two-tier vocabulary D111) | (a) Count only: the summary reports the losses whose recorded aircraft has a jump at the loss step. (b) Mark with the D111 function | (a) is NOT built yet: no jump count. The D111 function reads the two-tier artefact (`instructions/faults.py:25`), not a track. (b) needs that function moved to a neutral module |
 | MD13 | A re-solve that fails (T5: 4 of 50 windows, IPOPT `Maximum_Iterations_Exceeded`) | (a) Soft rows: a slack per row and a penalty in the objective (needs an objective hook in the optimizer). (b) Solve once more with the other branch. (c) Accept and report | **Decided: (b)** (user, 2026-10-05), built (§5.4 item 4) |
+| MD14 | Which solve is the window's record when the loop ends with a loss | (a) The last solve that succeeded. (b) The solve with the fewest counted loss instants (the earliest on a tie) | **Decided: (b)** (user, 2026-10-06), built (§5.4 item 4): a re-solve can make it worse (a KRDU job: 225 → 407 loss seconds) |
 | MD12 | The runway in force of a recorded aircraft | (a) Its record's runway for the whole window. (b) As the two-tier design: only from its own first predicted step (vocabulary D23) | (a), built. The optimizer has no predicted steps. State the difference in every comparison |
 
 ## 1. Purpose and scope
@@ -262,7 +263,9 @@ For one window:
    separation counts). A new vertical branch takes the side of this round's tightest loss with that
    aircraft. An aircraft whose rows already hold keeps its branch (Claude's reading of MD13). Keep the new
    branches after a good solve. If this solve also fails, the outcome is `solve_failed`. Keep both IPOPT
-   messages, the rows and the time of each attempt, and keep the last good solve as the window's record.
+   messages, the rows and the time of each attempt. When the loop ends with a loss (`solve_failed`,
+   `unresolved`), the window's record is the solve with the fewest counted loss instants, the earliest on a
+   tie (MD14); the sidecar names it (`kept_round`).
 5. Replay and judge (L2). If no loss has the commanded aircraft responsible, the outcome is `separated`.
 6. `i = i + 1`. If `i = K_max` (MD8), the outcome is `unresolved`. Else go to step 2.
 
