@@ -23,7 +23,7 @@ repository root; `readouts/` is `docs/two_tier/readouts/`. The documents of the 
 | Document | Part | Stage | State |
 |---|---|---|---|
 | `vocabulary.md` | The words, the labeller (open-loop and closed-loop reading), the executor, the judge; their Training view | A | Built on `dev-two-tier-v4`; A0–A42 merged into `dev-two-tier`; A43 (`60bbc901`, the backend runs no check at its start) to be merged after B5's campaign; the formal artefact `v12_20261005` / `v17_20261005` and the Training view (`closed_loop_v12_20261005`) done, the superseded artefacts deleted; Claude's check of A32–A40 done; no milestone open; the replay of the val days waits for the user (vocabulary §0.4) |
-| `prior.md` | The prior: inputs, outputs, decoding and its masks, training, a new airport; its Training view | B | Built in parallel with the end of stage A, on `dev-two-tier-v4-prior` (prior §0.3); B9 (the interface for stage C, D96) done; Claude's check of stage B done, its corrections B10 (D105–D108) before B5's formal campaign; B5 running (since 2026-10-05 22:40 UTC, on B12's code); Claude's check of B12 done, its corrections B13 (D127, D128) after B5 |
+| `prior.md` | The prior: inputs, outputs, decoding and its masks, training, a new airport; its Training view | B | Built in parallel with the end of stage A, on `dev-two-tier-v4-prior` (prior §0.3); B9 (the interface for stage C, D96) done; Claude's check of stage B done, its corrections B10 (D105–D108) before B5's formal campaign; B5 running (since 2026-10-05 22:40 UTC, on B12's code); B13 (D127, D128) done, merged after B5 |
 | `post_training.md` | The post-training in windows of traffic; the multi-aircraft work; its Training view | C | Design complete; built in parallel with the end of stage B, on `dev-two-tier-v4-post` (post-training §0.3, D95); C0–C5 and C7 done on synthetic artefacts; C6 and C8–C12 left |
 | This outline | The principles, the shared rules, the plan; the rules of each stage's Training view (§6) | — | — |
 
@@ -87,6 +87,7 @@ both, each with its part. A new decision or open item takes the next free number
 | D95 | Stage C is developed in parallel with the end of stage B (the user, 2026-10-05), on its own branch and worktree (§5 rule 1), by its own implementer; Claude writes its design and runs the project. Stage C never changes the code of `instructions/`, `autopilot/` or `prior/`. What it needs of them is a change of their public interfaces, made by their own stages (vocabulary D97, prior D96): code only, so that nothing of stage A is built again (the user, 2026-10-05); the changes of stage B before B5's formal campaign, because they change the draws of free generation. The formal runs of stage C wait for B5's base | Decided | User, 2026-10-05 |
 | D55 | A value that a runner fits from data and the user chooses (D15) is measured on all train days, in a scratch directory, directly after the milestone that writes the runner; the user chooses before a later milestone reads the value. A smoke build uses the chosen spec, and its flights are a random sample for each airport and split (seed 1337), not the first flights of the sorted flight keys (a key starts with the callsign, so the first flights are mostly one airline). Why: the smoke of stage A fitted its own spec on approximately 400 train flights, 373 of them one airline, with one climb piece; every smoke reading of A9–A16 used it (§5 rules 7 and 12) | Decided | User, 2026-10-04 |
 | D109 | The Training view opens the set of the base model's one validation readout (§6 item 4, prior B6) as it opens the others, and a click on a word flies its segment live: the backend rebuilds the val flight and flies the words that the readout already flew (the same states within the executor conformance tolerance), so it gives no new reading of the val days. Only that set: the frontend's reader and the backend's live segment take the splits a set may hold from its caller (stage A's own sets: train and select; stage B's prior sets: also val, for a set exported from the claimed validation readout, prior B10). Why: the export could write that set, but A23's reader and live segment accepted train and select only, so the planned publication did not open (Claude's check of stage B, 2026-10-05; vocabulary A39) | Decided | User, 2026-10-05 |
+| D131 | Every review of a stage follows one standard, the same in every round (`review_guide.md` §3 step 6 and "Later rounds"): each finding gets a severity. S1 (a leak into an input, a target selection or a choice; a split violation; a second read of the validation days; a defect that changes a number the user reads, on real data, beyond its tolerance) is corrected before any formal run. S2 (a latent leak, a boundary that does not refuse, a decided rule with no test, an effect not measured and not bounded) is corrected before the formal run when the correction is cheap; else it is listed as an open item of the stage's design document (§0.2, an O number), with no milestone and no order. S3 (a corner case below 0.1 % of the windows or steps that moves no reported number beyond its tolerance, a difference within a stated bound, style) is listed in one line of the review and not reported again. A later round reads the changed code and the S1 channels only; a finding of an earlier round is not reported again. A scenario against common sense is no finding at all, whatever its correction costs: it is not reviewed, not listed and not corrected — for example the code changed while a run of it goes on, an input that no step of the pipeline makes, a file moved or edited by hand to defeat a rule, a second person working against the first. Why: four rounds of the review of stage B found no leak, and their later findings came from a deeper search of the same guard in each round, not from new defects; the deepest were guards against a code change during a campaign, which does not happen (the user: "we are not in a spy war") | Decided | User, 2026-10-06 |
 
 **The identity rule (D21)** (the user, 2026-10-02 and 2026-10-03). An identity binds the format (what the words and the
 payloads mean) and the data rules (the sealed test days). Code is identified by what it does on fixed inputs (a
@@ -97,12 +98,12 @@ they came from. Each document lists the identities of its parts.
 
 | Document | Decisions | Open items |
 |---|---|---|
-| Outline | D7, D20, D21, D55, D85, D95, D109 | — |
+| Outline | D7, D20, D21, D55, D85, D95, D109, D131 | — |
 | Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62, D66, D67, D69–D71, D73, D74, D77–D84, D86–D90, D97, D102, D111, D126 | O8 |
 | Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60, D63–D65, D68, D72, D75, D96, D105–D108, D111, D118–D122, D126–D128 | — |
 | Post-training | D29–D31, D36, D37, D76, D91–D94, D98–D101, D103–D105, D107, D110, D112–D117, D123–D125, D129, D130 | O13 |
 
-The next free numbers: D131, O14.
+The next free numbers: D132, O15.
 
 ---
 
@@ -124,7 +125,7 @@ The next free numbers: D131, O14.
    stage A (done: `readouts/2026-10-05_stage_a_check_a32_a40.zh.md`), the user's choice of Δ (4 s) and A34's artefact. B9 (the interface for stage C, prior D96) and B10 (the
    corrections of Claude's check of stage B, prior D105–D108) come before B5's formal campaign (D95). B12 (the
    corrections of Claude's second check, prior D119–D122) is merged; B5 runs on its code since 2026-10-05. B13 (the
-   corrections of Claude's check of B12, prior D127, D128) is made on stage B's branch and merged after B5. It ends with the Training view of stage B
+   corrections of Claude's check of B12, prior D127, D128) is done on stage B's branch and merged after B5. It ends with the Training view of stage B
    (prior B6).
 3. Stage C (post-training §0.4): the post-training in windows of traffic with one aircraft commanded. Stage C is
    developed in parallel with the end of stage B (D95). A milestone of stage C starts when the parts of stages A and B

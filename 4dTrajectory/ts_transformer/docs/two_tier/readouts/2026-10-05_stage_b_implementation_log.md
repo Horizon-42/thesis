@@ -58,7 +58,7 @@ changed); 3 (the runway head's class order) is a detail of the code. The code fo
 | After A36 of stage A (`split_flights`, the closed-loop part of A23's export as one function), merged into this branch | B6's export of the closed-loop sentences beside the prior's own, through `split_flights` at the prior's Δ; stage B does not change A23's code |
 | After A32 of stage A (the corrections of Claude's review, vocabulary D77–D84), merged into this branch | The reader of item 3 with the later-row fields apart (D82), the start that reads no sample after the first predicted step (D77) and the candidates decided by no flight (D78), followed in `prior/` and its runners; the tests on synthetic artefacts again |
 
-## 3 Specifications of the milestones that are done (was §12: B0–B4, B8–B12)
+## 3 Specifications of the milestones that are done (was §12: B0–B4, B8–B13)
 
 **B0. Package and layout.**
 
@@ -262,3 +262,35 @@ the changed names for §7 items 2, 3 and 7.
   faulty-track marks); a fold through the runner: a change of the held-out airport's data leaves the checkpoint the
   same; the choice at its edges; the campaign's settings from a second process; the speaker's two refusals; a moved
   start's rows reach the inputs of the first predicted step.
+
+**B13. The corrections of Claude's check of B12** Moved here from the design on 2026-10-06, after B13 was done (`142272f0`, on `dev-two-tier-v4-prior`). (`readouts/2026-10-06_stage_b_b12_check.zh.md`; D108, D127,
+D128). On stage B's branch, on synthetic artefacts; merged into `dev-two-tier` only after B5 has ended: its behaviour
+check gives another answer, so B5 would stop under it. It changes no input, model, training, draw or choice, so B5's
+results stay valid. The report gives the changed names for §7.
+
+- D128: the claim records the reader's options (free generation: its airports, flights of each airport, samples, seed
+  and chunk; the validation readout: its split); a rerun to the same output with other options is refused by name; a
+  runner that finds its output with its readout written and the claim not marked spent marks it spent, then refuses;
+  the claim file is written whole (a temporary file linked to its name) and held under an exclusive lock while the
+  reader runs. Free generation refuses a negative seed and a repeated airport before it claims. A spent claim without
+  options (B5's, written by B12's code) is read for its output only.
+- D108's guard: in the behaviour check, the fixed sentence has landings in the 30 min before its rows on two or more
+  candidates, its own landing between two of its rows and another landing at the same second on another runway; the
+  speaking loop's aircraft each have their own landing index, with landings before their rows; the answer also holds
+  `kept` and `side` over every rule × outcome × mark, the campaign's plan of steps for a fixed record (each step's
+  runner and arguments) and free generation's draw of flights from a fixed set. On a resume, the campaign's refusal
+  names what differs from its start record. The comment of the choice's fixed table says which configurations are
+  within.
+- D127: the export writes each prior sentence's flown track unrounded (its sample format gets a new name; the
+  frontend's reader and fixtures follow); the backend's `apart_from_exported` calls stage A's
+  `fly.refuse_past_bound(…, "the readout's flown states")` and refuses an outcome or an end cycle that differs from the
+  sentence's. The export calls `checkpoint.written_claim` (one definition of a written claim) and refuses by name a val
+  output without its readout before it reads any of its files.
+- Tests: a kill between the readout and the spent mark (both readers); free generation's val path to its end on a
+  synthetic artefact with val days (the spent mark, a rerun after a crash with the same and with other options, the
+  recount after the claim); a second run to one output refused while the first holds the lock; the backend against a
+  real claim file (no stand-in for `written_claim`); the val set opened once by two threads; D127's refusals (a state
+  past the bound, another outcome, another end cycle); `LoopRows`' refusal of a start that is not one int; a change of
+  each new part of the behaviour answer changes the answer.
+- Not ordered: tying the observed rows to the `Loop` that the start returns (a change of stage A's start); stage C
+  passes them as the start gives them.
