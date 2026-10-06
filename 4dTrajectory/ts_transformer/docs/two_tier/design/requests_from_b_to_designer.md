@@ -11,14 +11,10 @@ ends (its behaviour check gives another answer).
 
 ## 1 Readings for the user to decide
 
-1. **The claim's options beyond D128's list** (proposal, built in B13): both readers also record the device, and free
-   generation its temperature and bound of go-arounds. Why: the words are drawn by comparing uniform numbers with
-   probabilities computed on the device (and at the temperature), so a rerun on another device need not be the same
-   read, which is D128's premise. Accept, or drop them.
-2. **An error found after the claim locks the val read for good.** Free generation's check "an airport with no val
-   sentence" can only run after the claim (it reads val, D85). With D128 a rerun with the same options fails the same
-   way, and one with corrected airports is refused for its other options. Unlikely for the base (every airport, the
-   default). Options: accept; or let the user clear the claim file by hand when it happens (Claude reports it).
+None open. Decided by the user, 2026-10-06, for the design text: (1) the claim's options also hold the device (both
+readers) and free generation's temperature and bound of go-arounds — kept, as built in B13 (`142272f0`); (2) an error
+that free generation can find only after its claim (an airport with no val sentence) locks that val read for good —
+accepted.
 
 ## 2 For stage A
 
