@@ -13,7 +13,8 @@ same flight is set up on its stored closed-loop sentence (`training_flights`, A2
 the first predicted step moved as the start moves them (`autopilot.start.moved_signals`, from which the start rule reads
 the start state), and the sentence's words grid replaced by the round's words (`prior.on_words`). The other aircraft are
 not flown: the executor reads only the words (vocabulary §6 item 5). The answer is checked against the export's flown
-track (`prior.apart_from_exported`); the backend test holds the live flight to it. A word after the window's end (its
+track, written unrounded (`prior.apart_from_exported`, prior D127 followed for windows: refused by name past the
+executor's bound, or at another outcome or end cycle). A word after the window's end (its
 outcome, or the end of the row of its loss of separation) has no segment. A window ended at a loss of separation ends
 there live too (`fly_window_segment`): no segment runs past the window's last state, and none is judged — the judge has
 no outcome for a flight its caller ended (post-training D93).
@@ -199,7 +200,7 @@ class WindowSegments:
             result = fly_window_segment(batch, inputs, j, sentence, COLUMNS.index(column_name), row, params, words,
                                         superseded, said["track"]["lastCycle"] if lost else None)
             answering = time.perf_counter()
-            apart = apart_from_exported(result, said["track"], batch, j, words.spec.step_s)
+            apart = apart_from_exported(result, said, batch, j, words.spec.step_s)
             body = segment_payload(result, batch.geometries[j], float(item["haeMinusMslM"]),
                                    np.asarray(inputs.aero_params[j].cpu().numpy()), apart)
             finished = time.perf_counter()

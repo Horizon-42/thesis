@@ -18,7 +18,7 @@ describe("the answer", () => {
       const parsed = parseTrainingWindowAutopilot(answer, windowRequestOf(answer, selection), selection);
       if (!parsed.ok) throw new Error(parsed.problem);
       expect(parsed.value.flightKey).toBe(selection.flight.flightKey);
-      expect(parsed.value.stored.horizontalM).toBeLessThan(0.08);
+      expect(parsed.value.stored.horizontalM).toBeLessThan(1e-6);      // the export's track unrounded (D127)
     }
     expect(lost.segment.end).toBe(TRAINING_AUTOPILOT_SEGMENT_END);
     expect(lost.segment.endCycle).toBe(sample.windows[1].rounds[0].flown.tS.length * 2 - 2);

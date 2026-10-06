@@ -827,10 +827,13 @@ POST_MAY_IMPORT = ("post.", "instructions.", "inference.separation", "inference.
 #: Prior §7, the column "Code": the names stage C may import from `prior/` (in `post/` and in its runners); B9's names
 #: (prior D96) and B10's (D105–D107: the function that opens a prior run, the motion of rows) as B9's log and B10's code
 #: give them, where §7 still reads "new, B9/B10"; the round of D111 and D118–D122 (items 1 and 4: the identity as a readout
-#: shows it, the one val read, the selection's cells). Item 7's names are methods of `SpeakingLoop`, which no import shows.
+#: shows it, the one val read, the selection's cells); B13 (D128): `holds_claim` replaced by `holds_written_claim`, as
+#: B13's code gives it where §7 still reads the old name. Item 7's names are methods of `SpeakingLoop`, which no import
+#: shows.
 PRIOR_INTERFACE = {
     "prior.checkpoint": {"load_checkpoint", "CHECKPOINT_SCHEMA", "open_prior", "OpenedPrior", "readable_identity",
-                         "validation_claim", "holds_claim"},
+                         "validation_claim", "written_claim", "holds_written_claim", "spend_validation_claim",
+                         "CLAIM_SPENT_BY"},
     "prior.model": {"Prior"},
     "prior.procedure": {"PROCEDURE_MASKS", "procedure_digests", "airport_finals", "Final"},
     "prior.inputs": {"state_inputs", "sentence_rows", "own_flight_key", "motion"},
@@ -937,7 +940,7 @@ TRAINING_EXPORT_NAMES = {
     "experiments.training_export": {"FORMATS", "candidate_hae_minus_msl_m", "candidates_block", "events",
                                     "split_flights", "vocabulary_block"},
     "experiments.training_attitude": {"attitude_payload", "executor_attitude"},
-    "experiments.prior_training_export": {"procedure_block"},
+    "experiments.prior_training_export": {"procedure_block", "unrounded"},
 }
 
 

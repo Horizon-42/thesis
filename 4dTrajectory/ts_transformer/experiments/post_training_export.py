@@ -56,7 +56,7 @@ from ts_transformer.experiments.post_train import (
     round_model, settings_of,
 )
 from ts_transformer.experiments.post_window_loop import WindowLoop, WindowResult, checked_edges, moved_commanded
-from ts_transformer.experiments.prior_training_export import procedure_block
+from ts_transformer.experiments.prior_training_export import procedure_block, unrounded
 from ts_transformer.experiments.training_attitude import attitude_payload, executor_attitude
 from ts_transformer.experiments.training_export import (
     FORMATS, candidate_hae_minus_msl_m, candidates_block, events, split_flights, vocabulary_block,
@@ -136,12 +136,12 @@ def sentence_payload(loop: WindowLoop, b: int, result: WindowResult, window: Win
         "events": events(result.words, None, geometry, words), "firstRow": first_row, "startRow": first,
         "flownFromRow": first * loop.every, "outcome": result.outcome, "endCycle": end_cycle,
         "timedOut": result.outcome == TIMEOUT, "goArounds": int(result.go_arounds), "crossing": crossing,
-        "track": {"rows": len(cycles), "lastCycle": int(last), "eM": stage_a_files.rounded(whole["e"][cycles], 1),
-                  "nM": stage_a_files.rounded(whole["n"][cycles], 1), "latDeg": stage_a_files.rounded(at[:, LAT], 7),
-                  "lonDeg": stage_a_files.rounded(at[:, LON], 7), "heightMslM": stage_a_files.rounded(at[:, ALT], 1),
-                  "trackDeg": stage_a_files.rounded(np.mod(whole["track"][cycles], 360.0), 2),
-                  "groundSpeedMps": stage_a_files.rounded(whole["ground_speed"][cycles], 2),
-                  "verticalRateMps": stage_a_files.rounded(whole["vertical_rate"][cycles], 2)},
+        # unrounded (prior D127, followed for windows): the live segment is checked against it within the executor's bound
+        "track": {"rows": len(cycles), "lastCycle": int(last), "eM": unrounded(whole["e"][cycles]),
+                  "nM": unrounded(whole["n"][cycles]), "latDeg": unrounded(at[:, LAT]), "lonDeg": unrounded(at[:, LON]),
+                  "heightMslM": unrounded(at[:, ALT]), "trackDeg": unrounded(np.mod(whole["track"][cycles], 360.0)),
+                  "groundSpeedMps": unrounded(whole["ground_speed"][cycles]),
+                  "verticalRateMps": unrounded(whole["vertical_rate"][cycles])},
         "attitude": attitude_payload(executor_attitude(executed, b, cycles, aero[b])),
         "end": {"reward": float(result.reward), "loss": loss, "speedMaskRows": int(result.speed_mask_rows),
                 "faultySteps": int(result.faulty_steps), "lossReadsFault": bool(result.loss_reads_fault)}}

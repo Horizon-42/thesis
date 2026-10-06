@@ -31,8 +31,6 @@ from aeroviz_backend.autopilot_segment.payload import SEGMENT_END
 from aeroviz_backend.autopilot_segment.prior import apart_from_exported, on_words
 from aeroviz_backend.http_server import AeroVizBackendApp
 
-#: The export writes e, n and height to 0.1 m: a distance of two of them is at most 0.05 m · √2 off.
-ROUNDING_M = 0.05 * 2**0.5 + 1e-3
 FRONTEND = Path(__file__).resolve().parents[2] / "aeroviz-4d" / "src" / "data"
 
 
@@ -117,8 +115,8 @@ def test_every_word_of_every_window_flown_live_is_the_exported_flight(world):
             for name, index in (("e", 0), ("n", 1), ("height", 2)):
                 assert float(np.abs(live[name][cycles] - reference[:rows, index]).max()) < STATE_BOUND_M, (
                     window["kind"], row, column, name)
-            apart = apart_from_exported(result, said["track"], told, 0, words.spec.step_s)
-            assert max(apart["horizontalM"], apart["verticalM"]) < ROUNDING_M
+            apart = apart_from_exported(result, said, told, 0, words.spec.step_s)        # refused past the bound
+            assert max(apart["horizontalM"], apart["verticalM"]) < STATE_BOUND_M
     assert kinds == ["real", "A", "B"]
     # window B's set carries its moved observed rows (the view draws them before the first predicted step)
     moved = world["sample"]["windows"][2]["movedStart"]
@@ -134,7 +132,7 @@ def test_a_request_flies_the_window_and_round_it_names(world):
         answer = backend.window.fly(request(world, window=place, seq=place + 1))
         assert (answer["schema"], answer["setId"], answer["window"], answer["round"], answer["rowIntervalS"]) == (
             window_segments.SCHEMA, FIXTURE_SET, place, "start", 4.0)
-        assert max(answer["stored"]["horizontalM"], answer["stored"]["verticalM"]) < ROUNDING_M
+        assert max(answer["stored"]["horizontalM"], answer["stored"]["verticalM"]) < STATE_BOUND_M
 
 
 def test_a_request_is_refused_or_not_listed_by_name(world):

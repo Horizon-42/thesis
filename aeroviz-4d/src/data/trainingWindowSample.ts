@@ -58,8 +58,8 @@ import {
 export const TRAINING_WINDOW_INDEX_SCHEMA = "aeroviz-training-window-index-v1";
 /** MIRROR of `training_files.INDEX_FILE`. */
 export const TRAINING_WINDOW_INDEX_FILE = "index_post_v1.json";
-/** MIRROR of `training_files.SAMPLE_SCHEMA`. */
-export const TRAINING_WINDOW_SAMPLE_SCHEMA = "aeroviz-training-window-sample-v1";
+/** MIRROR of `training_files.SAMPLE_SCHEMA` (v2: a round's flown track unrounded, prior D127 followed for windows). */
+export const TRAINING_WINDOW_SAMPLE_SCHEMA = "aeroviz-training-window-sample-v2";
 /** MIRROR of `training_files.SET_KIND`. */
 export const TRAINING_WINDOW_SET_KIND = "post-training-windows";
 /** MIRROR of `post_training_export.START`: the round that names the model at the start of the campaign. */

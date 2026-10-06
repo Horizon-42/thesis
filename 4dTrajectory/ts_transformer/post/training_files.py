@@ -28,10 +28,11 @@ from ts_transformer.io_utils import utc_now
 #: 2026-10-05): windows of recorded traffic — the commanded flight's observed track, open-loop and closed-loop sentence
 #: (stage A's head), the other aircraft on their records, and for each round of a post-training campaign the sentence
 #: its model said for the commanded aircraft, flown, with the window's end (its outcome, a loss of separation and its
-#: other aircraft, the reward).
+#: other aircraft, the reward). Sample v2 (prior D127, followed for windows, 2026-10-06): a round's flown track is written
+#: unrounded — the live executor's answer is checked against it within the executor's bound.
 INDEX_SCHEMA = "aeroviz-training-window-index-v1"
 INDEX_FILE = "index_post_v1.json"
-SAMPLE_SCHEMA = "aeroviz-training-window-sample-v1"
+SAMPLE_SCHEMA = "aeroviz-training-window-sample-v2"
 SAMPLE_FILE = "sample.json"
 SET_KIND = "post-training-windows"
 
