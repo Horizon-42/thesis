@@ -60,12 +60,13 @@ the measurements behind it are in §6 or in the readout named.
 | D129 | The window view (C11): the list names a window's runway as its recorded runway, since the round's sentence may say another; the shift of window A is shown in days or hours; the cursor starts at the window's row 0, so that the other aircraft show from the start | Decided | User, 2026-10-06, on the implementer's proposals P42–P44 |
 | D130 | The updates of a round's pass take the branch groups of each groups file in an order shuffled by the round's random numbers (the seed and the round), then `update_groups` at a time; so an update mixes branch points and windows, and a resumed campaign is the same. Why: in the order spoken, an update's groups came mostly from one branch time of one batch | Decided | User, 2026-10-06, on Claude's check of stage C |
 | D132 | The validation readout of a chosen round (C10, `post_validation`): it reads, for each airport, at most the campaign's select windows of each airport (`select_per_airport`) among the val days' real windows that do not open inside a loss, drawn as the selection readout draws the select days', with the same random numbers, and states each airport's coverage (real windows, left out, read). The one read of the val days (outline D85) is held for each campaign: its claim is in the campaign's directory. A formal campaign (`post_train`) and its validation readout refuse a base that is not stage B's formal base (a smoke prior or a fold): the formal start checks the base's run | Decided | User, 2026-10-06, on the implementer's readings P46, P47 and Claude's check (P48) |
+| D137 | The settings of the formal campaign (C10; was O13), chosen by the user as proposed from C8's profile: 1,000 windows of each kind (real, A, D, B) a round; 10 rounds; 4 branch groups an update; 64 sentences of the data term an update; batches of 64 windows; K = 8; learning rates 1e-5 (the prior) and 1e-4 (the traffic modules); weight decay 0.01; 200 select windows an airport for the selection readout; the traffic attention 64 wide with 4 heads. The criterion that chooses the round (D7) is the user's, before the validation readout. Why: C8 measured the time and the memory at the formal size (log §25) | Decided | User, 2026-10-06 |
 
 ### 0.2 Open items
 
 | # | Item | Proposal | § |
 |---|---|---|---|
-| O13 | The settings of the campaign (C10) that this design does not give: the rounds; the count of each kind of window in a round (real, A and D equal, D100; B); the windows of a batch; the learning rates of the prior and of the traffic attention; the weight decay; the branch groups and the data term's sentences of one update; the select windows of each airport for the selection readout; the width and the heads of the traffic attention. `post_train` takes each as a required setting | Claude proposes values from C8's profile; the user chooses them before C10 | 2, 8 |
+| O15 | The memory of N speaking workers is not checked before a campaign starts (outline §5 rule 13; D131: an S2 not corrected before C10). C10's round 0 is watched: a sampler records the GPU's peak; the main process releases its cache before each round's speaking (`ea2050ff`) | C13 checks it before the next campaign: one worker's host and GPU memory measured at the start, N workers refused by name where they do not fit | 8 |
 
 ### 0.3 Implementation
 
@@ -82,10 +83,12 @@ commits, the tests and the readings are in the implementation log.
 
 ### 0.4 Plan
 
-1. O13 and the user's criteria (D7); then C10 and the validation readout of its chosen round; then the speed of the
-   chosen round (outline §6.2 item 10, `model_speed`), with no other job on the host or the GPU.
-2. C12.
-3. The window view (C11) and the window export change with the one layout of the three stages' Training views (outline
+1. C10 runs (D137; from `.claude/worktrees/two-tier-v4-post`, untouched until it ends); the user's criterion for the
+   round (D7); the validation readout of the chosen round; then its speed (outline §6.2 item 10, `model_speed`), with no
+   other job on the host or the GPU.
+2. C13 (outline D138), after vocabulary A44, before the next campaign; C10 gets none of it.
+3. C12.
+4. The window view (C11) and the window export change with the one layout of the three stages' Training views (outline
    §6.2, D133–D135: the results page, the rounds' envelopes, one block of a flown sentence), built by stage B's
    implementer; while it is built, stage C changes no file of outline §6.2 item 9.
 
@@ -462,6 +465,21 @@ user, and a missing part of an interface is requested from its stage.
   (the rewards, the outcomes, the losses of separation, the rows the speed-word mask acted, D114's counts). Its checks
   as §4 item 2. Tests: it refuses a second read; it reads no train or select window.
 - A formal campaign and its validation readout refuse a base that is not stage B's formal base (D132).
+
+**C13. The speed of a round** (outline D138), on `dev-two-tier-v4` (outline §5 rule 1), after vocabulary A44, before
+the next campaign; C10 gets none of it.
+
+- The selection readout's batches are spoken by the speaking workers (`Speakers`), each window with its own seeded
+  numbers as now (`readout_numbers`); the main process sums the counts. Speaking in one process (no workers) stays a
+  mode, the reference.
+- The windows are started through vocabulary A44's `Start`, one for each split, opened in the campaign's process before
+  the workers fork, so that they share its memory.
+- O15: before a campaign starts, one worker's host and GPU memory is measured, and N workers are refused by name where
+  they do not fit.
+- Tests: the selection readout through two workers equals the one-process readout on a synthetic campaign; a round
+  started through `Start` equals one started through `start_moved` (the words, the rewards, the states).
+- Size: about 80 lines of `post_train.py`, 30 of the window loop's start, 80 of tests. After it, `post_profile` at C10's
+  settings measures a batch and a round again.
 
 **C12. Close of stage C.** The full ts suite passes. The implementation log and `docs/reference/runners.md` are
 updated; the report gives the code index for §7 (outline §5 rule 10). Report to the user: the commits, the rounds and

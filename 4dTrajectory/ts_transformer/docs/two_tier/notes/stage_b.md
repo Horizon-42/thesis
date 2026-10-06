@@ -62,4 +62,6 @@ instructions/training_files.py、experiments/post_training_export.py、post/trai
    - 报告地址和停止命令。
 9. 日志记在 B 的日志 §4。requests 文件重写：§3 第 1–4 条已进设计（outline §6.2、D134、D135）。
    不合并进 dev-two-tier：报告 dev-two-tier-v4 能否快进，由用户合并。
+10. 以上全部做完之后接着做 B14（prior.md §12、outline D138）：程序掩码的 batch 模式；
+    现在一架一架算的代码原样保留，作为可读的参照模式。两种模式必须给出相同的掩码，规格见 prior §12。
 ```

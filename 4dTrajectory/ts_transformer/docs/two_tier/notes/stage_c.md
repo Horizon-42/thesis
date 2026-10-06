@@ -4,7 +4,7 @@
 2026-10-06，Claude 写，用户转发。上一条（D132）已做完（`483b81d7`），C8 也已完成（`c396f9be`、`a2c6d578`）。
 
 ```
-现在没有写代码的命令：C10 的正式运行要等 O13（你在日志 §25 的提议）和用户定的标准。
+C10 正在跑（D137：O13 按你的提议定了）。选轮次的标准（D7）由用户定，在验证读数之前。
 
 1. 换分支（用户 2026-10-06，outline §5 规则 1）：
    - 三个阶段的主体已合进 dev-two-tier，dev-two-tier-v4-post 已全部在里面；
@@ -18,6 +18,9 @@
 3. 不改 outline §6.2 第 9 条列出的文件：前端 Training 视图的文件、aeroviz_backend/http_server.py，
    以及 C 的 Training 导出（experiments/post_training_export.py、post/training_files.py）。
    这些由 B 的实现者改（D133–D135），窗口视图和窗口导出跟着一起改。
-4. C10 的正式运行等用户合并后从主树启动，不在共用工作树里跑。
+4. C10 已从 two-tier-v4-post 启动，按原样跑完，不改它的代码。
+5. C13（post_training.md §8、outline D138）：等 A44 进了 dev-two-tier-v4 再在那里做，下一次战役之前完成，C10 不用它。
+   内容：选择读数分给说话的 worker 跑；单进程仍保留为一种模式；用 A44 的 Start，在 fork 之前打开；
+   战役开始前测一个 worker 的内存，装不下就按名字拒绝（O15）。
 不改 instructions/、autopilot/、prior/。
 ```

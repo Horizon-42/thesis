@@ -85,7 +85,8 @@ Proposals (where the design says nothing): none open.
 1. Stage B is closed. Its implementer builds the one layout of the three stages' Training views (outline §6.2,
    D133–D135): the results page, the envelopes of the prior's sentences and the shared parts of the exports; B6's sets
    `prior_sets_20261006` are exported again in a new sample format, with the same ids (the base and the folds read only).
-2. The post-training (`post_training.md`) reads only §7 and B5's base (`prior_base_20261006`).
+2. B14 (outline D138), after the work of outline §6.2, before stage C's next campaign.
+3. The post-training (`post_training.md`) reads only §7 and B5's base (`prior_base_20261006`).
 
 ---
 
@@ -510,5 +511,23 @@ The formal runs read `v12_20261005` / `v17_20261005` at Δ = 4 s. The rules of o
 | B13 | The corrections of Claude's check of B12 | D108, D127, D128 | Done |
 | B6 | The Training view of stage B | Outline §6, D109, D127 | Done |
 | B7 | The close of stage B | — | Done |
+| B14 | The procedure masks over the batch | Outline D138 | Not built; after the work of outline §6.2 |
 
-Every milestone is done; their specifications are in `readouts/2026-10-05_stage_b_implementation_log.md` §3.
+The specifications of the milestones that are done are in `readouts/2026-10-05_stage_b_implementation_log.md` §3.
+
+**B14. The procedure masks over the batch** (outline D138), on `dev-two-tier-v4` (outline §5 rule 1), by stage B's
+implementer after the work of outline §6.2, before stage C's next campaign.
+
+- `prior/procedure.py`: `ProcedureMasks` gets a mode. `per-aircraft` is today's code, unchanged, the readable reference.
+  `batch` computes `track`, `after_row` and `permitted` for all the aircraft at once: each aircraft's finals gathered
+  into arrays by its runway (threshold, course, region, edge, entry height, decision height), no loop over the aircraft.
+- The speaker takes the mode. Free generation, the campaign's runners and stage C's window loop use `batch`. Before the
+  batch mode is first used in a process, a check computes the masks of a fixed set of rows in both modes and refuses a
+  difference by name (milliseconds; as vocabulary D73).
+- Not changed: the grammar's column mask (`instructions/grammar.py`, already over the batch) and the loop over the runway
+  words in `Speaker._allowed`.
+- Tests: both modes equal on random rows of the synthetic artefact (inside, outside and at the edge of a region; with G;
+  joined and dipped); `prior_behaviour` compares both on its fixed inputs; one fold of B5 (KRDU) spoken again on the
+  select days with `batch`, in a scratch directory, gives its readout's sentences word for word.
+- Size: about 150 lines of `procedure.py`, 20 of the speaker, 120 of tests. Expected: most of the masks' share of a
+  speaking batch (about 19 %, outline D138), measured by `model_speed` (outline §6.2 item 10).
