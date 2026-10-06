@@ -88,13 +88,13 @@ voice, one meaning for each word. The words were not checked one by one against 
 5. **Verify.** Read the source line of each important finding. Reproduce it on data where you can (a count, a value).
    Check that a finding is not the design's own decision.
 6. **Classify.** Put each finding into one class: leak, latent leak, split (a day or a sample), boundary, end of a
-   flight, design mismatch, bug, test gap. Then give it one severity (the user, 2026-10-06: the same standard in every
+   flight, design mismatch, bug, test gap. Then give it one severity (outline D131; the user, 2026-10-06: the same standard in every
    round, so that a later round does not dig into corner cases):
 
    | Severity | What | Action |
    |---|---|---|
    | S1 | A leak into an input, a target selection or a choice (the future of a flight, a sealed day, a second read of the validation days, an identity of the airport); a split violation; a defect that changes a number the user will read (a reward, an outcome, a loss, a count in a readout) on real data by more than its stated tolerance; a design mismatch that changes behaviour on real data | Corrected before any formal run. Reported with its size |
-   | S2 | A latent leak (a forbidden value held but not read); a boundary that does not refuse; a decided rule with no test; a defect whose effect on real data is not measured and not bounded | Corrected before the formal run when the correction is cheap; else a stated limit, with the user's word |
+   | S2 | A latent leak (a forbidden value held but not read); a boundary that does not refuse; a decided rule with no test; a defect whose effect on real data is not measured and not bounded | Corrected before the formal run when the correction is cheap; else listed as an open item of the stage's design document (§0.2, an O number) — no milestone, no order, not reviewed again — until the user decides |
    | S3 | A case that real data reach in less than 0.1 % of the windows (or steps) and that changes no reported number beyond its tolerance; a difference within a stated bound (`STATE_BOUND_M`, a float tolerance); a case that needs an input the pipeline cannot make; style, names, wording | Listed in one line, no action. Not reported again in a later round |
 
    A finding states its size on real data, or a bound on it; without a size or a bound it is S2 until measured. A
