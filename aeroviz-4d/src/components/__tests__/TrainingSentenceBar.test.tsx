@@ -4,6 +4,7 @@
  * added marked, the flown flight's outcome and DA check in chips, the cursor moved by the artefact's own rows, ONE column's word
  * selected at a time, and the live executor's pick made by a click on a closed-loop word.
  */
+import { TRAINING_SENTENCE_COLOR } from "../../utils/trainingWordColors";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
@@ -253,18 +254,24 @@ describe("spacedLabels", () => {
 });
 
 describe("TrainingLegend", () => {
-  it("lists the flown path, the DA point and the correction words only for a closed-loop sentence that has them", () => {
+  it("lists the flown path in its kind's colour, the DA point and the correction words only for a flown sentence that has them", () => {
     const vocabulary = stageASelection().vocabulary;
     const layers = { ...DEFAULT_LAYERS };
-    const { rerender } = render(<TrainingLegend layers={layers} vocabulary={vocabulary} closed corrections autopilotColour={null} />);
+    const { rerender } = render(<TrainingLegend layers={layers} vocabulary={vocabulary} flown="closedLoop" corrections autopilotColour={null} />);
     fireEvent.click(screen.getByRole("button", { name: /Legend/ }));
     expect(screen.getByText("the flown path")).toBeTruthy();
+    const swatchOf = () => screen.getByText("the flown path").closest("li")!.querySelector("line")!.getAttribute("stroke");
+    expect(swatchOf()).toBe(TRAINING_SENTENCE_COLOR.closedLoop);
+    for (const kind of ["base", "postTrained"] as const) {
+      rerender(<TrainingLegend layers={layers} vocabulary={vocabulary} flown={kind} corrections autopilotColour={null} />);
+      expect(swatchOf()).toBe(TRAINING_SENTENCE_COLOR[kind]);
+    }
     expect(screen.getByText("DA point")).toBeTruthy();
     expect(screen.getByText("correction word")).toBeTruthy();
-    rerender(<TrainingLegend layers={layers} vocabulary={vocabulary} closed={false} corrections={false} autopilotColour={null} />);
+    rerender(<TrainingLegend layers={layers} vocabulary={vocabulary} flown={null} corrections={false} autopilotColour={null} />);
     expect(screen.queryByText("the flown path")).toBeNull();
     expect(screen.queryByText("correction word")).toBeNull();
-    rerender(<TrainingLegend layers={{ ...layers, headingBands: false }} vocabulary={vocabulary} closed={false} corrections={false}
+    rerender(<TrainingLegend layers={{ ...layers, headingBands: false }} vocabulary={vocabulary} flown={null} corrections={false}
       autopilotColour="#2563eb" />);
     expect(screen.queryByText("heading word: judged rows")).toBeNull();
     expect(screen.getByText("autopilot segment")).toBeTruthy();

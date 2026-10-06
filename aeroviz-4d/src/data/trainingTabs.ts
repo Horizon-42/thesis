@@ -10,6 +10,7 @@
  * A store of its own (as `trainingPriorLayers`): the sessions live in the left dock and the bar is a sibling of it.
  */
 
+import type { TrainingSentenceKind } from "../utils/trainingWordColors";
 import { useSyncExternalStore } from "react";
 import type { TrainingFlownEnd } from "./trainingSample";
 
@@ -22,6 +23,8 @@ export interface TrainingTab {
   title: string;
   /** The judge's outcome of a flown sentence, drawn as a dot in its colour; null for a sentence not flown (Labelled). */
   outcome: TrainingFlownEnd | null;
+  /** The kind of a flown sentence, drawn as a swatch of its colour (frontend §3 item 11); null for Labelled. */
+  kind: TrainingSentenceKind | null;
 }
 
 export interface TrainingTabs {

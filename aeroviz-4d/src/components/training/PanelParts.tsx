@@ -24,8 +24,9 @@ export interface DetailsPage {
   close: () => void;
 }
 
-/** The details page's two first sections in every stage (outline §6.2 item 3). */
+/** The details page's two sections in every stage (frontend §3 item 3, D159). */
 export const EXPERIMENT_SECTION = "experiment";
+export const STATISTICS_SECTION = "statistics";
 
 let request: { section: string; opener: HTMLElement; seq: number } | null = null;
 const requestListeners = new Set<() => void>();

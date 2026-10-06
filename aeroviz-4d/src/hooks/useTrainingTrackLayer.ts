@@ -9,7 +9,8 @@
  *    once in the reader), and its GROUND TRACE draped under it: the lateral envelopes lie on the ground, and from any
  *    oblique view the airborne line is displaced from them — the trace is what they are read against.
  *  • THE FLOWN PATH (a closed-loop reading): the states the executor flew from the first predicted step
- *    when it was told the sentence at the chosen Δ, in teal beside the observed track, its ground trace dashed, where
+ *    when it was told the sentence at the chosen Δ, in its kind's colour beside the observed track (frontend §3 item 11:
+ *    the closed loop teal, the base's sample magenta, a post-trained round yellow-green), its ground trace dashed, where
  *    it ended — named with the judge's outcome — and the DA POINT of the threshold crossing, green when the check
  *    passed, red when it did not (its values in the label).
  *  • THE CORRECTION WORDS: an orange point on the flown path where each word the closed-loop reading added is said.
@@ -42,6 +43,7 @@ import * as Cesium from "cesium";
 import { useApp, useTrainingCursor, type TrainingLayers } from "../context/AppContext";
 import useTrainingAircraftLayer from "./useTrainingAircraftLayer";
 import useTrainingLiveLayer from "./useTrainingLiveLayer";
+import { flownSentenceColour, flownSentenceKind, TRAINING_SENTENCE_KIND_TEXT } from "../data/trainingSentenceKind";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import { frameTrajectoryCamera } from "../utils/frameTrajectoryCamera";
 import {
@@ -51,7 +53,6 @@ import {
   TRAINING_DECISION_PASS_COLOR,
   TRAINING_DESIGNATED_COLOR,
   TRAINING_ENVELOPE_ALPHA,
-  TRAINING_EXECUTOR_COLOR,
   TRAINING_HEADING_BAND_COLOR,
   TRAINING_OUTSIDE_COLOR,
   TRAINING_TRACE_COLOR,
@@ -74,9 +75,7 @@ import { decisionText, TRAINING_OUTCOME_TAG } from "../data/trainingText";
 import {
   airLine,
   colour,
-  dash,
   entityGroup,
-  GROUND_ROWS_WIDTH,
   groundLine,
   lonLatHeights,
   marker,
@@ -129,10 +128,10 @@ function buildScene(viewer: Cesium.Viewer, selection: TrainingSelection, reading
       const rows = trainingBandGround(judged, band);
       if (!rows.length) return;
       add("headingBands", groundLine(TRAINING_ENTITY.heading(index), `Heading word ${index + 1}: the rows it is judged on`,
-        rows, GROUND_ROWS_WIDTH, colour(TRAINING_HEADING_BAND_COLOR, ALPHA.headingBand)));
+        rows, TRAINING_HEADING_BAND_COLOR));
       trainingBandOutsideGround(judged, band).forEach((degrees, run) =>
         add("headingBands", groundLine(TRAINING_ENTITY.headingOutside(index, run), `Heading word ${index + 1}: rows outside its band`,
-          degrees, GROUND_ROWS_WIDTH, colour(TRAINING_OUTSIDE_COLOR))));
+          degrees, TRAINING_OUTSIDE_COLOR)));
     });
 
     envelopes.altitude.forEach((tube, index) => {
@@ -177,20 +176,21 @@ function buildScene(viewer: Cesium.Viewer, selection: TrainingSelection, reading
   }
 
   // The observed track's plan position, on the ground with the envelopes that bound it; the track in the air.
-  add(null, groundLine(TRAINING_ENTITY.observedGround, "The observed track's ground trace", planDegrees(observed), 2,
-    colour(TRAINING_TRACE_COLOR, 0.55)));
+  add(null, groundLine(TRAINING_ENTITY.observedGround, "The observed track's ground trace", planDegrees(observed),
+    TRAINING_TRACE_COLOR, true));
   add(null, airLine(TRAINING_ENTITY.observedTrack, "The observed track",
     Cesium.Cartesian3.fromDegreesArrayHeights(lonLatHeights(observed)), TRAINING_TRACE_COLOR, 3));
 
   if (closed !== null) {
     const { flown, replay } = closed;
-    add(null, groundLine(TRAINING_ENTITY.flownGround, "The flown path's ground trace", planDegrees(flown), 2,
-      dash(TRAINING_EXECUTOR_COLOR, 0.6)));
-    add(null, airLine(TRAINING_ENTITY.flownTrack, "The flown path: the closed-loop sentence flown by the executor",
-      Cesium.Cartesian3.fromDegreesArrayHeights(lonLatHeights(flown)), TRAINING_EXECUTOR_COLOR, 3));
+    // its kind's colour (frontend §3 item 11): the closed loop, the base's sample, a post-trained round
+    const hue = flownSentenceColour(flight);
+    add(null, groundLine(TRAINING_ENTITY.flownGround, "The flown path's ground trace", planDegrees(flown), hue, true));
+    add(null, airLine(TRAINING_ENTITY.flownTrack, `The flown path: ${TRAINING_SENTENCE_KIND_TEXT[flownSentenceKind(flight)]}`,
+      Cesium.Cartesian3.fromDegreesArrayHeights(lonLatHeights(flown)), hue, 3));
     const end = flown.lon.length - 1;
     add(null, marker(TRAINING_ENTITY.flownEnd, "Where the flown path ends",
-      Cesium.Cartesian3.fromDegrees(flown.lon[end], flown.lat[end], flown.altitudeHaeM[end]), TRAINING_EXECUTOR_COLOR, 9,
+      Cesium.Cartesian3.fromDegrees(flown.lon[end], flown.lat[end], flown.altitudeHaeM[end]), hue, 9,
       `flown: ${TRAINING_OUTCOME_TAG[replay.outcome]}`,
       // above and to the LEFT of the end, right-aligned: the DA label sits above-right, the runway designators below
       new Cesium.Cartesian2(-12, -30), Cesium.HorizontalOrigin.RIGHT));

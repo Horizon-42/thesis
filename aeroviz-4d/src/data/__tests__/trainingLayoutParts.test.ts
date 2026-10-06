@@ -12,9 +12,9 @@ import answers from "./fixtures/training_intent/answers.json";
 import { requestTrainingDetails, useDetailsPage } from "../../components/training/PanelParts";
 
 const TABS: TrainingTab[] = [
-  { id: "labelled", label: "Labelled", title: "", outcome: null },
-  { id: "closed-loop", label: "Closed loop", title: "", outcome: "landed" },
-  { id: "sample-0", label: "Sample 0", title: "", outcome: "timeout" },
+  { id: "labelled", label: "Labelled", title: "", outcome: null, kind: null },
+  { id: "closed-loop", label: "Closed loop", title: "", outcome: "landed", kind: "closedLoop" },
+  { id: "sample-0", label: "Sample 0", title: "", outcome: "timeout", kind: "base" },
 ];
 
 describe("the tabs' one state", () => {

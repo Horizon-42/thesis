@@ -3,7 +3,12 @@
  * what is drawn is the exporter's, only put in Cesium's flat arrays.
  */
 import { describe, expect, it } from "vitest";
+import * as Cesium from "cesium";
 import {
+  airLine,
+  GROUND_LINE_ALPHA,
+  GROUND_LINE_WIDTH,
+  groundLine,
   groundRows,
   lonLatHeights,
   planDegrees,
@@ -21,6 +26,8 @@ import { stageBSample } from "../../data/__tests__/stageB";
 import { stageCSample } from "../../data/__tests__/stageC";
 import { trainingPriorFlightView } from "../../data/trainingPriorSample";
 import { trainingWindowFlightView } from "../../data/trainingWindowSample";
+import { flownSentenceColour, flownSentenceKind, roundKind } from "../../data/trainingSentenceKind";
+import { TRAINING_SENTENCE_COLOR } from "../../utils/trainingWordColors";
 
 const sample = stageASample();
 const [flight] = sample.flights;
@@ -94,5 +101,38 @@ describe("the envelopes of every stage's flown sentences (D135)", () => {
       const band = reading.envelopes!.heading.find((one) => one.stopRow > one.firstRow)!;
       expect(trainingBandGround(reading.judged, band).length).toBeGreaterThan(0);              // its judged rows on the ground
     }
+  });
+});
+
+describe("a line on the ground never reads as a track in the air (frontend §3 item 6, D159)", () => {
+  it("is dashed, at most 3 px wide and at 0.6 opacity; a line in the air stays solid and opaque", () => {
+    const time = Cesium.JulianDate.now();
+    for (const [line, width] of [[groundLine("g", "ground", [0, 0, 1, 1], "#7dd3fc"), GROUND_LINE_WIDTH],
+      [groundLine("t", "trace", [0, 0, 1, 1], "#e2e8f0", true), 2]] as const) {
+      const material = line.polyline!.material as Cesium.PolylineDashMaterialProperty;
+      expect(material).toBeInstanceOf(Cesium.PolylineDashMaterialProperty);
+      expect((material.color!.getValue(time) as Cesium.Color).alpha).toBeCloseTo(GROUND_LINE_ALPHA);
+      expect(line.polyline!.width).toBe(width);
+      expect(width).toBeLessThanOrEqual(3);
+      expect(line.polyline!.clampToGround).toBe(true);
+    }
+    expect(GROUND_LINE_ALPHA).toBe(0.6);
+    const air = airLine("a", "air", [], "#14b8a6", 3);
+    expect((air.polyline!.material as Cesium.Color).alpha).toBe(1);
+  });
+});
+
+describe("each kind of sentence has its colour (frontend §3 item 11, D159)", () => {
+  it("the closed loop teal, the base's sample and a campaign's start magenta, a post-trained round yellow-green", () => {
+    const b = stageBSample();
+    const c = stageCSample();
+    expect(flownSentenceKind(flight)).toBe("closedLoop");
+    expect(flownSentenceKind(trainingPriorFlightView(b, b.flights[0], 0))).toBe("base");
+    expect(flownSentenceKind(trainingPriorFlightView(b, b.flights[0], "closedLoop"))).toBe("closedLoop");
+    expect(flownSentenceKind(trainingWindowFlightView(c, c.windows[0], c.windows[0].commanded[0], "start"))).toBe("base");
+    expect(roundKind(3)).toBe("postTrained");
+    expect(TRAINING_SENTENCE_COLOR).toEqual({
+      observed: "#e2e8f0", closedLoop: "#14b8a6", base: "#d946ef", postTrained: "#a3e635", multi: "#b82e7a" });
+    expect(flownSentenceColour(trainingPriorFlightView(b, b.flights[0], 0))).toBe("#d946ef");
   });
 });

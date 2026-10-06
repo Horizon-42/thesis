@@ -52,9 +52,10 @@ export const TRAINING_TUBE_COLOR = TRAINING_COLUMN_COLOR.altitude;
 export const TRAINING_SPEED_COLOR = TRAINING_COLUMN_COLOR.speed;
 
 /** How opaque each envelope is in the 3D scene at rest, and a fill when it is the selected word's — one table, so the
- *  legend's swatches are the scene's. The heading bands are lines on the ground. */
+ *  legend's swatches are the scene's. The heading bands are lines on the ground, at every ground line's opacity
+ *  (`GROUND_LINE_ALPHA`, `scene/trainingEntities.ts`). */
 export const TRAINING_ENVELOPE_ALPHA = {
-  headingBand: 0.85, tube: 0.28, selected: 0.45,
+  tube: 0.28, selected: 0.45,
 } as const;
 
 /** Every candidate runway (the runway word's choices) — and the one the flight lands on. */
@@ -68,6 +69,22 @@ export const TRAINING_OUTSIDE_COLOR = "#f87171";
 /** THE FLOWN PATH: the closed-loop sentence flown by the executor (the replay's states) beside the observed track.
  *  Teal (2026-09-24): OKLab ΔE on the palette above is ≥ 11.9 from every colour here and 53 from the bar's surface. */
 export const TRAINING_EXECUTOR_COLOR = "#14b8a6";
+
+/** EACH KIND OF SENTENCE HAS ITS COLOUR (frontend §3 item 11, D159; the instruction-v3 view's validated palette, its
+ *  §4.8, checked on the bar's surface #0f131e): the observed track near-white and the labelled sentence flown by the
+ *  executor (the closed loop) teal, as before; the base's samples magenta; a post-trained round yellow-green; stage D's
+ *  model raspberry. Every round of one model has the model's colour (the tab names the round). The colour draws the flown
+ *  track in 3D and its ground trace, the read-back charts' flown line, the legend's swatch and a swatch on the bar's
+ *  tab; a model's name and numbers are in the body text's colour beside the swatch (raspberry's contrast is 3.3:1:
+ *  enough for lines and swatches, not for text). THE ONE MAP: no colour of a sentence kind is written elsewhere. */
+export type TrainingSentenceKind = "observed" | "closedLoop" | "base" | "postTrained" | "multi";
+export const TRAINING_SENTENCE_COLOR: Record<TrainingSentenceKind, string> = {
+  observed: TRAINING_TRACE_COLOR,
+  closedLoop: TRAINING_EXECUTOR_COLOR,
+  base: "#d946ef",
+  postTrained: "#a3e635",
+  multi: "#b82e7a",
+};
 
 /** THE EXECUTOR FLOWN LIVE: the clicked word's segment, flown by the backend when it is clicked
  *  (`trainingAutopilot.ts`) — the flown path's teal would read as the exported one. Royal blue (2026-09-25): the dataviz

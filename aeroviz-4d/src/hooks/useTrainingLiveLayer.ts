@@ -96,8 +96,7 @@ function flyOut(viewer: Cesium.Viewer, view: Ready) {
     aircraft.position = new Cesium.ConstantPositionProperty(positions[last]);
     aircraft.orientation = new Cesium.ConstantProperty(orientationAt({ index: last, fraction: 0 }));
     aircraft.label!.text = new Cesium.ConstantProperty(autopilotAircraftLabel(track, last, speedup));
-    group.add(groundLine(TRAINING_ENTITY.autopilotGround, "The autopilot's ground trace", planDegrees(track), 2,
-      new Cesium.PolylineDashMaterialProperty({ color: colour(hue, 0.6) })));
+    group.add(groundLine(TRAINING_ENTITY.autopilotGround, "The autopilot's ground trace", planDegrees(track), hue, true));
   };
   const remaining = playedAt + (flownS / speedup) * 1000 - Date.now();
   const timer = remaining > 0 ? window.setTimeout(land, remaining) : null;

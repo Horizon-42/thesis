@@ -12,7 +12,6 @@ import { useId } from "react";
 import {
   TRAINING_AUTOPILOT_COLOR,
   TRAINING_CORRECTION_COLOR,
-  TRAINING_EXECUTOR_COLOR,
   TRAINING_HEADING_BAND_COLOR,
   TRAINING_OUTSIDE_COLOR,
   TRAINING_TRACE_COLOR,
@@ -81,8 +80,8 @@ export default function ReadbackHeading({ m, onCursorChange, onColumnChange }: {
       <Line xs={observed.tS.map(m.xTime)} ys={observed.trackPlotDeg.map(yHeading)} stroke={TRAINING_TRACE_COLOR} width={1.4}
         className="training-readback-trace" title="the observed track" />
       {flown ? (
-        <Line xs={flown.tS.map(m.xTime)} ys={flown.trackPlotDeg.map(yHeading)} stroke={TRAINING_EXECUTOR_COLOR} width={1.6}
-          className="training-readback-executor" title="the flown path: the closed-loop sentence flown by the executor" />
+        <Line xs={flown.tS.map(m.xTime)} ys={flown.trackPlotDeg.map(yHeading)} stroke={m.flownColour} width={1.6}
+          className="training-readback-executor" title="the flown path: the sentence on screen flown by the executor" />
       ) : null}
       {m.column === "heading" && m.focusPoints(judged.tS).length >= 2 ? (
         <Line xs={m.focusPoints(judged.tS).map((i) => m.xTime(judged.tS[i]))}

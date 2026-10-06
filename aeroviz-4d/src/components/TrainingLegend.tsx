@@ -16,21 +16,25 @@ import {
   TRAINING_DECISION_FAIL_COLOR,
   TRAINING_DECISION_PASS_COLOR,
   TRAINING_ENVELOPE_ALPHA,
-  TRAINING_EXECUTOR_COLOR,
   TRAINING_HEADING_BAND_COLOR,
+  TRAINING_SENTENCE_COLOR,
+  type TrainingSentenceKind,
   TRAINING_OUTSIDE_COLOR,
   TRAINING_TRACE_COLOR,
   TRAINING_TUBE_COLOR,
   TRAINING_WORD_COLOR,
 } from "../utils/trainingWordColors";
 import { SwatchIcon, type Swatch } from "./training/chartKit";
+import { TRAINING_SENTENCE_KIND_TEXT } from "../data/trainingSentenceKind";
+import { GROUND_LINE_ALPHA } from "../scene/trainingEntities";
 import NotesToggle, { NotesList } from "./training/NotesToggle";
 
-export default function TrainingLegend({ layers, vocabulary, closed, corrections, autopilotColour }: {
+export default function TrainingLegend({ layers, vocabulary, flown, corrections, autopilotColour }: {
   layers: TrainingLayers;
   vocabulary: TrainingVocabulary;
-  /** A closed-loop sentence is read: the flown path and the DA point are drawn. */
-  closed: boolean;
+  /** The kind of the flown sentence read (its flown path and DA point are drawn, in its colour), or null: the labelled
+   *  sentence, not flown. */
+  flown: TrainingSentenceKind | null;
   /** The sentence read has correction words. */
   corrections: boolean;
   /** The colour the live executor's segment is drawn in (`autopilotColour`), or null when none is drawn. */
@@ -40,15 +44,16 @@ export default function TrainingLegend({ layers, vocabulary, closed, corrections
   const rows: Array<{ key: string; swatch: Swatch; text: string; title: string; shown: boolean }> = [
     { key: "track", swatch: { kind: "line", colour: TRAINING_TRACE_COLOR }, shown: true, text: "the observed track",
       title: "the observed track, and — faint on the ground — its ground trace" },
-    { key: "flown", swatch: { kind: "line", colour: TRAINING_EXECUTOR_COLOR }, shown: closed, text: "the flown path",
-      title: "teal: the closed-loop sentence flown by the executor from the first predicted step (dashed on the ground); the " +
+    { key: "flown", swatch: { kind: "line", colour: TRAINING_SENTENCE_COLOR[flown ?? "closedLoop"] }, shown: flown !== null,
+      text: "the flown path",
+      title: `${TRAINING_SENTENCE_KIND_TEXT[flown ?? "closedLoop"]}, from the first predicted step (dashed on the ground); the ` +
         "envelopes below judge it" },
-    { key: "da", swatch: { kind: "point", colour: TRAINING_DECISION_PASS_COLOR, ring: "#000000" }, shown: closed, text: "DA point",
+    { key: "da", swatch: { kind: "point", colour: TRAINING_DECISION_PASS_COLOR, ring: "#000000" }, shown: flown !== null, text: "DA point",
       title: "the decision-altitude check of the flown flight's threshold crossing: green passed, red " +
         `(${TRAINING_DECISION_FAIL_COLOR}) failed; its values are in the label and the sentence bar's chip` },
     { key: "correction", swatch: { kind: "point", colour: TRAINING_CORRECTION_COLOR, ring: "#000000" }, shown: corrections,
       text: "correction word", title: "where, on the flown path, a word the closed-loop reading added is said" },
-    { key: "heading", swatch: { kind: "line", colour: TRAINING_HEADING_BAND_COLOR }, shown: layers.headingBands,
+    { key: "heading", swatch: { kind: "line", colour: TRAINING_HEADING_BAND_COLOR, dash: "3 2", opacity: GROUND_LINE_ALPHA }, shown: layers.headingBands,
       text: "heading word: judged rows",
       title: `a heading word's judged rows, on the ground: from ${vocabulary.headingLeadS} s after it is said, where the track must ` +
         `stay within ±${vocabulary.headingToleranceDeg}° of it` },
@@ -60,7 +65,7 @@ export default function TrainingLegend({ layers, vocabulary, closed, corrections
       title: "yellow: the selected word — its envelope and the rows it is in force; the rest fades" },
     { key: "aircraft", swatch: { kind: "point", colour: TRAINING_TRACE_COLOR, ring: "#000000" }, shown: true,
       text: "the aircraft at the cursor",
-      title: "the aircraft model where the observed flight (and, in a closed-loop sentence, the flown path in teal) has it at the " +
+      title: "the aircraft model where the observed flight (and, for a flown sentence, its flown path in its kind's colour) has it at the " +
         "cursor, turned to its exported attitude: heading, the path angle as its pitch and its bank (wings level for a flight " +
         "the dynamics has no airframe for); the angle of attack is a reading through a clean-wing lift curve — high on a " +
         "flapped final — written under it, never drawn" },

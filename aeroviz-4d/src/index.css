@@ -956,38 +956,7 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   font-family: "SFMono-Regular", Menlo, Consolas, monospace;
 }
 
-/* The flown flight of the selected flight at Δ: outcome, threshold crossing and the DA check's values, a few lines. */
-.training-flown-block {
-  margin: 6px 0;
-  font-size: 11px;
-  line-height: 1.35;
-}
-
-.training-flown-block > div {
-  display: grid;
-  grid-template-columns: 74px minmax(0, 1fr);
-  gap: 6px;
-}
-
-.training-flown-block dt {
-  color: var(--text-muted, #94a3b8);
-}
-
-.training-flown-block > div:first-child dt {
-  grid-column: 1 / -1;
-  font-weight: 600;
-  color: inherit;
-}
-
-.training-flown-block > div:first-child {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.training-flown-block dd {
-  margin: 0;
-}
-
-/* The details page's table of every flight at every Δ. */
+/* The details page's tables. */
 .training-flown-table {
   border-collapse: collapse;
   font-size: 12px;
@@ -1210,15 +1179,6 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   font-weight: 600;
 }
 
-.training-details-subhead {
-  margin: 22px 0 8px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #7eb8f7;
-}
-
 .training-details-lede {
   max-width: 78ch;
   margin: 0 0 12px;
@@ -1231,19 +1191,8 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   color: #c8d8ec;
 }
 
-/* a model's or a switch's colour, beside its name */
-.training-details-main .training-model-swatch {
-  display: inline-block;
-  vertical-align: middle;
-  width: 16px;
-  height: 4px;
-  margin-right: 8px;
-  border-radius: 2px;
-}
-
-/* the readings of each switch, and every field of the vocabulary: a name column and its text */
-.training-details-main .training-notes-list,
-.training-details-main .training-vocabulary {
+/* the readings of each switch: a name column and its text */
+.training-details-main .training-notes-list {
   display: grid;
   grid-template-columns: minmax(140px, max-content) minmax(0, 1fr);
   gap: 0;
@@ -1253,13 +1202,11 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   line-height: 1.5;
 }
 
-.training-details-main .training-notes-list > div,
-.training-details-main .training-vocabulary > div {
+.training-details-main .training-notes-list > div {
   display: contents;
 }
 
-.training-details-main .training-notes-list dt,
-.training-details-main .training-vocabulary dt {
+.training-details-main .training-notes-list dt {
   display: block;
   padding: 7px 16px 7px 0;
   border-bottom: 1px solid #1c2640;
@@ -1267,8 +1214,7 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   white-space: nowrap;
 }
 
-.training-details-main .training-notes-list dd,
-.training-details-main .training-vocabulary dd {
+.training-details-main .training-notes-list dd {
   margin: 0;
   padding: 7px 0;
   border-bottom: 1px solid #1c2640;
@@ -1280,11 +1226,6 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
 
 .training-details-main .training-notes-list dt {
   color: #e0e6f0;
-}
-
-.training-details-main .training-vocabulary dd {
-  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
-  font-size: 12px;
 }
 
 /* ── The readouts' tables (on the details page) ── */
@@ -1439,7 +1380,6 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   pointer-events: none;
 }
 
-
 .training-sentence-legend {
   display: flex;
   flex-wrap: wrap;
@@ -1484,6 +1424,40 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   height: 7px;
   border-radius: 50%;
   flex: none;
+}
+
+/* a tab's sentence kind (frontend §3 item 11): a square swatch of its colour, beside the outcome's round dot */
+.training-source-tab-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 1px;
+  flex: none;
+}
+
+/* the models' statistics (frontend §3 item 3): a share over its count, the kind's swatch beside its name */
+.training-stats-table td {
+  text-align: right;
+  vertical-align: top;
+}
+
+.training-stats-share {
+  display: block;
+}
+
+.training-stats-count {
+  display: block;
+  font-size: 0.85em;
+  color: rgba(224, 230, 240, 0.55);
+}
+
+.training-stats-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border-radius: 2px;
+  vertical-align: -1px;
 }
 
 /* the set chooser's intent line (outline §6.2 item 1): one line, opening the details page */
@@ -4922,7 +4896,6 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   color: #e0f2fe;
 }
 
-
 /* Subject-aware evaluation block: title, context and Details button. */
 .evaluation-summary-head {
   display: flex;
@@ -4992,7 +4965,6 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   font-weight: 600;
   color: #e8f1ff;
 }
-
 
 .eval-report-card-label {
   font-size: 10px;
@@ -5445,7 +5417,6 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   color: #b9c7da;
   line-height: 1.6;
 }
-
 
 .procedure-details-nav-button,
 .procedure-details-link-button {

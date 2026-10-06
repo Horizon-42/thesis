@@ -12,7 +12,8 @@ import { extent, readbackModel } from "../training/readbackModel";
 import { parseTrainingAutopilot, type TrainingAutopilotSegment } from "../../data/trainingAutopilot";
 import { trainingReadingOf, type TrainingColumn } from "../../data/trainingSample";
 import type { TrainingLayers } from "../../context/AppContext";
-import { TRAINING_WORD_COLOR } from "../../utils/trainingWordColors";
+import { TRAINING_SENTENCE_COLOR, TRAINING_WORD_COLOR } from "../../utils/trainingWordColors";
+import { stageBSample, stageBSelection } from "../../data/__tests__/stageB";
 import { requestOf, stageAAnswers, stageASampleFile, stageASelection } from "../../data/__tests__/stageA";
 import { parseTrainingSample, TRAINING_SPLITS, trainingSelectionOf } from "../../data/trainingSample";
 
@@ -167,5 +168,22 @@ describe("TrainingReadbackWindow", () => {
   it("scales a chart over what it draws, padded, never zero-wide", () => {
     expect(extent([10, 20])).toEqual([9.2, 20.8]);
     expect(extent([5, 5])).toEqual([4, 6]);
+  });
+});
+
+describe("the flown line in its kind's colour (frontend §3 item 11, D159)", () => {
+  it("a sample of the base is magenta in every chart and in the swatch below; the closed loop teal", () => {
+    cleanup();
+    const b = stageBSample();
+    const sampled = stageBSelection(b, 0);
+    render(<TrainingReadbackWindow selection={sampled} reading={trainingReadingOf(sampled.flight, sampled.vocabulary.stepS, 4)}
+      layers={ALL} cursorS={100} onCursorChange={vi.fn()} column={null} onColumnChange={vi.fn()} onClose={vi.fn()} autopilot={null} />);
+    for (const name of ["Plan view", "Heading chart", "Altitude chart", "Speed chart"]) {
+      expect(chart(name).querySelector(`polyline[stroke="${TRAINING_SENTENCE_COLOR.base}"]`), name).not.toBeNull();
+      expect(chart(name).querySelector(`polyline[stroke="${TRAINING_SENTENCE_COLOR.closedLoop}"]`), name).toBeNull();
+    }
+    cleanup();
+    open(4);
+    expect(chart("Heading chart").querySelector(`polyline[stroke="${TRAINING_SENTENCE_COLOR.closedLoop}"]`)).not.toBeNull();
   });
 });

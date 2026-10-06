@@ -54,6 +54,7 @@ import { chooseTrainingTab, tabForKey, useTrainingTabs } from "../data/trainingT
 import { useTrainingSetIntent } from "../data/trainingSetIntent";
 import { trainingPriorOriginOf } from "../data/trainingPriorSample";
 import { lossesOf, otherOf, trainingWindowOriginOf } from "../data/trainingWindowSample";
+import { flownSentenceKind } from "../data/trainingSentenceKind";
 import { EXPERIMENT_SECTION, requestTrainingDetails } from "./training/PanelParts";
 import {
   TRAINING_AUTOPILOT_COLOR,
@@ -64,6 +65,7 @@ import {
   TRAINING_EXECUTOR_COLOR,
   TRAINING_OUTSIDE_COLOR,
   TRAINING_RAW_COLOR,
+  TRAINING_SENTENCE_COLOR,
   TRAINING_WORD_COLOR,
   trainingOutcomeColour,
 } from "../utils/trainingWordColors";
@@ -314,7 +316,8 @@ export default function TrainingSentenceBar() {
 
   return (
     <section className="training-sentence-bar" aria-label="Sentence bar" ref={bar}>
-      <TrainingLegend layers={trainingLayers} vocabulary={vocabulary} closed={closed !== null} corrections={corrections > 0}
+      <TrainingLegend layers={trainingLayers} vocabulary={vocabulary} flown={closed === null ? null : flownSentenceKind(flight)}
+        corrections={corrections > 0}
         autopilotColour={autopilot?.status === "ready" && autopilotHasLine(autopilot.segment) ? autopilotColour(autopilot.segment) : null} />
       <header className="training-sentence-head">
         <span className="training-source-tabs" role="group" aria-label="Which sentence is read"
@@ -329,6 +332,9 @@ export default function TrainingSentenceBar() {
           {(tabs?.tabs ?? []).map((tab) => (
             <button key={tab.id} type="button" className="training-source-tab" data-tab={tab.id} aria-pressed={tab.id === tabs?.chosen}
               tabIndex={tab.id === tabs?.chosen ? 0 : -1} title={tab.title} onClick={() => chooseTrainingTab(tab.id)}>
+              {tab.kind === null ? null : (
+                <span className="training-source-tab-swatch" style={{ background: TRAINING_SENTENCE_COLOR[tab.kind] }} aria-hidden="true" />
+              )}
               {tab.outcome === null ? null : (
                 <span className="training-source-tab-dot" style={{ background: trainingOutcomeColour(tab.outcome) }} aria-hidden="true" />
               )}

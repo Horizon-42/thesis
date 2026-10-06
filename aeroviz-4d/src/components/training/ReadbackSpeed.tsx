@@ -8,7 +8,6 @@
 
 import {
   TRAINING_CORRECTION_COLOR,
-  TRAINING_EXECUTOR_COLOR,
   TRAINING_OUTSIDE_COLOR,
   TRAINING_RAW_COLOR,
   TRAINING_SPEED_COLOR,
@@ -75,7 +74,7 @@ export default function ReadbackSpeed({ m, onCursorChange, onColumnChange }: {
       <Line xs={observed.tS.map(m.xTime)} ys={observed.groundSpeedMps.map(ySpeed)} stroke={TRAINING_TRACE_COLOR} width={1.4}
         className="training-readback-trace" title="the observed track" />
       {flown ? (
-        <Line xs={flown.tS.map(m.xTime)} ys={flown.groundSpeedMps.map(ySpeed)} stroke={TRAINING_EXECUTOR_COLOR} width={1.6}
+        <Line xs={flown.tS.map(m.xTime)} ys={flown.groundSpeedMps.map(ySpeed)} stroke={m.flownColour} width={1.6}
           className="training-readback-executor" title="the flown path's ground speed" />
       ) : null}
       {m.column === "speed" && m.focusPoints(judged.tS).length >= 2 ? (

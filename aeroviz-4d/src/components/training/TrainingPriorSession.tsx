@@ -8,7 +8,8 @@
  * generation, Sample 0, 1 … (`data/trainingTabs.ts`); the bar, the read-back window and the 3D layers draw it as stage A
  * draws a sentence (`trainingPriorFlightView`). The left panel has no second chooser.
  *
- * Its readouts, one line each: "This sentence" and "Sentences" open the DETAILS PAGE (modal) on Free generation; "At the
+ * Its readouts, one line each: "This sentence" and "Sentences" open the DETAILS PAGE (modal; two sections, frontend §3
+ * item 3, D159: the set and the experiment, the models' statistics) on the statistics; "At the
  * cursor" (the probability the prior gave "go-around", whether the procedure permitted one, on final or not, the words the
  * masks blocked) opens nothing — it follows the cursor, so it stays in the panel. Under the readouts, the cursor slider
  * (frontend §6.1) carries, on a sample's tab, the probability of "go-around" along the sentence. The procedure's limits and
@@ -35,19 +36,18 @@ import {
 } from "../../data/trainingPriorSample";
 import { readingRowAt, trainingReadingOf, type TrainingFlownEnd } from "../../data/trainingSample";
 import { firstStepMark, goAroundLine } from "../../data/trainingSlider";
-import { checkMark, TRAINING_OUTCOME_TAG, TRAINING_OUTCOME_TEXT } from "../../data/trainingText";
+import { checkMark, TRAINING_OUTCOME_TAG } from "../../data/trainingText";
 import { publishTrainingTabs, useTrainingTabs, type TrainingTab } from "../../data/trainingTabs";
 import { useTrainingSetIntent } from "../../data/trainingSetIntent";
 import { useTrainingSetResults } from "../../data/trainingSetResults";
-import { trainingOutcomeColour } from "../../utils/trainingWordColors";
 import CursorSlider from "./CursorSlider";
 import ProblemBox from "./ProblemBox";
 import TrainingDetails, { type TrainingDetailsSection } from "./TrainingDetails";
-import { DetailsLink, DrawBox, EXPERIMENT_SECTION, LayerSwitches, ReadoutLine, type DetailsPage } from "./PanelParts";
-import { ChoiceSection, FreeGenerationSection, resultSection, SpeedSection, TrainingSection, ValidationSection } from "./ResultSections";
+import { DetailsLink, DrawBox, EXPERIMENT_SECTION, LayerSwitches, ReadoutLine, STATISTICS_SECTION, type DetailsPage } from "./PanelParts";
+import StatisticsSection from "./StatisticsSection";
+import { stageBStatistics } from "../../data/trainingStatistics";
 import { ExperimentSection, ItemList, SetChooser } from "./SetParts";
 
-const FREE_GENERATION_SECTION = "free-generation";
 /** The tabs of a flight: its labelled sentence, its closed-loop sentence and each sample the prior said. */
 const LABELLED = "labelled";
 const CLOSED_LOOP = "closed-loop";
@@ -70,14 +70,14 @@ function flightTabs(sample: TrainingPriorSample, flight: TrainingPriorFlight): T
   const intervalS = sample.model.rowIntervalS;
   const closed = flight.head.closedLoop[String(sample.model.rowIntervalS)];
   return [
-    { id: LABELLED, label: "Labelled", outcome: null,
+    { id: LABELLED, label: "Labelled", outcome: null, kind: null,
       title: "The labeller's reading of the observed flight (open loop): its words on the 2 s rows; not flown" },
-    { id: CLOSED_LOOP, label: "Closed loop", outcome: closed.replay.outcome,
+    { id: CLOSED_LOOP, label: "Closed loop", outcome: closed.replay.outcome, kind: "closedLoop",
       title: `Stage A's closed-loop sentence of the flight at Δ = ${intervalS} s, flown by the executor — ` +
         ending(closed.replay.outcome, endS(flight, sample.model.rowIntervalS, closed.replay.endCycle), closed.replay.crossing?.decision ?? null, null) },
     ...flight.sentences.map((sentence) => ({
       // the tab says the sample's number alone; its tooltip says what it is (the user, 2026-10-06)
-      id: sampleTab(sentence.sample), label: `${sentence.sample}`, outcome: sentence.outcome,
+      id: sampleTab(sentence.sample), label: `${sentence.sample}`, outcome: sentence.outcome, kind: "base" as const,
       title: `A sentence the prior said (sample ${sentence.sample}, temperature ${sample.model.temperature}), flown by the executor — ` +
         ending(sentence.outcome, endS(flight, sample.model.rowIntervalS, sentence.endCycle), sentence.crossing?.decision ?? null, sentence.goArounds),
     })),
@@ -104,63 +104,6 @@ function AtTheCursor({ sample, flight, sentence }: {
   const summary = `row ${row}: go-around ${(probability[row] * 100).toFixed(1)} %, ${sentence.goAroundPermitted[row] ? "permitted" : "not permitted"}, ` +
     `${sentence.onFinal[row] ? "on final" : "not on final"} · blocked ${blocked}`;
   return <ReadoutLine name="At the cursor" summary={summary} />;
-}
-
-/** Every flight's sentences (the details page's Sentences): the closed-loop one and each sample, and the landed of each sample
- *  by stratum. */
-function SentencesTable({ sample }: { sample: TrainingPriorSample }) {
-  const intervalS = sample.model.rowIntervalS;
-  const samples = [...new Set(sample.flights.flatMap((flight) => flight.sentences.map((s) => s.sample)))].sort((a, b) => a - b);
-  const strata = [...new Set(sample.flights.map((flight) => flight.head.stratum))].sort();
-  const cell = (outcome: TrainingFlownEnd, text: string) => (
-    <td style={{ color: trainingOutcomeColour(outcome) }} title={TRAINING_OUTCOME_TEXT[outcome]}>{text}</td>
-  );
-  return (
-    <>
-      <table className="training-flown-table training-prior-table" aria-label="Every flight's sentences">
-        <thead>
-          <tr><th scope="col">flight</th><th scope="col">closed loop</th>{samples.map((s) => <th key={s} scope="col">sample {s}</th>)}</tr>
-        </thead>
-        <tbody>
-          {sample.flights.map((flight) => {
-            const closed = flight.head.closedLoop[String(intervalS)];
-            return (
-              <tr key={flight.head.flightKey}>
-                <th scope="row" title={flight.head.flightKey}>{flight.head.callsign} · {flight.head.stratum}</th>
-                {cell(closed.replay.outcome, ending(closed.replay.outcome, endS(flight, intervalS, closed.replay.endCycle), closed.replay.crossing?.decision ?? null, null))}
-                {samples.map((s) => {
-                  const said = flight.sentences.find((item) => item.sample === s);
-                  return said === undefined ? <td key={s}>–</td> : (
-                    <td key={s} style={{ color: trainingOutcomeColour(said.outcome) }} title={TRAINING_OUTCOME_TEXT[said.outcome]}>
-                      {ending(said.outcome, endS(flight, intervalS, said.endCycle), said.crossing?.decision ?? null, said.goArounds)}
-                    </td>
-                  );
-                })}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      <table className="training-flown-table" aria-label="Landed by sample and by stratum">
-        <thead><tr><th scope="col">landed</th>{strata.map((s) => <th key={s} scope="col">{s}</th>)}<th scope="col">all</th></tr></thead>
-        <tbody>
-          {samples.map((s) => {
-            const count = (flights: TrainingPriorFlight[]) => {
-              const said = flights.flatMap((flight) => flight.sentences.filter((item) => item.sample === s));
-              return `${said.filter((item) => item.outcome === "landed").length}/${said.length}`;
-            };
-            return (
-              <tr key={s}>
-                <th scope="row">sample {s}</th>
-                {strata.map((stratum) => <td key={stratum}>{count(sample.flights.filter((flight) => flight.head.stratum === stratum))}</td>)}
-                <td>{count(sample.flights)}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </>
-  );
 }
 
 export default function TrainingPriorSession({ airport, sets, details }: {
@@ -224,22 +167,18 @@ export default function TrainingPriorSession({ airport, sets, details }: {
   }, [sample, flight, said]);
 
 
-  // ── the details page: the experiment's results (outline §6.2 item 3, D134) ──
+  // ── the details page: the set and the models' statistics (frontend §3 item 3, D159) ──
   const results = useTrainingSetResults("B", airport, setId);
-  const b = results.status === "ready" && results.results.stage === "B" ? results.results : null;
+  const b = results.status === "ready" ? results.results : null;
   const absent = state.status === "invalid" ? `the set cannot be read: ${state.problem}` : "the set is loading";
   const sections: TrainingDetailsSection[] = [
     // the first section always has a body: the set's intent and provenance come from its index entry, not its sample
     entry === null ? { id: EXPERIMENT_SECTION, title: "The set and the experiment", body: <p className="training-details-lede">The index lists no set.</p> } : {
       id: EXPERIMENT_SECTION, title: "The set and the experiment",
       body: <ExperimentSection setId={entry.id} intent={intent} provenance={entry.source.readout} /> },
-    resultSection(FREE_GENERATION_SECTION, "Free generation", results, b === null ? null : b.freeGeneration,
-      (value, own) => <FreeGenerationSection {...value} own={own} />,
-      sample === null ? <p className="experiment-details-missing">{absent}</p> : <SentencesTable sample={sample} />),
-    resultSection("training", "Training", results, b === null ? null : b.training, (value) => <TrainingSection {...value} />),
-    resultSection("validation", "Validation", results, b === null ? null : b.validation, (value) => <ValidationSection {...value} />),
-    resultSection("speed", "Speed", results, b === null ? null : b.speed, (value) => <SpeedSection {...value} />),
-    resultSection("choice", "The choice", results, b === null ? null : b.choice, (value) => <ChoiceSection {...value} />),
+    sample === null ? { id: STATISTICS_SECTION, title: "The models' statistics", body: null, absent }
+      : { id: STATISTICS_SECTION, title: "The models' statistics",
+        body: <StatisticsSection table={stageBStatistics(sample, b)} results={results} /> },
   ];
 
   const choices = sets.map((item) => ({ id: item.id, count: `${item.flights} flights · ${item.sentences} sentences`, title: item.title,
@@ -265,13 +204,13 @@ export default function TrainingPriorSession({ airport, sets, details }: {
             }))} />
           {flight === null ? null : (
             <ul className="training-details-links" aria-label="Readouts">
-              <DetailsLink name="This sentence" onOpen={details.open(FREE_GENERATION_SECTION)} summary={
+              <DetailsLink name="This sentence" onOpen={details.open(STATISTICS_SECTION)} summary={
                 chosen === LABELLED ? "the labelled sentence (not flown)"
                   : said === null ? `closed loop: ${ending(flight.head.closedLoop[String(sample.model.rowIntervalS)].replay.outcome,
                     endS(flight, sample.model.rowIntervalS, flight.head.closedLoop[String(sample.model.rowIntervalS)].replay.endCycle),
                     flight.head.closedLoop[String(sample.model.rowIntervalS)].replay.crossing?.decision ?? null, null)}`
                     : `sample ${said.sample}: ${ending(said.outcome, endS(flight, sample.model.rowIntervalS, said.endCycle), said.crossing?.decision ?? null, said.goArounds)}`} />
-              <DetailsLink name="Sentences" onOpen={details.open(FREE_GENERATION_SECTION)} summary={
+              <DetailsLink name="Sentences" onOpen={details.open(STATISTICS_SECTION)} summary={
                 [...new Set(sample.flights.flatMap((item) => item.sentences.map((s) => s.sample)))].sort((a, b) => a - b).map((s) => {
                   const all = sample.flights.flatMap((item) => item.sentences.filter((x) => x.sample === s));
                   return `sample ${s}: ${all.filter((x) => x.outcome === "landed").length}/${all.length} landed`;

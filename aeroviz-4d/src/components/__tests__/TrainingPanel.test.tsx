@@ -4,7 +4,7 @@
  * flown flight's outcome and DA check in the dock.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 const { appState, setTrainingSelection, setTrainingIntervalS, setTrainingAutopilot, setTrainingLayer, fetchMock } = vi.hoisted(() => ({
   appState: {
@@ -149,13 +149,22 @@ describe("TrainingPanel", () => {
       expect(setTrainingLayer).toHaveBeenCalledWith("headingBands", false);
     });
 
-    it("opens the details page on the flown flights, with every flight at every Δ", async () => {
+    it("opens the details page on the models' statistics: two sections, a row for each Δ's closed loop", async () => {
       render(<TrainingPanel hidden={false} />);
       fireEvent.click(await screen.findByRole("button", { name: /Flown flights/ }));
       const dialog = screen.getByRole("dialog", { name: "Training details" });
-      expect(dialog.textContent).toContain("Δ 2 s");
-      expect(dialog.textContent).toContain("Δ 8 s");
-      expect(dialog.textContent).toContain("unstable at minimums · DA ✗ · 9 added");
+      expect(within(dialog).getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["The set and the experiment", "The models' statistics"]);
+      const table = within(dialog).getByRole("table", { name: "The models' statistics" });
+      const rows = within(table).getAllByRole("row").slice(2);
+      expect(rows.map((row) => within(row).getByRole("rowheader").textContent)).toEqual(
+        ["closed loop · Δ 2 s", "closed loop · Δ 4 s", "closed loop · Δ 8 s"]);
+      // this set: the flights' closed-loop outcomes at Δ 2 s; the formal readout: no answer here, so "—"
+      const flights = stageASample().flights;
+      const landed = flights.filter((flight) => flight.closedLoop["2"].replay.outcome === "landed").length;
+      const cells = within(rows[0]).getAllByRole("cell").map((cell) => cell.textContent);
+      expect(cells[0]).toBe(`${((landed / flights.length) * 100).toFixed(1)} %${landed}/${flights.length}`);
+      expect(cells[1]).toBe("—");                                                       // no go-around count in stage A
+      expect(cells.slice(3)).toEqual(["—", "—", "—"]);
     });
 
     it("keeps its session while hidden in another task: the panel hides, nothing is torn down", async () => {

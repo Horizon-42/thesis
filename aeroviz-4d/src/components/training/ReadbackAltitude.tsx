@@ -13,7 +13,6 @@ import {
   TRAINING_DECISION_FAIL_COLOR,
   TRAINING_DECISION_PASS_COLOR,
   TRAINING_DESIGNATED_COLOR,
-  TRAINING_EXECUTOR_COLOR,
   TRAINING_OUTSIDE_COLOR,
   TRAINING_TRACE_COLOR,
   TRAINING_TUBE_COLOR,
@@ -90,7 +89,7 @@ export default function ReadbackAltitude({ m, onCursorChange, onColumnChange }: 
       <Line xs={observed.tS.map(m.xTime)} ys={observed.altitudeMslM.map(yAltitude)} stroke={TRAINING_TRACE_COLOR} width={1.4}
         className="training-readback-trace" title="the observed track" />
       {flown ? (
-        <Line xs={flown.tS.map(m.xTime)} ys={flown.altitudeMslM.map(yAltitude)} stroke={TRAINING_EXECUTOR_COLOR} width={1.6}
+        <Line xs={flown.tS.map(m.xTime)} ys={flown.altitudeMslM.map(yAltitude)} stroke={m.flownColour} width={1.6}
           className="training-readback-executor" title="the flown path's altitude" />
       ) : null}
       {focusActive ? (

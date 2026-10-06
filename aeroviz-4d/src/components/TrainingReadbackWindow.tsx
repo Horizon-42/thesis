@@ -29,7 +29,6 @@ import {
   TRAINING_CORRECTION_COLOR,
   TRAINING_DECISION_FAIL_COLOR,
   TRAINING_DECISION_PASS_COLOR,
-  TRAINING_EXECUTOR_COLOR,
   TRAINING_HEADING_BAND_COLOR,
   TRAINING_OUTSIDE_COLOR,
   TRAINING_SPEED_COLOR,
@@ -46,6 +45,7 @@ import TrainingWindow from "./training/TrainingWindow";
 import { SwatchIcon, type Swatch } from "./training/chartKit";
 import NotesToggle, { NotesList } from "./training/NotesToggle";
 import { readbackModel, type ReadbackModel } from "./training/readbackModel";
+import { flownSentenceKind, TRAINING_SENTENCE_KIND_TEXT } from "../data/trainingSentenceKind";
 import ReadbackPlan from "./training/ReadbackPlan";
 import ReadbackHeading from "./training/ReadbackHeading";
 import ReadbackAltitude from "./training/ReadbackAltitude";
@@ -74,8 +74,8 @@ function footerSwatches(m: ReadbackModel): Array<{ key: string; swatch: Swatch; 
   return [
     { key: "trace", swatch: { kind: "line", colour: TRAINING_TRACE_COLOR }, text: "observed track",
       title: "the observed flight, on the 2 s rows of the data" },
-    ...(m.flown ? [{ key: "flown", swatch: { kind: "line", colour: TRAINING_EXECUTOR_COLOR } as Swatch, text: "flown path",
-      title: "the closed-loop sentence flown by the executor from the first predicted step; the envelopes judge it" }] : []),
+    ...(m.flown ? [{ key: "flown", swatch: { kind: "line", colour: m.flownColour } as Swatch, text: "flown path",
+      title: `${TRAINING_SENTENCE_KIND_TEXT[flownSentenceKind(m.flight)]}, from the first predicted step; the envelopes judge it` }] : []),
     { key: "heading", swatch: { kind: "area", colour: TRAINING_HEADING_BAND_COLOR, opacity: 0.3 }, text: "heading band",
       title: `a heading word's band: its target track ± ${vocabulary.headingToleranceDeg}° over the rows it is judged on, from ` +
         `${vocabulary.headingLeadS} s after it is said` },

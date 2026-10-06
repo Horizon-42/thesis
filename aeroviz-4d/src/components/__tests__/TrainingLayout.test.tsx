@@ -5,7 +5,7 @@
  * the dock (the sentence bar's notes); the session's tabs (stage C: Labelled and its rounds).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 const { appState, setTrainingSelection, setTrainingIntervalS, setTrainingAutopilot, setTrainingCursorS, fetchMock } = vi.hoisted(() => ({
   appState: {
@@ -100,7 +100,7 @@ describe("one layout for the three stages", () => {
     act(() => chooseTrainingTab("labelled"));
     await waitFor(() => expect(setTrainingIntervalS).toHaveBeenLastCalledWith(null));
     expect(screen.getByRole("button", { name: /^This round/ }).textContent).toContain("not flown");
-    expect(screen.getByRole("button", { name: /^The window/ }).textContent).toContain("B: the commanded aircraft's start moved");
+    expect(screen.getByTitle(/^The window/).textContent).toContain("B: the commanded aircraft's start moved");
     // the set's own line, and the header's ⓘ on "The set and the experiment"
     expect(await screen.findByRole("button", { name: /The fixture's windows/ })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Training details" }));
@@ -108,7 +108,7 @@ describe("one layout for the three stages", () => {
     expect(page.textContent).toContain("The windows");
     expect(page.textContent).toContain("What the post-training's rounds say in recorded traffic.");
     expect(page.textContent).toContain("post_training.md §6");
-    expect(screen.getByRole("tab", { name: /Rounds/ })).toBeTruthy();
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["The set and the experiment", "The models' statistics"]);
   });
 
   it("stage C: the cursor slider carries the window's first predicted step and, on a round's tab, its loss of separation", async () => {
@@ -129,14 +129,17 @@ describe("one layout for the three stages", () => {
     expect(document.querySelector('[data-mark="first-step"]')).not.toBeNull();
   });
 
-  it("a results section without fields says why, and still shows the set's own rounds", async () => {
+  it("a readout without fields says why, and the statistics still count the set's own rounds", async () => {
     serve(C_FILES, { [resultsUrl("C", "KXXX", WINDOW_SET_ID)]: resultsAnswer("Cmissing") });
     await openStage("window");
     fireEvent.click(await screen.findByRole("button", { name: "Training details" }));
-    fireEvent.click(await screen.findByRole("tab", { name: /Rounds/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: /The models' statistics/ }));
     const page = await screen.findByRole("dialog");
     await waitFor(() => expect(page.textContent).toContain("campaign.json does not exist"));
-    expect(screen.getByRole("table", { name: "Every window's rounds" })).toBeTruthy();
+    const table = screen.getByRole("table", { name: "The models' statistics" });
+    const [row] = within(table).getAllByRole("row").slice(2);
+    expect(within(row).getByRole("rowheader").textContent).toBe("start (base)");
+    expect(within(row).getAllByRole("cell").slice(5).map((cell) => cell.textContent)).toEqual(["—", "—", "—", "—", "—"]);
   });
 
   it("stage B: the ⓘ is never disabled; the claimed val set says its readout; a set without an intent says so by name", async () => {
@@ -153,8 +156,10 @@ describe("one layout for the three stages", () => {
     // the first section: the intent and one line of provenance (D134); the results: the base's validation, for this set only
     expect(page.textContent).toContain("made from fixture/readout_val");
     expect(page.textContent).not.toContain("What this view shows");
-    fireEvent.click(await screen.findByRole("tab", { name: /Validation/ }));
-    expect((await screen.findByRole("dialog")).textContent).toContain("1.0800 per step");
+    // the formal readout of the claimed val set's free generation, counted for its sentences (D109)
+    fireEvent.click(await screen.findByRole("tab", { name: /The models' statistics/ }));
+    const table = await screen.findByRole("table", { name: "The models' statistics" });
+    await waitFor(() => expect(within(within(table).getAllByRole("row")[3]).getAllByRole("cell")[3].textContent).toMatch(/\d+\/\d+$/));
   });
 
   it("the header's ⓘ opens a page where no session is on screen (stage B's index cannot be read), saying why", async () => {
@@ -172,9 +177,9 @@ describe("one layout for the three stages", () => {
     await waitFor(() => expect(lastPublished()?.flight.flightKey).toContain("~prior-0"));
     const opener = document.createElement("button");
     document.body.appendChild(opener);
-    act(() => requestTrainingDetails("speed", opener));
+    act(() => requestTrainingDetails("statistics", opener));
     const page = await screen.findByRole("dialog");
-    await waitFor(() => expect(page.textContent).toContain("flight rows a second"));
+    await waitFor(() => expect(within(page).getByRole("table", { name: "The models' statistics" })).toBeTruthy());
     expect(page.querySelector('[aria-label="The words at a row"]')).toBeNull();           // no row inspector (D134)
   });
 });
