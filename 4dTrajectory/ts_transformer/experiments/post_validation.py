@@ -17,7 +17,8 @@ opened; their selection counts are then checked against the base's identity (`re
 recount). The read is spent when ``readout.json`` (`CLAIM_SPENT_BY`, the last file written) is in the output; a second
 read — another round, another output, or the same one again — is refused by name. A run that stopped before its readout
 may be run again to the same output with the same options, its directory moved aside first if it made one (outline
-E8). THE CHECKS (§4 item 2) run first: the closed loop's (with the labeller's and the executor's, D69) and the edge
+E8). The campaign's recorded paths are read as this checkout reads them (`post_train.inputs_here`, D157: a campaign
+recorded in a worktree, read from another checkout). THE CHECKS (§4 item 2) run first: the closed loop's (with the labeller's and the executor's, D69) and the edge
 features' reference of the census (D104). From a clean checkout, once the campaign has done every round (the round is
 chosen on every round's selection readout, D7); a campaign that is a smoke has no formal read.
 ``--smoke`` (a tree with changes, a smoke campaign too) reads the select days instead and claims nothing, so the chain is
@@ -39,8 +40,8 @@ import torch
 
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
 from ts_transformer.experiments.post_train import (
-    CAMPAIGN_SCHEMA, done_rounds, open_context, readout_pool, round_model, selection_readout, selection_windows,
-    settings_of, split_data, window_record,
+    CAMPAIGN_SCHEMA, CLAIM_READER, done_rounds, inputs_here, open_context, readout_pool, round_model, selection_readout,
+    selection_windows, settings_of, split_data, window_record,
 )
 from ts_transformer.experiments.post_window_loop import checked_edges
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
@@ -51,8 +52,6 @@ from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 #: The format of the readout's files (``config.json``, ``readout.json``).
 VALIDATION_SCHEMA = "ts-post-validation-v1"
-#: The reader's name in the claim of the val read (prior D119).
-CLAIM_READER = "post_validation"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -88,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
     git = git_state()
     if git["dirty"] and not args.smoke:
         parser.error("a readout that is not a smoke needs a clean tree")
-    inputs = record["inputs"]
+    inputs = inputs_here(record["inputs"])         # the paths as this checkout reads them (D157)
     instructions, executor = Path(inputs["instructions"]), Path(inputs["executor"])
     _, opened, _ = require_conforming_closed_loop(instructions, executor)          # D69: the checks run here (D73)
     edges_reference = Path(inputs["windows"]) / "conformance" / "edges.npz"

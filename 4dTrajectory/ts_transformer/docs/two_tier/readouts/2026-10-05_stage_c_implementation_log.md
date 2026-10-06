@@ -899,6 +899,7 @@ the work, `dev-two-tier-v4-post` was fast-forwarded to `dev-two-tier` `63ca94e0`
 | Step | Commit | What |
 |---|---|---|
 | C14's code | `21547ad4` | See the list below |
+| P47 | `75fe9ff2` | The user's decision (2026-10-07) on reading P47: `open_campaign` refuses a raise of the rounds once the campaign holds `post_validation`'s claim of its val read, spent or not. A resume of the same count still opens. `CLAIM_READER` moves into `post_train`, because `post_validation` imports it. Tests: an unspent claim (`test_post_train`) and a real formal read (`test_post_validation`); both fail without the refusal. Review: no findings. C10's directory holds no claim, so the `--rounds 14` resume passes |
 
 **The code.**
 - `experiments/post_train.py` (`open_campaign`): a resume is accepted when its inputs equal the record's with the
