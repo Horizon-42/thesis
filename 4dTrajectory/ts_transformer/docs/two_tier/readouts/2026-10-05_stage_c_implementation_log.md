@@ -542,3 +542,147 @@ other aircraft labelled at once after a window or a round is chosen (the bar at 
 four Draw switches stay, no console error. It saw once a jump back to the first window after A → round 0 → start that
 two repeats did not show; the session file was changed (the cursor fix) while the check ran, and vite's reload of the
 module mounts the session anew on its first window — the likely cause.
+
+## 21 B13 followed (2026-10-06)
+
+| Step | Commit | What |
+|---|---|---|
+| Merge | `138b0ca0`, `ed76d6bd` | B13 (`142272f0`) and `dev-two-tier` |
+| B13 followed | `2933a66b` | PRIOR_INTERFACE: `holds_claim` (deleted by B13) replaced by `holds_written_claim`, with §7's `written_claim`, `spend_validation_claim`, `CLAIM_SPENT_BY` (each checked to exist). `prior.apart_from_exported` now refuses past the executor's bound or at another outcome or end cycle (D127), so the window export writes each round's track unrounded (`aeroviz-training-window-sample-v2`, the frontend mirror with it) and the window route passes the round's sentence; the traffic and window B's moved start stay rounded (drawn only). Reviewed, correct |
+
+Tests: Python 144 passed (the backend's window and prior segments, the architecture test, every `test_post_*`), vitest
+741 passed, tsc clean.
+
+The test stack follows: the smoke set exported again (v2, 0.9 MB for 10 windows, from 0.7 MB rounded), the test backend
+restarted on the new code; a live segment flown against it is the export's flight to 0.0 m over 126 rows (judged
+landed, 26 ms).
+
+**Reading, as a proposal.** P45: prior D127 is followed for windows (the window route uses stage B's check, which now
+refuses past the bound); the unrounded track makes a set's file larger (here 1.3×) — a formal set's size is to be read
+at its export.
+
+## 22 The specifications of the milestones done (moved verbatim from the design, 2026-10-06)
+
+Moved from `design/post_training.md` §8 when the design was cleared of the milestones done (Claude's check of stage C,
+2026-10-06). The design keeps C8, C10 and C12; its §7 gives the code and the import rules.
+
+**C0. Package and layout.**
+
+- A new package `post/`: the scene and its steps, the edge features, "established", the separation masks, the traffic
+  module, the reward, the branch groups and the loss. It reads `instructions/` and the names of prior §7; it does not
+  import `autopilot/`. The window loop, which joins the speaker, the start of a closed loop and the scene, is a module
+  shared by the runners of stage C (under `experiments/`, not a runner), as a runner joins a model to the executor; it
+  runs the commanded aircraft through the prior's step of a speaker's closed loop (prior §7 item 7, D106).
+  The separation judge stays in `inference/separation.py`.
+- The architecture test (`tests/test_architecture.py`, read by the names imported, as prior D69's test): `post/` imports
+  from `prior/` only the names of prior §7; the runners of stage C import from `autopilot/` only the names of
+  vocabulary §6, from `prior/` only those of prior §7, and from the module of prior §7 item 7 only its names given
+  there. After each merge of stage B, the test's list follows prior §7's "Code" column (B9's and B10's names).
+- The runners: `post_windows` (the windows and their census, C1), `post_train` (the rounds, C10), `post_readout` (a
+  window readout), `post_training_export` (C11). New code; the archived runners stay as they are.
+
+**C1. Windows and scenes** (§3; D29, D93, C32).
+
+- A window: one commanded flight with a closed-loop sentence at the chosen Δ (every such flight, inside the base's
+  selection or not, D76), and its scene: the stored signals of every other flight of the airport and the split, on the
+  scene's steps, from the commanded aircraft's row 0 to its end (D93).
+- The augmented windows A (one recorded flight of the same airport and split, from another time, inserted with its
+  record shifted in time) and D (the aircraft next ahead on the approach clock at the first predicted step, its record
+  shifted in time). The shifts: D103. A window that opens inside a loss of separation is left out of the draw (D113).
+- The census (`post_windows`, outline §5 rule 12): for each airport and split (train, select), the windows, the other
+  aircraft at the first predicted step, the share with a leader in the air on the same runway or a runway that counts
+  as one, and the windows near the cut between two operating days. Measured on all train days in a scratch directory
+  after C1; the user chose the count of each kind of window in a round on it (D100).
+- The recorded aircraft with a faulty observed track (vocabulary D111: the marks of `instructions/faults.py`), in the
+  census, for each airport and split (train, select): the windows with a marked recorded aircraft in the air; the
+  scene steps at which a recorded aircraft reads a faulty point (its row is one, or its 2 s motion reads one), and the
+  tokens of the traffic attention at those steps; and, with every aircraft on its record, the losses of separation
+  (the separation judge, reading VISUAL) of a pair in which one aircraft reads a faulty point at the event's step or in
+  the 2 Δ before it, against all losses. A recorded aircraft's jump can make a loss that did not occur (reward 0, D30)
+  and a token with a motion of hundreds of m/s. No criterion is applied: the user decides from the counts whether such
+  steps or windows need a rule (Claude's check of stage B, 2026-10-05).
+- Tests: a window never reads a test day (C32) or a flight of another split; its other aircraft at a step are exactly
+  the flights in the air then; a recorded aircraft's motion comes from its 2 s displacement (a change of its stored
+  track, ground speed or vertical rate changes nothing); its R is absent before its first predicted step; the steps are
+  on UTC multiples of Δ (vocabulary §6 item 7).
+
+**C2. Edge features** (§3, §4 item 1; D23, D31).
+
+- The features of §3 for every other aircraft at each step, at fixed SI scales; the conformance reference (fixed
+  scenes of the train days, seed 1337) written by the census beside its output (D104); the check run by every process
+  that computes them.
+- Tests: no feature uses a later row (a change of any row after the step changes nothing); D23 in a scene (a change of
+  one aircraft's runway word changes no input and no edge feature up to its first predicted step, bit for bit); a
+  permutation of the other aircraft permutes their features; an aircraft whose motion is unknown gives the flag and
+  zeros.
+
+**C3. Separation judge, "established" and the speed-word mask** (§3; D92).
+
+- `inference/separation.py` on v4: its inputs from vocabulary §6 item 4 (the position relative to a candidate) and
+  "established" of D92 (the region of prior §7 item 6, 20°; a recorded aircraft's G, D99); the reading VISUAL; the event of a
+  window: the first loss of separation for which the commanded aircraft answers.
+- The speed-word mask of §3, given to the speaker as a mask of a caller; its prediction to the threshold at the
+  executor's rate (vocabulary §6 item 1).
+- The regulation text that D92 reads ("established", the in-trail rule) cited to its paragraph, in
+  `docs/literature/arrival_separation/`.
+- Tests: "established" is a function of one row (a change of later rows changes nothing), the same for a commanded and
+  a recorded aircraft, false while G is true; the speed-word mask masks nothing outside its conditions and nothing when
+  every word falls short.
+
+**C4. The window loop** (§2 items 1–3; D29–D31, D91, D93, D105; prior D96, D106; vocabulary D97).
+
+- The commanded aircraft through the prior's step of a speaker's closed loop (prior §7 item 7, D106), which joins the
+  start of a closed loop (vocabulary §6 item 5; the most go-arounds 2, D91), the prior's one function of a loop's row
+  (prior §7 item 2) with the window's landings (D105) and the speaker with the random numbers of D94, the masks of a
+  caller (D91, the speed-word mask) and the traffic module's input; the scene step by step; the separation judge at each step; the end of the window (D93); the reward of D30, with the
+  present landing direction from the window's landings (D105). The motion of a recorded aircraft from prior §7 item 2
+  (D106): the mirror `post/motion.py` is deleted.
+- Tests: a window with no other aircraft says and flies what the prior's free generation says and flies for the same
+  flight with the same random numbers and the same bound: the same words and states, bit for bit in the same batch (D29; §2 item 1; §6.4); the
+  reward table of §2 item 2; the commanded aircraft's landing context never counts its own landing (D31) and counts an
+  inserted or moved aircraft's landing at its time in the window (D105); the loop reads no time limit (vocabulary
+  D90).
+
+**C5. The traffic attention** (§3; D98).
+
+- The module of §3 at each layer through prior §7 item 5, its input passed by the speaker (prior D96): the tokens of
+  D98, embedded once by one token network shared by the layers (D116); its own learning rate.
+- Tests: with the module added at its start, every output of the base is the same, bit for bit; with no other aircraft
+  its output is zero at any weights; a permutation of the other aircraft changes nothing.
+
+**C6. Branch training** (§2 item 9; D37, D94).
+
+- The two passes of D94: the random numbers of each window and each continuation from the seed, the round, the window,
+  the branch point and k; the second pass checked against the first; the copies of the loop, the speaker and the window
+  state at each branch point (vocabulary D97, prior D96); the continuations of one branch point of all windows as one
+  batch; the branch groups and their advantage after the branch point.
+- Tests: the test of D94 (D37 item 4); the executor in inference mode flies the states that it flies with gradients
+  (D37 item 6); a group whose rewards are all the same gives no sample; the advantage reaches only the words after its
+  branch point; a window whose second pass differs from its first is counted and gives no sample.
+
+**C7. The loss** (§2 item 5; D36, D76).
+
+- The clipped-ratio surrogate (ε = 0.2) on the log-probabilities of the words said, under the speaker's records of the
+  permitted words, with the traffic module's input (prior §7 item 4, D96); the pull to the base (0.04, the KL on the
+  sampled words; the base's log-probabilities under the same records); the data term (1) on single-aircraft samples of
+  the train days' closed-loop sentences in the selection `landed` (prior §7 item 4); the module's own learning rate;
+  one pass over the samples of a round; every counted row weighs the same (D115). The surrogate and the KL with dropout off, the data term with the base's
+  dropout (D107); the records of first sentences and continuations joined into one batch (prior §7 item 3, D106).
+- Tests: at the parameters that spoke the words, the ratio is 1 within the float tolerance of §6.4; a word that a record
+  blocks takes no probability; when the module gives zero, the data term equals the prior's teacher-forced loss on the
+  same batch (the same dropout state); a surrogate or KL asked of a model in training mode is refused (D107).
+
+**C9. Window B** (§2 item 4). After the moved start of vocabulary D97.
+
+- Moved starts through the start of a closed loop; the ranges of the turn, the height change and the speed change:
+  D123; windows B in the census of C1.
+- Tests: the prior reads the moved observed rows that the start gives back; D23 holds; a move of zero gives the window
+  without the move, bit for bit.
+
+**C11. The Training view of stage C (outline §6).** The last milestone of the stage. The window export (the archived
+`experiments/window_training_export.py`, R36, rewritten): windows of recorded traffic with the commanded aircraft
+flown on the words of the post-trained model and the other aircraft on their records; the separation judge's events;
+the outcome of each window; the rounds of the post-training side by side. The frontend's Training view shows the
+traffic window with the five columns of the commanded aircraft, and a click on a word flies its segment live with the
+executor of A23. New schema names; its own index beside the old one; the intent of each set; a test stack and the
+browser check (outline §6).
