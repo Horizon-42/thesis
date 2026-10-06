@@ -82,13 +82,14 @@ commits, the tests and the readings are in the implementation log.
 
 ### 0.4 Plan
 
-1. The corrections of Claude's check of stage C (2026-10-06), after the user decides them.
-2. C8, after B5's base and Claude's check of stage B.
-3. O13 and the user's criteria (D7); then C10 and the validation readout of its chosen round.
-4. C12.
-5. The window view (C11) and the window export change with the one layout of the three stages' Training views (outline
+1. O13 and the user's criteria (D7); then C10 and the validation readout of its chosen round.
+2. C12.
+3. The window view (C11) and the window export change with the one layout of the three stages' Training views (outline
    §6.2, D133–D135: the results page, the rounds' envelopes, one block of a flown sentence), built by stage B's
-   implementer on `dev-training-layout`; while it is built, stage C changes no file of outline §6.2 item 9.
+   implementer; while it is built, stage C changes no file of outline §6.2 item 9.
+
+Every milestone from now on is built on `dev-two-tier-v4`, in the worktree `.claude/worktrees/two-tier-v4` (outline §5
+rule 1); `dev-two-tier-v4-post` is merged into `dev-two-tier` and is deleted with its worktree.
 
 ---
 

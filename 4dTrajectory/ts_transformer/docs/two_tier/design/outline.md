@@ -24,8 +24,8 @@ repository root; `readouts/` is `docs/two_tier/readouts/`. The documents of the 
 |---|---|---|---|
 | `vocabulary.md` | The words, the labeller (open-loop and closed-loop reading), the executor, the judge; their Training view | A | A0–A43 done and merged into `dev-two-tier`; the formal artefact `v12_20261005` / `v17_20261005` and the Training view (`closed_loop_v12_20261005`) done, the superseded artefacts deleted; Claude's check of A32–A40 done; no milestone open; the replay of the val days waits for the user (vocabulary §0.4) |
 | `prior.md` | The prior: inputs, outputs, decoding and its masks, training, a new airport; its Training view | B | Closed (B0–B13 done, B7 on 2026-10-06): B5's campaign `prior_base_20261006` done (configuration C, variant `full`, the base and its one validation readout); B6's sets published (`prior_sets_20261006`); `dev-two-tier` = `dev-two-tier-v4` = `dev-two-tier-v4-prior` (the code at `d14a2f76`) |
-| `post_training.md` | The post-training in windows of traffic; the multi-aircraft work; its Training view | C | Built on `dev-two-tier-v4-post` (post-training §0.3, D95), merged into `dev-two-tier` (2026-10-06); C0–C7, C9 and C11 (the window view) done on synthetic artefacts; C8 and C10 built on synthetic artefacts, their formal runs wait; C12 left |
-| This outline | The principles, the shared rules, the plan; the rules of each stage's Training view and the one layout of the three views (§6) | — | The one layout (§6.2, D133–D135): built in part on `dev-training-layout`; the results page and the envelopes not built |
+| `post_training.md` | The post-training in windows of traffic; the multi-aircraft work; its Training view | C | Merged into `dev-two-tier` (2026-10-06); C0–C9 and C11 (the window view) done (C8 on B5's base); C10 and its validation readout built, the formal run waits for O13 and the user's criteria; C12 left. Further work on `dev-two-tier-v4` (§5 rule 1) |
+| This outline | The principles, the shared rules, the plan; the rules of each stage's Training view and the one layout of the three views (§6) | — | The one layout (§6.2, D133–D135): its first part built (stage B's `dev-training-layout`, to be merged into `dev-two-tier-v4`); the results page and the envelopes not built |
 
 How a stage is reviewed against its design (leaks, what each consumer may read, the procedure, a checklist for each
 stage) is in the review guide, `docs/two_tier/review_guide.md`; it is not a design document.
@@ -90,7 +90,7 @@ both, each with its part. A new decision or open item takes the next free number
 | D131 | Every review of a stage follows one standard, the same in every round (`review_guide.md` §3 step 6 and "Later rounds"): each finding gets a severity. S1 (a leak into an input, a target selection or a choice; a split violation; a second read of the validation days; a defect that changes a number the user reads, on real data, beyond its tolerance) is corrected before any formal run. S2 (a latent leak, a boundary that does not refuse, a decided rule with no test, an effect not measured and not bounded) is corrected before the formal run when the correction is cheap; else it is listed as an open item of the stage's design document (§0.2, an O number), with no milestone and no order. S3 (a corner case below 0.1 % of the windows or steps that moves no reported number beyond its tolerance, a difference within a stated bound, style) is listed in one line of the review and not reported again. A later round reads the changed code and the S1 channels only; a finding of an earlier round is not reported again. A scenario against common sense is no finding at all, whatever its correction costs: it is not reviewed, not listed and not corrected — for example the code changed while a run of it goes on, an input that no step of the pipeline makes, a file moved or edited by hand to defeat a rule, a second person working against the first. Why: four rounds of the review of stage B found no leak, and their later findings came from a deeper search of the same guard in each round, not from new defects; the deepest were guards against a code change during a campaign, which does not happen (the user: "we are not in a spy war") | Decided | User, 2026-10-06 |
 | D133 | The Training views of stages A, B and C share one layout (§6.2). The user decided: one layout with the switch between the stages kept; a set's intent read from `docs/experiments/intents.json` through the backend, with no export, set or index format changed; stage C's branch merged before the views change; stage B's implementer builds it, and for this work may change the view files of stages A and C and the backend's routes. Claude's design of the parts, on stage B's request: the left panel holds the set chooser with the set's own line of the intent registry, the item list with the same four columns, one-line readouts and the Draw switches, and no table; the sentence bar's tabs choose the sentence on screen in every stage (B: Labelled, Closed loop and the samples; C: Labelled and the rounds), and the bar's chips and notes follow the kind of that sentence; the details page in every stage, its first section the set and the experiment; what follows the cursor (B's probability of "go-around" at the cursor) stays in the left panel, since the details page is modal; shared parts, not copies. Why: B's and C's views chose the sentence in a table of the left panel, so that the bar's tab "Δ 4 s" meant the table's choice; B's details page was disabled and C's ⓘ opened nothing; no view showed a set's intent | Decided | User, 2026-10-06 (the layout, the intent's source, the order); the parts: Claude, on stage B's request |
 | D134 | The Training view's details page holds the results of the experiment that made the set (§6.2 items 3, 4): stage A — the labelling (train and select only), the executor's closed-loop replay at each Δ, the set's flown flights, the vocabulary; B — the free generation the set was made from, the training, the validation (the base's val set only), the choice; C — the rounds, the checks at the campaign's start, the window. The first section is the set and the experiment, with one line of provenance; "What this view shows" and the row inspector are removed. The backend reads the results (`GET /training/results`) from the files the set names under `4dTrajectory/outputs/` and answers named fields only; no answer holds a reading that the design keeps unshown (stage A's val block, the val counts of a run's identity), and B's validation only for the set of the claimed readout. It replaces the sections of D133. Why: the user found D133's page wrong: its sections (the intent and a list of paths, usage notes, the set's own 20 sentences counted, a row inspector that repeats the bar) were Claude's reading of the page before A23 as a place for long text; that page held the experiment's results | Decided | User, 2026-10-06 (the results, read through the backend, the removals); the sections and the route: stage B's proposal, with Claude's guards of the val days |
-| D135 | Every sentence on screen is drawn with the envelopes of its words (§6.2 items 6, 7), simpler than the instruction-v3 view: lateral, each heading word's judged rows on the ground with the rows outside its band in red; vertical, each altitude word's tube as a wall with its two edges; the speed bands in the charts only; no capture turn or corridor, and only the envelopes of the sentence on screen. The export computes them: one function of stage A's Training export (`flown_sentence`) gives the block of every flown sentence in every stage (the outcome, the crossing, the track unrounded, the attitude, the envelopes), and one writer of the Training files serves the three stages. The three sample formats get new names; stage A's and B's published sets are exported again with the same ids, and the old ones are deleted once the new view is merged and checked. Stage B's implementer builds it on `dev-training-layout` and may change stage A's and C's Training exports for it. The trained base is not affected: B's export opens it read-only and writes only under `aeroviz-4d/public/data`, the base's directory is read-only with its `SHA256SUMS`, and stage C opens the base itself and reads no Training set. Why: B's and C's exports wrote no envelopes, so their sentences were drawn without them, and three copies built the block of a flown sentence | Decided | User, 2026-10-06 |
+| D135 | Every sentence on screen is drawn with the envelopes of its words (§6.2 items 6, 7), simpler than the instruction-v3 view: lateral, each heading word's judged rows on the ground with the rows outside its band in red; vertical, each altitude word's tube as a wall with its two edges; the speed bands in the charts only; no capture turn or corridor, and only the envelopes of the sentence on screen. The export computes them: one function of stage A's Training export (`flown_sentence`) gives the block of every flown sentence in every stage (the outcome, the crossing, the track unrounded, the attitude, the envelopes), and one writer of the Training files serves the three stages. The three sample formats get new names; stage A's and B's published sets are exported again with the same ids, and the old ones are deleted once the new view is merged and checked. Stage B's implementer builds it on `dev-two-tier-v4` (§5 rule 1) and may change stage A's and C's Training exports for it. The trained base is not affected: B's export opens it read-only and writes only under `aeroviz-4d/public/data`, the base's directory is read-only with its `SHA256SUMS`, and stage C opens the base itself and reads no Training set. Why: B's and C's exports wrote no envelopes, so their sentences were drawn without them, and three copies built the block of a flown sentence | Decided | User, 2026-10-06 |
 
 **The identity rule (D21)** (the user, 2026-10-02 and 2026-10-03). An identity binds the format (what the words and the
 payloads mean) and the data rules (the sealed test days). Code is identified by what it does on fixed inputs (a
@@ -137,9 +137,9 @@ The next free numbers: D136, O15.
 4. Each stage ends with its own Training view (§6): the backend's live executor, the export and the frontend follow the
    stage, so that the user sees what the stage does in the frontend (the user, 2026-10-04). There is no separate
    frontend stage.
-5. The one layout of the three stages' Training views (§6.2, D133–D135): stage B's implementer, on `dev-training-layout`;
-   the results page, the envelopes and the shared parts of the exports, then the Training sets of stages A and B
-   exported again. While it is built, no other branch changes the files of §6.2 item 9.
+5. The one layout of the three stages' Training views (§6.2, D133–D135): stage B's implementer, on `dev-two-tier-v4`
+   (§5 rule 1); the results page, the envelopes and the shared parts of the exports, then the Training sets of stages A
+   and B exported again. While it is built, no other work changes the files of §6.2 item 9.
 6. The user merges (§5 rule 11).
 
 ---
@@ -149,17 +149,20 @@ The next free numbers: D136, O15.
 These rules hold at every stage. The plan of each stage is in its document; before a milestone, read the design
 sections that it names.
 
-1. The branches. Stage A is on `dev-two-tier-v4`, in the worktree `.claude/worktrees/two-tier-v4`, made from
-   `dev-two-tier`. Stage B is on `dev-two-tier-v4-prior`, in the worktree `.claude/worktrees/two-tier-v4-prior`, made
-   from `dev-two-tier-v4`. The merges go in one direction:
-   - before a milestone that a new design commit holds, the branch of the stage merges `dev-two-tier`;
-   - when stage A commits a part that a milestone of stage B reads, `dev-two-tier-v4-prior` merges `dev-two-tier-v4`;
-   - at the end of stage B (prior B7), `dev-two-tier-v4` merges `dev-two-tier-v4-prior`.
+1. The branches. The main parts of stages A, B and C are merged into `dev-two-tier` (2026-10-06). From then on, every
+   stage develops on one branch, `dev-two-tier-v4`, in the worktree `.claude/worktrees/two-tier-v4` (the user,
+   2026-10-06), so that a review reads one difference (`dev-two-tier...dev-two-tier-v4`):
+   - before its first commit, and before a milestone that a new design commit holds, the implementer brings
+     `dev-two-tier-v4` level with `dev-two-tier` (a fast-forward, or a merge of `dev-two-tier` when both moved);
+   - work begun on another branch (stage B's `dev-training-layout`) is merged into `dev-two-tier-v4` and goes on there;
+     a stage branch whose work is all in `dev-two-tier` (`dev-two-tier-v4-prior`, `dev-two-tier-v4-post`) is deleted with
+     its worktree;
+   - the user merges `dev-two-tier-v4` into `dev-two-tier` (rule 11).
 
-   Stage C is on `dev-two-tier-v4-post`, in the worktree `.claude/worktrees/two-tier-v4-post`, made from
-   `dev-two-tier-v4-prior` (D95). When stage B commits a part that a milestone of stage C reads (stage A's parts reach
-   stage C through stage B's merges), `dev-two-tier-v4-post` merges `dev-two-tier-v4-prior`; after prior B7 it merges
-   `dev-two-tier-v4`; at the end of stage C (post-training C12), `dev-two-tier-v4` merges `dev-two-tier-v4-post`.
+   Two implementers can work in the one worktree at the same time. Each changes only the files of its own work, stages
+   them by explicit paths, reads `git diff --cached --stat` before each commit, and never commits a file of the other
+   (a file that both need goes to the user). A formal build or run starts from the main checkout after the user's
+   merge, as B5 did, never from the shared worktree.
 
    Stage B never changes the code of `instructions/` or `autopilot/`; stage C never changes the code of
    `instructions/`, `autopilot/` or `prior/`. A defect in them goes to their stage, through the user; the stage that
@@ -388,14 +391,15 @@ envelopes of their words, because their exports wrote none (D135).
    answer) and the intent answer (one campaign, none, more than one, none asked). The browser check of §6.1 item 6 in
    each stage: the tabs choose the sentence, the details page opens from every ⓘ and from the set's line, the results
    and the intent show, every flown sentence shows its heading bands and altitude tubes, a word flies live.
-9. **Who and where.** Stage B's implementer (the user, 2026-10-06), on the branch `dev-training-layout` from
-   `dev-two-tier`, in the worktree `.claude/worktrees/training-layout`. For this work only, it may change the view files
+9. **Who and where.** Stage B's implementer (the user, 2026-10-06), on `dev-two-tier-v4` in the worktree
+   `.claude/worktrees/two-tier-v4` (§5 rule 1), after its first part on `dev-training-layout` is merged there. For this
+   work only, it may change the view files
    of stages A and C, `ExperimentDetails.tsx`, the backend's routes, and the Training exports and their formats of
    stages A and C (`experiments/training_export.py`, `instructions/training_files.py`,
    `experiments/post_training_export.py`, `post/training_files.py`), and run the exports of item 7; §5 rule 1
    otherwise holds. Its log is a section of stage B's implementation log; a
-   reading where this section says nothing is a proposal in stage B's requests note. While it is built, no other
-   branch changes these files: `aeroviz-4d/src/components/Training*.tsx`, `aeroviz-4d/src/components/training/`,
+   reading where this section says nothing is a proposal in stage B's requests note. While it is built, no other work
+   changes these files: `aeroviz-4d/src/components/Training*.tsx`, `aeroviz-4d/src/components/training/`,
    `aeroviz-4d/src/data/training*.ts`, `aeroviz-4d/src/hooks/useTraining*.ts`, their tests,
    `aeroviz-4d/src/components/ExperimentDetails.tsx`, `aeroviz_backend/http_server.py`,
    `experiments/training_export.py`, `instructions/training_files.py`, `experiments/prior_training_export.py`,

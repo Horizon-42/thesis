@@ -10,7 +10,14 @@
 instructions/training_files.py、experiments/post_training_export.py、post/training_files.py），
 并用新格式重导 A 和 B 已发布的集合。
 
-1. 在 dev-training-layout 上先合并 dev-two-tier（含 D134、D135 的提交）。
+1. 换分支（用户 2026-10-06，outline §5 规则 1：以后各阶段都在 dev-two-tier-v4 上开发）：
+   - 在 .claude/worktrees/two-tier-v4 里把 dev-two-tier-v4 快进到 dev-two-tier（C 已合入；含 D134、D135）；
+   - 把 dev-training-layout 合进 dev-two-tier-v4，之后的工作都在这里做；
+   - 确认 dev-training-layout 的提交都在 dev-two-tier-v4 里之后，删掉 training-layout 工作树和 dev-training-layout 分支；
+     dev-two-tier-v4-prior 已全部在 dev-two-tier 里，也删掉它和 two-tier-v4-prior 工作树；
+   - 这个工作树 C 以后也会用：只改 outline §6.2 第 9 条的文件，用显式路径暂存，每次提交前看 git diff --cached --stat，
+     不提交别人的文件；
+   - 重导（第 6 步）是写 aeroviz-4d/public/data，不是正式训练，可以在这个工作树里跑。
 2. 详情页按 §6.2 第 3、4 条重做：
    - 第一节「The set and the experiment」：意图，加一行来源（集合来自哪个读数或战役的路径）；
      去掉「What this view shows」和 Row inspector。
@@ -46,5 +53,5 @@ instructions/training_files.py、experiments/post_training_export.py、post/trai
      结果和意图显示出来；每句飞过的句子都显示航向带和高度管；一个词能实时飞；
    - 报告地址和停止命令。
 8. 日志记在 B 的日志 §4。requests 文件重写：§3 第 1–4 条已进设计（outline §6.2、D134、D135）。
-   分支不合并，报告能否快进。
+   不合并进 dev-two-tier：报告 dev-two-tier-v4 能否快进，由用户合并。
 ```
