@@ -6,9 +6,12 @@ faulty observed track (vocabulary D111, `post.fault_census`); and,
 with the train split, the reference of the edge features (post-training §4 item 1), read again at once.
 
 The user chooses the count of each kind of window in a round from this census (§2 item 4); a window that opens inside
-a loss of separation is left out of the draw (the ``_kept`` counts, the user 2026-10-05). It writes nothing under
-`4dTrajectory/outputs/`: ``--out`` is a new directory (a scratch directory for the census of all train days).
-``--sample N``: N windows of each airport and split, drawn at random with seed 1337 (D55) — a smoke.
+a loss of separation is left out of the draw (the ``_kept`` counts, the user 2026-10-05). ``--out`` is a new
+directory: a scratch directory, or THE FORMAL CENSUS (D104, the user's order of 2026-10-06), whose edge reference every
+later process reads by its path — a directory of its own directly under `FORMAL_ROOT`
+(``4dTrajectory/outputs/POOLED/post/<id>``), of train and select, from a clean tree; anything else under
+`4dTrajectory/outputs/` is refused. ``--sample N``: N windows of each airport and split, drawn at random with seed 1337
+(D55) — a smoke, never formal.
 
 Only the index of the closed-loop sentences is read (which flights have one at Δ), never a sentence: no closed-loop
 check is needed (vocabulary §6 item 3). The validation days are never read (D85).
@@ -37,9 +40,13 @@ from ts_transformer.post.scene import (
 )
 from ts_transformer.post.traffic import loss_at_first_step, opens_inside_loss
 from ts_transformer.prior.procedure import airport_finals
+from ts_transformer.repo_layout import OPT_OUTPUTS_ROOT as OUTPUTS
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 CENSUS_SCHEMA = "post-windows-census-v1"
+#: Where a census may write under the outputs (`OUTPUTS`): the formal census, a directory of its own directly under
+#: `FORMAL_ROOT`.
+FORMAL_ROOT = OUTPUTS / "POOLED" / "post"
 #: The splits a census reads (D85: never val; the test days are sealed, C32).
 CENSUS_SPLITS = ("train", "select")
 #: The seed of a smoke's sample (D55).
@@ -103,7 +110,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--instructions", type=Path, required=True, help="the sentence artefact")
     parser.add_argument("--interval-s", type=float, required=True, help="Δ (vocabulary D11: the user chose 4 s)")
-    parser.add_argument("--out", type=Path, required=True, help="a new directory (not under 4dTrajectory/outputs/)")
+    parser.add_argument("--out", type=Path, required=True,
+                        help="a new directory: a scratch one, or the formal census's under 4dTrajectory/outputs/POOLED/post/")
     parser.add_argument("--splits", nargs="+", default=list(CENSUS_SPLITS), choices=CENSUS_SPLITS)
     parser.add_argument("--sample", type=int, default=None, help="SMOKE: N windows of each airport and split (D55)")
     parser.add_argument("--procedure-root", type=Path, default=DEFAULT_PROCEDURE_ROOT,
@@ -113,15 +121,20 @@ def main(argv: list[str] | None = None) -> int:
                                          for p in (args.instructions, args.out, args.procedure_root))
     if out.exists():
         parser.error(f"{out} exists; a census is written to a new directory")
-    if out.resolve().is_relative_to((REPO_ROOT / "4dTrajectory" / "outputs").resolve()):
-        parser.error("a census writes nothing under 4dTrajectory/outputs/ (outline §5 rules 7 and 12)")
+    git = git_state()
+    if out.resolve().is_relative_to(OUTPUTS.resolve()):
+        if out.resolve().parent != FORMAL_ROOT.resolve():
+            parser.error(f"under 4dTrajectory/outputs/ a census writes only the formal one, a directory directly under "
+                         f"{FORMAL_ROOT} (outline §5 rules 7 and 12, D104)")
+        if args.sample is not None or set(args.splits) != set(CENSUS_SPLITS) or git["dirty"]:
+            parser.error("the formal census reads every window of train and select (no --sample), from a clean tree")
     spec, geometries, days = load_spec(instructions), load_candidates(instructions), load_day_split(instructions)
     separations = {code: airport_separation(g) for code, g in geometries.items()}
     finals = {code: airport_finals(g, root=procedure_root) for code, g in geometries.items()}
     rng = np.random.default_rng(SAMPLE_SEED)
     record: dict = {"schema": CENSUS_SCHEMA, "written_utc": utc_now(), "instructions": str(instructions),
                     "spec_sha256": spec.sha256, "row_interval_s": args.interval_s, "sample": args.sample,
-                    "sample_seed": SAMPLE_SEED if args.sample else None, "git": git_state(),
+                    "sample_seed": SAMPLE_SEED if args.sample else None, "git": git,
                     "proposals": {"A_landing_shift_s": A_LANDING_SHIFT_S, "A_apart_s": A_APART_S,
                                   "D_shift_s": D_SHIFT_S, "B_turn_deg": B_TURN_DEG, "B_height_m": B_HEIGHT_M,
                                   "B_speed_scale": B_SPEED_SCALE}, "splits": {}}

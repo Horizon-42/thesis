@@ -202,6 +202,30 @@ def test_the_census_runner_writes_its_census_and_the_edge_reference(built, tmp_p
     with pytest.raises(SystemExit):
         post_windows.main(["--instructions", str(directory), "--interval-s", "4", "--out", str(forbidden)])
     assert not forbidden.exists()
+    # the formal census (D104): directly under the formal root (here a stand-in under tmp, reached through a link as a
+    # worktree reaches the outputs, and through its target), whole, from a clean tree
+    real = tmp_path / "real_outputs"
+    real.mkdir()
+    outputs = tmp_path / "outputs"
+    outputs.symlink_to(real)
+    monkeypatch.setattr(post_windows, "OUTPUTS", outputs)
+    monkeypatch.setattr(post_windows, "FORMAL_ROOT", outputs / "POOLED" / "post")
+    monkeypatch.setattr(post_windows, "git_state", lambda: {"head": "x", "dirty": False})
+    formal = ["--instructions", str(directory), "--interval-s", "4", "--out"]
+    for refused in ([str(outputs / "elsewhere" / "census")], [str(real / "elsewhere" / "census")],
+                    [str(outputs / "POOLED" / "post" / "a" / "b")],
+                    [str(outputs / "POOLED" / "post" / "c"), "--sample", "2"],
+                    [str(real / "POOLED" / "post" / "c"), "--sample", "2"],
+                    [str(outputs / "POOLED" / "post" / "c"), "--splits", "train"]):
+        with pytest.raises(SystemExit):
+            post_windows.main(formal + refused)
+    monkeypatch.setattr(post_windows, "git_state", lambda: {"head": "x", "dirty": True})
+    with pytest.raises(SystemExit):
+        post_windows.main(formal + [str(outputs / "POOLED" / "post" / "c")])
+    assert not any(real.iterdir())
+    monkeypatch.setattr(post_windows, "git_state", lambda: {"head": "x", "dirty": False})
+    assert post_windows.main(formal + [str(real / "POOLED" / "post" / "c")]) == 0
+    assert json.loads((outputs / "POOLED" / "post" / "c" / "census.json").read_text())["git"]["dirty"] is False
     with pytest.raises(SystemExit):
         post_windows.main(["--instructions", str(directory), "--interval-s", "4", "--out", str(tmp_path / "v"),
                            "--splits", "val"])
