@@ -85,7 +85,8 @@ Proposals (where the design says nothing): none open.
 1. Stage B is closed. Its implementer builds the one layout of the three stages' Training views (outline §6.2,
    D133–D135): the results page, the envelopes of the prior's sentences and the shared parts of the exports; B6's sets
    `prior_sets_20261006` are exported again in a new sample format, with the same ids (the base and the folds read only).
-2. The post-training (`post_training.md`) reads only §7 and B5's base (`prior_base_20261006`).
+2. B14 (outline D138), after vocabulary A44 and post-training C13, before stage C's next campaign.
+3. The post-training (`post_training.md`) reads only §7 and B5's base (`prior_base_20261006`).
 
 ---
 
@@ -397,7 +398,7 @@ its report gives the names that change, and Claude writes them here.
 |---|---|---|---|
 | 1 | The checkpoint | A trained prior in a format with its own name; its identity (§8); the set of procedure masks that it speaks under (§8 item 2); one function that opens a prior run: the checkpoint, the identity of its data and the check of its procedure masks (D106) | `prior/checkpoint.py` `load_checkpoint`, `CHECKPOINT_SCHEMA`; `prior/model.py` `Prior`; `prior/procedure.py` `PROCEDURE_MASKS`, `procedure_digests`; `prior/checkpoint.py` `open_prior`, `OpenedPrior` (the function that opens a prior run); the identity as a readout shows it and the one val read (D85, D118, D119, D128): `prior/checkpoint.py` `readable_identity`, `validation_claim`, `lock_val_read`, `claim_validation_read(prior_dir, reader, out, options)`, `settle_written_claim`, `spend_validation_claim`, `written_claim`, `holds_written_claim`, `CLAIM_SPENT_BY`; `prior/source.py` `require_selection_of` |
 | 2 | The inputs of a row | One function from the states on the data's 2 s rows (observed before the first predicted step, flown from it), the words said, the candidates and the landings before the step to the inputs of a row (§2). Training, free generation and a loop of several aircraft use the same function: for the sentences of the artefact; and in a loop, from each aircraft's states, its own landings (D105) and the speaker's words in force, the inputs of the next Δ row and the position that the masks read (D96). The landings: from the tracks roster, less the sealed test days (the index refuses them, D105), counted before a time without a given flight's own landing (D63). The motion of rows: the 2 s displacement, with the velocities east and north (D106) | `prior/inputs.py` `state_inputs`, `sentence_rows`, `own_flight_key`, `motion` (the motion of rows); `prior/loop.py` `LoopRows` (`select`; one `LandingIndex` for each aircraft; one first predicted step for the batch, an int); `prior/landings.py` `Landing`, `LandingIndex`; `prior/source.py` `airport_landings` |
-| 3 | The speaker | Says one row from the inputs of the row, column by column, with a cache from row to row; under the masks of §4, the masks of a caller included; draws each word with the caller's random numbers at a temperature (§4, D96, D121); refuses a row whose mark of the first predicted step is not the aircraft's own (no word in force), before it changes anything; gives the row's words to the caller's last step (`accept`: a closed loop's executor) before it keeps the row, so a row the caller refuses leaves the speaker as it was; passes the caller's input of the added modules to the model; records the permitted words of each row and column; gives a copy of chosen aircraft (D96); refuses a model with any module in training mode (D107). A loop reads, and does not change, the words in force, the go-arounds said and the number of candidates (D106) | `prior/speaker.py` `Speaker` (`observe(rows, positions, extra)`, `speak(row, at, numbers, caller, extra, accept)`, `permitted`, `copy`; `heard`, `in_force`, `go_arounds`, `n_candidates`: read only), `Position`, `Permitted` (`select`, `join`: the join of several records), `draw`, `go_around_bound`, `MOST_GO_AROUNDS` |
+| 3 | The speaker | Says one row from the inputs of the row, column by column, with a cache from row to row; under the masks of §4, the masks of a caller included; draws each word with the caller's random numbers at a temperature (§4, D96, D121); refuses a row whose mark of the first predicted step is not the aircraft's own (no word in force), before it changes anything; gives the row's words to the caller's last step (`accept`: a closed loop's executor) before it keeps the row, so a row the caller refuses leaves the speaker as it was; passes the caller's input of the added modules to the model; records the permitted words of each row and column; gives a copy of chosen aircraft (D96); refuses a model with any module in training mode (D107). A loop reads, and does not change, the words in force, the go-arounds said and the number of candidates (D106) | `prior/speaker.py` `Speaker` (`observe(rows, positions, extra)`, `speak(row, at, numbers, caller, extra, accept)`, `permitted`, `copy`; the procedure masks' mode `masks`: `prior/procedure.py` `PER_AIRCRAFT`, `BATCH`, `MASK_MODES`, outline D138; the window loop takes `BATCH`; `heard`, `in_force`, `go_arounds`, `n_candidates`: read only), `Position`, `Permitted` (`select`, `join`: the join of several records), `draw`, `go_around_bound`, `MOST_GO_AROUNDS` |
 | 4 | The teacher-forced loss | The loss of each step and each column for a batch of sentences (§5); the sentences of a split under a selection rule (D75) as batches; the log-probability of given words under the speaker's records of the permitted words, with the input of the added modules, with gradients (D96), refused for a model with any module in training mode (D107); the rows of a sentence that a loop said, with its words as targets, as one batch (D106) | `prior/train.py` `batch_nll`, `masked_log_probability`; `prior/source.py` `ArtefactSource`; `prior/selection.py` `require_rule`, `kept(rule, outcome, faulty)`, `left_out`, `side`, `SIDES`, `REASONS`, `CELL` (a record's cells `kept`, `left_out_fault`, `left_out_outcome`; D111); `prior/batch.py` `collate`, `RowTensors`; the rows of a sentence a loop said: `SpeakingLoop.sentences` (item 7) |
 | 5 | A place in each layer | A module added at each layer whose output starts at zero leaves every output of the prior unchanged until it learns. Its input is what the caller gives the model and the speaker (item 3) | `prior/model.py` `Prior.add_at_each_layer` |
 | 6 | The region of a final | For each candidate, whether a position is inside the FAF and the LPV cone: the region of the procedure masks (D64) and of the rows "on the final" (D72) | `prior/procedure.py` `airport_finals`, `Final.inside` |
@@ -489,8 +490,9 @@ At `d14a2f76` (B13, the close of stage B). Paths relative to `4dTrajectory/ts_tr
 
 ## 12 Implementation plan: stage B
 
-**Rules.** On the branch `dev-two-tier-v4-prior` (outline §5 rule 1). Stage B changes no code of `instructions/` or
-`autopilot/` and no runner of stage A; it reads them only through the vocabulary's public interface (vocabulary §6).
+**Rules.** B0–B13 were built on `dev-two-tier-v4-prior`, changing no code of `instructions/` or `autopilot/` and no
+runner of stage A. From 2026-10-06 stage B's implementer builds the milestones of every stage on `dev-two-tier-v4`
+(outline §5 rule 1); the prior still reads the vocabulary only through its public interface (vocabulary §6).
 Tests use synthetic artefacts; a check on real data reads the formal artefact on the train and select days only (D85).
 The formal runs read `v12_20261005` / `v17_20261005` at Δ = 4 s. The rules of outline §5 apply.
 
@@ -510,5 +512,27 @@ The formal runs read `v12_20261005` / `v17_20261005` at Δ = 4 s. The rules of o
 | B13 | The corrections of Claude's check of B12 | D108, D127, D128 | Done |
 | B6 | The Training view of stage B | Outline §6, D109, D127 | Done |
 | B7 | The close of stage B | — | Done |
+| B14 | The procedure masks over the batch | Outline D138, D139 | Built and reviewed (`65adf480`); its real-data check first after C10 |
 
-Every milestone is done; their specifications are in `readouts/2026-10-05_stage_b_implementation_log.md` §3.
+The specifications of the milestones that are done are in `readouts/2026-10-05_stage_b_implementation_log.md` §3.
+
+**B14. The procedure masks over the batch** (outline D138), on `dev-two-tier-v4` (outline §5 rule 1), by stage B's
+implementer after vocabulary A44 and post-training C13, before stage C's next campaign.
+
+- `prior/procedure.py`: `ProcedureMasks` gets a mode. `per-aircraft` is today's code, unchanged, the readable reference.
+  `batch` computes `track`, `after_row` and `permitted` for all the aircraft at once: each aircraft's finals gathered
+  into arrays by its runway (threshold, course, region, edge, entry height, decision height), no loop over the aircraft.
+- The speaker takes the mode (`masks`: `PER_AIRCRAFT`, `BATCH`; `MASK_MODES`). Free generation, `model_speed` and stage
+  C's window loop use `BATCH`; `prior_behaviour` runs both; `prior_validation` and the speaker's default use
+  `PER_AIRCRAFT`. Before the batch mode is first used in a process, a check computes the masks of fixed rows in both
+  modes and refuses a difference by name: a grid about each final and a sweep down each course, so that a 0.2 m change
+  of a limit is found, 0.6–1.7 s an airport once a process (outline D139 (8); as vocabulary D73).
+- The real-data check below runs first after C10 ends, before any free generation, speed readout or campaign uses
+  `BATCH` on real data (Claude's review, finding 1).
+- Not changed: the grammar's column mask (`instructions/grammar.py`, already over the batch) and the loop over the runway
+  words in `Speaker._allowed`.
+- Tests: both modes equal on random rows of the synthetic artefact (inside, outside and at the edge of a region; with G;
+  joined and dipped); `prior_behaviour` compares both on its fixed inputs; one fold of B5 (KRDU) spoken again on the
+  select days with `batch`, in a scratch directory, gives its readout's sentences word for word.
+- Size: about 150 lines of `procedure.py`, 20 of the speaker, 120 of tests. Expected: most of the masks' share of a
+  speaking batch (about 19 %, outline D138), measured by `model_speed` (outline §6.2 item 10).

@@ -825,3 +825,18 @@ and asked for the change:
 | The GPU check | — | 64 windows, one round, on the GPU, 1 against 3 workers (twice, on the pool and on the executor code): the windows, the speaking record, the groups' bytes and the selection readout identical; the pass and the weights equal to float rounding (largest weight difference 9e-7; the loss equal to its last printed digit): the parent's own GPU history changes its kernels, as on any resume |
 | Merge | `e045d5c3` | `dev-two-tier` (docs) into the branch, `dev-two-tier` fast-forwarded to it |
 | Relaunch | — | From the worktree at `e045d5c3` (the user: the branch, since `dev-two-tier` may change), repository-relative paths, `OMP_NUM_THREADS=1`, `--speak-workers 3`, 13:27 local. `campaign.json` records its inputs under the worktree's path: the worktree stays until the campaign's export and validation readout are done. At the start: three workers at 75–80 % CPU each, 14 GB of host memory available, 0.25 GB of GPU each |
+
+**Round 0 and the workers (2026-10-06).** Round 0 ran 13:30–14:37 with three workers on `e045d5c3` (its
+`round.json` records `98a89871`, the head at its end: the fix below was committed in the worktree meanwhile; it
+releases cached memory only). The draw: 1,000 windows of each kind, 114 left out inside a loss (66 D, 45 A, 2 B,
+1 real), no shortfall; 63 batches. The first pass: 2,907 landed, 866 lost separation, 95 timeout, 60 unstable at
+minimums, 52 ground contact, 11 crossed too high, 5 crossed another runway, 4 crossed off the runway; 1,477 of 3,068
+groups informative (1.4 GB, deleted after the round). The pass: 391 updates, clipped share 2.3 %, pull term 0.012,
+data term 1.086. The selection readout's mean reward: KMSY 0.82, KRDU 0.75, KSJC 0.835, KSMF 0.785, KSTL 0.775. No
+criterion is applied (D7).
+
+| Step | Commit | What |
+|---|---|---|
+| The GPU cache | `ea2050ff` | With speakers on the GPU, the campaign's process releases the memory it cached in the last pass before each round's speaking (about 4.6 GB reserved after the pass; three workers speaking need about 3 GB: round 1 would have run out of memory). Review: no findings |
+| A supervisor | — | A detached script beside the campaign (the user's rule: five workers when the load is below 10): at round 0's checkpoint it resumed the campaign on the fixed code with five workers (load 2.9, 13 GB of host memory, other processes 0.5 GB of the GPU) |
+| Four workers | — | The GPU sampler showed round 0's pass at 7.0 of the GPU's 7.6 GB with three idle workers holding their contexts; five would very likely run round 1's pass out of memory. The five-worker process was stopped in its start checks and the campaign resumed at 14:41 with four (round 1 begun and moved aside as `round_1.aborted-…`); the supervisor reports only. The GPU, not the CPU, caps the workers at four on this card |
