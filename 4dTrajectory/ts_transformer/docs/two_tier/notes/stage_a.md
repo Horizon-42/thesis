@@ -14,5 +14,5 @@
 - 正式构建或正式运行，等用户合并后从主树启动，不在共用工作树里跑。
 - 由用户把 dev-two-tier-v4 合进 dev-two-tier。
 
-two-tier-v4-a32、two-tier-v4-a37 两个工作树留着（里面的 smoke_v4/data 是 A33、A34、A37、A38 报告引用的证据），删不删等用户。
+two-tier-v4-a32、two-tier-v4-a37 两个工作树和它们的分支已按用户的话删掉（2026-10-06，Claude 做的）。
 ```

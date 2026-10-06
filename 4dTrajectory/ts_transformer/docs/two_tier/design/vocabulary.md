@@ -114,7 +114,7 @@ The commits, dates, branches, test counts and measurements of every milestone ar
 | A43 (D73) | Done: `60bbc901` on `dev-two-tier-v4`, reviewed; merged into `dev-two-tier` with stage B's B12 (`645e4cf0`, 2026-10-05) |
 | The formal artefact | `instruction_language/v12_20261005`, `executor/v17_20261005` (A34; read-only, `SHA256SUMS`); its Training sets `closed_loop_v12_20261005`, 5 airports (A35). The superseded `v11_20261004`, `v16_20261004` and `closed_loop_v11_20261004` are deleted |
 | The replay of the val days | Not run; it waits for the user (outline D85) |
-| Worktrees `two-tier-v4-a32`, `two-tier-v4-a37` | Kept: their ignored scratch (`smoke_v4/data/a33`, `a34`, `a37`, `a38`) is the evidence of the A33, A34, A37 and A38 reports; the user decides |
+| Worktrees `two-tier-v4-a32`, `two-tier-v4-a37` | Deleted with their branches on 2026-10-06 (the user); their ignored scratch (`smoke_v4/data/a33`, `a34`, `a37`, `a38`), cited by the A33, A34, A37 and A38 reports, went with them |
 
 ### 0.4 Plan
 
@@ -124,7 +124,6 @@ No milestone of stage A is open (§12.1). What is left:
    block of a flown sentence becomes one function for every stage (`flown_sentence`, the track unrounded), and
    `closed_loop_v12_20261005` is exported again in a new sample format; built by stage B's implementer.
 2. The replay of the val days, the stage's one validation readout (outline D85), waits for the user.
-3. The worktrees `two-tier-v4-a32` and `two-tier-v4-a37`: the user decides.
 
 ---
 
