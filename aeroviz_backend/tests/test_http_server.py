@@ -17,6 +17,54 @@ class TestAeroVizBackendApp(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload, {"ok": True, "service": "aeroviz-backend"})
 
+    def test_a_sets_intent_is_its_one_campaign_and_none_or_several_are_named(self):
+        """Outline §6.2 item 4: the run's one campaign (its id, title, intent, design and the run's line), read from the file
+        at each request; no campaign, several, or no run asked: an error naming them. The answers are the frontend's
+        fixture (`aeroviz-4d/src/data/__tests__/fixtures/training_intent/answers.json`, its reader's tests read it;
+        ``AEROVIZ_WRITE_FIXTURES=1`` writes it), and the frontend's path is this route (a pinned mirror)."""
+        import json
+        import os
+        import re
+        import tempfile
+        from pathlib import Path
+
+        frontend = Path(__file__).resolve().parents[2] / "aeroviz-4d" / "src" / "data"
+        path_constant = re.search(r'export const TRAINING_SET_INTENT_PATH = "([^"]*)"',
+                                  (frontend / "trainingSetIntent.ts").read_text(encoding="utf-8"))
+        self.assertEqual(path_constant.group(1), "/experiments/intent")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "intents.json"
+            path.write_text(json.dumps({"campaigns": {
+                "one": {"title": "T", "intent": "I", "design": "D", "runs": {"set_a": "line a", "shared": "x"}},
+                "two": {"title": "T2", "intent": "I2", "design": "D2", "runs": {"shared": "y"}},
+                "question": {"title": "Q", "intent": "a question with no run of its own", "design": "D3"}}}), encoding="utf-8")
+            app = AeroVizBackendApp(simulation_backend=FakeSimulationBackend(),
+                                    optimization_backend=FakeOptimizationBackend(), experiment_intents=path)
+            answers = {name: app.handle_get(f"/experiments/intent?run={run}")
+                       for name, run in (("one", "set_a"), ("none", "nowhere"), ("several", "shared"))}
+            self.assertEqual(answers["one"], (200, {
+                "ok": True, "run": "set_a", "campaign": "one", "title": "T", "intent": "I", "design": "D", "line": "line a"}))
+            self.assertEqual((answers["none"][0], answers["none"][1]["campaigns"]), (404, []))
+            self.assertIn("nowhere is a run of no campaign", answers["none"][1]["error"])
+            self.assertEqual((answers["several"][0], answers["several"][1]["campaigns"]), (409, ["one", "two"]))
+            self.assertIn("2 campaigns (one, two)", answers["several"][1]["error"])
+            self.assertEqual(app.handle_get("/experiments/intent")[0], 400)
+            data = json.loads(path.read_text())
+            data["campaigns"]["three"] = {"title": "T3", "intent": "I3", "design": "D4", "runs": {"set_b": "line b"}}
+            path.write_text(json.dumps(data), encoding="utf-8")                # written since: answered at once
+            self.assertEqual(app.handle_get("/experiments/intent?run=set_b")[1]["campaign"], "three")
+        fixture = frontend / "__tests__" / "fixtures" / "training_intent" / "answers.json"
+        text = json.dumps({name: {"status": status, "body": body} for name, (status, body) in answers.items()}, indent=1) + "\n"
+        if os.environ.get("AEROVIZ_WRITE_FIXTURES") == "1":
+            fixture.parent.mkdir(parents=True, exist_ok=True)
+            fixture.write_text(text, encoding="utf-8")
+        self.assertEqual(fixture.read_text(encoding="utf-8"), text,
+                         f"{fixture} is not what the backend answers now: AEROVIZ_WRITE_FIXTURES=1 writes it again")
+        # the registry itself: a published set of stage B
+        app = AeroVizBackendApp(simulation_backend=FakeSimulationBackend(), optimization_backend=FakeOptimizationBackend())
+        status, payload = app.handle_get("/experiments/intent?run=prior_base_val_20261006")
+        self.assertEqual((status, payload["campaign"]), (200, "prior_sets_20261006"))
+
     def test_aircraft_endpoint_uses_simulation_namespace(self):
         app = AeroVizBackendApp(
             simulation_backend=FakeSimulationBackend(),

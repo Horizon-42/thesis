@@ -25,6 +25,27 @@ from aeroviz_backend.observed_trajectories import ObservedTrajectoryBackend
 from aeroviz_backend.simulation_backend import SimulationBackend, aircraft_catalog
 
 
+#: The experiments' intents, their one source (outline §6.2 item 4): read at each `GET /experiments/intent` request.
+EXPERIMENT_INTENTS = Path(__file__).resolve().parents[1] / "4dTrajectory" / "ts_transformer" / "docs" / "experiments" / "intents.json"
+
+
+def experiment_intent(intents: Path, run: str) -> tuple[int, dict[str, Any]]:
+    """The intent of the run (a Training set's id) ``run``: the one campaign of ``intents`` whose ``runs`` hold it — its id,
+    title, intent and design, and the run's own line. No campaign (404) or more than one (409: a run key is not unique in
+    the registry) is an error naming the run and the campaigns found. Reads the file at each call; writes nothing."""
+    campaigns = json.loads(intents.read_text(encoding="utf-8"))["campaigns"]
+    # a campaign without runs (a question with no run of its own) lists none
+    found = sorted(name for name, campaign in campaigns.items() if "runs" in campaign and run in campaign["runs"])
+    if len(found) != 1:
+        where = "no campaign" if not found else f"{len(found)} campaigns ({', '.join(found)})"
+        return (404 if not found else 409), {
+            "ok": False, "run": run, "campaigns": found,
+            "error": f"{run} is a run of {where} in {intents.name}: a set's intent is the one campaign that lists it"}
+    campaign = campaigns[found[0]]
+    return 200, {"ok": True, "run": run, "campaign": found[0], "title": campaign["title"], "intent": campaign["intent"],
+                 "design": campaign["design"], "line": campaign["runs"][run]}
+
+
 class AeroVizBackendApp:
     def __init__(
         self,
@@ -33,6 +54,7 @@ class AeroVizBackendApp:
         dynamics_comparison_backend: DynamicsComparisonBackend | None = None,
         observed_trajectory_backend: ObservedTrajectoryBackend | None = None,
         autopilot_segment_backend: Any = None,
+        experiment_intents: Path = EXPERIMENT_INTENTS,
     ) -> None:
         # The simulation endpoints run in-process (they are high-frequency and use
         # only casadi function evaluation, not the crash-prone NLP construction).
@@ -56,6 +78,7 @@ class AeroVizBackendApp:
         # (`warm_autopilot`); tests inject their own.
         self._autopilot_segment_backend = autopilot_segment_backend
         self._autopilot_segment_lock = threading.Lock()
+        self.experiment_intents = experiment_intents
 
     def autopilot_segment_backend(self) -> Any:
         with self._autopilot_segment_lock:
@@ -69,6 +92,12 @@ class AeroVizBackendApp:
         parsed = urlsplit(path)
         if parsed.path == "/health":
             return 200, {"ok": True, "service": "aeroviz-backend"}
+        if parsed.path == "/experiments/intent":         # a Training set's intent (outline §6.2 item 4)
+            try:
+                run = _query_value(parse_qs(parsed.query, keep_blank_values=True), "run", required=True)
+            except ValueError as exc:
+                return 400, {"ok": False, "error": str(exc)}
+            return experiment_intent(self.experiment_intents, run)
         if parsed.path == "/simulation/aircraft":
             return 200, aircraft_catalog()
         if parsed.path == "/dynamics-comparison/history":
