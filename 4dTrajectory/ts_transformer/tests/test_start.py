@@ -508,6 +508,120 @@ def test_a_moved_start_refuses_a_sentence_not_its_flights_and_a_wrong_move(tmp_p
             Move(**wrong)
 
 
+def _same_start(a, b, grid) -> None:
+    """Two starts (`start_moved`'s ``(loop, order, observed)``) give the same order, observed rows, physical context and
+    time limits, and fly ``grid`` (the stored sentence's rows) to the same states, bit for bit."""
+    (loop_a, order_a, observed_a), (loop_b, order_b, observed_b) = a, b
+    assert order_a == order_b and observed_a.keys() == observed_b.keys()
+    for i in observed_a:
+        assert np.array_equal(observed_a[i], observed_b[i])
+    for f in fields(FlightInputs):
+        assert torch.equal(getattr(loop_a.executor.inputs, f.name), getattr(loop_b.executor.inputs, f.name)), f.name
+    assert torch.equal(loop_a.executor.time_limit_s, loop_b.executor.time_limit_s)
+    for row in grid:
+        rows_a, done_a = loop_a.step(row[None, :])
+        rows_b, done_b = loop_b.step(row[None, :])
+        assert np.array_equal(rows_a, rows_b) and np.array_equal(done_a, done_b)
+
+
+def test_an_opened_start_gives_start_moveds_loop_order_and_observed_rows_bit_for_bit(tmp_path, monkeypatch):
+    """A44 (D138): `Start.moved` gives what the one-call form `start_moved` gives — no move and a moved start, and a
+    flight started again on the series it kept — bit for bit."""
+    from ts_transformer.autopilot.start import Start
+
+    from types import SimpleNamespace
+
+    directory, words, batch, stored, _ = _moved_artefact(tmp_path, monkeypatch)
+    # each flight's series a marker of its flight, and the start's context refused for a series not its flight's: a
+    # series kept under another key than the flight's place in the split is caught
+    monkeypatch.setattr(start_module, "rebuild_series",
+                        lambda d, flights: [SimpleNamespace(dataset_id=f.dataset_id) for f in flights])
+
+    def inputs(series, flights, anchors, airports, rule, device):
+        assert [s.dataset_id for s in series] == [f.dataset_id for f in flights]
+        return executor_inputs(flights[0], batch.geometries[0], anchors[0], rule=rule)
+
+    monkeypatch.setattr(start_module, "flight_inputs", inputs)
+    opened = Start(directory, "train", 4.0, tmp_path / "executor")
+    for move in (NO_MOVE, Move(turn_deg=10.0, speed_scale=1.04), NO_MOVE):     # a raise makes its words ungrammatical
+        _same_start(opened.moved({0: stored}, {0: move}, most_go_arounds=0, device=CPU),
+                    start_moved(directory, "train", 4.0, {0: stored}, tmp_path / "executor", {0: move},
+                                most_go_arounds=0, device=CPU),
+                    stored.rows.grid)
+    with pytest.raises(ValueError, match="a move for each flight"):
+        opened.moved({0: stored}, {}, most_go_arounds=0, device=CPU)
+
+
+def test_an_opened_starts_second_call_reads_no_file(tmp_path, monkeypatch):
+    """A44: a `Start` reads the artefact, the spec and the closed-loop file when it is opened and rebuilds a flight the
+    first time it is started; a second call opens no file and rebuilds nothing (the readers counted)."""
+    import builtins
+    import io
+
+    from ts_transformer.autopilot.start import Start
+
+    directory, _, _, stored, _ = _moved_artefact(tmp_path, monkeypatch)
+    rebuilt = []
+    rebuild = start_module.rebuild_series
+    monkeypatch.setattr(start_module, "rebuild_series", lambda d, flights: rebuilt.append(len(flights)) or rebuild(
+        d, flights))
+    opened = Start(directory, "train", 4.0, tmp_path / "executor")
+    first = opened.moved({0: stored}, {0: NO_MOVE}, most_go_arounds=0, device=CPU)
+    assert rebuilt == [1]
+    files = []
+    real_open = builtins.open
+
+    def counted(path, *args, **kwargs):
+        files.append(str(path))
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", counted)
+    monkeypatch.setattr(io, "open", counted)
+    again = opened.moved({0: stored}, {0: Move(turn_deg=5.0)}, most_go_arounds=0, device=CPU)
+    monkeypatch.setattr(builtins, "open", real_open)
+    monkeypatch.setattr(io, "open", real_open)
+    assert files == [] and rebuilt == [1]
+    assert again[1] == first[1]
+
+
+def _forked_start(opened, stored, out) -> None:
+    """In a forked process: one thread (a fork after the parent's CPU threads ran can hang them), the flight started on
+    the parent's opened `Start` and flown; its observed rows and flown states sent back."""
+    torch.set_num_threads(1)
+    loop, order, observed = opened.moved({0: stored}, {0: NO_MOVE}, most_go_arounds=0, device=CPU)
+    out.send((order, observed[0], [loop.step(row[None, :])[0] for row in stored.rows.grid]))
+    out.close()
+
+
+def test_a_start_opened_before_a_fork_serves_the_forked_process(tmp_path, monkeypatch):
+    """A44: a `Start` opened in the parent serves a forked child — the child starts and flies the flight as the parent's
+    one-call start does, bit for bit."""
+    import multiprocessing
+
+    from ts_transformer.autopilot.start import Start
+
+    directory, _, _, stored, _ = _moved_artefact(tmp_path, monkeypatch)
+    opened = Start(directory, "train", 4.0, tmp_path / "executor")
+    context = multiprocessing.get_context("fork")
+    receive, send = context.Pipe(duplex=False)
+    child = context.Process(target=_forked_start, args=(opened, stored, send), daemon=True)
+    child.start()
+    send.close()
+    try:
+        assert receive.poll(120), "the forked start sent nothing in 120 s"
+        order, observed, flown = receive.recv()
+        child.join(30)
+        assert child.exitcode == 0
+    finally:                                           # a hung child never holds the test (or its worker) open
+        child.kill()
+        child.join()
+    loop, here, rows = start_moved(directory, "train", 4.0, {0: stored}, tmp_path / "executor", {0: NO_MOVE},
+                                   most_go_arounds=0, device=CPU)
+    assert order == here and np.array_equal(observed, rows[0])
+    for row, states in zip(stored.rows.grid, flown, strict=True):
+        assert np.array_equal(loop.step(row[None, :])[0], states)
+
+
 def test_the_start_refuses_sentences_not_read_under_its_artefact_split_and_executor(tmp_path, monkeypatch):
     """The sentences are tied to what they were read under: the vocabulary, the executor parameters of the artefact's
     closed-loop file, the row interval, and the flight (its observed rows are its stored signals: a sentence of another
@@ -515,7 +629,10 @@ def test_the_start_refuses_sentences_not_read_under_its_artefact_split_and_execu
     directory, words, _, stored, _ = _artefact(tmp_path, monkeypatch, 4.0)
     with pytest.raises(ValueError, match="no sentence"):
         start(directory, "train", 4.0, {}, tmp_path / "executor", most_go_arounds=0, device=CPU)
-    with pytest.raises(ValueError, match="does not start at row 8 of 2 s"):
+    late = ClosedLoopSentence(rows=replace(stored.rows, start=stored.rows.start + 1), withheld=stored.withheld)
+    with pytest.raises(ValueError, match="does not start at row 4 of 4 s"):
+        start(directory, "train", 4.0, {0: late}, tmp_path / "executor", most_go_arounds=0, device=CPU)
+    with pytest.raises(FileNotFoundError):             # no closed-loop sentence of the split read at 2 s
         start(directory, "train", 2.0, {0: stored}, tmp_path / "executor", most_go_arounds=0, device=CPU)
     other_params = _executor(tmp_path / "other_params", directory, replace(_params(), timeout_factor=2.0),
                              words.spec.sha256)
