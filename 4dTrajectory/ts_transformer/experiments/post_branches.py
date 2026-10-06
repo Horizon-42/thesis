@@ -71,20 +71,22 @@ class Rules:
       go on from their first-sentence streams and are not asked);
     - ``reward(results)``: the window's reward from its aircraft's ends;
     - ``again(results)``: whether the window is spoken again;
-    - ``varied(window, loop, rows)``: the aircraft it varies (places among its commanded aircraft) and each one's branch
-      points (ticks of the window's grid), from the first pass's ``loop`` and the window's ``rows`` in it."""
+    - ``varied(window, loop, rows, results)``: the aircraft it varies (places among its commanded aircraft) and each
+      one's branch points (ticks of the window's grid), from the first pass's ``loop``, the window's ``rows`` in it and
+      their ends ``results``."""
 
     first: Callable[[int, int], np.random.Generator]
     continuation: Callable[[int, int, int, int, int], np.random.Generator]
     reward: Callable[[Sequence[WindowResult]], float]
     again: Callable[[Sequence[WindowResult]], bool]
-    varied: Callable[[Window, WindowLoop, Sequence[int]], list[tuple[int, list[int]]]]
+    varied: Callable[[Window, WindowLoop, Sequence[int], Sequence[WindowResult]], list[tuple[int, list[int]]]]
 
 
 def stage_c_rules(seed: int, round_: int, interval_s: float) -> Rules:
     """Stage C's rules (module docstring; D37, D94): one aircraft, its reward, spoken again below 1, its branch points from
     its first predicted step to its event."""
-    def varied(window: Window, loop: WindowLoop, rows: Sequence[int]) -> list[tuple[int, list[int]]]:
+    def varied(window: Window, loop: WindowLoop, rows: Sequence[int], results: Sequence[WindowResult]
+               ) -> list[tuple[int, list[int]]]:
         (b,) = rows
         return [(0, branch_points(loop.speaking.start, loop.end_step(b), interval_s))]
 
@@ -151,7 +153,7 @@ def branch_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop,
         return BranchRound(results, [], [], [])
     first_samples = first.samples(split)
     #: each window spoken again (its place in ``again``): its varied aircraft and their branch points (ticks)
-    varied = {k: rules.varied(windows[w], first, first.members[w]) for k, w in enumerate(again)}
+    varied = {k: rules.varied(windows[w], first, first.members[w], ends[w]) for k, w in enumerate(again)}
     second = window_loop(again)
     numbers = sources(second, again)
     while second.speaking.observing:

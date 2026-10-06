@@ -214,13 +214,17 @@ def test_a_callers_rule_of_who_answers_is_asked_with_the_windows_commanded_aircr
     answers nothing leaves every aircraft spoken."""
     s = setup
     _, loop_of = _multi(s)
-    asked = []
+    asked, held = [], []
 
     def nobody(window, step, loss, aircraft, commanded):
+        (loop,) = held
+        # the judged step: the row flown to (the loop's tick after its step), of this window
+        assert step == loop.speaking.t and window is loop.windows[0]
         asked.append((step, commanded, aircraft.keys[:commanded]))
         return ()
 
     loop = loop_of(_with_module(s["base"]), answering=nobody)
+    held.append(loop)
     loop.run(_numbers(len(JOINS)))
     assert asked and not loop.silent.any()
     keys = [r.key for r in loop.records]
@@ -331,7 +335,7 @@ def test_a_continuation_of_a_varied_aircraft_on_its_own_numbers_repeats_the_firs
         own.random((tick - JOINS[member] - start, len(COLUMNS)))     # past the rows it said before the tick
         return own
 
-    def varied(window, loop, rows):
+    def varied(window, loop, rows, results):
         return [(1, [JOINS[1] + start + 1])]                          # copy 1, one tick after its first predicted step
 
     finished = []
@@ -379,7 +383,7 @@ def test_a_varied_aircraft_on_new_numbers_gives_the_group_of_its_own_rows(setup)
     s = setup
     start = 4
     rules = _rules(lambda place, member, v, tick, k: np.random.default_rng([9, place, member, tick, k]),
-                   lambda window, loop, rows: [(0, [start + 1])])
+                   lambda window, loop, rows, results: [(0, [start + 1])])
     round_ = _round_of(s, _with_module(s["base"]), rules, continuations=3)
     (group,) = round_.groups
     assert group.varied == 0 and len(group.continuations) == 3
@@ -401,7 +405,7 @@ def test_the_check_of_the_second_pass_reads_an_aircraft_ended_before_the_point_a
     start = 4
     pairs = {}
 
-    def at_its_end(window, loop, rows):                              # the later aircraft, one row before its own end
+    def at_its_end(window, loop, rows, results):                              # the later aircraft, one row before its own end
         b = rows[1]
         pairs["points"] = [JOINS[1] + loop.end_step(b) - 1]
         return [(1, pairs["points"])]
@@ -423,5 +427,5 @@ def test_the_check_of_the_second_pass_reads_an_aircraft_ended_before_the_point_a
     assert len(late.first[0].states) < pairs["points"][0] * every + 1      # the anchor ended before the point
     assert late.spoken_again == [5] and late.differed == [] and len(late.groups) == 1
     first = run(_rules(lambda place, member, v, tick, k: np.random.default_rng([9, place, member, tick, k]),
-                       lambda window, loop, rows: [(1, [40 + start])]), (0, 40))
+                       lambda window, loop, rows, results: [(1, [40 + start])]), (0, 40))
     assert first.differed == []

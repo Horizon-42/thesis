@@ -7,7 +7,8 @@ import numpy as np
 import pytest
 
 from ts_transformer.instructions.artefact import load_candidates
-from ts_transformer.multi.census import PAIRS, classify, summary, window_count
+from ts_transformer.multi.census import summary, window_count
+from ts_transformer.multi.separation import PAIRS, classify
 from ts_transformer.multi.windows import COMPRESSED, REAL_KIND, Anchors, Drawn, compressed, left_out, opening_loss
 from ts_transformer.post.runways import airport_separation
 from ts_transformer.post.scene import airport_scenes, real_windows
@@ -219,7 +220,7 @@ def test_a_loss_that_only_a_recorded_aircraft_answers_for_is_charged_when_the_re
     """D145 on the baseline: a commanded aircraft placed just ahead of a recorded follower (the follower responsible,
     in trail) where their records are 120 s apart is counted ``records_kept`` (the loop charges it), never
     ``recorded_only``; on the records themselves no such loss is found."""
-    from ts_transformer.multi.census import Positions
+    from ts_transformer.multi.separation import Positions
 
     windows, separation, fin = built
     b, c = windows[1], windows[2]                                       # the window of b alone: c behind it, recorded
@@ -247,7 +248,7 @@ def test_a_loss_that_the_records_also_have_stays_recorded_only(built):
     ``records_kept``."""
     from dataclasses import replace
 
-    from ts_transformer.multi.census import Positions, on_records
+    from ts_transformer.multi.separation import Positions, on_records
     from ts_transformer.post.scene import INSERTED, INSERTED_SUFFIX, MovedScene
 
     windows, separation, fin = built

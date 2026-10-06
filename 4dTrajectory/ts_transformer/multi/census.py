@@ -26,7 +26,7 @@ of a set of windows by airport: no criterion (D7).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Mapping, Sequence
+from typing import Mapping, Sequence
 
 import numpy as np
 
@@ -35,25 +35,10 @@ from ts_transformer.instructions.artefact import ClosedLoopSentence
 from ts_transformer.instructions.grammar import apply
 from ts_transformer.instructions.labeller.interval import OBSERVATION_S
 from ts_transformer.instructions.words import Words
+from ts_transformer.multi.separation import PAIRS, Positions, classify, judged_step, losses_on_records, on_records
 from ts_transformer.multi.windows import Drawn, first_step_rows, left_out
-from ts_transformer.post.scene import AircraftAt, Window
-from ts_transformer.post.traffic import scene_aircraft, step_losses, traffic
+from ts_transformer.post.scene import Window
 from ts_transformer.prior.procedure import Final
-
-#: The pairs of a loss that holds a commanded aircraft (module docstring), in the order of the census.
-PAIRS = ("commanded_commanded", "commanded_answers", "records_kept", "recorded_only")
-
-
-@dataclass(frozen=True)
-class Positions:
-    """A caller's positions of a window's commanded aircraft (module docstring): ``at(member, time_s)`` → `AircraftAt`
-    fields of that aircraft at that step (`post.scene.Recorded.at_step`'s), or None when it is not in the air then;
-    ``end_s`` the last time any of them is; ``records``: whether they are the records themselves."""
-
-    at: Callable[[int, float], "tuple | None"]
-    end_s: float
-    records: bool
-
 
 @dataclass
 class WindowCount:
@@ -67,22 +52,6 @@ class WindowCount:
     #: by pair: the steps judged with a loss of that pair
     loss_steps: dict[str, int] = field(default_factory=lambda: {pair: 0 for pair in PAIRS})
     steps: int = 0
-
-
-def on_records(window: Window) -> Positions:
-    """The commanded aircraft on their records (moved, in a compressed window), never over their thresholds (module
-    docstring)."""
-    records = window.commanded_all
-    interval = window.scene.interval_s
-
-    def at(member: int, time_s: float):
-        record = records[member]
-        if not record.start_s <= time_s <= record.end_s:
-            return None
-        key, here, before, known, runway, category, _, go_around = record.at_step(time_s, interval)
-        return key, here, before, known, runway, category, False, go_around
-
-    return Positions(at, max(r.end_s for r in records), True)
 
 
 def closed_loop_positions(window: Window, sentences: Mapping[int, ClosedLoopSentence], words: Words) -> Positions:
@@ -116,22 +85,6 @@ def closed_loop_positions(window: Window, sentences: Mapping[int, ClosedLoopSent
     return Positions(at, end_s, False)
 
 
-def _step(window: Window, positions: Positions, step: int, separation: Separation, finals: Sequence[Final],
-          step_s: float):
-    """The judged set of ``window``'s step ``step`` (its commanded aircraft at ``positions`` first, its recorded ones),
-    the count of its commanded ones, and its losses; None when no commanded aircraft is in the air then."""
-    time_s = window.step_s(step)
-    present = [item for item in (positions.at(k, time_s) for k in range(len(window.commanded_all)))
-               if item is not None]
-    if not present:
-        return None
-    aircraft = scene_aircraft(AircraftAt.of(present), window.others_at(step))
-    if len(aircraft) < 2:
-        return aircraft, len(present), []
-    scene = traffic(aircraft, window.scene.geometry, separation, finals, step_s)
-    return aircraft, len(present), step_losses(scene, aircraft.last_step, separation)
-
-
 def window_losses(window: Window, positions: Positions, separation: Separation, finals: Sequence[Final], step_s: float,
                   count: WindowCount) -> None:
     """The losses of ``window``'s steps into ``count`` (module docstring), its commanded aircraft at ``positions``, to
@@ -139,9 +92,8 @@ def window_losses(window: Window, positions: Positions, separation: Separation, 
     interval = window.scene.interval_s
     first = int(first_step_rows(window)[0])
     last = int(round((positions.end_s - window.row0_s) / interval))
-    records = None if positions.records else on_records(window)
     for step in range(first, last + 1):
-        judged = _step(window, positions, step, separation, finals, step_s)
+        judged = judged_step(window, positions, step, separation, finals, step_s)
         if judged is None:
             continue
         aircraft, commanded, losses = judged
@@ -150,28 +102,15 @@ def window_losses(window: Window, positions: Positions, separation: Separation, 
         kept_on_records = None
         for loss in losses:
             pair = classify(loss.i, loss.j, loss.responsible, commanded)
-            if pair == "recorded_only" and records is not None:     # the same pair on the records, at that step
+            if pair == "recorded_only" and not positions.records:     # the same pair on the records, at that step
                 if kept_on_records is None:
-                    on = _step(window, records, step, separation, finals, step_s)
-                    kept_on_records = set() if on is None else {
-                        frozenset((on[0].keys[x.i], on[0].keys[x.j])) for x in on[2]}
+                    kept_on_records = losses_on_records(window, step, separation, finals, step_s)
                 if frozenset((aircraft.keys[loss.i], aircraft.keys[loss.j])) not in kept_on_records:
                     pair = "records_kept"
             if pair is not None:
                 found.add(pair)
         for pair in found:
             count.loss_steps[pair] += 1
-
-
-def classify(i: int, j: int, responsible: Sequence[int], commanded: int) -> str | None:
-    """The pair of a loss between aircraft ``i`` and ``j`` of a step (the first ``commanded`` commanded, module docstring),
-    None when it holds no commanded aircraft."""
-    held = [k < commanded for k in (i, j)]
-    if all(held):
-        return "commanded_commanded"
-    if not any(held):
-        return None
-    return "commanded_answers" if any(k < commanded for k in responsible) else "recorded_only"
 
 
 def window_count(drawn: Drawn, separation: Separation, finals: Sequence[Final], step_s: float,
