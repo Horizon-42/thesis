@@ -17,6 +17,10 @@ import {
 } from "../trainingEntities";
 import { sentenceColumnRuns, trainingReadingOf } from "../../data/trainingSample";
 import { stageASample } from "../../data/__tests__/stageA";
+import { stageBSample } from "../../data/__tests__/stageB";
+import { stageCSample } from "../../data/__tests__/stageC";
+import { trainingPriorFlightView } from "../../data/trainingPriorSample";
+import { trainingWindowFlightView } from "../../data/trainingWindowSample";
 
 const sample = stageASample();
 const [flight] = sample.flights;
@@ -71,5 +75,24 @@ describe("the selected word", () => {
     expect(stretch).toHaveLength(6 * 3);
     expect(trainingFocusStretch(reading.judged, reading.originS + 10, reading.originS + 10)).toEqual([]);
     expect(trainingFocusStretch(reading.judged, 1e6, 2e6)).toEqual([]);
+  });
+});
+
+describe("the envelopes of every stage's flown sentences (D135)", () => {
+  it("a sentence of stage B and a round of stage C get their heading bands and tubes in 3D, on their own flown track", () => {
+    const b = stageBSample();
+    const c = stageCSample();
+    const readings = [
+      trainingReadingOf(trainingPriorFlightView(b, b.flights[0], 0), b.vocabulary.stepS, b.model.rowIntervalS),
+      trainingReadingOf(trainingWindowFlightView(c, c.windows[0], c.windows[0].rounds[c.windows[0].rounds.length - 1].round),
+        c.vocabulary.stepS, c.model.rowIntervalS),
+    ];
+    for (const reading of readings) {
+      expect(reading.loop).toBe("closed");
+      expect(reading.envelopes!.heading.length).toBeGreaterThan(0);
+      expect(trainingEnvelopeEntities(reading)).toHaveLength(reading.envelopes!.heading.length + reading.envelopes!.altitude.length);
+      const band = reading.envelopes!.heading.find((one) => one.stopRow > one.firstRow)!;
+      expect(trainingBandGround(reading.judged, band).length).toBeGreaterThan(0);              // its judged rows on the ground
+    }
   });
 });
