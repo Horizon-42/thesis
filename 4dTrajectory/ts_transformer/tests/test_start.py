@@ -582,6 +582,9 @@ def test_an_opened_starts_second_call_reads_no_file(tmp_path, monkeypatch):
     monkeypatch.setattr(io, "open", real_open)
     assert files == [] and rebuilt == [1]
     assert again[1] == first[1]
+    opened.release()                                       # C13: a caller bounds what it keeps
+    opened.moved({0: stored}, {0: NO_MOVE}, most_go_arounds=0, device=CPU)
+    assert rebuilt == [1, 1]
 
 
 def _forked_start(opened, stored, out) -> None:

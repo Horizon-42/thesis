@@ -17,6 +17,7 @@ from ts_transformer.experiments.post_train import (
     KINDS, Context, Settings, Speakers, batches, done_rounds, draw_round, open_campaign, run_campaign, speak_round,
     start_model, train_pass, update_pairs, window_record,
 )
+from ts_transformer.autopilot.start import Start, start_moved
 from ts_transformer.instructions.artefact import closed_loop_sentences
 from ts_transformer.post.scene import INSERTED, LEADER_MOVED, MOVED_START, NO_START_MOVE, REAL
 from ts_transformer.prior.source import ArtefactSource
@@ -34,6 +35,8 @@ def _settings(**changed):
 
 
 def _context(s):
+    """The campaign's context on the fixture's artefact: its train split read as the select days too (the artefact has
+    a train split only), with the split's opened `Start`."""
     code = s["geometry"].code
     train = {"windows": s["windows"], "sentences": closed_loop_sentences(s["directory"], "train", DELTA,
                                                                          s["words"].spec),
@@ -41,18 +44,11 @@ def _context(s):
     from ts_transformer.instructions.artefact import load_signals
 
     train["signals"] = {x.dataset_id: x for x in load_signals(s["directory"], "train")}
+    train["start"] = Start(s["directory"], "train", DELTA, s["directory"].parent / "executor")
     data = ArtefactSource(s["directory"], DELTA, "full", {code: s["roster"]}, "all").sentences("train", code)
     return Context(s["directory"], s["directory"].parent / "executor", s["reference"], CPU, s["words"], DELTA, s["base"],
                    {"base": "the fixture's"}, s["geometries"], {code: s["roster"]}, s["finals"],
                    {"train": train, "select": train}, data)
-
-
-@pytest.fixture
-def select_is_train(monkeypatch):
-    """The fixture's artefact has a train split only: the selection readout's start reads it as the select days."""
-    real = post_train.start_moved
-    monkeypatch.setattr(post_train, "start_moved", lambda instructions, split, *a, **k: real(instructions, "train",
-                                                                                             *a, **k))
 
 
 def test_the_context_holds_the_base_on_its_device(monkeypatch, tmp_path):
@@ -227,6 +223,128 @@ def test_each_speaker_speaks_with_the_round_s_model_and_a_dead_one_fails_the_rou
         speakers.close()
 
 
+class _OneCall:
+    """A split's start that starts every batch by the one-call form (`start_moved`): the reference of C13's `Start`."""
+
+    def __init__(self, directory, executor):
+        self.directory, self.executor = directory, executor
+
+    def moved(self, sentences, moves, *, most_go_arounds, device):
+        return start_moved(self.directory, "train", DELTA, sentences, self.executor, moves,
+                           most_go_arounds=most_go_arounds, device=device)
+
+
+def _same_ends(a, b):
+    assert len(a) == len(b)
+    for x, y in zip(a, b):
+        assert (x.index, x.kind, x.outcome, x.reward, x.go_arounds, x.speed_mask_rows, x.faulty_steps,
+                x.loss_reads_fault) == (y.index, y.kind, y.outcome, y.reward, y.go_arounds, y.speed_mask_rows,
+                                        y.faulty_steps, y.loss_reads_fault)
+        assert np.array_equal(x.words, y.words) and np.array_equal(x.states, y.states)
+
+
+def test_a_round_started_through_start_is_the_round_started_by_the_one_call_form(setup, tmp_path, monkeypatch):
+    """C13: the windows started through the split's opened `Start` speak the round the one-call `start_moved` speaks —
+    its record and its groups' bytes (the words, the rewards), and the readout's ends (the words, the rewards, the
+    states) — a short window (its own flight inserted 8 s ahead, `_ahead`), the second pass on the series the start
+    kept; and window B's moved start is the one-call form's, started twice."""
+    from ts_transformer.experiments.post_train import B_HEIGHT_M, B_SPEED_SCALE, B_TURN_DEG
+    from ts_transformer.post.scene import moved_start_window
+
+    s = setup
+    context = _context(s)
+    reference = replace(context, splits={"train": {**context.splits["train"],
+                                                   "start": _OneCall(s["directory"], context.executor)}})
+    settings = _settings(continuations=2)
+    model, _ = start_model(context, settings)
+    real = s["windows"][0]
+    moved = moved_start_window(real, np.random.default_rng(3), turn_deg=B_TURN_DEG, height_m=B_HEIGHT_M,
+                               speed_scale=B_SPEED_SCALE)
+    windows = [_ahead(real)]                       # window B carries no other aircraft: its start compared below
+    here, there = tmp_path / "start", tmp_path / "one_call"
+    here.mkdir()
+    there.mkdir()
+    assert (speak_round(model, context, windows, settings, 0, here)
+            == speak_round(model, reference, windows, settings, 0, there))
+    assert sorted(p.name for p in here.iterdir()) == sorted(p.name for p in there.iterdir())
+    assert all((here / p.name).read_bytes() == p.read_bytes() for p in there.iterdir())
+    _same_ends(post_train.read_batch(model, context, windows, [0], settings, "train"),
+               post_train.read_batch(model, reference, windows, [0], settings, "train"))
+    assert moved.start_move != NO_START_MOVE
+    for _ in range(2):                                 # the second start on the series the first kept
+        a, b = (c.start_loop("train", [moved])([moved.signal_index]) for c in (context, reference))
+        assert a[1] == b[1] and all(np.array_equal(a[2][i], b[2][i]) for i in a[2])
+        assert all(torch.equal(getattr(a[0].executor.inputs, f), getattr(b[0].executor.inputs, f))
+                   for f in ("initial_state", "aero_params", "frame_params", "max_thrust_n"))
+        assert torch.equal(a[0].executor.time_limit_s, b[0].executor.time_limit_s)
+
+
+def test_the_selection_readout_through_two_workers_is_the_one_process_readout(setup, tmp_path, monkeypatch):
+    """C13: the readout's batches read by two speaking workers give the ends of the one-process readout, window for
+    window (the words, the rewards, the states), and the same sums; a worker refuses readout windows not its own."""
+    s = setup
+    context = _context(s)
+    settings = _settings()
+    model, _ = start_model(context, settings)
+    with torch.no_grad():
+        for p in model.parameters():
+            p.add_(0.01)                                   # not the model at the start: the reading's model reaches them
+    (real,) = post_train.selection_windows(context, settings)
+    select = [_ahead(real)] * 2           # one short window twice (`_ahead`): two batches, each window its own numbers
+    monkeypatch.setattr(post_train, "selection_windows", lambda context, settings, split="select": select)
+    places = batches(select, settings.batch_windows)
+    assert places == [[0], [1]]
+    here = [post_train.read_batch(model, context, select, p, settings, "select") for p in places]
+    speakers = Speakers(context, settings, 2, CPU)
+    try:
+        there = speakers.read(model, select, places, "select")
+        for a, b in zip(here, there, strict=True):
+            _same_ends(a, b)
+        with torch.no_grad():
+            for p in model.parameters():
+                p.add_(-0.03)                              # a second reading's model: a worker keeping the first's fails
+        again = [post_train.read_batch(model, context, select, p, settings, "select") for p in places]
+        with pytest.raises(AssertionError):                # the second model says otherwise: the check can fail
+            _same_ends(here[0], again[0])
+        for a, b in zip(again, speakers.read(model, select, places, "select"), strict=True):
+            _same_ends(a, b)
+        assert (post_train.selection_readout(model, context, select, settings, speakers=speakers)
+                == post_train.selection_readout(model, context, select, settings))
+        wrong = [{**window_record(select[0]), "row0_s": real.row0_s + 4.0}]
+        with pytest.raises(ValueError, match="other readout windows"):
+            speakers.pool.submit(post_train._read, 99, str(tmp_path / "x.pt"), "select", [0], wrong).result()
+    finally:
+        speakers.close()
+
+
+def test_n_workers_are_refused_by_name_where_one_workers_measured_memory_does_not_fit(setup, monkeypatch):
+    """O15: one worker speaks the first batch of the round to come and its memory is measured (here on the CPU: the host
+    only); N workers fit when N times its peak is at most what is available plus what it holds already, and the pass
+    (on a GPU) when its growth and what the other workers hold fit in the free memory; refused by name otherwise."""
+    gib = 1 << 30
+    measured = {"host": {"peak": 2 * gib, "now": 1 * gib}, "gpu": {"peak": 1 * gib, "now": gib // 4}}
+    passed = {"peak": 3 * gib, "now": gib // 2, "groups": 4}
+    assert post_train.workers_fit(3, measured, passed, {"host": 5 * gib, "gpu": 3 * gib}) == []
+    short = post_train.workers_fit(3, measured, passed, {"host": 4 * gib, "gpu": 2 * gib})
+    assert [line.split(":")[0] for line in short] == ["host", "gpu", "gpu"]
+    assert "3 workers speaking need 6.0 GiB" in short[0] and "the pass beside 3 workers needs 3.0 GiB more" in short[2]
+    assert post_train.workers_fit(3, {**measured, "gpu": None}, None, {"host": 5 * gib, "gpu": None}) == []
+    s = setup
+    context = _context(s)
+    short_round(monkeypatch, s)                            # before the fork: the workers draw the short round too
+    speakers = Speakers(context, _settings(continuations=2), 2, CPU)
+    try:
+        settings = _settings(continuations=2)
+        measure = post_train.require_workers_fit(speakers, context, settings, 0)
+        assert measure["pass"] is None and measure["measured"]["gpu"] is None and measure["measured"]["windows"] >= 1
+        assert measure["measured"]["host"]["peak"] >= measure["measured"]["host"]["now"] > 0
+        monkeypatch.setattr(post_train, "available_memory", lambda device: {"host": 0, "gpu": None})
+        with pytest.raises(SystemExit, match=r"do not fit \(O15\): host: 2 workers speaking need"):
+            post_train.require_workers_fit(speakers, context, settings, 0)
+    finally:
+        speakers.close()
+
+
 def short_round(monkeypatch, s):
     """The round's windows replaced by one short window (its own flight inserted 8 s ahead: lost at its first row flown,
     one branch point), so a round flies only a few rows; the draw has its own test, the real window's whole flight
@@ -236,7 +354,7 @@ def short_round(monkeypatch, s):
     return window
 
 
-def test_a_campaign_round_end_to_end(setup, tmp_path, monkeypatch, select_is_train):
+def test_a_campaign_round_end_to_end(setup, tmp_path, monkeypatch):
     """One round through every step but the draw (`short_round`): the two passes, the pass, the selection readout (the
     real window of the select days), the record and the checkpoint with its identity."""
     s = setup
@@ -244,8 +362,12 @@ def test_a_campaign_round_end_to_end(setup, tmp_path, monkeypatch, select_is_tra
     settings = _settings(rounds=1, continuations=2)
     out = tmp_path / "campaign"
     open_campaign(out, {"settings": asdict(settings)}, {"head": "x", "dirty": False}, {})
+    released = []
+    real = Start.release
+    monkeypatch.setattr(Start, "release", lambda self: (released.append(self.split), real(self))[1])
     run_campaign(out, settings, _context(s))
     assert done_rounds(out) == 1
+    assert released == ["train"]                           # C13: the round's kept series released at its start
     record = json.loads((out / "round_0" / "round.json").read_text())
     assert [w["kind"] for w in record["windows"]] == [INSERTED] and record["speaking"]["spoken_again"] == 1
     assert record["speaking"]["groups"] == 1 and record["speaking"]["outcomes"] == {"lost_separation": 1}

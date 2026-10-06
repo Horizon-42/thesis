@@ -306,8 +306,9 @@ class Start:
     refusal of a closed-loop file not flown by it (`require_flown_by`), the candidates, the split's signals by their
     place in it, and the labelled sentences' lengths. `moved` starts flights with only their own work: each flight is
     rebuilt from the harvest the first time it is started (`flights.rebuild_series`, the arrival records read then) and
-    its series kept for the life of the object (about 34 KB a flight pickled on the artefact v12, so the train split's
-    44,703 flights at most about 1.5 GB), so a flight started again — the second pass of a window — reads no file. A
+    its series kept until `release` (about 34 KB a flight pickled on the artefact v12, so the train split's 44,703
+    flights at most about 1.5 GB; a caller bounds them by releasing them, post-training C13: a round's), so a flight
+    started again — the second pass of a window — reads no file. A
     flight's first start still reads its airport's arrival and tracks manifests (`rebuild_series`: about 1.7 s for 64
     flights of five airports on v12, against about 170 s for a speaking batch of 64 windows).
     Opened before a process forks, it serves the forked processes. `start_moved` and `start` open one and call it once:
@@ -322,6 +323,10 @@ class Start:
         labelled = load_sentences(instructions, split, self.words.spec, ("signal_index", "offsets"))
         self.lengths = dict(zip(labelled["signal_index"].tolist(), np.diff(labelled["offsets"]).tolist()))
         self.series: dict[int, FlightSeries] = {}     # each flight's rebuilt series, by its place in the split
+
+    def release(self) -> None:
+        """Forget the series kept: a flight started after it is rebuilt again (the same series)."""
+        self.series.clear()
 
     def moved(self, sentences: Mapping[int, ClosedLoopSentence], moves: Mapping[int, Move], *, most_go_arounds: int,
               device: torch.device) -> tuple[Loop, list[int], dict[int, np.ndarray]]:
