@@ -21,8 +21,8 @@ this stage reads as evidence only (§9), is `archive/two_tier_v3_2026_10/docs/mu
 archived design").
 
 **State of this document.** Written 2026-10-06 on the user's request, before any of it is built. Every decision in
-§0.1 is a proposal of Claude until the user decides it (state "Proposed"); the user decided D141 and D142 on
-2026-10-06. Nothing of stage D starts before stage C's
+§0.1 is a proposal of Claude until the user decides it (state "Proposed"); the user decided D141, D142 and D150
+on 2026-10-06. Nothing of stage D starts before stage C's
 campaign (C10) ends and its round is chosen.
 
 ---
@@ -47,7 +47,7 @@ the evidence is in §9.
 | D147 | **Landings in the loop.** A commanded aircraft's recorded landing is never counted by any aircraft of its window: it is the future of that aircraft. Its landing in the loop is counted from the time of its crossing by every other aircraft of the window, in their inputs (prior §7 item 2) and in the present landing direction of the reward (post-training §2 item 2). The landings of the recorded aircraft follow post-training D105. Why: the inputs give only what a controller knows before the step (principle 7); with one commanded aircraft this is post-training D31 and D105 | Proposed | Claude, 2026-10-06 |
 | D148 | **One row at a time for all aircraft.** At a Δ row, every commanded aircraft is spoken at once, from the state at the start of the row; no aircraft reads the words that another one says in the same row. The masks of a caller are computed once for the row from that state (post-training D110). The speed-word mask takes a commanded leader as it takes a recorded one: its speed target is its present speed along its course (post-training D117 P5). Why: the archived design ordered the aircraft of a step along the approach clock so that a later aircraft's mask read the earlier one's new words (§9.1); that needed an order, several passes of the speaker in each step and a rule for ties, for a mask that acted on 0.18 % of the labelled speed words | Proposed | Claude, 2026-10-06 |
 | D149 | **Stage D's code depends on stage C's code, through a public interface.** The post-training document gets a public interface (a new §9, items in §6.1 here); stage D imports from `post/` and from stage C's runners only its names. Where one commanded aircraft becomes several (the window, the window loop, the loss of separation, the two passes of a round, the campaign's steps), stage C's code is generalised, not copied. A generalisation keeps stage C's behaviour: with one commanded aircraft in each window, the same words, states, rewards and branch groups, bit for bit, on fixed inputs (the CPU, one thread), checked by a test before stage D uses it (as outline D138: the old form is the reference). Stage C's formal results stay valid | Proposed | Claude, 2026-10-06 |
-| D150 | **The interfaces that stage D needs from stages A and B** (§6.2): the aircraft of one closed loop each with its own first Δ row on one UTC grid (an aircraft joins a loop that is running), and landings added to a loop while it runs. Each is written in its stage's public interface (vocabulary §6, prior §7) before it is built; with every aircraft at the same first row and no landing added, the loop is today's loop, bit for bit (a test). Why: a window's commanded aircraft enter at different times, and today a loop has one first predicted step for the batch (`prior.loop.LoopRows`: "one first predicted step for the batch, an int"; `SpeakingLoop` refuses flights with different ones). The alternative, one loop for each entry row, stepped together, needs no new interface but speaks each row in as many small batches as there are entry rows (up to L / Δ, 150 at L = 10 min) | Proposed | Claude, 2026-10-06 |
+| D150 | **The aircraft of one closed loop join it at their own Δ rows, in one batch** (§6.3). A loop has a row clock (its ticks, one Δ each); each aircraft has a join tick j: before it the aircraft is absent (its rows not present, not spoken, not flown, its executor waiting), from it the aircraft's own row 0, then its observed rows to its own first predicted step, then its said rows. Built in stages A's and B's code (the start and `Loop`; `LoopRows`, the speaker, `SpeakingLoop`), each written first in its stage's public interface (vocabulary §6 item 5, prior §7 items 2, 3, 7). The prior's network does not change: its time attention already reads only present rows (`Past.present`) and time differences (RoPE on each aircraft's own seconds). With every join tick 0 the loop is today's loop, bit for bit (a test); free generation and stage C call it so. Also: a landing added to chosen aircraft's landings while the loop runs (D147). Why: the commanded aircraft of a window enter at different times; one loop for each entry row would speak a row in up to L / Δ small batches (150 at L = 10 min), each with its fixed cost in Python, and the speaking is bound by the CPU (outline D138) | Decided | User, 2026-10-06 (one batch with each aircraft's own first row, Claude's option 1); the design of §6.3: Claude |
 | D151 | **What the reward does not have.** No term for the time an aircraft takes (the judge's time limit bounds it; vocabulary §6 item 6); no shaping by the margin of separation; no payment for a go-around of its own; no probes (forced words). Why: each of them was built or measured in the archived design or in stage C and gave the model a target that is not the outcome (§2.5, §9) | Proposed | Claude, 2026-10-06 |
 
 ### 0.2 Open items
@@ -289,7 +289,7 @@ flies on the executor and has none.
 ### 3.3 Speaking for several aircraft
 
 - **One batch.** The commanded aircraft of all windows of a batch are one batch of the speaker (prior §7 item 3),
-  each with its own first Δ row (D150). The prior's forward pass, the masks over the batch (prior B14) and the
+  each joining at its own tick (D150, §6.3). The prior's forward pass, the masks over the batch (prior B14) and the
   executor's steps are those of stage C; an aircraft that has not joined is not spoken and not flown.
 - **Random numbers.** Each commanded aircraft has its own stream, from the seed, the round, the window's place in the
   round and the aircraft's place in the window; a copy of a window copies every stream (D142).
@@ -373,10 +373,61 @@ stage's checks.
 
 | # | Interface | The change | Its test |
 |---|---|---|---|
-| 1 | Vocabulary §6 item 5, the start of a closed loop and `Loop` | The flights of one loop each with its own first predicted step on one UTC grid: a flight joins a running loop at its own row (the executor already flies "a batch in which each aircraft starts at its own cycle", vocabulary §6 item 5) | Every flight at one first step: today's loop, bit for bit; a flight that joins later flies the states that it flies alone (`STATE_BOUND_M`) |
-| 2 | Prior §7 item 7, `SpeakingLoop`, and item 2, `LoopRows` | Each aircraft its own first Δ row (today one `start` for the batch); an aircraft before its row 0 is not encoded, not spoken and not flown | Every aircraft at one first row: today's loop, bit for bit; an aircraft that joins later says, with the same numbers, what it says alone, to the tolerance of post-training §6.4 |
-| 3 | Prior §7 item 2, the landings of a loop | A landing added to chosen aircraft's landings from a time, while the loop runs (`LandingIndex` today is fixed when the loop starts); copied with the loop | No landing added: today's inputs, bit for bit; a landing added at t changes only the counts of rows after t |
+| 1 | Vocabulary §6 item 5, the start of a closed loop and `Loop` | Each flight's join tick (§6.3 item 1) | Every join tick 0: today's loop, bit for bit; a flight that joins at tick j flies, with the same words, the states that it flies alone, within `STATE_BOUND_M` |
+| 2 | Prior §7 items 2, 3 and 7: `LoopRows`, the speaker, `SpeakingLoop` | Each aircraft's join tick; one row of the batch holds absent, observed and said aircraft (§6.3 items 2–4) | Every join tick 0: today's words, records and states, bit for bit; an aircraft that joins at tick j says, with the same numbers, what it says alone, to the tolerance of post-training §6.4 |
+| 3 | Prior §7 item 2, the landings of a loop | A landing added to chosen aircraft's landings while the loop runs; copied with the loop (§6.3 item 5) | No landing added: today's inputs, bit for bit; a landing added at a time changes only the counts of the rows after it |
 | 4 | Prior §7 item 3, the masks of a caller | A caller's mask in every column (D144's silent aircraft): to check that the speaker takes one in each column and that the grammar permits "unchanged" in every column after the first predicted step | A silent aircraft flies its words in force; its rows' log-probability under records is 0 |
+
+### 6.3 The design of D150: aircraft that join a loop
+
+One loop holds the commanded aircraft of every window of a batch. The loop counts **ticks**, one a Δ row, on the
+window's UTC grid (tick 0 at the earliest row 0 of the window; the windows of a batch are aligned by their own tick
+0, as stage C's are by their row 0). Each aircraft has a **join tick** j: its own row 0. At tick t an aircraft is
+
+- **absent** for t < j: nothing of it is encoded, said or flown;
+- **observed** for j ≤ t < j + s (s the Δ rows to the first predicted step, 4 at Δ = 4 s): its own row t − j is its
+  observed row, as the start gives it back;
+- **said** for t ≥ j + s, while it is flown: the speaker says its own row t − j and the executor flies it;
+- **done** after the executor is done with it or the caller ends it, as today.
+
+The parts, each in its own stage's code, each with the readable form kept as today's call with every join tick 0:
+
+1. **The start and `Loop`** (stage A). `Start.moved` takes each flight's join tick; `Loop` gives the executor the start
+   cycle of each flight (join tick + s) × the cycles of a Δ row: the executor's multi-aircraft batch, which already
+   holds a flight before its own cycle 0 and counts its time and its time limit from it (`Executor(start_cycle=…)`,
+   checked by the executor conformance in that way of flying). A flight that has not started is not heard: the grammar
+   and the bound of go-arounds read only started flights, as they read only flights not done or halted today; the
+   sentence time of each flight is its own. `Loop.copy` keeps the join ticks.
+2. **`LoopRows`** (stage B). Each aircraft's join tick in place of the one first predicted step of the batch: the
+   inputs of aircraft b at tick t are those of its own row t − j_b, at its own UTC time (its entry time and its first
+   row, as today); an absent aircraft's row is not present.
+3. **The speaker** (stage B). One row of the batch may hold absent, observed and said aircraft. A row is given with
+   each aircraft's role; the network runs once on the whole row; an absent aircraft's row is written into the cache as
+   not present (`Past.present` false, so no later row reads it: the attention already masks rows not present and always
+   lets a row read itself, so no row has every key masked); an observed one's as `observe` writes it; a said one's words
+   are drawn as `speak` draws them, with its numbers and masks, and only its records are kept. The mark of the first
+   predicted step is each aircraft's own (its first said row). `observe` and `speak` stay, as the forms of a row in
+   which every aircraft has the same role.
+4. **`SpeakingLoop`** (prior §7 item 7). `step` advances one tick for every aircraft (absent, observed or said by its
+   own clock); `observe` stays as today's phase for a loop whose join ticks are all 0. Each aircraft's records, words,
+   states and sentence (`sentences`, `said`, `states`, `generated`) are of its own rows from its row 0, as today, so
+   stage C's samples and the loss read them unchanged.
+5. **The landings of a loop** (stage B, `LoopRows` and `SpeakingLoop`). A landing (its flight, runway and time) added
+   to chosen aircraft's landings: each aircraft's `LandingIndex` replaced by one that holds it (the index keeps its
+   checks: time order, the sealed days, one landing a flight). The counts of a row read the landings before its time,
+   so a landing added at its crossing time changes only later rows. Copied with the loop.
+
+**What it costs.** An absent aircraft's row is computed by the network and thrown away (it is in the batch): the
+waste is the share of absent rows in a batch, at most L over the window's length. The masks, the inputs and the
+executor skip absent aircraft. The model's checkpoint, the base and C10's rounds are unchanged; free generation and
+stage C call the loop with every join tick 0.
+
+**Tests** (before stage D uses it): every join tick 0 gives today's words, records, states and outcomes, bit for bit
+(the CPU, one thread), for free generation and for stage C's window loop; an aircraft that joins at tick j, beside
+others that joined earlier, says with the same numbers the words it says alone and flies its states within
+`STATE_BOUND_M` (its probabilities to the tolerance of post-training §6.4); an absent aircraft is never read by
+another aircraft's row, never heard by the executor and never in a record; a copy of a loop with join ticks continued
+with the same numbers says what the original says.
 
 ---
 
