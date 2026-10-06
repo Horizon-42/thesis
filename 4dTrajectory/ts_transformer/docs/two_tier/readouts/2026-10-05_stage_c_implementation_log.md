@@ -25,6 +25,7 @@ Branch `dev-two-tier-v4-post`, worktree `.claude/worktrees/two-tier-v4-post`, ma
 | C6 | Waits for A38 (vocabulary D97: the copy of a loop) on this branch |
 | D105: the landings of a window's scene | Done, `00e81c88` (reviewed), after `dev-two-tier` `202b38d0` was merged (`65b4d782` merged as well); §10 |
 | C8–C12 | Wait for B5's base, Claude's check of stage B, the moved start (C9) and the user's criteria (D7) |
+| C14 (D157): C10 to 14 rounds | Code `21547ad4` (reviewed) on `dev-two-tier-v4-post`; rounds 10–13 wait for the user's merge and stage D's GPU and timing steps (§27) |
 
 ## 2 C0–C3 (2026-10-05)
 
@@ -889,3 +890,54 @@ under the worktree's path: the validation readout reads them, so the worktree is
 selection readout's noise (about one point) of the best — round 6 (landed 85.1 %, lost separation 11.3 %, mean reward
 0.842; the best is round 8 at 0.849). The validation readout is NOT run yet: the post-training may be extended; the
 worktree `two-tier-v4-post` is kept (its `campaign.json` paths) until the user decides.
+
+## 27 C14: a resume may raise the rounds (2026-10-06)
+
+The order is `notes/stage_c.md` of 2026-10-06 (late evening), and the design is post-training D157 and §8 C14. Before
+the work, `dev-two-tier-v4-post` was fast-forwarded to `dev-two-tier` `63ca94e0`.
+
+| Step | Commit | What |
+|---|---|---|
+| C14's code | `21547ad4` | See the list below |
+
+**The code.**
+- `experiments/post_train.py` (`open_campaign`): a resume is accepted when its inputs equal the record's with the
+  rounds left out, and its rounds are at least the record's. More rounds raise the record's count.
+- The recorded paths are compared through `inputs_here`: `training_export.this_checkout`, imported as `model_speed`
+  imports it, over the keys of `INPUT_PATHS`. The record keeps its paths.
+- Each resume's entry gives its time, its commit, its checks, the paths it read (`inputs`) and the rounds
+  (`{"before", "after"}`).
+- `experiments/post_validation.py` reads the campaign's paths through `inputs_here`.
+- `docs/experiments/intents.json` gives rounds 10–13 their intent.
+
+**The tests** (each fails when the mapping or the raise is taken out):
+- 2 rounds raised to 3 runs round 2 only, with rounds 0 and 1 byte for byte unchanged. It gives the round 2 of a
+  campaign of 3 rounds from its start: the checkpoint bit for bit (model, optimizer, identity), the `round.json` (its
+  commit and time aside) and the readout.
+- Fewer rounds are refused by name, and so are more rounds together with another seed, number of update groups,
+  smoke flag or executor. The record is not touched.
+- A campaign recorded under a deleted worktree's data trees resumes from the main checkout, and a path that maps to
+  other data is refused.
+- `post_validation` reads the mapped paths.
+- Results: `test_post_train`, `test_post_validation` and `test_architecture` 62 passed. `test_post_training_export`,
+  `test_model_speed`, `test_post_profile` and the publisher's tests also pass.
+
+**Review** (opus, independent, `review_guide` §3 step 6): no S1 and no S2. Two S3 findings go to the requests note:
+- `model_speed` and `post_training_export` keep their own five-key lists;
+- the entry records the mapped path, not the one typed.
+
+The reviewer also checked that the real campaign `post_train_20261006` will be accepted from the main checkout with
+`--rounds 14`, using a read-only copy of its `campaign.json`. All five mapped paths exist. The record goes from 10 to 14
+rounds and keeps the worktree paths.
+
+**The readers of a campaign's `"inputs"`** in `experiments/`:
+- `open_campaign` maps both sides; `settings_of` reads only the settings.
+- `post_validation`, `post_training_export` and `model_speed` map through `this_checkout`. `model_speed.open_round` gets
+  a record that is already mapped.
+- `post_profile` and `prior_behaviour` write records of their own and do not read one.
+
+**Next:**
+- The user merges `dev-two-tier-v4-post`; `dev-two-tier` can fast-forward to it.
+- Then rounds 10–13 from the main checkout. They wait for stage D's report that C13's GPU check, the speed readout and
+  the re-exports are done.
+
