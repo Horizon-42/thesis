@@ -854,3 +854,11 @@ saw 480 and 4), and an update of four groups is padded to its longest and widest
 | The pass in pieces | `832555a5` | The user's decision (2026-10-06; an exception to `notes/stage_c.md`'s "C runs C10 without changing code"): `post.loss.update_step` — each branch group a piece, its surrogate and pull divided by the whole update's counted rows, its backward at once; the data term whole (its dropout); `update_loss` kept as the reference and checked equal (parts to 1e-6, gradients to rounding, the clipped counts equal; a piece normalised by its own rows fails the test). `update_pairs` yields a piece a group; the profile measures pieces, with the group of the largest rows × traffic beside (a proxy, not a bound; `ts-post-profile-v3`). Review in two rounds: two S2 (a test of the branches not updated; the profile's bound wording), four S3; all fixed. On round 4's real groups with round 3's model: an update of the four largest (668 rows, traffic 7) peaks at 1.58 GB, the same for one, two or four groups |
 | Merge | `af36ebe8` | `dev-two-tier` (docs only: D137–D139, the notes) into the branch; `dev-two-tier` fast-forwarded to it |
 | Resume | — | From the worktree at `af36ebe8`, 18:36, five workers (load 1.3, 23 GB of host memory, the GPU 0.5 GB used; the speaking's peak about 1.24 GB a worker): round 4 from round 3's checkpoint. Rounds 0–3 ran the whole update; rounds 4–9 run it in pieces (the same loss, float rounding apart) |
+
+**Round 4 and five workers (2026-10-06).** Round 4 ran 18:36–19:13 with five workers and the pass in pieces: the
+selection readout's mean reward KMSY / KRDU / KSJC / KSMF / KSTL 0.865 / 0.805 / 0.865 / 0.785 / 0.81; landed 83.7 %,
+lost separation 13.2 % of its 1,000 windows (round 0: 80.2 %, 14.9 %). The speaking with five workers peaked at 7.24 of
+the GPU's 7.59 GB; round 5's speaking ran out of the GPU's memory at 19:47 (62 of about 63 batches spoken; the five
+workers held 1.2–1.7 GB each at once). The campaign resumed at once with four workers (round 5 begun anew from round 4's
+checkpoint; the half round moved aside): their speaking peaked at about 5.6 GB in rounds 1–3, and the pass in pieces
+needs about 1.6 GB. Four is the most this GPU holds safely; the user's rule of five cannot hold on it.
