@@ -58,9 +58,10 @@ import copy
 import json
 import multiprocessing
 import os
-import resource
+import pickle
 import subprocess
 import tempfile
+import threading
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor, wait
 from dataclasses import asdict, dataclass, replace
@@ -332,6 +333,8 @@ def speak_round(model: Prior, context: Context, windows: Sequence[Window], setti
     return {**record, "windows": len(windows), "outcomes": dict(outcomes)}
 
 
+#: How often a worker's own host memory is sampled while it speaks the measured batch (O15, `_PeakSampler`), s.
+PEAK_SAMPLE_S = 0.2
 #: What a speaker process holds (`Speakers`): set before the fork, so each worker inherits the campaign's context.
 _SPEAKER: dict[str, Any] = {}
 
@@ -387,9 +390,9 @@ class Speakers:
     def measure(self, round_: int, directory: Path) -> dict[str, Any]:
         """O15: one worker's memory at the formal size — the first batch of round ``round_`` spoken by one worker with the
         model at the start (APPROXIMATION, stated: a resumed campaign's model says other words, so other groups and
-        lengths), its groups written to ``directory`` — its process's peak host memory not shared with the campaign's
-        process, and on the GPU its peak (the CUDA context and the most the allocator held), each with what it still
-        holds after the batch (`_memory_after_batch`)."""
+        lengths), its groups written to ``directory`` — its own peak host memory (sampled, not shared with the campaign's
+        process), and on the GPU its peak (the CUDA context and the most the allocator held), each with what it still
+        holds after the batch, and what a worker holds besides in a round (`_measure`)."""
         return self.pool.submit(_measure, round_, str(directory)).result()
 
     @staticmethod
@@ -476,32 +479,84 @@ def _read(reading: int, state: str, split: str, places: list[int], records: list
 
 
 def _measure(round_: int, directory: str) -> dict[str, Any]:
-    """A worker's measure (`Speakers.measure`): the first batch of round ``round_`` spoken, then its memory."""
+    """A worker's measure (`Speakers.measure`): the first batch of round ``round_`` spoken, its own host memory sampled
+    meanwhile (`_PeakSampler`), then its memory after the batch (`_memory_after_batch`) and what a worker holds besides
+    in a round (``held``): the selection readout's model (as large as the round's: `_read`) and the round's kept series
+    (`Start.release` at each round) — at most the round's flights, at the mean pickled size of the series this batch
+    kept (an estimate: a series in memory is not its pickle). Not counted: the selection readout's windows and the
+    series its start keeps (the select split's, never released: bounded by `Settings.select_per_airport` × the
+    airports). The swap share is read against its value here, once every worker is forked (`SwapPss` divides a shared
+    page among the processes holding it, so it falls with each fork); a later move of the shared swap moves it too (an
+    estimate)."""
+    swapped_here = _own_memory()["swapped"]
     context, settings = _worker_context()
+    start = context.splits["train"]["start"]
     model, _ = start_model(context, settings)
     windows, _ = draw_round(context, settings.per_kind, np.random.default_rng([settings.seed, round_]))
     first = batches(windows, settings.batch_windows)[0]
-    speak_batch(model, context, windows, first, settings, round_, Path(directory), 0)
-    return {"round": round_, "windows": len(first), **_memory_after_batch(context.device)}
+    with _PeakSampler(swapped_here) as sampled:
+        speak_batch(model, context, windows, first, settings, round_, Path(directory), 0)
+    kept = [len(pickle.dumps(series)) for series in start.series.values()]
+    flights = len({w.signal_index for w in windows})
+    held = {"reader_model": sum(t.numel() * t.element_size() for t in (*model.parameters(), *model.buffers())),
+            "series": flights * sum(kept) // len(kept), "round_flights": flights}
+    return {"round": round_, "windows": len(first), **_memory_after_batch(context.device, sampled.peak), "held": held}
 
 
-def _memory_after_batch(device: torch.device) -> dict[str, Any]:
-    """This process's memory, bytes (`Speakers.measure`). Host: its peak resident memory (``ru_maxrss``, or the resident
-    memory now where larger) less what it shares now with the process it was forked from, plus what is swapped out now (an
-    estimate of its own peak: the pages it shares, or has swapped out, at the peak are counted at their number now),
-    and its own resident memory now. GPU (a CUDA device): its use now by ``nvidia-smi`` (the context and what the
-    allocator holds), less what the allocator holds now, plus the most it held — the peak — and its use after the cache
-    is released."""
+def _own_memory() -> dict[str, int]:
+    """This process's own host memory now, bytes (``/proc/self/smaps_rollup``): its private resident pages, and its
+    share of what is swapped out (``SwapPss``: a page it shares with the process it was forked from counts in part)."""
     fields = {}
     for line in Path("/proc/self/smaps_rollup").read_text(encoding="utf-8").splitlines()[1:]:
         name, value = line.split(":")
         fields[name] = int(value.split()[0]) * 1024
-    own = fields["Private_Clean"] + fields["Private_Dirty"]
-    # the kernel's peak is taken when memory is released, so it may lag the resident memory now: the larger; what is
-    # swapped out now was its own too (the peak counts it; what it holds now does not: it gives back no RAM)
-    peak = (max(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024, fields["Rss"]) - (fields["Rss"] - own)
-            + fields["Swap"])
-    out: dict[str, Any] = {"host": {"peak": peak, "now": own}, "gpu": None}
+    return {"resident": fields["Private_Clean"] + fields["Private_Dirty"], "swapped": fields["SwapPss"]}
+
+
+class _PeakSampler:
+    """The most of this process's own host memory while a block runs (`_own_memory`: its private resident pages and its
+    share of the swap less ``swapped_at_start``), sampled every `PEAK_SAMPLE_S` by a thread and once at the end; a
+    failure of the thread is raised at the end. The kernel's peak (``ru_maxrss``) is not used: a forked process
+    inherits its parent's, and it counts the pages it shares."""
+
+    def __init__(self, swapped_at_start: int) -> None:
+        self.swapped_at_start = swapped_at_start
+        self.peak = 0
+        self._failed: BaseException | None = None
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def _sample(self) -> None:
+        own = _own_memory()
+        self.peak = max(self.peak, own["resident"] + own["swapped"] - self.swapped_at_start)
+
+    def _run(self) -> None:
+        try:
+            while not self._stop.wait(PEAK_SAMPLE_S):
+                self._sample()
+        except BaseException as error:                  # raised in the measuring thread at the end
+            self._failed = error
+
+    def __enter__(self) -> _PeakSampler:
+        self._sample()
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self._stop.set()
+        self._thread.join()
+        if self._failed is not None:
+            raise RuntimeError("the memory sampler failed") from self._failed
+        self._sample()
+
+
+def _memory_after_batch(device: torch.device, host_peak: int) -> dict[str, Any]:
+    """This process's memory, bytes (`Speakers.measure`). Host: its own peak (``host_peak``, `_PeakSampler`) and its own
+    resident memory now (`_own_memory`; what is swapped out gives back no RAM). GPU (a CUDA device): its use now by
+    ``nvidia-smi`` (the context and what the allocator holds), less what the allocator holds now, plus the most it
+    held — the peak — and its use after the cache is released."""
+    now = _own_memory()["resident"]
+    out: dict[str, Any] = {"host": {"peak": max(host_peak, now), "now": now}, "gpu": None}   # held after: held at the peak
     if device.type == "cuda":
         used = _gpu_used()
         peak_gpu = used - torch.cuda.memory_reserved(device) + torch.cuda.max_memory_reserved(device)
@@ -551,24 +606,33 @@ def pass_memory_of(context: Context, settings: Settings, directory: Path) -> dic
 def workers_fit(workers: int, measured: Mapping[str, Any], passed: Mapping[str, Any] | None,
                 available: Mapping[str, int | None]) -> list[str]:
     """O15: where ``workers`` workers do not fit, read after the measures (``available``: the host's and the GPU's free
-    memory, with the measured worker and this process holding what they hold after them). The speaking: each worker
-    needs the measured worker's peak (``measured``, `Speakers.measure`; it holds part of it already). The pass, on a
-    GPU: this process grows to its pass's peak (``passed``, `pass_memory_of`) while each of the other workers holds what
-    the measured one holds after its batch. One line for each that does not fit; none: they fit."""
+    memory, with the measured worker and this process holding what they hold after them). Each worker needs the
+    measured worker's peak (``measured``, `Speakers.measure`; it holds part of it already) and what a worker holds
+    besides in a round (``measured["held"]``: the readout's model on the campaign's device, the round's kept series on
+    the host). The pass, on a GPU: this process grows to its pass's peak (``passed``, `pass_memory_of`) while each of
+    the other workers holds what the measured one holds after its batch and the readout's model, and the measured one
+    its readout's model besides. One line for each that does not fit; none: they fit."""
+    held = measured["held"]
+    reader = {"host": 0 if measured["gpu"] is not None else held["reader_model"],
+              "gpu": held["reader_model"] if measured["gpu"] is not None else 0}
+    besides = {"host": reader["host"] + held["series"], "gpu": reader["gpu"]}
     out = []
     for name in ("host", "gpu"):
         if measured[name] is None:
             continue
-        need, have = workers * measured[name]["peak"], available[name] + measured[name]["now"]
+        one = measured[name]["peak"] + besides[name]
+        need, have = workers * one, available[name] + measured[name]["now"]
         if need > have:
             out.append(f"{name}: {workers} workers speaking need {need / 2**30:.1f} GiB (one worker's peak "
-                       f"{measured[name]['peak'] / 2**30:.2f} GiB), {have / 2**30:.1f} GiB available")
+                       f"{measured[name]['peak'] / 2**30:.2f} GiB and {besides[name] / 2**30:.2f} GiB held in a round), "
+                       f"{have / 2**30:.1f} GiB available")
     if passed is not None:
-        need = passed["peak"] - passed["now"] + (workers - 1) * measured["gpu"]["now"]
+        each = measured["gpu"]["now"] + reader["gpu"]
+        need = passed["peak"] - passed["now"] + (workers - 1) * each + reader["gpu"]
         if need > available["gpu"]:
             out.append(f"gpu: the pass beside {workers} workers needs {need / 2**30:.1f} GiB more (its peak "
-                       f"{passed['peak'] / 2**30:.2f} GiB, each worker holding {measured['gpu']['now'] / 2**30:.2f} "
-                       f"GiB), {available['gpu'] / 2**30:.1f} GiB free")
+                       f"{passed['peak'] / 2**30:.2f} GiB, each worker holding {each / 2**30:.2f} GiB), "
+                       f"{available['gpu'] / 2**30:.1f} GiB free")
     return out
 
 

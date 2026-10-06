@@ -317,18 +317,51 @@ def test_the_selection_readout_through_two_workers_is_the_one_process_readout(se
         speakers.close()
 
 
+def test_the_memory_sampler_sees_a_peak_freed_before_the_end_and_raises_its_failure(monkeypatch):
+    """O15: memory taken and freed inside the measured block counts in its peak (the sampling thread sees it), and a
+    failure of the thread is raised, not left as a smaller peak."""
+    import threading
+    import time
+
+    with post_train._PeakSampler(post_train._own_memory()["swapped"]) as sampled:
+        start = sampled.peak
+        block = np.ones(400 << 20, dtype=np.uint8)                       # 400 MiB, written: resident
+        time.sleep(3 * post_train.PEAK_SAMPLE_S)
+        del block
+        time.sleep(post_train.PEAK_SAMPLE_S)
+    assert sampled.peak - start >= 380 << 20
+    own = post_train._own_memory
+
+    def failing():
+        if threading.current_thread() is not threading.main_thread():
+            raise OSError("smaps_rollup unreadable")
+        return own()
+
+    monkeypatch.setattr(post_train, "_own_memory", failing)
+    with pytest.raises(RuntimeError, match="the memory sampler failed"):
+        with post_train._PeakSampler(0):
+            time.sleep(3 * post_train.PEAK_SAMPLE_S)
+
+
 def test_n_workers_are_refused_by_name_where_one_workers_measured_memory_does_not_fit(setup, monkeypatch):
     """O15: one worker speaks the first batch of the round to come and its memory is measured (here on the CPU: the host
     only); N workers fit when N times its peak is at most what is available plus what it holds already, and the pass
     (on a GPU) when its growth and what the other workers hold fit in the free memory; refused by name otherwise."""
     gib = 1 << 30
-    measured = {"host": {"peak": 2 * gib, "now": 1 * gib}, "gpu": {"peak": 1 * gib, "now": gib // 4}}
+    held = {"reader_model": gib // 4, "series": gib // 2, "round_flights": 100}
+    measured = {"host": {"peak": 2 * gib, "now": 1 * gib}, "gpu": {"peak": 1 * gib, "now": gib // 4}, "held": held}
     passed = {"peak": 3 * gib, "now": gib // 2, "groups": 4}
-    assert post_train.workers_fit(3, measured, passed, {"host": 5 * gib, "gpu": 3 * gib}) == []
-    short = post_train.workers_fit(3, measured, passed, {"host": 4 * gib, "gpu": 2 * gib})
+    # host: 3 × (2 + 0.5 series) = 7.5 ≤ 6.5 + 1; GPU: 3 × (1 + 0.25 model) = 3.75 ≤ 3.75 + 0.25, the pass
+    # 2.5 + 2 × (0.25 + 0.25) + 0.25 = 3.75 ≤ 3.75
+    assert post_train.workers_fit(3, measured, passed, {"host": int(6.5 * gib), "gpu": int(3.75 * gib)}) == []
+    short = post_train.workers_fit(3, measured, passed, {"host": 6 * gib, "gpu": int(3.25 * gib)})
     assert [line.split(":")[0] for line in short] == ["host", "gpu", "gpu"]
-    assert "3 workers speaking need 6.0 GiB" in short[0] and "the pass beside 3 workers needs 3.0 GiB more" in short[2]
-    assert post_train.workers_fit(3, {**measured, "gpu": None}, None, {"host": 5 * gib, "gpu": None}) == []
+    assert "3 workers speaking need 7.5 GiB" in short[0] and "the pass beside 3 workers needs 3.8 GiB more" in short[2]
+    assert [line.split(":")[0] for line in post_train.workers_fit(3, measured, passed, {"host": int(6.5 * gib),
+                                                                                      "gpu": int(3.7 * gib)})] == ["gpu"]
+    on_cpu = {**measured, "gpu": None}                     # the readout's model on the host: 3 × 2.75 = 8.25 ≤ 7.25 + 1
+    assert post_train.workers_fit(3, on_cpu, None, {"host": int(7.25 * gib), "gpu": None}) == []
+    assert post_train.workers_fit(3, on_cpu, None, {"host": 7 * gib, "gpu": None})
     s = setup
     context = _context(s)
     short_round(monkeypatch, s)                            # before the fork: the workers draw the short round too
@@ -338,6 +371,10 @@ def test_n_workers_are_refused_by_name_where_one_workers_measured_memory_does_no
         measure = post_train.require_workers_fit(speakers, context, settings, 0)
         assert measure["pass"] is None and measure["measured"]["gpu"] is None and measure["measured"]["windows"] >= 1
         assert measure["measured"]["host"]["peak"] >= measure["measured"]["host"]["now"] > 0
+        held = measure["measured"]["held"]
+        assert held["round_flights"] == 1 and held["series"] > 0 and held["reader_model"] == sum(
+            p.numel() * p.element_size() for p in (*start_model(context, settings)[0].parameters(),
+                                                   *start_model(context, settings)[0].buffers()))
         monkeypatch.setattr(post_train, "available_memory", lambda device: {"host": 0, "gpu": None})
         with pytest.raises(SystemExit, match=r"do not fit \(O15\): host: 2 workers speaking need"):
             post_train.require_workers_fit(speakers, context, settings, 0)
