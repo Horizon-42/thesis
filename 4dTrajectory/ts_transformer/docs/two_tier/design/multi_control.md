@@ -60,13 +60,17 @@ the evidence is in §9.
 
 ### 0.3 Implementation
 
-Not started. Stage D's implementer keeps this table and its log, `readouts/2026-10-06_stage_d_implementation_log.md`
-(outline §5 rule 10); its readings and requests go to `requests_from_d_to_designer.md`. The formal runs wait for C10's
-chosen round.
+Stage D's implementer keeps this table and its log, `readouts/2026-10-06_stage_d_implementation_log.md` (outline §5
+rule 10); its readings and requests go to `requests_from_d_to_designer.md`. All on `dev-multi-control`, not merged;
+nothing of stage D has run on real data (C14's rounds run first).
 
 | Milestone | State |
 |---|---|
-| MC0–MC10 | Not started |
+| MC0 | Built, reviewed, committed (9c98a8d6, d7bf55f5, 3a9b7153, 80fe774c, 648b6591, 5e456406, a1ea664f); D73's checks and D149's real-window check after C14 |
+| MC1 | Built, reviewed, committed (e6f0e564); the census after C14 (its cost measured on a sample first) |
+| MC2, MC3 | Built, reviewed, committed (fd720c75): stage D's rule of who answers, its token part, its credit |
+| MC4 | The round's stage (first part) built, in review; the runners next; the smoke waits for O16 |
+| MC5–MC10 | Not started |
 
 ### 0.4 Plan
 
