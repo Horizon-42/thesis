@@ -14,7 +14,8 @@ Claude 第二轮复审（readouts/2026-10-06_stage_c_check.zh.md §5）之后的
 4. 更新 post_training.md §0.3 状态表（验证读数已实现；C8 的状态）和 requests 文件（只写当前未决的请求）。
 5. 每步：单文件测试 → 独立审查（只审代码）→ 用显式路径提交。报告提交号。
 不改 instructions/、autopilot/、prior/，也不改 B 的共用模块。
-6. 也不改前端 Training 视图的文件（aeroviz-4d/src/components/Training*.tsx、src/components/training/、
-   src/data/training*.ts、src/hooks/useTraining*.ts 及其测试）和 aeroviz_backend/http_server.py 的路由：
-   三个阶段 Training 视图的统一布局（outline §6.2、D133）在另一个分支上做，窗口视图跟着它改。
+6. 不改 outline §6.2 第 9 条列出的文件：前端 Training 视图的文件、aeroviz_backend/http_server.py，
+   以及 C 的 Training 导出（experiments/post_training_export.py、post/training_files.py）。
+   三个阶段 Training 视图的统一布局、结果页和包络（outline §6.2、D133–D135）由 B 的实现者在 dev-training-layout 上做，
+   窗口视图和窗口导出跟着它改。
 ```

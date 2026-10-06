@@ -86,8 +86,9 @@ commits, the tests and the readings are in the implementation log.
 2. C8, after B5's base and Claude's check of stage B.
 3. O13 and the user's criteria (D7); then C10 and the validation readout of its chosen round.
 4. C12.
-5. The window view (C11) changes with the one layout of the three stages' Training views (outline §6.2, D133), built
-   on another branch; while it is built, stage C changes no file of the Training view (outline §6.2 item 7).
+5. The window view (C11) and the window export change with the one layout of the three stages' Training views (outline
+   §6.2, D133–D135: the results page, the rounds' envelopes, one block of a flown sentence), built by stage B's
+   implementer on `dev-training-layout`; while it is built, stage C changes no file of outline §6.2 item 9.
 
 ---
 

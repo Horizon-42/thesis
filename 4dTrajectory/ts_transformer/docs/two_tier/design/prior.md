@@ -83,7 +83,8 @@ Proposals (where the design says nothing): none open.
 ### 0.4 Plan
 
 1. Stage B is closed. Its implementer builds the one layout of the three stages' Training views (outline §6.2,
-   D133); no export of stage B runs again.
+   D133–D135): the results page, the envelopes of the prior's sentences and the shared parts of the exports; B6's sets
+   `prior_sets_20261006` are exported again in a new sample format, with the same ids (the base and the folds read only).
 2. The post-training (`post_training.md`) reads only §7 and B5's base (`prior_base_20261006`).
 
 ---
