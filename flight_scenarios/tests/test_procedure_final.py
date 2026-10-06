@@ -1,4 +1,4 @@
-"""FAF read from the RNAV(GPS) procedure document (the cross-check against the backend parser lives in aeroviz_backend/tests/test_procedure_segments.py)."""
+"""FAF read from the RNAV(GPS) procedure document (the cross-check against the optimizer's parser lives in 4dTrajectory/optimization/procedure/tests/test_segments.py)."""
 
 import json
 from pathlib import Path

@@ -24,6 +24,11 @@ const { appState, canonicalEntities } = vi.hoisted(() => {
       activeAirportCode: "KRDU",
       selectedRunway: null,
       trajectorySampleCount: 200,
+      trafficScene: null,
+      selectedFlightId: null,
+      setSceneTime: () => undefined,
+      setSelectedFlightId: () => undefined,
+      setTrajectoryDataSource: () => undefined,
       trajectoryDataSource: {
         show: true,
         entities: { values: canonicalEntities },

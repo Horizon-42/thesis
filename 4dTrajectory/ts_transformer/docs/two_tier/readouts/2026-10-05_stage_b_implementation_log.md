@@ -336,7 +336,7 @@ commits, the readings of each fold and of the base, the choice and its rule, and
 
 ## 4 The Training view's one layout (outline §6.2, D133)
 
-Built by stage B's implementer on `dev-training-layout` (from `docs-training-view` `4fa9f2ee`, which holds D133), worktree
+Built by stage B's implementer on `dev-training-layout` (from `docs-training-view` `4fa9f2ee`, which holds D133; `dev-two-tier` merged in, with D133 as `b2911b89`), worktree
 `.claude/worktrees/training-layout`, at the user's order of 2026-10-06 (notes/stage_b.md); for this work it changed the
 view files of stages A and C and the backend's routes.
 

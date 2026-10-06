@@ -125,7 +125,7 @@ class SeamTest(unittest.TestCase):
 
         source = (
             Path(__file__).resolve().parents[2]
-            / "4dTrajectory" / "optimization" / "scenario_optimization.py"
+            / "4dTrajectory" / "optimization" / "scenario_references.py"
         ).read_text(encoding="utf-8")
         start = source.index("def write_reference_records")
         body = source[start : source.index("\ndef ", start + 1)]

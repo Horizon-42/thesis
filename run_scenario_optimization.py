@@ -473,10 +473,9 @@ class Plan:
                 optimize_cmd += ["--state-substeps", str(self.state_substeps)]
             if self.with_constraint:
                 # Constrained-IAF: optimize via the runway's RNAV(GPS) procedure (one
-                # trajectory per scenario, IAF chosen by shortest 3D path). The multiphase
+                # trajectory per scenario, IAF chosen by shortest horizontal path). The multiphase
                 # mesh is set PER LEG (n_seg_per_phase); n_segments does not apply here.
                 optimize_cmd += ["--constrained-iaf", "--iaf-selection", "shortest",
-                                 "--airport", self.airport,
                                  "--n-seg-per-phase", str(self.n_seg_per_phase)]
             else:
                 # Unconstrained: one phase, control over the whole trajectory (n_segments).

@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from aeroviz_backend.procedure_constraint import (
+from procedure.constraint import (
     AltitudeWindow,
     ProcedureConstraint,
     altitude_window_from_cifp,
@@ -29,7 +29,7 @@ def _leg(seq, terminator, end_fix, role, altitude, geometry_ft):
 
 # A minimal KRDU R05LY-shaped detail document (final branch only), using the
 # authoritative published chart values (RNAV (GPS) Y RWY 5L). Self-contained so
-# the backend suite needs no generated-data bundle; the real parser-vs-chart
+# the optimizer suite needs no generated-data bundle; the real parser-vs-chart
 # guarantee lives in the aeroviz-4d python suite, which builds from CIFP.
 R05LY_DOCUMENT = {
     "procedureUid": "KRDU-R05LY-RW05L",
@@ -156,7 +156,7 @@ class TestProcedureConstraintFromDetailDocument(unittest.TestCase):
 
 
 class TestProcedureConstraintRoundTrip(unittest.TestCase):
-    """The frontend builds the constraint and ships JSON; the backend parses the
+    """The frontend builds the constraint and ships JSON; the optimizer side parses the
     same shape. Round-tripping it through the wire payload must be lossless on
     the fields the optimizer reads."""
 

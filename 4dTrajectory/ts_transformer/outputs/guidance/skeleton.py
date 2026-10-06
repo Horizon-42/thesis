@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from ts_transformer.data.dataset import FlightSeries
 
 #: RNP APCH initial / intermediate lateral accuracy: the box corridor a published pre-final
-#: leg is flown inside. MUST match `aeroviz_backend.procedure_segments._DEFAULT_RNP_NM`
+#: leg is flown inside. MUST match `procedure.segments._DEFAULT_RNP_NM`
 #: (the optimizer's constraint bridge is not on this package's import path).
 RNP_HALF_WIDTH_M = 1.0 * NM_M
 #: How far the document's threshold may sit from the manifest's target before the two are

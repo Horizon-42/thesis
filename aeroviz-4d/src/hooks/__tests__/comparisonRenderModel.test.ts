@@ -3,12 +3,14 @@ import * as Cesium from "cesium";
 import {
   applyComparisonRenderModel,
   applyComparisonReferenceRenderModel,
+  applyComparisonTrafficRenderModel,
   availabilityByEntityId,
   isComparisonEntity,
   kindOfEntityId,
 } from "../useComparisonTrajectoryLayer";
 import {
-  COMPARISON_KIND_COLORS, COMPARISON_KIND_ALPHA, PREDICTION_OTHER_RUNWAY_COLOR,
+  COMPARISON_KIND_COLORS, COMPARISON_KIND_ALPHA, COMPARISON_STATUS_STYLES, COMPARISON_TRAFFIC_COLOR,
+  PREDICTION_OTHER_RUNWAY_COLOR,
 } from "../../utils/trajectoryRenderModel";
 import { OBSERVED_VERDICT_COLORS } from "../../utils/observedVerdictColors";
 
@@ -229,5 +231,51 @@ describe("comparison references", () => {
     applyComparisonReferenceRenderModel(observed, new Set());
 
     expectLegendColor(observed, "reference");
+  });
+});
+
+describe("comparison traffic (the recorded aircraft around a commanded flight)", () => {
+  const trafficEntity = () => new Cesium.Entity({
+    id: "traffic-A/B",
+    path: new Cesium.PathGraphics({ material: new Cesium.ColorMaterialProperty(BAKED) }),
+    model: new Cesium.ModelGraphics({ uri: "/models/aircraft.glb" }),
+  });
+  const modelShown = (e: Cesium.Entity) => e.model!.show!.getValue(Cesium.JulianDate.now());
+
+  it("draws them in the one traffic colour, on the track and on the aircraft model", () => {
+    const neighbour = trafficEntity();
+    applyComparisonTrafficRenderModel(neighbour, new Set([neighbour.id]));
+
+    expectVerdictColor(neighbour, COMPARISON_TRAFFIC_COLOR);
+    expect(rgbOf(neighbour.model!.color!.getValue(Cesium.JulianDate.now()) as Cesium.Color))
+      .toEqual(rgbOf(Cesium.Color.fromCssColorString(COMPARISON_TRAFFIC_COLOR)));
+    expect(neighbour.model!.runAnimations!.getValue(Cesium.JulianDate.now())).toBe(false);
+  });
+
+  it("carries the aircraft model only for the ids the model budget chose; the rest stay tracks", () => {
+    const chosen = trafficEntity();
+    const other = trafficEntity();
+    applyComparisonTrafficRenderModel(chosen, new Set([chosen.id]));
+    applyComparisonTrafficRenderModel(other, new Set());
+    expect(modelShown(chosen)).toBe(true);
+    expect(modelShown(other)).toBe(false);
+    expectVerdictColor(other, COMPARISON_TRAFFIC_COLOR);          // the track is coloured either way
+  });
+
+  it("is a colour no other comparison path wears", () => {
+    const others = [
+      ...Object.values(COMPARISON_KIND_COLORS),
+      ...Object.values(COMPARISON_STATUS_STYLES).map((style) => style.color),
+      ...Object.values(OBSERVED_VERDICT_COLORS),
+      PREDICTION_OTHER_RUNWAY_COLOR,
+    ].map((css) => rgbOf(Cesium.Color.fromCssColorString(css)));
+    expect(others).not.toContainEqual(rgbOf(Cesium.Color.fromCssColorString(COMPARISON_TRAFFIC_COLOR)));
+  });
+
+  it("is applied to a track that has no aircraft model without one", () => {
+    const track = entity("traffic-A/B", "solved");
+    applyComparisonTrafficRenderModel(track, new Set());
+    expect(track.model).toBeUndefined();
+    expectVerdictColor(track, COMPARISON_TRAFFIC_COLOR);
   });
 });

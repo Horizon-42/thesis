@@ -135,6 +135,13 @@ export function planObservedTracks({
   return { fileUrl, visible };
 }
 
+/**
+ * The most flight keys one trajectories request may name. MIRROR of `aeroviz_backend/observed_trajectories.py`
+ * `MAX_TRAJECTORIES_PER_RESPONSE` (pinned by `build_scenario_comparison_czml`'s tests): the backend refuses a
+ * longer list outright, so a caller with more keys splits them.
+ */
+export const MAX_FLIGHT_KEYS_PER_REQUEST = 1000;
+
 export interface ObservedReferenceTrackRequest {
   backendUrl: string;
   airport: string;

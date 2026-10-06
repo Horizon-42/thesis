@@ -1,5 +1,122 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-06 — Multi-aircraft optimization merged into dev-two-tier
+
+- `dev-optimizer-multi-aircraft` merged (the user's order): dev-two-tier merged into the branch twice (de7f0daf, b9a8afec)
+  with the one conflict, aeroviz_backend/http_server.py, resolved keeping dev-two-tier's autopilot routes byte-identical
+  (the user: two-tier first, no two-tier design changed); then dev-two-tier fast-forwarded to b9a8afec. On the merged
+  tree: ts suite 1839 passed, Python 606 (145 subtests), optimizer 215, Vitest 942, tsc clean; reviewed (opus).
+- The live backend 8765 restarted (the user's choice): /traffic answers; a Training word flown live matches its stored
+  states (0.0 m). The branch, its worktree and the test stack (5177, 8782) removed.
+
+### 2026-10-06 — Multi-aircraft optimization T11: the Optimize task's multi-aircraft mode (one controlled / all controlled)
+
+- Design §10 (the user's order). Optimize gets a mode selector: single aircraft (unchanged), multi-aircraft one
+  controlled (M1: a recorded arrival of a UTC day), multi-aircraft all controlled (M2: a 15/30/60-min block).
+- Backend (`aeroviz_backend/traffic_jobs.py`, routes `/traffic/arrivals`, `/traffic/jobs…`): one job per backend, a
+  subprocess group at nice 10 with one solver thread (`scenario_batch.SOLVER_THREAD_ENV`), `traffic_job.py` reading
+  only the near traffic (plus one arrival per runway for the targets), the batch writers, evaluation and the
+  comparison builder into a job directory (`~/.cache/aeroviz/traffic_jobs/<port>`, last 5 kept, never public/data).
+  A group is signalled only when its leader is the job's own process (start time + boot id): a reused pid is never
+  hit. Status carries the readout when done.
+- Frontend: the panel (day, arrivals, block start in 24-h UTC selects, progress, cancel; Start disabled while a job
+  runs), the comparison layer fed from a job, a "Scene time (UTC)" readout, plain outcome names, the three-entry
+  traffic legend, M1 drawn one window at a time (the user's review). The single-aircraft panel stays mounted hidden.
+- Built by sonnet agents on Claude's orders (one later browser check ran on the session's model: sonnet access
+  was refused, oauth_org_not_allowed); reviewed (opus) frontend and backend, two rounds each. Real M1 and M2 jobs
+  on a test backend matched the batch (FFL1206: separated, +100.5 s).
+
+### 2026-10-06 — Multi-aircraft optimization T10: an M2 run published as one scene
+
+- `4e6c3ad0`: an M2 run writes one directory and one summary.json (mode traffic:m2); `87f5f2f2`: the builder and the
+  viewer show it as one scene (every controlled aircraft on one clock, the background in pink; AV47).
+- Published: `4dTrajectory/outputs/KRDU/traffic_m2_runway_cons/` (read-only, SHA256SUMS; the T8 numbers again) and
+  category `traffic_m2_runway_cons` (77 groups, 48 background aircraft, about 5 h). Checked in the browser.
+- The user's review: the traffic colours had no legend, and M1 drew all windows at once — design §9 now says one
+  window at a time and a three-entry legend (built with T11, the Optimize task's multi-aircraft mode, design §10).
+
+### 2026-10-06 — Multi-aircraft optimization T7: traffic windows published to the comparison view
+
+- Viewer + builder (`78ce2fcb`, AV46): a `traffic:m1` summary publishes each solved group with its recorded neighbours
+  (`traffic.recorded`, `traffic.startOffsetsS` from the summary's arrivals roster); the frontend draws them pink at their
+  real time, clipped to the groups' clock, under the model budget. Built by a sonnet agent, reviewed (opus) twice.
+- Published (the user's order 2026-10-05): `4dTrajectory/outputs/KRDU/traffic_m1_runway_cons/` (read-only, SHA256SUMS)
+  and comparison category `traffic_m1_runway_cons` (50 groups; categories.json: this key only). The 5173 dev server
+  needs a restart to serve it (AV5).
+
+### 2026-10-05 — Multi-aircraft optimization: a failed re-solve is retried once with the other branch (MD13)
+
+- The user's decision (MD13 (b)): in `traffic/loop.py` (M1, and M2 through it) a re-solve that fails is solved once
+  more with the other branch for each recorded aircraft with a position loss in that round (`rows.other_branch`;
+  none for an aircraft with an in-trail loss rowed in any round; a vertical side from that round's losses; Claude's
+  reading: an aircraft whose rows already hold keeps its branch). The flip is kept only after the retry solves.
+  Sidecars record each attempt (`rows_next` / `rows_retry`, `retried_branches`, `retry_error`, `next_solve_s` per
+  attempt): schemas renamed `optimization-traffic-v2` / `optimization-traffic-block-v2`.
+- T5 again (50 KRDU windows): 43 separated at baseline, 4 separated (the retry saved 1, landing +101 s), 3
+  solve_failed (both attempts at the IPOPT cap). T8 again (five 1-h blocks, 77 aircraft): 58 / 6 separated,
+  1 unresolved, 9 solve_failed, 3 slot_failed; 10 retries, 3 solved. F12 step 2 (a reused solver): not now (the user).
+
+### 2026-10-05 — Multi-aircraft optimization M2: a block of arrivals, scheduled, then flown in slot order
+
+- `4dTrajectory/optimization/traffic/block.py`, runner `traffic_optimization.py m2` (design §5.6, the user's MD1): ETA by a
+  free-time solve; a first-come-first-served schedule on the FAA minima with every record outside the scheduled set frozen
+  into it (`block.place`; `runway_schedule.schedule` has no frozen slots); each aircraft flown to its CTA by a fixed-time,
+  warm-started solve through the M1 loop, seeing the replays before it and the records outside; a final check of the
+  block. `solve_iaf(fixed_duration_s=…)`, `fly_in_traffic(fixed_duration_s=…, warm=…)`; in fixed time a wake loss at
+  the threshold gets no row (`wake_at_fixed_time`). `scenario_batch.write_solved_record` / `write_failed_record` are
+  run_batch's writer, shared. M2 sidecars: schema `optimization-traffic-block-v1`. The runner is now `m1` / `m2`.
+- T8, five 1-hour KRDU blocks (77 aircraft, 5 min 41 s on 5 workers): 58 separated at baseline, 4 after re-solves,
+  1 unresolved, 11 solve_failed, 3 slot_failed; delays median 0 s, max 252 s. Reviewed (opus) + re-verified.
+
+### 2026-10-05 — The six older optimizers archived; studies moved; the collocation envelope named once
+
+- `code_review.md` F13/F10/F9/F12 (`4dTrajectory/docs/multi_aircraft_optimization/`): `transcription_optimizor`,
+  `least_squares_…`, `warm_start_…`, `variable_time_warm_start_…`, `single_shooting_optimizor`, `casadi_optimizer` and their
+  seven tests moved unchanged to `4dTrajectory/optimization/archive/legacy_optimizers_2026_10/`. The backend serves only the
+  collocation optimizers (menu, the casadiIpopt instance cache, alpha controls and the playback's alpha path removed);
+  the frontend dropped the six names. Five study scripts + data moved to `optimization/studies/`. `collocation` exports
+  only public names; `components.MAX_BANK_RAD` / `LOAD_FACTOR_RANGE` name the envelope.
+- F12 measured: the symbolic build ~0.04 s, casadi's `nlpsol` setup 0.7–1.1 s = about half of a solve;
+  `last_solve_timings` carries `buildS` and `solverSetupS`. A reused solver per aircraft type is the lever (open).
+- Gate: 20 KRDU flights bit-identical to the base code; 661 tests pass.
+
+### 2026-10-05 — Multi-aircraft optimization M1: one optimized aircraft in its airport's recorded traffic
+
+- `4dTrajectory/optimization/traffic/` + runner `traffic_optimization.py` (design `4dTrajectory/docs/multi_aircraft_optimization/design.md`
+  §5.1–5.4, decisions MD1–MD3 by the user): the constrained (shortest-IAF) solve, its replay judged by the two-tier
+  separation rules (VISUAL makes rows, IFR reported) against every recorded arrival of the airport, losses the commanded
+  aircraft answers for turned into rows (`casadi.pw_lin` of the recorded track at the symbolic node times; one branch per
+  aircraft; a landed / not-yet-entered aircraft relaxed by a presence weight; the wake at the threshold as a linear
+  landing-time row), warm re-solves until separated or K_max. `run_batch` gained a per-record sidecar (`*_traffic.json`).
+  `scenario_optimization` exposes `iaf_setup`, `solve_iaf` (with `extra_rows`, `initial_guess`), `shortest_iaf_solve`,
+  `iaf_result`.
+- Gates: T1 own record at the start = scenario initial state on 200 KRDU scenarios (0.000 mm); T2 casadi's inline interpolant
+  cannot take SX, `pw_lin` can; T5 on 50 KRDU windows: 43 separated at baseline, 3 separated after 1–2 re-solves
+  (landing 34–43 s later), 4 `solve_failed` (IPOPT cap on long radar-or-vertical losses); 1 min 31 s on 8 workers, 4.2 GB.
+- Three reviews (opus) found and fixed: the commanded aircraft "not established" at its own landing (the LPV cone continues
+  past the threshold), branches re-chosen per check step (contradictory rows), an extrapolated / swept absent aircraft, a
+  non-finite sidecar value aborting a batch, two losses at one instant merged.
+
+### 2026-10-05 — Optimizer T0 for the multi-aircraft work: caller rows, the procedure package, the batch split by job
+
+- Design and review: `4dTrajectory/docs/multi_aircraft_optimization/` (`design.md`, `code_review.md` F1–F13; the user accepted
+  all 13 on 2026-10-05). Branch `dev-optimizer-multi-aircraft`.
+- F7: `CollocationOptimizer` takes `extra_rows(nodes, times)` (the procedure families' row contract on every dense node and its
+  symbolic time) and keeps `last_decision_vector` for a warm start.
+- F4/F5: `aeroviz_backend/procedure_constraint.py` and `procedure_segments.py` moved to `4dTrajectory/optimization/procedure/`
+  (`constraint`, `segments`, and `iaf` from `scenario_optimization`); the optimizer imports nothing from the backend;
+  `build_constraint_segments` refuses a procedure without a leg (both callers' own checks gone). The IAF ranking proxy is the
+  horizontal path length (the 3D one read an uncoded IAF altitude as 0 ft): on the 43 multi-IAF documents of the five
+  K-airports every IAF order is unchanged. Two ts_transformer lines name the new path (the mirror test, a comment; user OK).
+- F6: `scenario_optimization.py` (1,634 lines) split: `scenario_replay` (records, rollout), `scenario_batch` (`run_batch`,
+  resume, sweep, filenames), `scenario_references`; the solves, workers and CLI stay. F2: `--dt`/`dt` and the constrained
+  path's `n_segments` removed (no solve read them). F3: the IAF airport is the scenario's `arr_airport` (`--airport` and its
+  KRDU fallback removed; the runner no longer passes it), `window_s` and a failed record's `reason` required. F11: the
+  resume's dead identity compare removed (the file is named by the flight_key). F8: the backend's own 1000-iteration HTTP
+  default documented (K4). `simulate_controls` removed (no caller).
+- Gates: 20 KRDU flights (unconstrained + constrained-IAF shortest) solve bit-identically to the base code after each step
+  (40/40); an end-to-end CLI batch (3 scenarios, both modes, reference records) writes 21 byte-identical files; 532 tests pass.
+
 ### 2026-10-04 — `run_all_tests.sh` runs its three groups at once, on pytest-xdist workers
 
 - The user's goal was speed. Measured: the ts_transformer suite (1,531 tests) 15.5 min serial -> 2.8-3.2 min on 8-16 workers; the

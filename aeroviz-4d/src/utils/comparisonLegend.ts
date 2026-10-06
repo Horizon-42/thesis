@@ -19,11 +19,50 @@ export type ComparisonStatusLegend =
 /** Optimizer state sequences are intentionally not user-facing comparison paths. */
 export type ComparisonLegendKind = Exclude<ComparisonKind, "optimizer">;
 
+/**
+ * A traffic category (AV46, AV47): `windows` — M1, one controlled aircraft in recorded traffic per window — or `scene` — M2,
+ * every aircraft of a block controlled, the recorded traffic being what is outside the scheduled set.
+ */
+export type ComparisonTrafficLegend = "windows" | "scene";
+
 export interface ComparisonLegendModel {
   /** User-toggleable path kinds present in the selected category/runway. */
   kinds: ComparisonLegendKind[];
   /** Outcome colours that override the base kind colour in those groups. */
   statuses: ComparisonStatusLegend[];
+  /** Set when the index is a traffic category: the legend then names who is controlled and who is not. */
+  traffic: ComparisonTrafficLegend | null;
+}
+
+const KIND_LABELS: Record<ComparisonLegendKind, string> = {
+  reference: "Reference",
+  simulator: "Optimize results",
+  predicted: "Predicted",
+  lookback: "Predictor input",
+};
+
+/** In a traffic category the reference is the controlled aircraft's own record, the result its optimized path. */
+const TRAFFIC_KIND_LABELS: Record<ComparisonLegendKind, string> = {
+  ...KIND_LABELS,
+  reference: "Controlled aircraft — its record",
+  simulator: "Controlled aircraft — optimized path",
+};
+
+export function comparisonKindLabel(kind: ComparisonLegendKind, traffic: ComparisonTrafficLegend | null): string {
+  return (traffic === null ? KIND_LABELS : TRAFFIC_KIND_LABELS)[kind];
+}
+
+/**
+ * In a traffic category the optimized path turns yellow where the aircraft's final state missed the runway-threshold target
+ * (the evaluation gates failed, status `offTarget`): said beside the optimized-path entry, not apart under "Outcome colours".
+ */
+export const TRAFFIC_OFF_TARGET_LABEL = "yellow: the optimized path ended off the runway-threshold target (failed the gates)";
+
+/** The pink aircraft: recorded, and not controlled (an M2 scene shows those outside the scheduled set). */
+export function recordedTrafficLabel(traffic: ComparisonTrafficLegend): string {
+  return traffic === "scene"
+    ? "Recorded traffic — not controlled, outside the scheduled set"
+    : "Recorded traffic — not controlled";
 }
 
 const DISPLAY_KIND_ORDER: ComparisonLegendKind[] = [
@@ -53,8 +92,9 @@ export function buildComparisonLegend(
   index: ComparisonIndex,
   selectedRunway: string | null,
 ): ComparisonLegendModel {
+  // a scene is drawn whole, whatever the runway selector says
   const groups = index.groups.filter(
-    (group) => selectedRunway === null || group.runway === selectedRunway,
+    (group) => selectedRunway === null || index.scene !== undefined || group.runway === selectedRunway,
   );
   const availableKinds = new Set<ComparisonKind>();
   let hasOffTargetResult = false;
@@ -93,5 +133,6 @@ export function buildComparisonLegend(
   return {
     kinds: DISPLAY_KIND_ORDER.filter((kind) => availableKinds.has(kind)),
     statuses,
+    traffic: index.scene !== undefined ? "scene" : groups.some((group) => group.traffic !== undefined) ? "windows" : null,
   };
 }

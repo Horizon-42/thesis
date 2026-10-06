@@ -247,7 +247,7 @@
   <li><span class="chip rk4" style="background:#f1f5f9;color:#64748b;">Local ENU @ target</span> <strong>固定</strong>切平面(锚在目标)的连续动力学——它和测地一样是连续 RHS,所以<strong>同样可选任意拟合</strong>(梯形/HS/RK4);只是<strong>刻意降级</strong>用于对比,远离目标会漂出上百米,见下面那篇 30&nbsp;km 对比文档,不建议实战用。</li>
 </ul>
 <p><b>命令行对比</b>(打印上面那张真实对比表):</p>
-<pre>cd 4dTrajectory/optimization
+<pre>cd 4dTrajectory/optimization/studies
 python -m collocation_scheme_comparison --aircraft A320 --horizon 90
 python -m collocation_scheme_comparison --aircraft C172 --horizon 60</pre>
 <p><b>代码位置</b>:</p>

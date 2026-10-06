@@ -28,7 +28,8 @@ from aerodynamic_model.casadi_simulator import make_geodetic_step_integrator  # 
 from aircraft.aircraft_sets import A320  # noqa: E402
 from aircraft.aero_params import aero_params_for_aircraft  # noqa: E402
 
-from collocation import CollocationOptimizer, _DEFECT_SCHEMES, altitude_floor_m, ALTITUDE_FLOOR_MARGIN_M  # noqa: E402
+from collocation import CollocationOptimizer, altitude_floor_m, ALTITUDE_FLOOR_MARGIN_M  # noqa: E402
+from collocation.schemes import _DEFECT_SCHEMES  # noqa: E402
 from collocation import schemes as _schemes  # noqa: E402
 from collocation import components as _components  # noqa: E402
 from collocation import optimizer as _optimizer  # noqa: E402
@@ -325,6 +326,7 @@ def test_unconstrained_free_time_reaches_target():
     assert controls.shape == (opt.n_segments, 3)
     assert states.shape == (opt.n_segments, 6)
     assert final_time < 120.0 * 1.6 - 1.0                    # the time objective actually shrank T
+    assert set(opt.last_solve_timings) == {"buildS", "solverSetupS", "coldStartS", "freeTimeSolveS", "solveTotalS"}
     np.testing.assert_allclose(
         states[-1], [target.latitude, target.longitude, target.altitude, target.V, target.psi, target.gamma],
         atol=1e-2)
@@ -371,6 +373,55 @@ def test_supplied_initial_guess_is_accepted():
     seed = opt._solve_fixed_raw(init, target, 120.0 * 1.6)
     ft2, _c2, _s2 = opt.optimize_free_time(init, target, 120.0 * 1.6, initial_guess=seed)
     assert ft2 == pytest.approx(ft, rel=0.2)
+
+
+def test_extra_rows_see_every_dense_node_in_solve_order_with_its_symbolic_time():
+    # A multi-phase (procedure) build: the hook's nodes, read at a decision vector, are the dense
+    # plan `_extract` exports from it, in the same order; its times are the plan's node times.
+    init = _straight_in()
+    S = _rollout_samples(init, 120.0)
+    target = GeodeticState(*S[-1][:6], MTOW)
+    segments, _faf, _ltp = _approach(S, ac.TargetFrame(target.latitude, target.longitude))
+    opt = CollocationOptimizer(A320, segments=segments)
+    seen = {}
+
+    def record(nodes, times):
+        seen["nodes"], seen["times"] = nodes, times
+        return []
+
+    nlp, *_bounds, x0, layout = opt._build(init, target, 200.0, extra_rows=record)
+    assert len(layout["phase_nseg"]) > 1
+    x = np.asarray(x0, float)
+    opt._extract(x, layout)
+    read = ca.Function("read", [nlp["x"]], [ca.horzcat(*seen["nodes"]).T, ca.vertcat(*seen["times"])])
+    nodes, times = (np.array(v) for v in read(x))
+    geo = np.array([opt._row_to_geo(row) for row in nodes * layout["c"] + layout["b"]])
+    np.testing.assert_allclose(geo, opt.last_dense_states_geo, rtol=0, atol=1e-12)
+    np.testing.assert_allclose(times.reshape(-1), opt.last_dense_state_times_s, rtol=1e-12)
+
+
+def test_an_empty_extra_rows_leaves_the_nlp_unchanged():
+    init = _straight_in()
+    target = _reachable_target(init, 120.0)
+    opt = CollocationOptimizer(A320, scheme="trapezoidalNormalizedFullTransport")
+
+    def serialized(**kwargs):
+        nlp, *bounds, layout = opt._build(init, target, 150.0, **kwargs)
+        return ca.Function("nlp", [nlp["x"]], [nlp["f"], nlp["g"]]).serialize(), bounds
+
+    assert serialized() == serialized(extra_rows=lambda nodes, times: [])
+
+
+def test_an_extra_row_on_the_total_time_binds_the_solve():
+    init = _straight_in()
+    target = _reachable_target(init, 120.0)
+    opt = CollocationOptimizer(A320, scheme="trapezoidalNormalizedFullTransport")
+    free_time, _c, _s = opt.optimize_free_time(init, target, 120.0 * 1.6)
+    later = free_time + 15.0
+    late_time, _c, _s = opt.optimize_free_time(
+        init, target, 120.0 * 1.6, initial_guess=opt.last_decision_vector,
+        extra_rows=lambda nodes, times: [(times[-1], later, ca.inf)])
+    assert late_time == pytest.approx(later, abs=1e-3)
 
 
 def test_handles_heading_wrap_across_180_deg():

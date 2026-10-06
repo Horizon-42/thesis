@@ -27,6 +27,13 @@ Two modes:
   ``--start-visible``); the frontend reads ``comparison_index.json`` (one record per group, with
   its ``initialState`` and the CZML file + entity ids it owns), samples a subset, and reveals
   only those. The reference is resolved by flight key in the canonical observed datasource.
+  A summary of mode ``traffic:m1`` (traffic windows of ``traffic_optimization.py m1``) publishes each
+  solved group's ``<flight_key>_traffic.json`` too: its index record carries ``traffic``, the window's
+  outcome and the recorded aircraft around the commanded one (their ``ref-`` ids, and when each enters
+  relative to the commanded entry, read from the arrivals roster the summary names). A summary of mode
+  ``traffic:m2`` (one scheduled run) publishes ONE scene: every group on a single clock that starts at the
+  earliest group entry, each group's ``scene`` field (its offset on that clock, outcome, delay), the result paths
+  written on that clock, and the index's ``scene`` (its start and the background aircraft that are not groups).
 """
 
 from __future__ import annotations
@@ -37,6 +44,7 @@ import json
 import tempfile
 import uuid
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -60,6 +68,25 @@ from geokit import haversine_m
 # way, in this package's flight_identity module — see its docstring for the shared pin.)
 STATES_SUFFIX = "_states.json"
 EVAL_SUFFIX = "_eval.json"
+# MIRROR of `4dTrajectory/optimization/scenario_batch.py` `sidecar_filename` (the name rule: a record's
+# `_states.json` stem plus the suffix) and `4dTrajectory/optimization/traffic_optimization.py`
+# `TRAFFIC_SUFFIX` (the suffix). Pinned by the traffic mirror test.
+TRAFFIC_SUFFIX = "_traffic.json"
+# MIRROR of `4dTrajectory/optimization/traffic/loop.py` `TRAFFIC_RECORD_SCHEMA`: the only sidecar
+# schema an M1 summary's solved groups carry; any other (an M2 block sidecar included) is refused by
+# name. Pinned by the traffic mirror test.
+TRAFFIC_SCHEMA = "optimization-traffic-v2"
+# MIRROR of `4dTrajectory/optimization/traffic/__init__.py` `M1_MODE`, `M2_MODE`: the `mode` of a traffic run's
+# `summary.json`. An M1 summary is a set of windows (each with its own neighbours, on its own clock), an M2 summary
+# is one scene (every group on one clock); both publish their sidecars. Any other `traffic:` mode is refused.
+M1_MODE, M2_MODE = "traffic:m1", "traffic:m2"
+# MIRROR of `4dTrajectory/optimization/traffic/block.py` `BLOCK_RECORD_SCHEMA`: the only sidecar schema an M2
+# summary's solved groups carry (M1 reads `TRAFFIC_SCHEMA` only); any other is refused by name.
+BLOCK_SCHEMA = "optimization-traffic-block-v2"
+# MIRROR of `trajectory_data_process/harvest/arrivals.py` `SCHEMA_VERSION`: the only arrivals roster
+# whose `entry_time_utc` (the first kept sample's own time, to the millisecond) places two flights on
+# one clock; an older roster is refused by name.
+ARRIVALS_SCHEMA_VERSION = "harvest-arrivals-v7-measured-crossing-in-slice"
 
 # A fixed display epoch (state times are offsets in seconds from it), matching the
 # convention generate_czml uses. The relative motion is what matters, not the wall clock.
@@ -518,6 +545,203 @@ def _flight_facts(
     return (float(v) if v is not None else None), (float(m) if m is not None else None)
 
 
+def _utc(text: str) -> datetime:
+    return datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+
+def load_entry_times(manifest_path: str | Path) -> dict[str, datetime]:
+    """``flight_key`` -> ``entry_time_utc`` for every flight of an ``arrivals/manifest.json``.
+
+    The arrival window is the window the frontend resolves every reference through
+    (`window=arrival`, rostered by this manifest), and each flight's CZML there has ``t = 0`` at
+    its OWN entry. The entry time is what puts two such flights on one real clock.
+    """
+    manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    if manifest.get("schema_version") != ARRIVALS_SCHEMA_VERSION:
+        raise ValueError(
+            f"{manifest_path}: arrivals roster schema {manifest.get('schema_version')!r}, "
+            f"this builder reads {ARRIVALS_SCHEMA_VERSION!r} only"
+        )
+    return {row["flight_key"]: _utc(row["entry_time_utc"]) for row in manifest["records"]}
+
+
+def traffic_mode(summary: dict[str, Any]) -> str | None:
+    """`M1_MODE` or `M2_MODE` for a traffic summary, ``None`` for a summary of no traffic mode.
+
+    Any other ``traffic:`` mode is refused by name: it must not be published as a plain category.
+    """
+    mode = summary.get("mode")
+    if isinstance(mode, str) and mode.startswith("traffic:") and mode not in (M1_MODE, M2_MODE):
+        raise ValueError(
+            f"summary mode {mode!r}: this builder publishes {M1_MODE!r} and {M2_MODE!r} runs only"
+        )
+    return mode if mode in (M1_MODE, M2_MODE) else None
+
+
+def traffic_roster(summary: dict[str, Any]) -> dict[str, datetime]:
+    """The entry times of the arrivals roster a traffic summary names
+    (``optimization_config.traffic.selection.manifest``), so the publication needs no argument for it."""
+    return load_entry_times(summary["optimization_config"]["traffic"]["selection"]["manifest"])
+
+
+def _read_sidecar(group: str, states_file: str, states_dir: Path, schema: str) -> dict[str, Any]:
+    """A traffic window's ``<group>_traffic.json`` (the states file's name without ``_states.json``, plus the
+    sidecar suffix, as `scenario_batch.sidecar_filename` builds it); refused by name when it is missing, of
+    another schema, or another flight's."""
+    path = states_dir / (states_file.removesuffix(STATES_SUFFIX) + TRAFFIC_SUFFIX)
+    if not path.is_file():
+        raise ValueError(f"{group}: traffic sidecar {path.name} is missing from {states_dir}")
+    sidecar = json.loads(path.read_text(encoding="utf-8"))
+    if sidecar.get("schema") != schema:
+        raise ValueError(
+            f"{group}: traffic sidecar {path.name} has schema {sidecar.get('schema')!r}, "
+            f"this builder reads {schema!r} only"
+        )
+    if sidecar["flight_key"] != group:
+        raise ValueError(f"{group}: traffic sidecar {path.name} belongs to {sidecar['flight_key']!r}")
+    return sidecar
+
+
+def _require_roster_entry(group: str, recorded_entry: str, roster_entry: datetime) -> None:
+    if _utc(recorded_entry) != roster_entry:
+        raise ValueError(
+            f"{group}: the arrivals manifest puts its entry at {roster_entry.isoformat()}, its record at "
+            f"{recorded_entry}; the manifest is not the one this run flew"
+        )
+
+
+def _traffic_index_block(
+    group: str,
+    states_file: str,
+    states_dir: Path,
+    entry_times: dict[str, datetime],
+    state_data: dict[str, Any],
+) -> dict[str, Any]:
+    """The index record's ``traffic`` block of one window, from its ``<group>_traffic.json``.
+
+    ``recorded`` names each recorded aircraft by the logical reference id the group's own
+    reference carries (``ref-<flight_key>``, resolved by the frontend in the arrival window of
+    the canonical observed datasource); ``startOffsetsS`` is, for each, the seconds its entry
+    comes after the commanded aircraft's (negative: already in the scene), so the frontend can
+    put it at its real time on the group's clock, where ``t = 0`` is the commanded entry.
+    """
+    sidecar = _read_sidecar(group, states_file, states_dir, TRAFFIC_SCHEMA)
+    if group not in entry_times:
+        raise ValueError(f"{group}: not in the arrivals manifest the traffic offsets are read from")
+    entry = entry_times[group]
+    _require_roster_entry(group, state_data["source"]["entry_time_utc"], entry)
+    unknown = [key for key in sidecar["recorded"] if key not in entry_times]
+    if unknown:
+        raise ValueError(
+            f"{group}: {len(unknown)} recorded flight_key(s) are not in the arrivals manifest "
+            f"(the arrival window the frontend resolves references in): {unknown}"
+        )
+    return {
+        "outcome": sidecar["outcome"],
+        "recorded": [f"ref-{key}" for key in sidecar["recorded"]],
+        "startOffsetsS": [
+            round((entry_times[key] - entry).total_seconds(), 3) for key in sidecar["recorded"]
+        ],
+    }
+
+
+def _is_solved(result: dict[str, Any]) -> bool:
+    return bool(result.get("status") == "solved" and result.get("states_file"))
+
+
+def _best_rows(results: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """One row per group, preferring a solved row. A flight can appear in the summary as both a failed
+    attempt and a solved one; the solved result is the one to show, regardless of row order. Both rows carry
+    the same record filenames, so they land in the same group and the dedup still does its job."""
+    best: dict[str, dict[str, Any]] = {}
+    for result in results:
+        group = _group_key(result)
+        current = best.get(group)
+        if current is None or (_is_solved(result) and current.get("status") != "solved"):
+            best[group] = result
+    return best
+
+
+def _scene_time(moment: datetime) -> str:
+    return moment.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+
+@dataclass(frozen=True)
+class Scene:
+    """An M2 run as ONE scene: every group on the clock that starts at the earliest group entry ``start``.
+
+    ``groups`` maps each group (solved or not) to its index ``scene`` field ``{startOffsetS, outcome,
+    delayS}``: its entry minus ``start`` (its result paths are written on the scene clock, the frontend shifts
+    its reference by the same offset), its outcome and its delay. ``entries`` are the groups' roster entries.
+    ``background`` is the index-level ``scene.background``: the recorded aircraft the flown aircraft saw that
+    are not groups.
+    """
+
+    start: datetime
+    entries: dict[str, datetime]
+    groups: dict[str, dict[str, Any]]
+    background: dict[str, list[Any]]
+
+    def index_block(self) -> dict[str, Any]:
+        return {"startUtc": _scene_time(self.start), "background": self.background}
+
+
+def build_scene(summary: dict[str, Any], roster: dict[str, datetime], states_dir: Path) -> Scene:
+    """The scene of an M2 summary (``mode`` `M2_MODE`), its groups' entries read from ``roster``.
+
+    A solved row takes the outcome and the slot's delay of its block sidecar (`BLOCK_SCHEMA`; missing or of
+    another schema: refused by name). An unsolved row takes its ``reason`` as the outcome and its delay from
+    ``summary.blocks[].slots`` (``None``: it has no slot). The background is the union of the solved sidecars'
+    ``recorded`` minus every group, sorted, each once, with its roster entry minus the scene start; a key the
+    roster lacks is refused by name, as is a group the roster lacks or whose record puts its entry elsewhere.
+    """
+    best = _best_rows(summary["results"])
+    absent = [group for group in best if group not in roster]
+    if absent:
+        raise ValueError(f"{len(absent)} group(s) are not in the arrivals manifest: {absent}")
+    entries = {group: roster[group] for group in best}
+    start = min(entries.values())
+    delays = {slot["flight_key"]: slot["delay_s"] for block in summary["blocks"] for slot in block["slots"]}
+    groups: dict[str, dict[str, Any]] = {}
+    recorded: set[str] = set()
+    for group, result in best.items():
+        if _is_solved(result):
+            sidecar = _read_sidecar(group, result["states_file"], states_dir, BLOCK_SCHEMA)
+            outcome, delay = sidecar["outcome"], sidecar["slot"]["delay_s"]
+            recorded.update(sidecar["recorded"])
+        else:
+            outcome, delay = result["reason"], delays.get(group)
+            if not isinstance(outcome, str):
+                raise ValueError(f"{group}: an unsolved scene row names no reason")
+            eval_file = result["eval_file"]
+            _require_roster_entry(
+                group,
+                json.loads((states_dir / eval_file).read_text(encoding="utf-8"))["source"]["entry_time_utc"],
+                entries[group],
+            )
+        groups[group] = {
+            "startOffsetS": round((entries[group] - start).total_seconds(), 3),
+            "outcome": outcome,
+            "delayS": delay,
+        }
+    background = sorted(recorded - set(best))
+    lacking = [key for key in background if key not in roster]
+    if lacking:
+        raise ValueError(
+            f"{len(lacking)} background flight_key(s) are not in the arrivals manifest "
+            f"(the arrival window the frontend resolves references in): {lacking}"
+        )
+    return Scene(
+        start=start,
+        entries=entries,
+        groups=groups,
+        background={
+            "recorded": [f"ref-{key}" for key in background],
+            "startOffsetsS": [round((roster[key] - start).total_seconds(), 3) for key in background],
+        },
+    )
+
+
 def build_runway_comparison(
     results: list[dict[str, Any]],
     states_dir: str | Path,
@@ -529,6 +753,8 @@ def build_runway_comparison(
     verdicts: dict[str, dict[str, Any]] | None = None,
     include_reference_entities: bool = True,
     landed_verdicts: dict[str, dict[str, Any]] | None = None,
+    traffic_entry_times: dict[str, datetime] | None = None,
+    scene: Scene | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Combined CZML for one runway **plus** its index records (every flight on one map).
 
@@ -558,23 +784,21 @@ def build_runway_comparison(
     to the wrong namesake's track. Entities are ``show=False`` when ``start_hidden`` so
     the frontend renders only the groups it samples.
 
+    ``traffic_entry_times`` (an arrivals manifest's ``load_entry_times``): every SOLVED group is a
+    traffic window — it must have its ``<group>_traffic.json``, and its index record gains the
+    ``traffic`` block (`_traffic_index_block`). An unsolved group (its baseline failed: a failed
+    record, no sidecar) has no traffic block and is not refused. ``None``: no traffic.
+
+    ``scene`` (an M2 run, `build_scene`): every group, solved or not, gets its ``scene`` field, and a solved
+    group's optimizer and simulator paths are written on the scene clock (their times plus ``startOffsetS``).
+
     Returns ``(czml_packets, index_records)``. Each index record describes one group:
     its id, flight id, runway, status, initial state, and the entity ids that belong to it.
     """
     states_dir = Path(states_dir)
     show = not start_hidden
 
-    # Collapse to one row per group, preferring a solved row. A flight can appear in the
-    # summary as both a failed attempt and a solved one; the solved result is the one to show,
-    # regardless of row order. Both rows carry the same record filenames, so they land in the
-    # same group and the dedup still does its job.
-    best: dict[str, dict[str, Any]] = {}
-    for result in results:
-        group = _group_key(result)
-        is_solved = result.get("status") == "solved" and result.get("states_file")
-        current = best.get(group)
-        if current is None or (is_solved and current.get("status") != "solved"):
-            best[group] = result
+    best = _best_rows(results)
 
     entities: list[dict[str, Any]] = []
     index_records: list[dict[str, Any]] = []
@@ -582,7 +806,7 @@ def build_runway_comparison(
     for group, result in best.items():
         flight_id = result.get("id")
         runway = result.get("runway") or "unknown"
-        solved = result.get("status") == "solved" and result.get("states_file")
+        solved = _is_solved(result)
         entity_ids: list[str] = []
 
         if solved:
@@ -593,7 +817,14 @@ def build_runway_comparison(
                 optimizer_states = state_data["optimizer_states"]
                 simulator_states = state_data["simulator_states"]
                 predicted_states = lookback_states = None
+                if scene is not None:
+                    _require_roster_entry(group, state_data["source"]["entry_time_utc"], scene.entries[group])
+                    shift_s = scene.groups[group]["startOffsetS"]
+                    optimizer_states = _time_shifted(optimizer_states, shift_s)
+                    simulator_states = _time_shifted(simulator_states, shift_s)
             else:
+                if scene is not None:
+                    raise ValueError(f"{group}: a scene holds optimizer records only")
                 optimizer_states = simulator_states = None
                 # A prediction record rebases its own time so t=0 is the ANCHOR — the last
                 # observed sample the model was shown, typically `seq_len` samples into the
@@ -722,6 +953,11 @@ def build_runway_comparison(
             if landed is not None:
                 record["landedRunway"] = landed["runway"]
                 record["observedRunwayVerdict"] = observed_verdict
+            if traffic_entry_times is not None:
+                record["traffic"] = _traffic_index_block(
+                    group, states_file, states_dir, traffic_entry_times, state_data)
+            if scene is not None:
+                record["scene"] = scene.groups[group]
             index_records.append(record)
         else:
             if include_reference_entities:
@@ -742,12 +978,15 @@ def build_runway_comparison(
             # aircraft mass + observed V — surface them so the flight list shows them (and flags red).
             scen = (scenario_initial or {}).get(group)
             initial_v, mass_kg = _flight_facts(None, scen)
-            index_records.append({
+            record = {
                 "group": group, "flightId": flight_id, "runway": runway, "airport": airport,
                 "status": "failed", "finalTimeS": None, "initialState": None,
                 "initialVMps": initial_v, "massKg": mass_kg,
                 "entities": entity_ids,
-            })
+            }
+            if scene is not None:
+                record["scene"] = scene.groups[group]
+            index_records.append(record)
 
     # Span the clock over the LONGEST trajectory actually in the file — references included.
     # (Deriving it only from solved opt/sim states collapsed the clock to ~1 s on runways with
@@ -1035,6 +1274,8 @@ def publish_comparison_batch(
     """Build and atomically publish one complete comparison generation. ``landed_runway_report``:
     the evaluation report of the flights graded again on the runway they landed on
     (`build_runway_comparison`'s ``landed_verdicts``); the published report stays the category's.
+    A summary of mode `M1_MODE` is a set of traffic windows (`_traffic_index_block`), one of mode `M2_MODE`
+    one scene (`build_scene`, the index's ``scene``).
 
     Every CZML and the report receive an immutable generation suffix. They are
     written first; ``comparison_index.json`` is atomically replaced last and is therefore
@@ -1060,6 +1301,9 @@ def publish_comparison_batch(
     unknown = sorted(set(landed_verdicts or ()) - set(verdicts))
     if unknown:
         raise ValueError(f"the landed-runway report grades flights the category does not hold: {unknown[:3]}")
+    mode = traffic_mode(summary)
+    roster = traffic_roster(summary) if mode else None
+    scene = build_scene(summary, roster, states_dir) if mode == M2_MODE else None
     groups = group_results_by_runway(summary, fallback_airport=airport)
     index: dict[str, Any] = {
         "schemaVersion": "comparison-v2-generation",
@@ -1072,6 +1316,8 @@ def publish_comparison_batch(
     }
     if summary.get("split") in DATASET_SPLITS:
         index["datasetSplit"] = summary["split"]
+    if scene is not None:
+        index["scene"] = scene.index_block()
     created: list[Path] = []
     try:
         for (group_airport, runway), results in sorted(groups.items()):
@@ -1087,6 +1333,8 @@ def publish_comparison_batch(
                     verdicts=verdicts,
                     include_reference_entities=False,
                     landed_verdicts=landed_verdicts,
+                    traffic_entry_times=roster if mode == M1_MODE else None,
+                    scene=scene,
                 )
                 suffix = f"_p{part_index + 1:03d}" if len(parts) > 1 else ""
                 out_path = (

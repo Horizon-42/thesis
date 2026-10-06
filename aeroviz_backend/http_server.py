@@ -2,13 +2,18 @@ from __future__ import annotations
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import argparse
+from collections.abc import Callable
+from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
+import re
+import signal
 import sys
 import threading
 import time
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 
 if __package__ in (None, ""):
@@ -23,6 +28,16 @@ from aeroviz_backend.isolated_backend import (
 from aeroviz_backend.optimization_backend import OptimizationBackend
 from aeroviz_backend.observed_trajectories import ObservedTrajectoryBackend
 from aeroviz_backend.simulation_backend import SimulationBackend, aircraft_catalog
+from aeroviz_backend.traffic_jobs import BadJobRequest, JobBusy, JobNotFound, TrafficJobs, traffic_jobs_root
+
+_JOB_ROUTE = re.compile(r"^/traffic/jobs/(?P<job>[^/]+)(?P<rest>/files/[^/]+|/cancel)?$")
+
+
+@dataclass(frozen=True)
+class ServedFile:
+    """What ``handle_get`` returns for a file of a traffic job: sent as the file's own bytes, not re-encoded."""
+
+    path: Path
 
 
 #: The experiments' intents, their one source (outline §6.2 item 4): read at each `GET /experiments/intent` request.
@@ -55,6 +70,7 @@ class AeroVizBackendApp:
         observed_trajectory_backend: ObservedTrajectoryBackend | None = None,
         autopilot_segment_backend: Any = None,
         experiment_intents: Path = EXPERIMENT_INTENTS,
+        traffic_jobs: TrafficJobs | None = None,
     ) -> None:
         # The simulation endpoints run in-process (they are high-frequency and use
         # only casadi function evaluation, not the crash-prone NLP construction).
@@ -79,6 +95,8 @@ class AeroVizBackendApp:
         self._autopilot_segment_backend = autopilot_segment_backend
         self._autopilot_segment_lock = threading.Lock()
         self.experiment_intents = experiment_intents
+        # The Optimize task's multi-aircraft jobs: one subprocess at a time (aeroviz_backend/traffic_jobs.py).
+        self.traffic_jobs = traffic_jobs or TrafficJobs()
 
     def autopilot_segment_backend(self) -> Any:
         with self._autopilot_segment_lock:
@@ -128,6 +146,24 @@ class AeroVizBackendApp:
                 return 404, {"ok": False, "error": str(exc)}
             except ValueError as exc:
                 return 400, {"ok": False, "error": str(exc)}
+        if parsed.path == "/traffic/arrivals":
+            try:
+                query = parse_qs(parsed.query, keep_blank_values=True)
+                return 200, self.traffic_jobs.arrivals(
+                    _query_value(query, "airport", required=True), _query_value(query, "date", required=True))
+            except FileNotFoundError as exc:
+                return 404, {"ok": False, "error": str(exc)}
+            except ValueError as exc:
+                return 400, {"ok": False, "error": str(exc)}
+        route = _JOB_ROUTE.match(parsed.path)
+        if route is not None and route["rest"] != "/cancel":            # /traffic/jobs/<id> and .../files/<name>
+            job, rest = route["job"], route["rest"]
+            try:
+                if rest is None:
+                    return 200, self.traffic_jobs.status(job)
+                return 200, ServedFile(self.traffic_jobs.file(job, unquote(rest.removeprefix("/files/"))))
+            except JobNotFound as exc:
+                return 404, {"ok": False, "error": str(exc)}
         return 404, {"ok": False, "error": "not found"}
 
     def _autopilot(self, fly: Any) -> tuple[int, dict[str, Any], str | None]:
@@ -178,6 +214,20 @@ class AeroVizBackendApp:
             return self._autopilot(lambda: self.autopilot_segment_backend().prior.fly(payload))
         if path == "/autopilot/window-segment":    # the same, on a window of a Training set of stage C
             return self._autopilot(lambda: self.autopilot_segment_backend().window.fly(payload))
+        if path == "/traffic/jobs":
+            # one multi-aircraft job at a time: a second start is a 409, a request the roster cannot serve a 400
+            try:
+                return 200, self.traffic_jobs.start(payload), None
+            except JobBusy as exc:
+                return 409, {"ok": False, "error": str(exc)}, None
+            except BadJobRequest as exc:
+                return 400, {"ok": False, "error": str(exc)}, None
+        route = _JOB_ROUTE.match(path)
+        if route is not None and route["rest"] == "/cancel":
+            try:
+                return 200, self.traffic_jobs.cancel(route["job"]), None
+            except JobNotFound as exc:
+                return 404, {"ok": False, "error": str(exc)}, None
         return 404, {"ok": False, "error": "not found"}, None
 
 
@@ -191,6 +241,17 @@ class AeroVizRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         status, payload = self.app.handle_get(self.path)
+        if isinstance(payload, ServedFile):
+            try:
+                body = payload.path.read_bytes()
+            except FileNotFoundError:
+                # a newer job's start pruned this job's directory between the route's check and this read
+                payload = {"ok": False, "error": f"{payload.path.name} is gone: its job was pruned"}
+                self._send_json(payload, status=404)
+                self._log_error(404, payload["error"])
+                return
+            self._send_json_bytes(body)
+            return
         self._send_json(payload, status=status)
         if status >= 400:
             self._log_error(status, payload.get("error", "not found"))
@@ -368,6 +429,22 @@ class AeroVizRequestHandler(BaseHTTPRequestHandler):
             sys.stderr.flush()
             return False
 
+    def _send_json_bytes(self, body: bytes) -> bool:
+        """Answer 200 with JSON that is already encoded (a traffic job's CZML can be large: no parse, no re-encode)."""
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self._send_cors_headers()
+            self.end_headers()
+            self.wfile.write(body)
+            return True
+        except (BrokenPipeError, ConnectionResetError):
+            self._finish_live_log_line()
+            sys.stderr.write(f"[aeroviz-backend] client gone status=200 method={self.command} path={self.path}\n")
+            sys.stderr.flush()
+            return False
+
     def _send_empty(self, status: int) -> None:
         self.send_response(status)
         self._send_cors_headers()
@@ -425,6 +502,23 @@ def warm_autopilot(app: AeroVizBackendApp) -> None:
     app.autopilot_segment_backend().warm_up(log=lambda line: print(line, flush=True))
 
 
+def die_of(signum: int) -> None:
+    """Die of the signal ``signum`` as the process would have without a handler (the supervisor sees the signal)."""
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+
+
+def stop_traffic_jobs_then_terminate(
+    app: AeroVizBackendApp, terminate: Callable[[int], None] = die_of,
+) -> Callable[[int, Any], None]:
+    """The SIGTERM handler: the supervisor ends the backend with SIGTERM, which skips ``finally``, and a traffic job is
+    a session of its own that would run on, orphaned. Stop it, then ``terminate``."""
+    def handler(signum: int, _frame: Any) -> None:
+        app.traffic_jobs.shutdown()
+        terminate(signum)
+    return handler
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the AeroViz backend server.")
     parser.add_argument("--host", default="127.0.0.1")
@@ -432,19 +526,26 @@ def main() -> None:
     parser.add_argument("--training-airports-root", type=Path, default=None,
                         help="the airports root whose Training sets the live executor flies (a test stack's own; "
                              "default: the frontend's public data)")
+    parser.add_argument("--traffic-jobs-root", type=Path, default=None,
+                        help="where the Optimize task's multi-aircraft jobs write (the newest 5 job directories "
+                             "are kept; default ~/.cache/aeroviz/traffic_jobs/<port>, so two backends never share one)")
     args = parser.parse_args()
 
+    traffic_jobs = TrafficJobs(args.traffic_jobs_root or traffic_jobs_root(args.port))
     if args.training_airports_root is None:
-        app = AeroVizBackendApp()
+        app = AeroVizBackendApp(traffic_jobs=traffic_jobs)
     else:
         from aeroviz_backend.autopilot_segment.backend import stage_a_service
 
-        app = AeroVizBackendApp(autopilot_segment_backend=stage_a_service(args.training_airports_root))
+        app = AeroVizBackendApp(autopilot_segment_backend=stage_a_service(args.training_airports_root),
+                                traffic_jobs=traffic_jobs)
     http_server = ThreadingHTTPServer(
         (args.host, args.port),
         make_request_handler(app),
     )
     print(f"AeroViz backend listening on http://{args.host}:{args.port}", flush=True)
+
+    signal.signal(signal.SIGTERM, stop_traffic_jobs_then_terminate(app))
     threading.Thread(target=warm_autopilot, args=(app,), name="autopilot-warm-up", daemon=True).start()
     try:
         http_server.serve_forever()
@@ -452,6 +553,7 @@ def main() -> None:
         pass
     finally:
         http_server.server_close()
+        app.traffic_jobs.shutdown()          # a running job is its own session: stopping the server would not stop it
 
 
 if __name__ == "__main__":

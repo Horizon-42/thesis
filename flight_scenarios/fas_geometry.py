@@ -12,7 +12,7 @@ derived from the threshold alone:
     halfwidth(d)  = course_width · (d + d_GARP) / d_GARP     d = distance back from the LTP
 
 Two consumers share it and must never disagree: the optimizer's constraint bridge
-(``aeroviz_backend.procedure_segments._lpv_spec`` → ``approach_constraints.LpvFinalSpec``,
+(``procedure.segments._lpv_spec`` → ``approach_constraints.LpvFinalSpec``,
 where ``lateral.lpv_course_halfwidth`` evaluates the same cone from the GARP/LTP points)
 and the learned model's final-approach corridor
 (``4dTrajectory/ts_transformer/geometry/final_approach_geometry.py``).  This module lives in the

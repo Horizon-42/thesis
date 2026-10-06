@@ -12,7 +12,6 @@
 
 import { useState } from "react";
 import { useApp } from "../context/AppContext";
-import type * as Cesium from "cesium";
 import type { ObservedFlightSummary } from "../utils/observedFlightSummary";
 import {
   useFlightComparisonData,
@@ -20,6 +19,8 @@ import {
   type FlightComparisonDatum,
 } from "../hooks/useFlightComparisonData";
 import { formatDuration, formatSpeed, formatMass } from "../utils/flightListFormat";
+import { trackEntityById } from "../utils/trackEntity";
+import { trafficOutcomeTitle } from "../utils/trafficOutcome";
 import { COMPARISON_KIND_COLORS } from "../utils/trajectoryRenderModel";
 
 interface FlightTableProps {
@@ -41,17 +42,7 @@ export default function FlightTable({ flightIds, flightSummaries }: FlightTableP
 
   function handleRowClick(id: string) {
     setSelectedFlightId(id);
-    if (!viewer) return;
-
-    let found: Cesium.Entity | undefined;
-    for (let i = 0; i < viewer.dataSources.length; i += 1) {
-      const entity = viewer.dataSources.get(i).entities.getById(id);
-      if (entity) {
-        found = entity;
-        break;
-      }
-    }
-    viewer.trackedEntity = found;
+    if (viewer) trackEntityById(viewer, id);
   }
 
   return (
@@ -99,6 +90,18 @@ export default function FlightTable({ flightIds, flightSummaries }: FlightTableP
                 ? comparisonOutcome(comparison, resultKind)
                 : null;
               const callsign = summary?.callsign ?? id;
+              // The row's info text: the flight, its outcome, a traffic window's or scene group's outcome, and
+              // a scene group's delay (none when it has no slot).
+              const info = [
+                id,
+                outcome?.label,
+                comparisonActive && comparison?.trafficOutcome
+                  ? `traffic: ${trafficOutcomeTitle(comparison.trafficOutcome)}`
+                  : undefined,
+                comparisonActive && comparison?.trafficDelayS != null
+                  ? `delay ${Math.round(comparison.trafficDelayS)} s`
+                  : undefined,
+              ].filter(Boolean).join(" — ");
               return (
                 <tr
                   key={id}
@@ -108,7 +111,7 @@ export default function FlightTable({ flightIds, flightSummaries }: FlightTableP
                 >
                   <td
                     className={`flight-table-id${outcome ? ` flight-table-${outcome.style}` : ""}`}
-                    title={outcome ? `${id} — ${outcome.label}` : id}
+                    title={info}
                   >
                     {callsign}
                   </td>

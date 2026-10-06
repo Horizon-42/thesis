@@ -63,7 +63,7 @@ export function useComparisonLegend(
   }, [active, airportCode, categoryDir]);
 
   const model = useMemo(
-    () => index ? buildComparisonLegend(index, selectedRunway) : { kinds: [], statuses: [] },
+    () => index ? buildComparisonLegend(index, selectedRunway) : { kinds: [], statuses: [], traffic: null },
     [index, selectedRunway],
   );
 

@@ -301,7 +301,6 @@ export function sampleTrajectoryAt(
     dragCoefficient: lerp(a.dragCoefficient, b.dragCoefficient),
     actualLoadFactor: lerp(a.actualLoadFactor, b.actualLoadFactor),
     ...(a.loadFactor === undefined ? {} : { loadFactor: a.loadFactor }),
-    ...(a.attackDeg === undefined ? {} : { attackDeg: a.attackDeg }),
   };
 }
 
@@ -336,6 +335,6 @@ function attachOrientation(
     if (!sample) return undefined;
     // the simulator's bank turns left when positive
     return aircraftOrientation(position, compassFromPsiDeg(sample.headingDeg),
-      sample.flightPathDeg + (sample.attackDeg ?? 0), -sample.bankDeg);
+      sample.flightPathDeg, -sample.bankDeg);
   }, false);
 }

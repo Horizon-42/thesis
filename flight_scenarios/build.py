@@ -142,7 +142,7 @@ def build_scenario(
         # names WHICH flight it is without having to re-derive the key from a filename.
         # Only when the flight HAS an id: ``flight_key``'s fallback is the caller's list
         # index, which this function does not have, and a key built on the wrong index
-        # would disagree with the record filename ``_scenario_filename`` derives.
+        # would disagree with the record filename ``scenario_batch.scenario_filename`` derives.
         "flight_key": flight_key(flight, 0) if flight.get("id") else None,
         "callsign": flight.get("callsign"),
         "icao24": flight.get("icao24"),

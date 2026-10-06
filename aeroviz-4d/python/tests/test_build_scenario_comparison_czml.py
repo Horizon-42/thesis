@@ -1,6 +1,7 @@
 """Tests for the scenario-comparison CZML builder (single + per-runway batch)."""
 
 import json
+import re
 
 import pytest
 from pathlib import Path
@@ -1326,3 +1327,401 @@ def test_a_landed_runway_report_grading_a_flight_the_category_lacks_is_refused(t
             landed_runway_report={"trajectories": [{"file": "X_05L_eval.json", "runway": "05R", "solved": True,
                                                     "verdict": "pass"}]})
 
+
+
+# ── Traffic windows (4dTrajectory/optimization/traffic_optimization.py m1) ────
+
+COMMANDED = "AFR074_05L_a1b2c3_20260501T000300Z"
+EARLIER = "DAL1312_05L_d4e5f6_20260501T000100Z"      # already in the scene when the commanded one enters
+LATER = "UPS22_05R_a7b8c9_20260501T000500Z"         # enters after it
+ENTRY_UTC = {
+    COMMANDED: "2026-05-01T00:00:10.250Z",
+    EARLIER: "2026-05-01T00:00:00.901Z",
+    LATER: "2026-05-01T00:01:41.000Z",
+}
+
+
+def _write_traffic_window(directory: Path, *, entry: str = ENTRY_UTC[COMMANDED], sidecar: dict | None = None,
+                          write_sidecar: bool = True) -> list[dict]:
+    """One window in ``directory``: its states file, its sidecar, and the summary row naming them."""
+    state_data = {**STATE_DATA, "source": {**STATE_DATA["source"], "entry_time_utc": entry}}
+    (directory / f"{COMMANDED}_states.json").write_text(json.dumps(state_data), encoding="utf-8")
+    if write_sidecar:
+        (directory / f"{COMMANDED}_traffic.json").write_text(json.dumps(sidecar or {
+            "schema": comparison_builder.TRAFFIC_SCHEMA, "flight_key": COMMANDED,
+            "outcome": "separated", "recorded": [EARLIER, LATER],
+        }), encoding="utf-8")
+    return [{"id": "AFR074", "runway": "05L", "status": "solved",
+             "states_file": f"{COMMANDED}_states.json", "eval_file": f"{COMMANDED}_eval.json"}]
+
+
+def _write_arrivals_manifest(directory: Path, entries: dict[str, str] = ENTRY_UTC,
+                             schema_version: str | None = comparison_builder.ARRIVALS_SCHEMA_VERSION) -> Path:
+    path = directory / "manifest.json"
+    path.write_text(json.dumps({"schema_version": schema_version, "records": [
+        {"flight_key": key, "entry_time_utc": entry} for key, entry in entries.items()]}), encoding="utf-8")
+    return path
+
+
+def _traffic_index(directory: Path, results: list[dict], entries: dict[str, str] = ENTRY_UTC) -> list[dict]:
+    _czml, index = build_runway_comparison(
+        results, directory, [], airport="KRDU", include_reference_entities=False,
+        traffic_entry_times=comparison_builder.load_entry_times(_write_arrivals_manifest(directory, entries)))
+    return index
+
+
+def test_a_traffic_window_carries_its_outcome_the_recorded_aircraft_and_when_each_enters(tmp_path):
+    index = _traffic_index(tmp_path, _write_traffic_window(tmp_path))
+
+    assert [record["group"] for record in index] == [COMMANDED]
+    # `recorded` is the logical reference id the group's own reference carries (`ref-<flight_key>`);
+    # the offsets are the seconds each enters after the commanded aircraft, to the millisecond.
+    assert index[0]["traffic"] == {
+        "outcome": "separated",
+        "recorded": [f"ref-{EARLIER}", f"ref-{LATER}"],
+        "startOffsetsS": [-9.349, 90.75],
+    }
+    assert f"ref-{COMMANDED}" in index[0]["entities"]
+
+
+def test_a_batch_without_traffic_entry_times_has_no_traffic_block(tmp_path):
+    results = _write_traffic_window(tmp_path)
+    _czml, index = build_runway_comparison(results, tmp_path, [], airport="KRDU", include_reference_entities=False)
+    assert "traffic" not in index[0]
+
+
+def test_a_missing_traffic_sidecar_is_refused_by_name(tmp_path):
+    results = _write_traffic_window(tmp_path, write_sidecar=False)
+    with pytest.raises(ValueError, match=f"{COMMANDED}: traffic sidecar {COMMANDED}_traffic.json is missing"):
+        _traffic_index(tmp_path, results)
+
+
+@pytest.mark.parametrize("schema", ["optimization-traffic-v1", "optimization-traffic-block-v2", None])
+def test_a_traffic_sidecar_of_another_schema_is_refused_by_name(tmp_path, schema):
+    sidecar = {"flight_key": COMMANDED, "outcome": "separated", "recorded": []}
+    if schema is not None:
+        sidecar["schema"] = schema
+    results = _write_traffic_window(tmp_path, sidecar=sidecar)
+    with pytest.raises(ValueError, match=f"{COMMANDED}_traffic.json has schema {schema!r}, this builder reads "
+                                         f"'optimization-traffic-v2' only"):
+        _traffic_index(tmp_path, results)
+
+
+def test_a_traffic_sidecar_of_another_flight_is_refused(tmp_path):
+    results = _write_traffic_window(tmp_path, sidecar={
+        "schema": comparison_builder.TRAFFIC_SCHEMA, "flight_key": EARLIER, "outcome": "separated", "recorded": []})
+    with pytest.raises(ValueError, match=f"belongs to {EARLIER!r}"):
+        _traffic_index(tmp_path, results)
+
+
+def test_a_recorded_flight_the_arrival_window_does_not_hold_is_refused_by_name(tmp_path):
+    results = _write_traffic_window(tmp_path)
+    entries = {key: entry for key, entry in ENTRY_UTC.items() if key != LATER}
+    with pytest.raises(ValueError, match=f"1 recorded flight_key.*not in the arrivals manifest.*{LATER}"):
+        _traffic_index(tmp_path, results, entries)
+
+
+def test_a_manifest_that_is_not_the_one_the_run_flew_is_refused(tmp_path):
+    results = _write_traffic_window(tmp_path)
+    entries = {**ENTRY_UTC, COMMANDED: "2026-05-01T00:00:08.000Z"}      # an older roster: entry 2 s early
+    with pytest.raises(ValueError, match="the manifest is not the one this run flew"):
+        _traffic_index(tmp_path, results, entries)
+
+
+def test_an_unsolved_row_is_a_group_without_traffic_and_is_not_refused(tmp_path):
+    # Its M1 baseline failed: a failed record and no sidecar. The solved window beside it keeps its block.
+    results = _write_traffic_window(tmp_path) + [{
+        "id": "BAW9", "runway": "05L", "status": "failed", "eval_file": "BAW9_05L_b00009_20260501T000900Z_eval.json"}]
+    index = {record["flightId"]: record for record in _traffic_index(tmp_path, results)}
+    assert index["BAW9"]["status"] == "failed" and "traffic" not in index["BAW9"]
+    assert index["AFR074"]["traffic"]["outcome"] == "separated"
+
+
+def test_the_traffic_mirrors_are_the_sources_constants():
+    # Read as text, not imported: the optimizer modules pull in casadi, and this package must not
+    # depend on the modeling tree (same rule as the precision mirror above).
+    root = Path(__file__).resolve().parents[3]
+    optimization = root / "4dTrajectory" / "optimization"
+    assert f'TRAFFIC_RECORD_SCHEMA = "{comparison_builder.TRAFFIC_SCHEMA}"' in \
+        (optimization / "traffic" / "loop.py").read_text(encoding="utf-8")
+    assert f'TRAFFIC_SUFFIX = "{comparison_builder.TRAFFIC_SUFFIX}"' in \
+        (optimization / "traffic_optimization.py").read_text(encoding="utf-8")
+    assert f'M1_MODE, M2_MODE = "{comparison_builder.M1_MODE}", "{comparison_builder.M2_MODE}"' in \
+        (optimization / "traffic" / "__init__.py").read_text(encoding="utf-8")
+    assert f'BLOCK_RECORD_SCHEMA = "{comparison_builder.BLOCK_SCHEMA}"' in \
+        (optimization / "traffic" / "block.py").read_text(encoding="utf-8")
+    # the name rule the sidecar path is built by: the states name without its suffix, plus the sidecar's
+    assert "states_name.removesuffix(_STATES_SUFFIX) + suffix" in \
+        (optimization / "scenario_batch.py").read_text(encoding="utf-8")
+    assert f'SCHEMA_VERSION = "{comparison_builder.ARRIVALS_SCHEMA_VERSION}"' in \
+        (root / "trajectory_data_process" / "harvest" / "arrivals.py").read_text(encoding="utf-8")
+
+
+def test_the_frontends_flight_key_request_limit_is_the_backends():
+    # The frontend splits the recorded aircraft's keys into requests of at most this many; the backend
+    # refuses a longer list outright.
+    root = Path(__file__).resolve().parents[3]
+    frontend = re.search(r"MAX_FLIGHT_KEYS_PER_REQUEST = (\d+);",
+                         (root / "aeroviz-4d" / "src" / "data" / "observedTracks.ts").read_text(encoding="utf-8"))
+    backend = re.search(r"MAX_TRAJECTORIES_PER_RESPONSE = (\d+)\n",
+                        (root / "aeroviz_backend" / "observed_trajectories.py").read_text(encoding="utf-8"))
+    assert frontend and backend and frontend.group(1) == backend.group(1)
+
+
+def _run_cli(monkeypatch, *argv: str) -> None:
+    import sys
+    monkeypatch.setattr(sys, "argv", ["build_scenario_comparison_czml.py", *argv])
+    comparison_builder.main()
+
+
+def _publish(monkeypatch, directory: Path, results: list[dict], manifest: Path, *, mode: str | None) -> Path:
+    """Run the CLI over a summary of ``results`` (a traffic summary names its roster); returns the category dir."""
+    summary = {"total": len(results), "solved": len(results), "failed": 0, "results": results}
+    if mode is not None:
+        summary["mode"] = mode
+        summary["optimization_config"] = {"traffic": {"selection": {"manifest": str(manifest)}}}
+    (directory / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
+    (directory / "evaluation_report.json").write_text(json.dumps({
+        "total": 1, "solved": 1, "successful": 1, "success_rate": 1.0, "lateral_m": None, "final_time_s": None,
+        "trajectories": []}), encoding="utf-8")
+    out = directory / "comparison" / "traffic_m1_runway"
+    _run_cli(monkeypatch, "--summary", str(directory / "summary.json"), "--output-dir", str(out), "--airport", "KRDU",
+             "--evaluation-report", str(directory / "evaluation_report.json"), "--category", "traffic_m1_runway",
+             "--category-label", "Traffic M1 (runway)")
+    return out
+
+
+def test_a_traffic_summary_publishes_its_traffic_with_the_entry_fields_existing_categories_use(monkeypatch, tmp_path):
+    out = _publish(monkeypatch, tmp_path, _write_traffic_window(tmp_path), _write_arrivals_manifest(tmp_path),
+                   mode=comparison_builder.M1_MODE)
+
+    index = json.loads((out / "comparison_index.json").read_text(encoding="utf-8"))
+    assert index["groups"][0]["traffic"]["recorded"] == [f"ref-{EARLIER}", f"ref-{LATER}"]
+    # ONLY the fields existing categories carry: `isComparisonCategory` rejects nothing here, and one
+    # category it rejected would empty the whole airport's picker.
+    categories = json.loads((tmp_path / "comparison" / "categories.json").read_text(encoding="utf-8"))["categories"]
+    assert categories == [{"key": "traffic_m1_runway", "label": "Traffic M1 (runway)", "dir": "traffic_m1_runway",
+                           "groups": 1, "constrained": False}]
+
+
+def test_a_traffic_summary_requires_its_sidecars(monkeypatch, tmp_path):
+    results = _write_traffic_window(tmp_path, write_sidecar=False)
+    with pytest.raises(ValueError, match=f"{COMMANDED}: traffic sidecar {COMMANDED}_traffic.json is missing"):
+        _publish(monkeypatch, tmp_path, results, _write_arrivals_manifest(tmp_path), mode=comparison_builder.M1_MODE)
+    assert not (tmp_path / "comparison" / "traffic_m1_runway" / "comparison_index.json").exists()   # nothing committed
+
+
+def test_a_summary_of_another_mode_is_published_as_before_sidecars_or_not(monkeypatch, tmp_path):
+    out = _publish(monkeypatch, tmp_path, _write_traffic_window(tmp_path), _write_arrivals_manifest(tmp_path), mode=None)
+    assert "traffic" not in json.loads((out / "comparison_index.json").read_text(encoding="utf-8"))["groups"][0]
+
+
+@pytest.mark.parametrize("mode", ["traffic:m3", "traffic:"])
+def test_a_traffic_summary_of_another_kind_is_refused_by_name_not_published_as_a_plain_category(monkeypatch, tmp_path, mode):
+    with pytest.raises(ValueError, match=f"summary mode {mode!r}: this builder publishes 'traffic:m1' and 'traffic:m2' runs only"):
+        _publish(monkeypatch, tmp_path, _write_traffic_window(tmp_path), _write_arrivals_manifest(tmp_path), mode=mode)
+    assert not (tmp_path / "comparison" / "traffic_m1_runway" / "comparison_index.json").exists()
+
+
+@pytest.mark.parametrize("schema_version", ["harvest-arrivals-v6-cifp-leg-vertical", None])
+def test_an_arrivals_roster_of_another_schema_is_refused_by_name(monkeypatch, tmp_path, schema_version):
+    manifest = _write_arrivals_manifest(tmp_path, schema_version=schema_version)
+    if schema_version is None:                                  # a roster that names no schema at all
+        document = json.loads(manifest.read_text(encoding="utf-8"))
+        del document["schema_version"]
+        manifest.write_text(json.dumps(document), encoding="utf-8")
+    with pytest.raises(ValueError, match=f"arrivals roster schema {schema_version!r}, this builder reads "
+                                         f"'{comparison_builder.ARRIVALS_SCHEMA_VERSION}' only"):
+        _publish(monkeypatch, tmp_path, _write_traffic_window(tmp_path), manifest, mode=comparison_builder.M1_MODE)
+
+
+# ── An M2 run as one scene (4dTrajectory/optimization/traffic_optimization.py m2) ───────────────────────────
+
+G1 = "AFR074_23L_a1b2c3_20260521T180900Z"     # solved, enters second
+G2 = "DAL1312_23R_d4e5f6_20260521T181500Z"    # solved, enters last
+G3 = "UPS22_23L_a7b8c9_20260521T180100Z"      # unsolved, enters FIRST: the scene starts at its entry
+BG1 = "SWA1_23L_aaaaaa_20260521T181000Z"      # recorded aircraft that are not groups; BG1 enters before the scene
+BG2 = "SWA2_32_bbbbbb_20260521T182000Z"
+SCENE_ENTRY_UTC = {
+    G3: "2026-05-21T17:50:00.250Z",
+    G1: "2026-05-21T17:55:10.000Z",
+    G2: "2026-05-21T18:00:30.500Z",
+    BG1: "2026-05-21T17:49:00.000Z",
+    BG2: "2026-05-21T18:10:00.000Z",
+}
+SCENE_START_UTC = "2026-05-21T17:50:00.250Z"
+SCENE_STAGES = [(G1, "AFR074", "23L", "separated_at_baseline", 12.5, [G2, G3, BG2, BG1]),
+                (G2, "DAL1312", "23R", "separated", 0.0, [G1, BG2, BG1])]      # BG1, BG2 recorded by both
+
+
+def _write_scene(directory: Path, *, sidecar_schema: str = comparison_builder.BLOCK_SCHEMA,
+                 write_sidecars: bool = True, reason: str | None = "BaselineFailed: slot solve (delay 180.5 s)",
+                 entries: dict[str, str] = SCENE_ENTRY_UTC, eval_entry: str = SCENE_ENTRY_UTC[G3],
+                 slots: list[dict] | None = None) -> dict:
+    """An M2 summary in ``directory``: two solved groups with block sidecars, one unsolved group, the roster."""
+    results = []
+    for key, flight, runway, outcome, delay, recorded in SCENE_STAGES:
+        state_data = {**STATE_DATA, "source": {**STATE_DATA["source"], "entry_time_utc": SCENE_ENTRY_UTC[key]}}
+        (directory / f"{key}_states.json").write_text(json.dumps(state_data), encoding="utf-8")
+        if write_sidecars:
+            (directory / f"{key}_traffic.json").write_text(json.dumps({
+                "schema": sidecar_schema, "flight_key": key, "outcome": outcome, "recorded": recorded,
+                "slot": {"eta_utc_s": 1.0, "cta_utc_s": 2.0, "delay_s": delay}}), encoding="utf-8")
+        results.append({"id": flight, "runway": runway, "status": "solved", "states_file": f"{key}_states.json",
+                        "eval_file": f"{key}_eval.json"})
+    (directory / f"{G3}_eval.json").write_text(json.dumps({"source": {"entry_time_utc": eval_entry}}), encoding="utf-8")
+    results.append({"id": "UPS22", "runway": "23L", "status": "failed", "states_file": None,
+                    "eval_file": f"{G3}_eval.json", "reason": reason})
+    roster = _write_arrivals_manifest(directory, entries)
+    return {
+        "mode": comparison_builder.M2_MODE, "total": 3, "solved": 2, "failed": 1, "results": results,
+        "optimization_config": {"traffic": {"selection": {"manifest": str(roster)}}},
+        "blocks": [{"slots": slots if slots is not None else [
+            {"flight_key": G1, "delay_s": 12.5}, {"flight_key": G2, "delay_s": 0.0}, {"flight_key": G3, "delay_s": 180.5}]}],
+    }
+
+
+def _publish_scene(monkeypatch, directory: Path, summary: dict) -> Path:
+    (directory / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
+    (directory / "evaluation_report.json").write_text(json.dumps({
+        "total": 3, "solved": 2, "successful": 2, "success_rate": 1.0, "lateral_m": None, "final_time_s": None,
+        "trajectories": []}), encoding="utf-8")
+    out = directory / "comparison" / "traffic_m2_runway"
+    _run_cli(monkeypatch, "--summary", str(directory / "summary.json"), "--output-dir", str(out), "--airport", "KRDU",
+             "--evaluation-report", str(directory / "evaluation_report.json"), "--category", "traffic_m2_runway",
+             "--category-label", "Traffic M2 (runway)")
+    return out
+
+
+def _scene_index(monkeypatch, directory: Path, **kwargs) -> dict:
+    out = _publish_scene(monkeypatch, directory, _write_scene(directory, **kwargs))
+    return json.loads((out / "comparison_index.json").read_text(encoding="utf-8"))
+
+
+def test_a_scene_starts_at_the_earliest_group_entry_solved_or_not_and_names_its_background(monkeypatch, tmp_path):
+    index = _scene_index(monkeypatch, tmp_path)
+
+    # The unsolved group enters first, so it is the scene start; the others are offset from it.
+    assert index["scene"]["startUtc"] == SCENE_START_UTC
+    # The background: the union of the solved sidecars' recorded aircraft minus every group (G2 and G3 are groups),
+    # sorted, each once (BG1 and BG2 are recorded by both), offset from the scene start (BG1 enters before it).
+    assert index["scene"]["background"] == {"recorded": [f"ref-{BG1}", f"ref-{BG2}"], "startOffsetsS": [-60.25, 1199.75]}
+    groups = {group["group"]: group for group in index["groups"]}
+    assert set(groups) == {G1, G2, G3}
+    assert all("traffic" not in group for group in groups.values())          # the M1 field is the other mode's
+
+
+def test_each_scene_group_carries_its_offset_outcome_and_delay(monkeypatch, tmp_path):
+    groups = {group["group"]: group for group in _scene_index(monkeypatch, tmp_path)["groups"]}
+
+    # solved: the sidecar's outcome and slot delay
+    assert groups[G1]["scene"] == {"startOffsetS": 309.75, "outcome": "separated_at_baseline", "delayS": 12.5}
+    assert groups[G2]["scene"] == {"startOffsetS": 630.25, "outcome": "separated", "delayS": 0.0}
+    # unsolved: the row's reason, and its delay from the block's slots
+    assert groups[G3]["scene"] == {"startOffsetS": 0.0, "delayS": 180.5,
+                                   "outcome": "BaselineFailed: slot solve (delay 180.5 s)"}
+    assert groups[G3]["status"] == "failed"
+
+
+def test_an_unsolved_group_without_a_slot_has_no_delay(monkeypatch, tmp_path):
+    slots = [{"flight_key": G1, "delay_s": 12.5}, {"flight_key": G2, "delay_s": 0.0}]
+    groups = {group["group"]: group for group in _scene_index(monkeypatch, tmp_path, slots=slots)["groups"]}
+    assert groups[G3]["scene"]["delayS"] is None
+
+
+def test_the_result_paths_are_written_on_the_scene_clock(monkeypatch, tmp_path):
+    out = _publish_scene(monkeypatch, tmp_path, _write_scene(tmp_path))
+    index = json.loads((out / "comparison_index.json").read_text(encoding="utf-8"))
+    packets = {}
+    for name in {group["czml"] for group in index["groups"]}:
+        packets.update({packet["id"]: packet for packet in json.loads((out / name).read_text(encoding="utf-8"))[1:]})
+
+    # the records' own times are 0 s and 5 s; on the scene clock they are the group's offset later
+    for key, offset in ((G1, 309.75), (G2, 630.25)):
+        for kind in ("opt", "sim"):
+            assert _offsets(packets[f"{kind}-{key}"]) == [offset, offset + 5.0]
+    # and the group's own flight time stays its own
+    assert {group["group"]: group["finalTimeS"] for group in index["groups"]}[G1] == STATE_DATA["final_time_s"]
+
+
+def test_a_scene_category_is_listed_with_the_entry_fields_existing_categories_use(monkeypatch, tmp_path):
+    _scene_index(monkeypatch, tmp_path)
+    categories = json.loads((tmp_path / "comparison" / "categories.json").read_text(encoding="utf-8"))["categories"]
+    assert categories == [{"key": "traffic_m2_runway", "label": "Traffic M2 (runway)", "dir": "traffic_m2_runway",
+                           "groups": 3, "constrained": False}]
+
+
+def test_a_solved_scene_row_without_its_sidecar_is_refused_by_name(monkeypatch, tmp_path):
+    with pytest.raises(ValueError, match=f"{G1}: traffic sidecar {G1}_traffic.json is missing"):
+        _scene_index(monkeypatch, tmp_path, write_sidecars=False)
+
+
+@pytest.mark.parametrize("schema", [comparison_builder.TRAFFIC_SCHEMA, "optimization-traffic-block-v1", None])
+def test_a_scene_sidecar_of_another_schema_is_refused_by_name(monkeypatch, tmp_path, schema):
+    with pytest.raises(ValueError, match=f"{G1}: traffic sidecar {G1}_traffic.json has schema {schema!r}, "
+                                         f"this builder reads 'optimization-traffic-block-v2' only"):
+        _scene_index(monkeypatch, tmp_path, sidecar_schema=schema)
+
+
+def test_a_group_the_roster_lacks_is_refused_by_name(monkeypatch, tmp_path):
+    entries = {key: entry for key, entry in SCENE_ENTRY_UTC.items() if key != G2}
+    with pytest.raises(ValueError, match=f"1 group.*not in the arrivals manifest.*{G2}"):
+        _scene_index(monkeypatch, tmp_path, entries=entries)
+
+
+def test_a_background_flight_the_roster_lacks_is_refused_by_name(monkeypatch, tmp_path):
+    entries = {key: entry for key, entry in SCENE_ENTRY_UTC.items() if key != BG2}
+    with pytest.raises(ValueError, match=f"1 background flight_key.*not in the arrivals manifest.*{BG2}"):
+        _scene_index(monkeypatch, tmp_path, entries=entries)
+
+
+def test_a_roster_that_is_not_the_one_the_run_flew_is_refused_for_solved_and_unsolved_groups(monkeypatch, tmp_path):
+    older = {**SCENE_ENTRY_UTC, G1: "2026-05-21T17:55:08.000Z"}               # a solved group's record says otherwise
+    with pytest.raises(ValueError, match=f"{G1}: the arrivals manifest puts its entry at .*the manifest is not the one"):
+        _scene_index(monkeypatch, tmp_path, entries=older)
+    other = tmp_path / "other"
+    other.mkdir()
+    with pytest.raises(ValueError, match=f"{G3}: the arrivals manifest puts its entry at .*the manifest is not the one"):
+        _scene_index(monkeypatch, other, eval_entry="2026-05-21T17:49:58.000Z")      # the unsolved group's eval record
+
+
+def test_an_unsolved_scene_row_must_name_its_reason(monkeypatch, tmp_path):
+    with pytest.raises(ValueError, match=f"{G3}: an unsolved scene row names no reason"):
+        _scene_index(monkeypatch, tmp_path, reason=None)
+
+
+def test_a_scene_summary_is_not_read_as_an_m1_run(monkeypatch, tmp_path):
+    # the mode decides which sidecar schema is read: M1 refuses the block sidecars of a scene
+    summary = _write_scene(tmp_path)
+    summary["mode"] = comparison_builder.M1_MODE
+    with pytest.raises(ValueError, match=f"has schema 'optimization-traffic-block-v2', this builder reads "
+                                         f"'optimization-traffic-v2' only"):
+        _publish_scene(monkeypatch, tmp_path, summary)
+
+
+def test_a_block_that_failed_publishes_its_rows_as_unsolved_groups_with_no_delay(monkeypatch, tmp_path):
+    # `_fly_one_block`: a block that raises gets the summary shape of a normal one — no slots, every aircraft's
+    # outcome "block failed: …", no final losses, plus its `error` — and a failed row with that reason for each aircraft.
+    summary = _write_scene(tmp_path)
+    reason = "block failed: ValueError: no schedule"
+    for result, (key, *_rest) in zip(summary["results"], SCENE_STAGES):
+        (tmp_path / f"{key}_eval.json").write_text(json.dumps({"source": {"entry_time_utc": SCENE_ENTRY_UTC[key]}}),
+                                                   encoding="utf-8")
+        result.update(status="failed", states_file=None, reason=reason)
+    summary["results"][2]["reason"] = reason            # the unsolved third row (G3) already was failed
+    summary.update(solved=0, failed=3)
+    summary["blocks"] = [{"aircraft": 3, "scheduled": 0, "eta_failed": 0, "slot_failed": 0, "schedule_speed_mps": None,
+                          "slots": [], "outcomes": {G1: reason, G2: reason, G3: reason}, "final_losses": {},
+                          "error": "ValueError: no schedule"}]
+
+    out = _publish_scene(monkeypatch, tmp_path, summary)
+
+    index = json.loads((out / "comparison_index.json").read_text(encoding="utf-8"))
+    assert {group["group"]: group["status"] for group in index["groups"]} == {G1: "failed", G2: "failed", G3: "failed"}
+    assert {group["group"]: group["scene"] for group in index["groups"]} == {
+        G1: {"startOffsetS": 309.75, "outcome": reason, "delayS": None},
+        G2: {"startOffsetS": 630.25, "outcome": reason, "delayS": None},
+        G3: {"startOffsetS": 0.0, "outcome": reason, "delayS": None},
+    }
+    # no solved group, so no sidecar was read and there is no background; the scene still starts at the earliest entry
+    assert index["scene"] == {"startUtc": SCENE_START_UTC, "background": {"recorded": [], "startOffsetsS": []}}

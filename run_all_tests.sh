@@ -3,7 +3,7 @@
 # Run every Python test suite in the thesis project.
 #
 # Why three pytest invocations instead of one:
-#   - Two suites share the filename test_single_shooting_optimizor.py and the test
+#   - Test files in different dirs share names (test_frame.py) and the test
 #     dirs have no __init__.py, so pytest's default importer collides. The modeling +
 #     backend group works around this with --import-mode=importlib.
 #   - aeroviz-4d/python has its own pytest.ini (pythonpath/testpaths), so it runs

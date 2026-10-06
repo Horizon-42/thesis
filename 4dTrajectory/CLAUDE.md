@@ -21,7 +21,7 @@ restrictions, HSL): repo `docs/open-items.md`, "Optimizer".
   `atan2(Δn, Δe)`); mixing in compass convention reads an aligned aircraft as a 90° intercept (O3).
 - **"Batch edition" seam class**: the batch callers in `scenario_optimization.py` duplicate wiring
   the backend HTTP path has — change BOTH and their seam tests; batch mechanics go in the ONE
-  `_run_batch` driver (O4).
+  `scenario_batch.run_batch` driver; a procedure's legs come only from `procedure.segments` (O4).
 - The dense plan export carries the solver's OWN node times (`last_dense_state_times_s`), never
   an even spread; states files from before 2026-08-23 have wrong `optimizer_states[].t` (O5).
 - **The constrained solve does NOT move its target, and must not** —
@@ -44,6 +44,9 @@ restrictions, HSL): repo `docs/open-items.md`, "Optimizer".
 - `docs/direct_collocation_hermite_simpson.zh.md` §5 and `geodetic_dynamics_transport.zh.html`
   describe the OLD HS-planner + RK4-polish pipeline (kept, historically inaccurate) (O12).
 
+- **Multi-aircraft (`optimization/traffic/`)**: only `traffic/rules.py` imports `ts_transformer` (the separation
+  rules, read-only); its tests pin the rules and the boundary — never import ts elsewhere in the optimizer (O13).
+
 ## Key defaults & constants (current)
 
 - Mesh: `collocation/optimizer.py` `DEFAULT_N_SEGMENTS = 8`, `DEFAULT_N_SEG_PER_PHASE = 3`
@@ -53,11 +56,11 @@ restrictions, HSL): repo `docs/open-items.md`, "Optimizer".
   rollout error); constrained solves do not need big M (K2).
 - Fitting: Hermite-Simpson (`hermiteSimpsonNormalizedFullTransport`) for constrained and
   unconstrained; `trapezoidal` / `rk4` are kept for comparison studies only (K3).
-- IPOPT: `components.DEFAULT_MAX_ITERATIONS = 3000` on both IPOPT constructions; the `sqpmethod`
-  backend hardcodes `max_iter: 100` and ignores it; linear solver `AEROVIZ_IPOPT_LINSOL`
-  (default `mumps`; the HSL hook is dormant) (K4).
+- IPOPT: `components.DEFAULT_MAX_ITERATIONS = 3000` on both IPOPT constructions (the HTTP request
+  default is the backend's own 1000); the `sqpmethod` backend hardcodes `max_iter: 100` and ignores
+  it; linear solver `AEROVIZ_IPOPT_LINSOL` (default `mumps`; the HSL hook is dormant) (K4).
 - Altitude floor `altitude_floor_m(target) = target − 5 m`; rollout guard = floor − 5 m;
-  `min_altitude_m` is REQUIRED on `rollout_controls` / `simulate_controls` (K5).
+  `min_altitude_m` is REQUIRED on `rollout_controls` (K5).
 - ψ corridor: constrained solves bound heading to the route's heading hull ± 90° — this killed the
   looping/crawling local-optimum family (K6).
 - Join/passage: the ONE forced fix passage is the pre-FAF fix within its k·RNP disc; the FAC join

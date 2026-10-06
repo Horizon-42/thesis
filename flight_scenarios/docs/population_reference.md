@@ -155,7 +155,7 @@ gets a new ID here and ONE new line in the index.**
   `flight_key: null` while observed rows carried it, because `build_scenario` never copied
   it. It does now — but only when the flight has an `id`, since `flight_key`'s fallback is
   the caller's list index and this function does not have one; a key built on the wrong index
-  would disagree with the record filename `_scenario_filename` derives.
+  would disagree with the record filename `scenario_batch.scenario_filename` derives.
 
 ### FS7 · A threshold target that cannot be built is refused (2026-09-25)
 

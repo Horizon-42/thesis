@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { FlightComparisonDatum } from "../../hooks/useFlightComparisonData";
 
-type Datum = Omit<FlightComparisonDatum, "landedRunway"> & Partial<Pick<FlightComparisonDatum, "landedRunway">>;
+type Optional = "landedRunway" | "trafficOutcome" | "trafficDelayS";
+type Datum = Omit<FlightComparisonDatum, Optional> & Partial<Pick<FlightComparisonDatum, Optional>>;
 
 const { appState, comparisonData } = vi.hoisted(() => ({
   appState: { viewer: null, selectedFlightId: null as string | null, setSelectedFlightId: vi.fn() },
@@ -182,5 +183,36 @@ describe("FlightTable", () => {
     expect(other.className).not.toContain("flight-table-pass");
     expect(other.getAttribute("title")).toContain("passed on runway 23L");
     expect(screen.getByText("FDX1738").className).toContain("flight-table-pass");
+  });
+
+  it("adds a traffic window's outcome to the row's info text, only while the comparison is active", () => {
+    comparisonData.byFlightKey = new Map<string, Datum>([
+      [UPS, { initialVMps: 141.85, massKg: 66300, resultTimeS: 576, status: "solved", trafficOutcome: "separated" }],
+      [FDX, { initialVMps: 148.7, massKg: 77800, resultTimeS: 309, status: "offTarget", trafficOutcome: "solve_failed" }],
+    ]);
+    const { rerender } = render(<FlightTable flightIds={flightIds} flightSummaries={flightSummaries} />);
+    fireEvent.click(screen.getByRole("button", { name: /Flights/ }));
+    expect(screen.getByText("UPS1276").getAttribute("title")).toBe(UPS);           // comparison off: the flight only
+
+    comparisonData.comparisonActive = true;
+    rerender(<FlightTable flightIds={flightIds} flightSummaries={flightSummaries} />);
+    expect(screen.getByText("UPS1276").getAttribute("title")).toBe(`${UPS} — traffic: separated after re-solve (separated)`);
+    expect(screen.getByText("FDX1738").getAttribute("title"))
+      .toBe(`${FDX} — optimized but missed the target (off target) — traffic: loss left (re-solve failed; last good solve shown) (solve_failed)`);
+  });
+
+  it("adds a scene group's delay (rounded) to its row's info text, and none when it has no slot", () => {
+    comparisonData.comparisonActive = true;
+    comparisonData.byFlightKey = new Map<string, Datum>([
+      [UPS, { initialVMps: 141.85, massKg: 66300, resultTimeS: 576, status: "solved",
+              trafficOutcome: "separated_at_baseline", trafficDelayS: 12.5 }],
+      [FDX, { initialVMps: 148.7, massKg: 77800, resultTimeS: null, status: "failed",
+              trafficOutcome: "BaselineFailed: slot solve", trafficDelayS: null }],
+    ]);
+    render(<FlightTable flightIds={flightIds} flightSummaries={flightSummaries} />);
+    fireEvent.click(screen.getByRole("button", { name: /Flights/ }));
+    expect(screen.getByText("UPS1276").getAttribute("title")).toBe(`${UPS} — traffic: separated at the first solve (no re-solve) (separated_at_baseline) — delay 13 s`);
+    expect(screen.getByText("FDX1738").getAttribute("title"))
+      .toBe(`${FDX} — optimization failed — traffic: not optimized: its slot could not be flown (BaselineFailed: slot solve)`);
   });
 });

@@ -390,7 +390,7 @@ half a day (+ study regen), Phase 3 ≈ half a day, Phase 4 ≈ small.
 - `radians_expr`/`degrees_expr`: `casadi_coordinates_converter.py:9-14`, `casadi_direct_collocation_optimizer.py:95-100`.
 - Normalization radius: `casadi_direct_collocation_optimizer.py:88`, `dynamics_comparison.py:62` (`"Must match…"`).
 - Knots→m/s `0.51444`: `casadi_optimizer.py:139`, `casadi_direct_collocation_optimizer.py:960`, `geodetic_vs_reanchored_error.py:155`, + many tests.
-- `FEET_TO_METERS`: `aeroviz_backend/procedure_constraint.py:23`.
+- `FEET_TO_METERS`: `4dTrajectory/optimization/procedure/constraint.py:23`.
 
 ### C. Data pipeline (`trajectory_data_process/`, `aeroviz-4d/python/`, `bc_lidar_downloader/`)
 - Haversine: `trajectory_data_process/geo.py:12` (`6371.0`), `aeroviz-4d/python/generate_czml.py:75` (`6_371_000`), `preprocess_waypoints.py:106` (`6371.0088`), `preprocess_obstacles.py:74` (`6371.0`), `preprocess_procedures.py:96` (`6_371_008.8`).

@@ -38,6 +38,14 @@ gets a new ID here and ONE new line in the index.**
   intra-file instance is gone: `optimize_scenarios` and `optimize_scenarios_constrained_iaf`
   are thin fronts over ONE `_run_batch` driver (2026-08-23) — batch mechanics changes go there,
   once.
+- **Note (2026-10-05):** the batch is split by job (`code_review.md` F4–F6 in
+  `docs/multi_aircraft_optimization/`): the driver is `scenario_batch.run_batch` (pool, resume, stale sweep,
+  summary, the record filenames), the reference records `scenario_references`, the replay and the record
+  types `scenario_replay`; `scenario_optimization.py` keeps the solves, the pool workers and the CLI. The
+  procedure geometry left the backend for `optimization/procedure/` (`constraint`, `segments`, `iaf`): the
+  backend and the batch build a procedure's legs through the one `procedure.segments.build_constraint_segments`,
+  which refuses a procedure without a leg; the optimizer imports nothing from `aeroviz_backend`. The batch's
+  `--dt` and `--airport` are gone (no solve read `dt`; the airport is the scenario's `arr_airport`).
 
 ### O5 · the dense plan export carries the solver's own node times
 
@@ -130,6 +138,14 @@ gets a new ID here and ONE new line in the index.**
 - Stale docs (historically inaccurate, kept): `4dTrajectory/docs/direct_collocation_hermite_simpson.zh.md`
   §5 and `geodetic_dynamics_transport.zh.html` describe the old HS-planner + RK4-polish pipeline.
 
+### O13 · the multi-aircraft package reads ts_transformer through one module
+
+- **`optimization/traffic/` (multi-aircraft M1, 2026-10-05) imports `ts_transformer` ONLY in `traffic/rules.py`**,
+  read-only, and only `inference.separation` + `inference.runway_schedule` (pure, no torch). `traffic/tests/test_rules.py`
+  pins the rules' results on fixed scenes and checks the import boundary (AST) and that importing the adapter loads no
+  torch: a rule change on the two-tier side fails there. Design and readout:
+  `docs/multi_aircraft_optimization/design.md`; runner `optimization/traffic_optimization.py`.
+
 ## Key defaults & constants (current)
 
 ### K1 · mesh
@@ -160,7 +176,8 @@ gets a new ID here and ONE new line in the index.**
 
 - **IPOPT**: `components.DEFAULT_MAX_ITERATIONS = 3000` (`ipopt.max_iter` set explicitly on BOTH
   IPOPT constructions — verbose and quiet; request `maxIterations` reaches both backend
-  branches). The third construction in that function is the `sqpmethod` backend, which
+  branches). The backend's HTTP request default is its own `DEFAULT_MAX_ITERATIONS = 1000`
+  (`aeroviz_backend/optimization_backend.py`, 2026-10-05: kept, the docs said 3000). The third construction in that function is the `sqpmethod` backend, which
   **hardcodes `max_iter: 100` and ignores `max_iterations` entirely**. Linear solver:
   `AEROVIZ_IPOPT_LINSOL` (default `mumps`) + `AEROVIZ_IPOPT_HSLLIB` — HSL hook dormant (free MA27
   measured 3–27× slower than MUMPS on these small NLPs; kept for a future MA57 attempt). Batch
@@ -174,7 +191,7 @@ gets a new ID here and ONE new line in the index.**
   leg's published entry floor `_first_leg_entry_floor_m`) − margin. Rollout guard:
   `ROLLOUT_GUARD_MARGIN_M = 5.0`, `rollout_guard_altitude_m(target) = altitude_floor_m(target) − 5`
   (zero margin truncated faithful floor-riding replays on cm integration noise). `min_altitude_m`
-  is REQUIRED on `rollout_controls`/`simulate_controls` (no silent sea-level default).
+  is REQUIRED on `rollout_controls` (no silent sea-level default; `simulate_controls` removed 2026-10-05, no caller).
 
 ### K6 · ψ corridor
 

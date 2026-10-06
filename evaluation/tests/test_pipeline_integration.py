@@ -138,6 +138,7 @@ def test_constrained_optimizer_target_is_graded_against_the_same_threshold(tmp_p
 
     sys.path.insert(0, str(REPO_ROOT / "4dTrajectory" / "optimization"))
     import scenario_optimization as so
+    from procedure.iaf import iaf_paths
     from aerodynamic_model.common import GeodeticState
     from flight_scenarios.runway_target import threshold_target_state
     from flight_scenarios.scenario import aircraft_for_code
@@ -159,7 +160,7 @@ def test_constrained_optimizer_target_is_graded_against_the_same_threshold(tmp_p
             continue                      # no published RNAV(GPS) procedure for this runway
         import json as _json
 
-        paths = so._iaf_full_paths(_json.loads(path.read_text(encoding="utf-8")))
+        paths = iaf_paths(_json.loads(path.read_text(encoding="utf-8")))
         if not paths:
             continue
         context = contexts[("KRDU", runway.ident)]

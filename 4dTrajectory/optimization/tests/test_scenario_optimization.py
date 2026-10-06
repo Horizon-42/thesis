@@ -1,9 +1,6 @@
-"""Tests for the scenario-optimization scaffold.
+"""Tests for the scenario batch: records, the replay, resume, the reference records, the IAF glue.
 
-Plumbing (records, the node-state reshape, the target guard, filenames) passes already.
-``test_simulate_controls_rolls_forward`` guards the forward rollout (TODO ②, now wired
-through ``aerodynamic_model.rollout_piecewise_constant``). The full ``optimize_scenario``
-path runs the solver, so it is exercised by the CLI, not the unit suite.
+The full ``optimize_scenario`` path runs the solver, so it is exercised by the CLI, not the unit suite.
 """
 
 import json
@@ -23,6 +20,9 @@ if str(_REPO_ROOT) not in sys.path:
 
 import evaluation_export as ee  # noqa: E402
 import scenario_optimization as so  # noqa: E402
+import scenario_batch as batch  # noqa: E402
+import scenario_references as refs  # noqa: E402
+import scenario_replay as replay  # noqa: E402
 from aerodynamic_model.common import GeodeticState, LoadFactorControl  # noqa: E402
 from aerodynamic_model.rollout import RolloutSample  # noqa: E402
 from aircraft.aero_params import aero_params_for_aircraft  # noqa: E402
@@ -39,7 +39,7 @@ def _scenario(*, target: GeodeticState | None) -> FlightScenario:
         # A scenario source as build_scenario writes it for a harvested arrival.
         source={"id": "AFR074", "callsign": "AFR074", "icao24": "ad7f04",
                 "landing_time_utc": "2026-06-18T21:37:36Z", "arr_airport": "KRDU", "runway": "05L",
-                "target_source": "runway_threshold"},
+                "target_source": "runway_threshold", "window_s": 15.0},
         target=target,
     )
 
@@ -62,9 +62,14 @@ def _fake_optimizer(dense_states_geo, final_time, controls, *, on_init=None,
             )
             if segment_durations_s is not None:
                 self.segment_durations_s = segment_durations_s
+            self.last_decision_vector = None
 
-        def optimize_free_time(self, initial, tgt, max_duration):
+        def optimize_free_time(self, initial, tgt, max_duration, **_solve_kwargs):
             return final_time, controls, None
+
+        def optimize_trajectory(self, initial, tgt, duration, **_solve_kwargs):
+            self.fixed_duration = duration
+            return duration, controls, None
 
     return FakeOptimizer
 
@@ -91,12 +96,12 @@ def test_node_states_to_samples_uses_supplied_times():
     # NON-uniform on purpose: multiphase solves space their nodes per phase (free
     # durations × per-phase auto substeps), so the serializer takes the optimizer's own
     # node times — an even spread over [0, T] time-warped every constrained plan export.
-    samples = so._node_states_to_samples(node_state, [0.0, 30.0, 100.0], mass=78000.0)
+    samples = replay.node_states_to_samples(node_state, [0.0, 30.0, 100.0], mass=78000.0)
     assert [s.t for s in samples] == pytest.approx([0.0, 30.0, 100.0])
     assert samples[0].lat == 35.0 and samples[0].m == 78000.0
     assert samples[-1].alt == 1000.0
     with pytest.raises(ValueError):   # times must align 1:1 with the nodes
-        so._node_states_to_samples(node_state, [0.0, 30.0], mass=78000.0)
+        replay.node_states_to_samples(node_state, [0.0, 30.0], mass=78000.0)
 
 
 def test_dense_node_times_are_per_phase():
@@ -110,8 +115,8 @@ def test_dense_node_times_are_per_phase():
 
 
 def test_scenario_optimization_serialization():
-    sample = so.StateSample(t=0.0, lat=35.0, lon=-78.0, alt=2000.0, V=130.0, psi=1.0, gamma=-0.05, m=78000.0)
-    result = so.ScenarioOptimization(
+    sample = replay.StateSample(t=0.0, lat=35.0, lon=-78.0, alt=2000.0, V=130.0, psi=1.0, gamma=-0.05, m=78000.0)
+    result = replay.ScenarioOptimization(
         source={"id": "AFR074"},
         final_time_s=120.0,
         optimizer_states=[sample],
@@ -128,8 +133,8 @@ def test_scenario_filename():
     bare = _scenario(target=None)
     bare.source.pop("icao24")
     bare.source.pop("landing_time_utc")
-    assert so._scenario_filename(bare, 0) == "AFR074_05L_states.json"
-    assert so._scenario_filename(_scenario(target=None), 0) == "AFR074_05L_ad7f04_20260618T213736Z_states.json"
+    assert batch.scenario_filename(bare, 0) == "AFR074_05L_states.json"
+    assert batch.scenario_filename(_scenario(target=None), 0) == "AFR074_05L_ad7f04_20260618T213736Z_states.json"
 
 
 def test_scenario_filename_shares_the_ts_transformer_identity():
@@ -153,8 +158,8 @@ def test_scenario_filename_disambiguates_by_icao24_and_time():
             source={"id": "EJA969", "runway": "05R", "icao24": icao24, "landing_time_utc": landing},
             target=None,
         )
-    a = so._scenario_filename(scn("ad7f04", "2026-06-18T21:37:36Z"), 0)
-    b = so._scenario_filename(scn("ad7f04", "2026-06-23T18:45:21Z"), 1)
+    a = batch.scenario_filename(scn("ad7f04", "2026-06-18T21:37:36Z"), 0)
+    b = batch.scenario_filename(scn("ad7f04", "2026-06-23T18:45:21Z"), 1)
     assert a == "EJA969_05R_ad7f04_20260618T213736Z_states.json"
     assert a != b
 
@@ -177,7 +182,7 @@ def test_optimize_scenarios_skips_failures_and_continues(monkeypatch, tmp_path):
         attempts["n"] += 1
         if attempts["n"] == 1:
             raise ValueError("Direct collocation free-time optimization failed: Infeasible_Problem_Detected")
-        return so.ScenarioOptimization(
+        return replay.ScenarioOptimization(
             scenario.source, 12.0, [], [],
                 evaluation=ee.evaluation_record(
                     scenario.initial, scenario.target, _rollout_samples(scenario.initial),
@@ -236,6 +241,30 @@ def test_optimize_scenarios_skips_failures_and_continues(monkeypatch, tmp_path):
     }
 
 
+def test_the_constrained_front_reads_the_scenario_airport_and_resumes_a_failed_record(monkeypatch, tmp_path):
+    # The IAF airport is the scenario's own arr_airport (no CLI fallback); a failed record resumes
+    # with the reason it was written with, and is not solved again.
+    target = GeodeticState(35.59, -78.49, 500.0, 80.0, 1.5, -0.05, A320.landing_mass)
+    scenario = _scenario(target=target)
+    scenario.source["arr_airport"] = "KXYZ"
+    seen = []
+
+    def no_procedure(procedure_root, airport, runway):
+        seen.append((airport, runway))
+        raise ValueError(f"no RNAV(GPS) procedure for {airport} {runway}")
+
+    monkeypatch.setattr(so, "_resolve_procedure_path", no_procedure)
+    so.optimize_scenarios_constrained_iaf([scenario], output_dir=tmp_path, jobs=1)
+    assert seen == [("KXYZ", "05L")]
+    summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
+    assert summary["mode"] == "constrainedIaf:shortest" and summary["failed"] == 1
+    reason = summary["results"][0]["reason"]
+    so.optimize_scenarios_constrained_iaf([scenario], output_dir=tmp_path, jobs=1, resume=True)
+    assert len(seen) == 1                                   # resumed, not solved again
+    resumed = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
+    assert resumed["results"][0]["reason"] == reason
+
+
 def test_resume_rejects_records_from_a_different_configuration(monkeypatch, tmp_path):
     # --resume used to check identity only, so records solved under a different
     # --max-iterations/--fitting/--rollout-dt were silently absorbed and summary.json
@@ -247,7 +276,7 @@ def test_resume_rejects_records_from_a_different_configuration(monkeypatch, tmp_
 
     def fake_optimize_scenario(s, **kwargs):
         solves["n"] += 1
-        return so.ScenarioOptimization(
+        return replay.ScenarioOptimization(
             s.source, 12.0, [], [],
             evaluation=ee.evaluation_record(
                 s.initial, s.target, _rollout_samples(s.initial), s.source,
@@ -281,7 +310,7 @@ def test_resume_re_solves_a_record_flown_to_another_target(monkeypatch, tmp_path
 
     def fake_optimize_scenario(s, **kwargs):
         solves["n"] += 1
-        return so.ScenarioOptimization(
+        return replay.ScenarioOptimization(
             s.source, 12.0, [], [],
             evaluation=ee.evaluation_record(
                 s.initial, s.target, _rollout_samples(s.initial), s.source, subject="optimized",
@@ -313,10 +342,10 @@ def test_the_stall_margin_floor_stays_below_every_published_lower_edge():
 
 def test_resolve_jobs_auto_and_explicit():
     # auto (0) leaves cores free: half the CPUs, capped at the task count, floored at 1
-    assert so._resolve_jobs(0, 100) == max(1, (os.cpu_count() or 2) // 2)
-    assert so._resolve_jobs(4, 100) == 4          # explicit count honoured
-    assert so._resolve_jobs(8, 3) == 3            # never more workers than scenarios
-    assert so._resolve_jobs(0, 0) == 1            # empty batch -> serial
+    assert batch.resolve_jobs(0, 100) == max(1, (os.cpu_count() or 2) // 2)
+    assert batch.resolve_jobs(4, 100) == 4          # explicit count honoured
+    assert batch.resolve_jobs(8, 3) == 3            # never more workers than scenarios
+    assert batch.resolve_jobs(0, 0) == 1            # empty batch -> serial
 
 
 def test_optimize_one_scenario_returns_record(monkeypatch):
@@ -327,11 +356,11 @@ def test_optimize_one_scenario_returns_record(monkeypatch):
 
     monkeypatch.setattr(
         so, "optimize_scenario",
-        lambda s, **k: so.ScenarioOptimization(s.source, 12.0, [], [],
+        lambda s, **k: replay.ScenarioOptimization(s.source, 12.0, [], [],
                                                evaluation={"states": [], "controls": []}),
     )
     index, flight_id, result_dict, eval_dict, error = so._optimize_one_scenario((3, scenario, {}))
-    assert index == 3 and flight_id == "AFR074" and error is None
+    assert index == 3 and flight_id == "AFR074_05L_ad7f04_20260618T213736Z" and error is None
     assert result_dict["final_time_s"] == 12.0
     assert eval_dict == {"states": [], "controls": []}   # the evaluation record rides along
 
@@ -377,9 +406,9 @@ def test_failed_evaluation_record_keeps_boundary_conditions_with_empty_lists():
 
 
 def test_eval_filename_mirrors_states_filename():
-    assert so._eval_filename("EJA969_05R_ad7f04_20260618T213736Z_states.json") == \
+    assert batch.eval_filename("EJA969_05R_ad7f04_20260618T213736Z_states.json") == \
         "EJA969_05R_ad7f04_20260618T213736Z_eval.json"
-    assert so._reference_filename("EJA969_05R_states.json") == "EJA969_05R_reference_eval.json"
+    assert batch.reference_filename("EJA969_05R_states.json") == "EJA969_05R_reference_eval.json"
 
 
 def test_write_reference_records_from_observed_tracks(tmp_path):
@@ -409,7 +438,7 @@ def test_write_reference_records_from_observed_tracks(tmp_path):
     stale_ref = refs_dir / "OLD1_23L_dead00_20260101T000000Z_reference_eval.json"
     stale_ref.write_text("{}")
 
-    written = so.write_reference_records([scenario], [flight], output_dir=tmp_path)
+    written = refs.write_reference_records([scenario], [flight], output_dir=tmp_path)
     assert not stale_ref.exists()
     assert written == [tmp_path / "references" /
                        "AFR074_05L_ad7f04_20260618T213736Z_reference_eval.json"]
@@ -420,7 +449,7 @@ def test_write_reference_records_from_observed_tracks(tmp_path):
 
     raw = json.loads(written[0].read_text(encoding="utf-8"))
     assert raw["states"] == [] and raw["states_ref"]["key"] == "states"
-    track = (written[0].parent.parent / so.OBSERVED_TRACKS_DIR
+    track = (written[0].parent.parent / refs.OBSERVED_TRACKS_DIR
              / "AFR074_05L_ad7f04_20260618T213736Z_track.json")
     assert track.is_file()
     assert (written[0].parent / raw["states_ref"]["file"]).resolve() == track.resolve()
@@ -437,7 +466,7 @@ def test_write_reference_records_from_observed_tracks(tmp_path):
     orphan = _scenario(target=target)
     orphan.source["id"] = "GHOST"
     with pytest.raises(ValueError, match="no observed flight"):
-        so.write_reference_records([orphan], [flight], output_dir=tmp_path)
+        refs.write_reference_records([orphan], [flight], output_dir=tmp_path)
 
 
 def test_reference_records_reuse_a_matching_canonical_source(monkeypatch, tmp_path):
@@ -457,7 +486,7 @@ def test_reference_records_reuse_a_matching_canonical_source(monkeypatch, tmp_pa
     scenario.source.update({"icao24": "ad7f04", "landing_time_utc": flight["landing_time_utc"]})
     signature = {"scenarios_sha256": "one", "arrivals_manifest_sha256": "two"}
 
-    first = so.write_reference_records(
+    first = refs.write_reference_records(
         [scenario],
         [flight],
         output_dir=tmp_path / "runway",
@@ -465,11 +494,11 @@ def test_reference_records_reuse_a_matching_canonical_source(monkeypatch, tmp_pa
         source_signature=signature,
     )
     monkeypatch.setattr(
-        so,
+        refs,
         "load_model_arrivals",
         lambda _path: (_ for _ in ()).throw(AssertionError("cache was not reused")),
     )
-    second = so.write_reference_records(
+    second = refs.write_reference_records(
         [scenario],
         [flight],
         output_dir=tmp_path / "runway_cons",
@@ -498,7 +527,7 @@ def test_reference_cache_rebuilds_when_a_record_changes(monkeypatch, tmp_path):
     scenario.source.update({"icao24": "ad7f04", "landing_time_utc": flight["landing_time_utc"]})
     signature = {"scenarios_sha256": "one", "arrivals_manifest_sha256": "two"}
 
-    [path] = so.write_reference_records(
+    [path] = refs.write_reference_records(
         [scenario], [flight], output_dir=tmp_path, source_signature=signature,
     )
     changed = json.loads(path.read_text(encoding="utf-8"))
@@ -511,8 +540,8 @@ def test_reference_cache_rebuilds_when_a_record_changes(monkeypatch, tmp_path):
         calls["n"] += 1
         return [flight]
 
-    monkeypatch.setattr(so, "load_model_arrivals", load_again)
-    so.write_reference_records(
+    monkeypatch.setattr(refs, "load_model_arrivals", load_again)
+    refs.write_reference_records(
         [scenario], [flight], output_dir=tmp_path, source_signature=signature,
     )
 
@@ -528,7 +557,7 @@ def test_batch_embeds_reference_pointers(monkeypatch, tmp_path):
     def fake_optimize_scenario(scenario, **kwargs):
         if scenario.source["id"] == "BAD001":
             raise ValueError("Infeasible_Problem_Detected")
-        return so.ScenarioOptimization(
+        return replay.ScenarioOptimization(
             scenario.source, 12.0, [], [],
             evaluation=ee.evaluation_record(
                 scenario.initial, scenario.target, _rollout_samples(scenario.initial),
@@ -552,15 +581,15 @@ def test_require_usable_rollout_rejects_first_step_truncation():
     initial = GeodeticState(35.6, -78.5, 2000.0, 130.0, 1.5, -0.05, 60000.0)
     control = LoadFactorControl(thrust=1e5, bank_rad=0.0, load_factor=1.0)
     with pytest.raises(ValueError, match="envelope"):
-        so._require_usable_rollout([RolloutSample(0.0, initial, control, 0)])
+        replay.require_usable_rollout([RolloutSample(0.0, initial, control, 0)])
     usable = [RolloutSample(0.0, initial, control, 0), RolloutSample(1.0, initial, control, 0)]
-    assert so._require_usable_rollout(usable) is usable
+    assert replay.require_usable_rollout(usable) is usable
 
 
 def test_rollout_controls_carries_active_control_per_sample():
     initial = GeodeticState(35.6, -78.5, 2000.0, 130.0, 1.5, -0.05, A320.mass.max_takeoff_kg)
     node_control = [[40000.0, 0.0, 1.0], [50000.0, 0.1, 1.01]]
-    samples = so.rollout_controls(initial, node_control, final_time=4.0, aircraft=A320, dt=1.0,
+    samples = replay.rollout_controls(initial, node_control, final_time=4.0, aircraft=A320, dt=1.0,
                                   min_altitude_m=0.0)
     assert samples[0].t == 0.0 and samples[0].control.thrust == 40000.0
     assert samples[-1].control.thrust == 50000.0 and samples[-1].segment_index == 1
@@ -572,8 +601,8 @@ def test_rollout_truncates_below_the_trajectory_floor():
     # the rollout truncates at the guard instead.
     initial = GeodeticState(35.6, -78.5, 2000.0, 130.0, 1.5, -0.05, A320.mass.max_takeoff_kg)
     descending = [[0.0, 0.0, 0.98]]         # idle thrust, n slightly < 1 -> gentle descent
-    full = so.rollout_controls(initial, descending, 60.0, A320, dt=0.5, min_altitude_m=0.0)
-    capped = so.rollout_controls(initial, descending, 60.0, A320, dt=0.5,
+    full = replay.rollout_controls(initial, descending, 60.0, A320, dt=0.5, min_altitude_m=0.0)
+    capped = replay.rollout_controls(initial, descending, 60.0, A320, dt=0.5,
                                  min_altitude_m=1900.0)
     assert full[-1].t == pytest.approx(60.0, abs=1.0)          # sea-level backstop far away
     assert capped[-1].t < full[-1].t                            # truncated at the floor
@@ -589,8 +618,8 @@ def test_rollout_guard_sits_a_margin_below_the_nlp_floor():
     from collocation.components import altitude_floor_m
 
     target_alt = 144.8
-    guard = so.rollout_guard_altitude_m(target_alt)
-    assert guard == pytest.approx(altitude_floor_m(target_alt) - so.ROLLOUT_GUARD_MARGIN_M)
+    guard = replay.rollout_guard_altitude_m(target_alt)
+    assert guard == pytest.approx(altitude_floor_m(target_alt) - replay.ROLLOUT_GUARD_MARGIN_M)
     assert guard < altitude_floor_m(target_alt)
 
 
@@ -613,7 +642,7 @@ def test_optimize_scenario_passes_the_guard_altitude_to_the_rollout(monkeypatch)
     monkeypatch.setattr(so, "rollout_controls", fake_rollout)
     so.optimize_scenario(scenario)
     assert captured["min_altitude_m"] == pytest.approx(
-        so.rollout_guard_altitude_m(target.altitude)
+        replay.rollout_guard_altitude_m(target.altitude)
     )
 
 
@@ -687,22 +716,22 @@ def test_batch_clears_stale_records_from_a_previous_run(tmp_path):
     assert (tmp_path / "summary.json").exists()
 
 
-def test_simulate_controls_rolls_forward():
+def test_rollout_controls_rolls_forward():
     initial = GeodeticState(35.6, -78.5, 2000.0, 130.0, 1.5, -0.05, A320.mass.max_takeoff_kg)
     # two constant-control segments over a short 4 s horizon
     node_control = [[40000.0, 0.0, 1.0], [40000.0, 0.0, 1.0]]
-    samples = so.simulate_controls(initial, node_control, final_time=4.0, aircraft=A320, dt=1.0,
-                                   min_altitude_m=0.0)
+    samples = replay.rollout_controls(initial, node_control, final_time=4.0, aircraft=A320, dt=1.0,
+                                      min_altitude_m=0.0)
     assert len(samples) >= 2
     assert samples[0].t == 0.0
-    assert samples[0].lat == initial.latitude  # first sample is the initial state
+    assert samples[0].state.latitude == initial.latitude  # first sample is the initial state
     assert samples[-1].t == pytest.approx(4.0, abs=1.0)
 
 
 # ── Constrained min-time-IAF glue (synthetic; the real procedure data is gitignored) ──
 
 def _pc(waypoints, *, branch_id="branch:X", nominal_kt=140.0):
-    from aeroviz_backend.procedure_constraint import Glidepath, ProcedureConstraint
+    from procedure.constraint import Glidepath, ProcedureConstraint
     return ProcedureConstraint(
         procedure_uid="UID", airport_icao="KRDU", runway_ident="RW05L",
         branch_id=branch_id, approach_course_deg=45.0,
@@ -712,7 +741,7 @@ def _pc(waypoints, *, branch_id="branch:X", nominal_kt=140.0):
 
 
 def _wp(ident, lat, lon, *, alt_ft=None, fix_id=None):
-    from aeroviz_backend.procedure_constraint import ProcedureConstraintWaypoint
+    from procedure.constraint import ProcedureConstraintWaypoint
     return ProcedureConstraintWaypoint(
         fix_id=ident if fix_id is None else fix_id, ident=ident, role="IF", leg_type="TF",
         lon_deg=lon, lat_deg=lat, altitude=None, altitude_ref_ft=alt_ft,
@@ -722,7 +751,7 @@ def _wp(ident, lat, lon, *, alt_ft=None, fix_id=None):
 
 def test_solve_iaf_feeds_the_optimizer_a_segment_list(monkeypatch):
     # SEAM regression: build_constraint_segments returns a plain LIST of SegmentSpec
-    # (its old (segments, spans) tuple return is gone). _solve_iaf must pass that list
+    # (its old (segments, spans) tuple return is gone). solve_iaf must pass that list
     # through to CollocationOptimizer(segments=...) verbatim — a stale 2-tuple unpack
     # here broke EVERY constrained batch (ValueError for != 2 legs, and for exactly
     # 2 legs a lone SegmentSpec reached the optimizer -> TypeError).
@@ -748,8 +777,8 @@ def test_solve_iaf_feeds_the_optimizer_a_segment_list(monkeypatch):
             n_seg_per_phase=kwargs.get("n_seg_per_phase")),
         segment_durations_s=[10.0],
     ))
-    solve = so._solve_iaf(pc, scenario, target, A320, 60.0,
-                          n_segments=8, dt=1.0, max_duration=600.0, verbose=False)
+    solve = so.solve_iaf(pc, scenario, target, A320, 60.0,
+                          max_duration=600.0, verbose=False)
     assert solve.final_time == 100.0
     assert isinstance(captured["segments"], list) and len(captured["segments"]) >= 2
     assert all(isinstance(s, SegmentSpec) for s in captured["segments"])
@@ -758,12 +787,17 @@ def test_solve_iaf_feeds_the_optimizer_a_segment_list(monkeypatch):
     assert captured["n_seg_per_phase"] == so.DEFAULT_N_SEG_PER_PHASE
 
     # --fitting / --state-substeps / --n-seg-per-phase all reach the CONSTRAINED path
-    so._solve_iaf(pc, scenario, target, A320, 60.0,
-                  n_segments=8, dt=1.0, max_duration=600.0, verbose=False,
+    so.solve_iaf(pc, scenario, target, A320, 60.0,
+                  max_duration=600.0, verbose=False,
                   fitting="trapezoidal", state_substeps=6, n_seg_per_phase=5)
     assert captured["scheme"] == "trapezoidalNormalizedFullTransport"
     assert captured["state_substeps"] == 6
     assert captured["n_seg_per_phase"] == 5
+
+    # a flight to a controlled time of arrival is a fixed-time solve (M2)
+    fixed = so.solve_iaf(pc, scenario, target, A320, 60.0, max_duration=600.0, verbose=False,
+                         fixed_duration_s=321.0)
+    assert fixed.final_time == 321.0
 
 
 def test_procedure_threshold_agreement_accepts_the_cifp_rounding_gap():
@@ -790,30 +824,6 @@ def test_procedure_threshold_agreement_rejects_a_displaced_threshold():
         so._require_procedure_threshold_agrees(config_target, [pc])
 
 
-def test_concat_to_runway_joins_transition_and_final():
-    # transition CHWDR -> SCHOO  +  final SCHOO -> RW05L  =>  CHWDR -> SCHOO -> RW05L
-    trans = _pc([_wp("CHWDR", 36.10, -78.70), _wp("SCHOO", 36.00, -78.60)], branch_id="branch:T")
-    final = _pc([_wp("SCHOO", 36.00, -78.60), _wp("RW05L", 35.88, -78.78)], branch_id="branch:R")
-    merged = so._concat_to_runway(trans, final)
-    assert [w.ident for w in merged.waypoints] == ["CHWDR", "SCHOO", "RW05L"]
-    assert merged.branch_id == "branch:T"                 # labelled by the transition (the IAF)
-    dists = [w.distance_from_start_m for w in merged.waypoints]
-    assert dists[0] == 0.0 and dists[1] < dists[2]        # cumulative, recomputed
-
-    # a transition that does not end at the final's first fix does not feed it
-    stray = _pc([_wp("CHWDR", 36.10, -78.70), _wp("ELSEW", 36.20, -78.90)], branch_id="branch:T")
-    assert so._concat_to_runway(stray, final) is None
-
-    # Two identifier-LESS endpoints ("" is the constraint layer's missing-fixId default)
-    # must not read as the same fix — "" == "" used to satisfy the fix_id half of the
-    # check and concatenate a transition onto a final it does not feed.
-    blank_end = _pc([_wp("CHWDR", 36.10, -78.70),
-                     _wp("SCHOO", 36.00, -78.60, fix_id="")], branch_id="branch:T")
-    blank_start = _pc([_wp("ELSEW", 36.05, -78.65, fix_id=""),
-                       _wp("RW05L", 35.88, -78.78)], branch_id="branch:R")
-    assert so._concat_to_runway(blank_end, blank_start) is None
-
-
 def test_resolve_procedure_path_picks_rnav_gps(tmp_path):
     details = tmp_path / "KRDU" / "procedure-details"
     details.mkdir(parents=True)
@@ -828,19 +838,6 @@ def test_resolve_procedure_path_picks_rnav_gps(tmp_path):
     assert path.name == "KRDU-R05LY-RW05L.json"           # RNAV(GPS), not the RNP
     with pytest.raises(ValueError):
         so._resolve_procedure_path(tmp_path, "KRDU", "99X")
-
-
-def test_path_length_ranks_shorter_path_lower():
-    # The naive selector ranks IAFs by this 3D polyline length (no solve; the old
-    # Lagrange-curve proxy inflated cornered routes and could invert the ranking).
-    # A near, direct path must score lower than a longer one that enters farther out.
-    short = _pc([_wp("SCHOO", 36.00, -78.60, alt_ft=3000.0), _wp("RW05L", 35.88, -78.78, alt_ft=400.0)])
-    long = _pc([
-        _wp("OTTOS", 36.30, -78.40, alt_ft=6000.0), _wp("CHWDR", 36.15, -78.55, alt_ft=5000.0),
-        _wp("SCHOO", 36.00, -78.60, alt_ft=3000.0), _wp("RW05L", 35.88, -78.78, alt_ft=400.0),
-    ])
-    assert so._path_length_m(short) < so._path_length_m(long)
-    assert so._path_length_m(_pc([_wp("X", 36.0, -78.6)])) == float("inf")  # single point
 
 
 def test_pipeline_run_config_mirrors_the_optimizer_iteration_cap():

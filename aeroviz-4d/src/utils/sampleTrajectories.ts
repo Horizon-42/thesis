@@ -54,12 +54,14 @@ export function selectComparisonGroups(
   count: number,
   rng: Rng = Math.random,
 ): ComparisonSelection {
+  // A scene (an M2 run) is ONE picture of every group on one clock: no sample, and no runway filter either —
+  // a group left out would leave the others' separation unexplained.
   const eligible = index.groups.filter(
     (group) =>
       group.entities.length > 0 &&
-      (selectedRunway === null || group.runway === selectedRunway),
+      (index.scene !== undefined || selectedRunway === null || group.runway === selectedRunway),
   );
-  const groups = sampleSubset(eligible, count, rng);
+  const groups = index.scene !== undefined ? eligible : sampleSubset(eligible, count, rng);
   const files = [...new Set(groups.map((group) => group.czml))];
   const shownEntityIds = new Set<string>();
   for (const group of groups) {

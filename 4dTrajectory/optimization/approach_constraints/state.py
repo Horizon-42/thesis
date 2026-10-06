@@ -2,7 +2,7 @@
 
 A *trajectory* here is a NumPy array of shape ``(K, 7)``; each row is one state node in the
 **optimizer's NORMALIZED metric coordinates** (the representation the
-``trapezoidalNormalizedFullTransport`` scheme already carries — see CLAUDE.md and
+normalized full-transport schemes (default ``hermiteSimpsonNormalizedFullTransport``) already carry — see CLAUDE.md and
 ``optimization_constraint_design.md`` §2):
 
     z = (n, e, h, V, psi, gamma, m)

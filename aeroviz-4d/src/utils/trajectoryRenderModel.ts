@@ -54,6 +54,14 @@ export const COMPARISON_KIND_COLORS: Record<ComparisonKind, string> = {
 };
 
 /**
+ * The recorded aircraft around a commanded flight in a traffic window (`ComparisonGroup.traffic`): one
+ * colour for all of them, set apart from every other colour a comparison draws (reference white,
+ * optimizer orange, simulator blue, prediction purple, off-target yellow, the verdict green / red / grey,
+ * other-runway sky blue). Drawn at the reference's alpha.
+ */
+export const COMPARISON_TRAFFIC_COLOR = "rgb(255, 110, 199)";
+
+/**
  * Per-kind path/label alpha. Everything renders at the same opacity as the CZML bakes in
  * (~220/255) except the lookback, which is observed input rather than a result and is faded
  * so a viewer can see at a glance where the model stopped being told and started guessing.
