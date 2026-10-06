@@ -527,3 +527,18 @@ B5's one finished fold (`prior_base_20261006/A_full_s1337/KMSY`, a fold model, n
 - **P43.** Window A inserts a flight of another time: its shift is often days (−4,409,144 s ≈ 51 d in the smoke), shown
   in seconds; days or hours would read better.
 - **P44.** The cursor starts at the commanded flight's row 0, before the window's row 0, so no other aircraft shows there.
+
+## 20 D129: the window view's three changes (2026-10-06)
+
+| Step | Commit | What |
+|---|---|---|
+| D129 | `18d570c4` | The window list names the recorded runway ("recorded 23R"); window A's shift in days or hours (`windowShiftText`: "−51.0 d"); the cursor at the window's row 0 once its window and round are on screen (`WindowCursorStart`, a leaf; never written on the flight before). Reviewed twice (fixed: the cursor written on the flight before for one render) |
+
+Tests: vitest 741 passed (104 files), the cursor and panel tests after the last fix; tsc clean.
+
+**The browser check** (a one-shot subagent, the test stack of §19: vite 5183, backend 8771): every step passed — the
+list reads "DAL1427 recorded 23R …", window A's "Moved … by −51.0 d" (another: −118.0 d; window D's "−20 s"), the
+other aircraft labelled at once after a window or a round is chosen (the bar at "t = 2 s · before the sentence"), the
+four Draw switches stay, no console error. It saw once a jump back to the first window after A → round 0 → start that
+two repeats did not show; the session file was changed (the cursor fix) while the check ran, and vite's reload of the
+module mounts the session anew on its first window — the likely cause.
