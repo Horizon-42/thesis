@@ -59,6 +59,7 @@ the measurements behind it are in §6 or in the readout named.
 | D125 | The implementer's readings of C6–C11, accepted as built: (P33) a kind with fewer windows than its count does not stop the round, and the round's record shows the shortfall; (P34) the number of rounds is a setting of the campaign, which cannot be extended after it ends; (P35, P36) C8 measures the bytes of the branch groups and the memory of the data term (every train sentence of the base's selection in memory) before the formal run; (P37) a window set carries no per-row speaker records (the probability of "go-around", the blocked words), and the window view does not show them; (P38) the window set's `procedure` block is stage B's (prior §7 item 8); (P39) the loop draws at temperature 1 (prior D121) | Decided | User, 2026-10-05, on Claude's review of the readings |
 | D129 | The window view (C11): the list names a window's runway as its recorded runway, since the round's sentence may say another; the shift of window A is shown in days or hours; the cursor starts at the window's row 0, so that the other aircraft show from the start | Decided | User, 2026-10-06, on the implementer's proposals P42–P44 |
 | D130 | The updates of a round's pass take the branch groups of each groups file in an order shuffled by the round's random numbers (the seed and the round), then `update_groups` at a time; so an update mixes branch points and windows, and a resumed campaign is the same. Why: in the order spoken, an update's groups came mostly from one branch time of one batch | Decided | User, 2026-10-06, on Claude's check of stage C |
+| D132 | The validation readout of a chosen round (C10, `post_validation`): it reads, for each airport, at most the campaign's select windows of each airport (`select_per_airport`) among the val days' real windows that do not open inside a loss, drawn as the selection readout draws the select days', with the same random numbers, and states each airport's coverage (real windows, left out, read). The one read of the val days (outline D85) is held for each campaign: its claim is in the campaign's directory. A formal campaign (`post_train`) and its validation readout refuse a base that is not stage B's formal base (a smoke prior or a fold): the formal start checks the base's run | Decided | User, 2026-10-06, on the implementer's readings P46, P47 and Claude's check (P48) |
 
 ### 0.2 Open items
 
@@ -450,10 +451,11 @@ user, and a missing part of an interface is requested from its stage.
 - The rounds as one campaign (`post_train`) from one commit on a clean checkout: in each round the windows drawn (D100,
   D113, D124), the two passes of D94, one pass of the loss (§2 item 5), the selection readout on the select days (§2
   item 7); resumable; the intent in `docs/experiments/intents.json` before the launch.
-- The validation readout of the chosen round (not built): the round's model on real windows of the validation days,
+- The validation readout of the chosen round (`post_validation`, D132): the round's model on real windows of the validation days,
   read one time (outline D85; prior D119, D128: a claim before the read), with the readouts of the selection readout
   (the rewards, the outcomes, the losses of separation, the rows the speed-word mask acted, D114's counts). Its checks
   as §4 item 2. Tests: it refuses a second read; it reads no train or select window.
+- A formal campaign and its validation readout refuse a base that is not stage B's formal base (D132).
 
 **C12. Close of stage C.** The full ts suite passes. The implementation log and `docs/reference/runners.md` are
 updated; the report gives the code index for §7 (outline §5 rule 10). Report to the user: the commits, the rounds and
