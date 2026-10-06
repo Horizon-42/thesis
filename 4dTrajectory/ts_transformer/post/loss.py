@@ -26,6 +26,13 @@ same (D115; a continuation from a late branch point weighs no more for each of i
 
 **Dropout** (the user, 2026-10-05): off in the ratio and the pull — the words are scored in eval mode, the distribution
 they were drawn from — and on in the data term (training mode).
+
+**One update in pieces** (`update_step`, the user, 2026-10-06, after C10's round 4 ran out of the GPU's memory): an
+update's samples are given as pieces (a branch group each); each piece's surrogate and pull are summed over its counted
+words and divided by the counted rows of the WHOLE update, and its backward taken at once, so the gradient is the
+whole update's (to float rounding: the sums are added in another order) while the memory is a piece's, whatever the
+longest group of the round. The data term is one piece (its dropout would draw other masks if cut). `update_loss`, the
+whole update at once, is the readable reference `update_step` is checked against.
 """
 
 from __future__ import annotations
@@ -60,6 +67,13 @@ class Samples:
     advantage: torch.Tensor
     counted: torch.Tensor
 
+    def select(self, indices: Sequence[int]) -> Samples:
+        """The samples ``indices``, in that order (each tensor's first axis), padded as here."""
+        chosen = torch.as_tensor(list(indices), device=self.advantage.device)
+        return Samples(RowTensors(*(tensor[chosen] for tensor in self.rows)), self.permitted.select(indices),
+                       Traffic(self.traffic.tokens[chosen], self.traffic.present[chosen]), self.advantage[chosen],
+                       self.counted[chosen])
+
     def __post_init__(self) -> None:
         shape = tuple(self.rows.asked.shape)
         if tuple(self.advantage.shape) != shape or tuple(self.counted.shape) != shape or self.counted.dtype != torch.bool:
@@ -92,28 +106,44 @@ class PassStart:
             parameter.requires_grad_(False)
 
 
+def _counted_sum(values: torch.Tensor, counted: torch.Tensor) -> torch.Tensor:
+    """The batch's sum over its counted words ``values`` [B, R, 5] (a row not counted adds nothing)."""
+    return torch.where(counted[..., None], values, torch.zeros_like(values)).sum()
+
+
 def _per_row(values: torch.Tensor, counted: torch.Tensor) -> torch.Tensor:
     """The batch's sum over its counted words ``values`` [B, R, 5] divided by its counted rows: every counted row weighs
     the same (D115)."""
-    kept = torch.where(counted[..., None], values, torch.zeros_like(values))      # a row not counted adds nothing
-    return kept.sum() / counted.sum().to(values.dtype)
+    return _counted_sum(values, counted) / counted.sum().to(values.dtype)
+
+
+def _surrogate_words(log_p: torch.Tensor, start_log_p: torch.Tensor, advantage: torch.Tensor, counted: torch.Tensor,
+                     clip: float) -> tuple[torch.Tensor, int, int]:
+    """Each word's clipped-ratio loss [B, R, 5], the words counted and those clipped (module docstring)."""
+    ratio = torch.exp(log_p - start_log_p)
+    a = advantage[..., None]
+    loss = -torch.minimum(ratio * a, torch.clamp(ratio, 1.0 - clip, 1.0 + clip) * a)
+    words = counted[..., None].expand_as(ratio)
+    return loss, int(words.sum()), int(((ratio - 1.0).abs() > clip)[words].sum())
+
+
+def _pull_words(log_p: torch.Tensor, base_log_p: torch.Tensor) -> torch.Tensor:
+    """Each word's pull to the base [B, R, 5] (module docstring)."""
+    gap = base_log_p - log_p
+    return torch.exp(gap) - gap - 1.0
 
 
 def surrogate(log_p: torch.Tensor, start_log_p: torch.Tensor, advantage: torch.Tensor, counted: torch.Tensor,
               clip: float = CLIP) -> tuple[torch.Tensor, int, int]:
     """``(the clipped-ratio surrogate's loss, the words counted, the words clipped)`` (module docstring); the log-
     probabilities [B, R, 5] of the words said under the model and under the model that spoke them."""
-    ratio = torch.exp(log_p - start_log_p)
-    a = advantage[..., None]
-    loss = -torch.minimum(ratio * a, torch.clamp(ratio, 1.0 - clip, 1.0 + clip) * a)
-    words = counted[..., None].expand_as(ratio)
-    return _per_row(loss, counted), int(words.sum()), int(((ratio - 1.0).abs() > clip)[words].sum())
+    loss, words, clipped = _surrogate_words(log_p, start_log_p, advantage, counted, clip)
+    return _per_row(loss, counted), words, clipped
 
 
 def pull_to_base(log_p: torch.Tensor, base_log_p: torch.Tensor, counted: torch.Tensor) -> torch.Tensor:
     """The pull to the base on the counted words (module docstring)."""
-    gap = base_log_p - log_p
-    return _per_row(torch.exp(gap) - gap - 1.0, counted)
+    return _per_row(_pull_words(log_p, base_log_p), counted)
 
 
 def data_term(model: Prior, rows: RowTensors) -> torch.Tensor:
@@ -128,10 +158,11 @@ def data_term(model: Prior, rows: RowTensors) -> torch.Tensor:
 
 
 def update_loss(model: Prior, start: PassStart, base: Prior, samples: Samples, data: RowTensors) -> LossParts:
-    """One update's loss (module docstring): ``model`` the model trained (its traffic modules added), ``start`` the
-    model that spoke the samples, ``base`` the base checkpoint, ``data`` a batch of single-aircraft samples. The words
-    are scored in eval mode (``model`` is put there; a base or a pass-start copy with any module in training mode is
-    refused by `masked_log_probability`, D107)."""
+    """One update's loss, the whole update at once (module docstring; the readable reference of `update_step`):
+    ``model`` the model trained (its traffic modules added), ``start`` the model that spoke the samples, ``base`` the
+    base checkpoint, ``data`` a batch of single-aircraft samples. The words are scored in eval mode (``model`` is put
+    there; a base or a pass-start copy with any module in training mode is refused by `masked_log_probability`,
+    D107)."""
     model.eval()
     log_p = masked_log_probability(model, samples.rows, samples.permitted, samples.traffic)
     with torch.no_grad():
@@ -144,20 +175,50 @@ def update_loss(model: Prior, start: PassStart, base: Prior, samples: Samples, d
     return LossParts(reward + KL_WEIGHT * kl + DATA_WEIGHT * teacher, reward, kl, teacher, words, clipped)
 
 
+def update_step(model: Prior, start: PassStart, base: Prior, pieces: Sequence[Samples], data: RowTensors) -> LossParts:
+    """One update's loss in pieces (module docstring, "One update in pieces"): for each piece of the update's samples
+    its surrogate and pull, summed over its counted words and divided by the counted rows of all the pieces, and their
+    backward; then the data term on ``data`` and its backward. The gradients are left in the model's parameters (the
+    caller zeroes them before and steps after); the parts, detached, are `update_loss`'s on the pieces joined (to float
+    rounding). The words are scored in eval mode, the data term in training mode (as `update_loss`)."""
+    model.eval()
+    rows = sum(piece.counted.sum() for piece in pieces).to(torch.float32)
+    surrogate_sum = torch.zeros((), device=rows.device)
+    kl_sum = torch.zeros((), device=rows.device)
+    words = clipped = 0
+    for piece in pieces:
+        log_p = masked_log_probability(model, piece.rows, piece.permitted, piece.traffic)
+        with torch.no_grad():
+            start_log_p = masked_log_probability(start.model, piece.rows, piece.permitted, piece.traffic)
+            base_log_p = masked_log_probability(base, piece.rows, piece.permitted)
+        loss, counted_words, counted_clipped = _surrogate_words(log_p, start_log_p, piece.advantage, piece.counted,
+                                                                CLIP)
+        reward = _counted_sum(loss, piece.counted)
+        kl = _counted_sum(_pull_words(log_p, base_log_p), piece.counted)
+        ((reward + KL_WEIGHT * kl) / rows).backward()
+        object.__setattr__(piece.traffic, "embedded", None)      # the input keeps no embedded tokens and their graph
+        surrogate_sum += reward.detach()
+        kl_sum += kl.detach()
+        words += counted_words
+        clipped += counted_clipped
+    teacher = data_term(model, data)
+    (DATA_WEIGHT * teacher).backward()
+    reward, kl, teacher = surrogate_sum / rows, kl_sum / rows, teacher.detach()
+    return LossParts(reward + KL_WEIGHT * kl + DATA_WEIGHT * teacher, reward, kl, teacher, words, clipped)
+
+
 def one_pass(model: Prior, base: Prior, optimizer: torch.optim.Optimizer,
-             pairs: Iterable[tuple[Samples, RowTensors]]) -> list[LossParts]:
-    """One pass over a round's samples (§2 item 5): the model at the start of the pass is the one that spoke them; each
-    batch of samples paired with a batch of the data term, drawn from ``pairs`` one at a time (a round's samples need
-    not be held at once); one optimizer step for each. The parts of each update, detached."""
+             pairs: Iterable[tuple[Sequence[Samples], RowTensors]]) -> list[LossParts]:
+    """One pass over a round's samples (§2 item 5): the model at the start of the pass is the one that spoke them;
+    each update's samples, in pieces (`update_step`), paired with a batch of the data term, drawn from ``pairs`` one at
+    a time (a round's samples need not be held at once); one optimizer step for each. The parts of each update,
+    detached."""
     start = PassStart(model)
     out = []
-    for samples, rows in pairs:
-        parts = update_loss(model, start, base, samples, rows)
+    for pieces, rows in pairs:
         optimizer.zero_grad(set_to_none=True)
-        parts.loss.backward()
+        out.append(update_step(model, start, base, pieces, rows))
         optimizer.step()
-        out.append(LossParts(*(p.detach() if isinstance(p, torch.Tensor) else p for p in (
-            parts.loss, parts.surrogate, parts.kl, parts.data, parts.words, parts.clipped))))
     return out
 
 

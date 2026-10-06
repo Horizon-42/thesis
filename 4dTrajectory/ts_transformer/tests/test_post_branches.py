@@ -111,7 +111,7 @@ def test_a_round_gives_groups_after_each_branch_point_and_their_samples(setup):
     # the samples go through the loss of C7
     optimizer = torch.optim.AdamW(parameter_groups(model, prior_lr=1e-4, traffic_lr=1e-3))
     data = batch.rows
-    (parts,) = one_pass(model, s["base"], optimizer, [(batch, data)])
+    (parts,) = one_pass(model, s["base"], optimizer, [([batch], data)])
     assert torch.isfinite(parts.loss)
 
 

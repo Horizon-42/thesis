@@ -54,12 +54,13 @@ from ts_transformer.experiments.post_train import (
 from ts_transformer.experiments.post_window_loop import checked_edges
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.post.branches import CONTINUATIONS, samples
-from ts_transformer.post.loss import PassStart, update_loss
+from ts_transformer.post.loss import PassStart, update_step
 from ts_transformer.prior.batch import collate
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
-#: v2 (C8, 2026-10-06): one update's memory by its groups (``pass_memory``); the record written after each part.
-PROFILE_SCHEMA = "ts-post-profile-v2"
+#: v2 (C8, 2026-10-06): one update's memory by its groups (``pass_memory``); the record written after each part. v3
+#: (2026-10-06): an update measured in pieces of a group each (`post.loss.update_step`), ``1_densest`` beside.
+PROFILE_SCHEMA = "ts-post-profile-v3"
 #: The parts of a speaking batch (module docstring, item 1): each the functions (a file of the package and a name) whose
 #: cumulative time it is.
 PARTS = {
@@ -126,11 +127,14 @@ def group_size(group: Any) -> tuple[int, int]:
 def pass_memory(model: Any, context: Context, directory: Path, settings: Settings, counts: Sequence[int],
                 saved: Callable[[dict[str, Any]], None] = lambda part: None) -> dict[str, Any]:
     """Part 3 of the module docstring: for each k of ``counts`` (ascending), one update's forward and backward on k
-    branch groups written in ``directory`` — an update is padded to its longest sentence and its widest traffic
-    (`group_size`, D116), so the k are the longest group, the widest group (by traffic, then rows) and the next longest,
-    which bound any update of k ≥ 2 groups; for k = 1 the longest, and the widest alone too (``1_widest``) when it is
-    not the longest (not a bound: a group between them in both is not measured) — with ``data_sentences`` sentences of the data term; its peak GPU memory, its time and its padded shape; the
-    gradients dropped after each, no optimizer step. The groups are read file by file, the longest and the widest kept
+    branch groups written in ``directory``, in pieces of a group each as the campaign runs it (`update_step`): its
+    peak is its largest piece's (a piece padded to its own longest sentence and widest traffic, `group_size`, D116) and
+    the data term's, so the size of k matters little. The k are the longest group, the widest group (by traffic, then
+    rows) and the next longest; besides k = 1 (the longest), the widest alone (``1_widest``) and the group of the
+    largest rows × traffic (``1_densest``) when they are other groups. A PROXY, not a bound: a group long and wide but
+    none of these three is not measured. With ``data_sentences`` sentences of the data term; its peak GPU memory, its
+    time and its shape (the pieces' sentences, the longest piece's rows, the widest piece's traffic); the gradients
+    dropped after each, no optimizer step. The groups are read file by file, the longest and the widest kept
     (the round's are not held at once). A k past the groups held is recorded as such; an update out of the GPU's memory
     is recorded and stops the rest. ``saved`` gets the record after each one measured. APPROXIMATIONS, stated: the data
     term's sentences are one draw, not a bound (the pass draws them again for each update; they carry no traffic); an
@@ -140,6 +144,7 @@ def pass_memory(model: Any, context: Context, directory: Path, settings: Setting
     wanted = max(counts)
     longest: list[Any] = []
     widest: Any = None
+    densest: Any = None
     sizes: list[tuple[int, int]] = []
     for path in sorted(directory.glob("groups_*.pt"), key=lambda p: int(p.stem.split("_")[1])):
         loaded = torch.load(path, weights_only=False)
@@ -147,6 +152,8 @@ def pass_memory(model: Any, context: Context, directory: Path, settings: Setting
         longest = sorted(longest + loaded, key=group_size, reverse=True)[:wanted]
         widest = max(([widest] if widest is not None else []) + loaded, key=lambda g: group_size(g)[::-1],
                      default=None)
+        densest = max(([densest] if densest is not None else []) + loaded,
+                      key=lambda g: (group_size(g)[0] * group_size(g)[1], group_size(g)[0]), default=None)
     order = longest if widest is None or widest is longest[0] else (
         [longest[0], widest] + [g for g in longest[1:] if g is not widest])
     runs = []
@@ -154,6 +161,8 @@ def pass_memory(model: Any, context: Context, directory: Path, settings: Setting
         runs.append((str(k), order[:k]))
         if k == 1 and order and order[0] is not widest:
             runs.append(("1_widest", [widest]))
+        if k == 1 and order and densest is not order[0] and densest is not widest:
+            runs.append(("1_densest", [densest]))
     chosen = np.random.default_rng([settings.seed, 0, 3]).choice(
         len(context.data), size=min(settings.data_sentences, len(context.data)), replace=False)
     data = [context.data[int(i)] for i in chosen]
@@ -162,15 +171,17 @@ def pass_memory(model: Any, context: Context, directory: Path, settings: Setting
                            "largest_rows": max([0] + [r for r, _ in sizes]),
                            "largest_traffic": max([0] + [n for _, n in sizes]), "updates": {}}
     for label, groups in runs:
-        if label != "1_widest" and int(label) > len(order):
+        if label not in ("1_widest", "1_densest") and int(label) > len(order):
             out["updates"][label] = "fewer groups held"
             continue
         try:
-            batch = samples(groups, device)
+            batch = [samples([group], device) for group in groups]           # the campaign's pieces (`update_step`)
             rows = collate(data, device)
-            shape = {"sentences": int(batch.rows.asked.shape[0]), "rows": int(batch.rows.asked.shape[1]),
-                     "traffic": int(batch.traffic.tokens.shape[2]), "data_rows": int(rows.asked.shape[1])}
-            _, seconds = timed(device, lambda: update_loss(model, start, context.base, batch, rows).loss.backward())
+            shape = {"sentences": sum(int(p.rows.asked.shape[0]) for p in batch),
+                     "rows": max(int(p.rows.asked.shape[1]) for p in batch),
+                     "traffic": max(int(p.traffic.tokens.shape[2]) for p in batch),
+                     "data_rows": int(rows.asked.shape[1])}
+            _, seconds = timed(device, lambda: update_step(model, start, context.base, batch, rows))
             out["updates"][label] = {"s": seconds, **shape, **memory(device)}
         except torch.OutOfMemoryError:
             out["updates"][label] = "out of memory"

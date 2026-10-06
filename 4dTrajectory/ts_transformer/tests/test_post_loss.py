@@ -11,7 +11,7 @@ import torch
 from ts_transformer.instructions.words import Words
 from ts_transformer.post.edges import TOKEN_FEATURES
 from ts_transformer.post.loss import (
-    CLIP, PassStart, Samples, data_term, one_pass, pull_to_base, stacked, surrogate, update_loss,
+    CLIP, PassStart, Samples, data_term, one_pass, pull_to_base, stacked, surrogate, update_loss, update_step,
 )
 from ts_transformer.post.traffic_attention import (
     Traffic, TrafficConfig, add_traffic_attention, parameter_groups, traffic_modules, traffic_of,
@@ -166,7 +166,7 @@ def test_one_update_and_one_pass():
     def pairs():                                                            # drawn one at a time, after the pass starts
         for k in range(2):
             drawn.append(k)
-            yield samples, data
+            yield [samples], data
 
     passed = one_pass(model, base, optimizer, pairs())
     assert drawn == [0, 1]
@@ -178,6 +178,42 @@ def test_one_update_and_one_pass():
     nan = torch.zeros(1, 2, 5)
     nan[0, 0] = float("nan")                                                # a row not counted that holds a NaN
     assert torch.isfinite(pull_to_base(nan, torch.zeros(1, 2, 5), torch.tensor([[False, True]])))
+
+
+def test_an_update_in_pieces_is_the_whole_update():
+    """`update_step` on the samples cut in pieces (each piece's surrogate and pull divided by the whole update's counted
+    rows, its backward at once; the data term whole) gives the parts and the gradient of `update_loss` on them all at
+    once, to float rounding; with the same random numbers its data term draws the same dropout."""
+    base = _base()
+    model = _trained(base)
+    rows, permitted, _, traffic = _spoken(model)
+    rng = np.random.default_rng(9)
+    data = collate([prior_sentence(rng, WORDS, candidates=2, rows=LENGTH, first_step=FIRST) for _ in range(4)], CPU)
+    advantage = torch.as_tensor(np.random.default_rng(2).normal(size=rows.asked.shape), dtype=torch.float32)
+    counted = rows.asked.clone()
+    counted[0, :FIRST + 6] = False                                     # pieces with other counts of rows
+    samples = _samples(rows, permitted, traffic, advantage, counted)
+    start = PassStart(model)
+    with torch.no_grad():                                              # the model moved since it spoke: some clipped
+        generator = torch.Generator().manual_seed(4)
+        for p in model.parameters():
+            p.add_(torch.randn(p.shape, generator=generator) * 0.05)
+    torch.manual_seed(3)
+    whole = update_loss(model, start, base, samples, data)
+    whole.loss.backward()
+    expected = [None if p.grad is None else p.grad.clone() for p in model.parameters()]
+    model.zero_grad(set_to_none=True)
+    torch.manual_seed(3)
+    first, second = samples.select([0]), samples.select([1, 2])
+    pieces = update_step(model, start, base, [first, second], data)
+    for name in ("loss", "surrogate", "kl", "data"):
+        assert torch.allclose(getattr(pieces, name), getattr(whole, name).detach(), atol=1e-6, rtol=1e-6), name
+    assert (pieces.words, pieces.clipped) == (whole.words, whole.clipped) and not pieces.loss.requires_grad
+    assert 0 < whole.clipped < whole.words
+    assert any(g is not None for g in expected)
+    assert all((p.grad is None) == (g is None) and (g is None or torch.allclose(p.grad, g, atol=1e-6, rtol=1e-5))
+               for p, g in zip(model.parameters(), expected))
+    assert not model.training and first.traffic.embedded is None and second.traffic.embedded is None
 
 
 def test_samples_refuse_rows_that_are_not_said_or_carry_nothing():

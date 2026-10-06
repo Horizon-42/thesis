@@ -118,9 +118,9 @@ def test_the_pass_reads_the_groups_file_by_file_a_few_at_a_time(setup, tmp_path)
     torch.save([rewarded] * 3, directory / "groups_0.pt")          # 3 groups: an update of 2, then of 1
     torch.save([], directory / "groups_1.pt")                      # a batch without an informative group
     torch.save([rewarded], directory / "groups_10.pt")             # read after groups_1 (by number, not by name)
-    sizes = [p.rows.asked.shape[0] for p, _ in update_pairs(directory, context.data, settings,
-                                                            np.random.default_rng(0), CPU)]
-    assert sizes == [6, 3, 3]                                      # 3 sentences a group
+    updates = list(update_pairs(directory, context.data, settings, np.random.default_rng(0), CPU))
+    sizes = [[piece.rows.asked.shape[0] for piece in pieces] for pieces, _ in updates]
+    assert sizes == [[3, 3], [3], [3]]                             # a piece a group, 3 sentences each
     before = [p.detach().clone() for p in model.parameters()]
     passed = train_pass(model, context, optimizer, directory, settings, np.random.default_rng(0))
     assert passed["updates"] == 3 and np.isfinite(passed["loss"]) and not model.training
@@ -142,8 +142,8 @@ def test_the_pass_shuffles_each_file_s_groups_by_the_round_s_numbers(tmp_path, m
     settings = _settings(update_groups=3)
 
     def updates(seed):
-        return [chunk for chunk, _ in update_pairs(directory, list(range(4)), settings, np.random.default_rng(seed),
-                                                   CPU)]
+        return [[g for piece in pieces for g in piece]           # each piece one group (`samples` returns it)
+                for pieces, _ in update_pairs(directory, list(range(4)), settings, np.random.default_rng(seed), CPU)]
 
     chunks = updates([1337, 0, 1])
     first = [g for chunk in chunks for g in chunk]

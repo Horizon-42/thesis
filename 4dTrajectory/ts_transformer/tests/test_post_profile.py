@@ -53,11 +53,10 @@ def test_an_update_out_of_memory_is_recorded_and_stops_the_larger_ones(tmp_path,
     torch.save([_group(9, 4), _group(1, 1), _group(2, 1)], directory / "groups_1.pt")
     tried = []
 
-    def update(model, start, base, batch, data):
-        tried.append(batch.chosen)
-        if len(batch.chosen) >= 4:
+    def update(model, start, base, pieces, data):
+        tried.append([size for piece in pieces for size in piece.chosen])
+        if len(pieces) >= 4:
             raise torch.OutOfMemoryError("CUDA out of memory")
-        return SimpleNamespace(loss=(model.weight * 0).sum())
 
     def batch_of(groups, device):
         rows = max(len(g.sentences[0].tokens) for g in groups)
@@ -65,7 +64,7 @@ def test_an_update_out_of_memory_is_recorded_and_stops_the_larger_ones(tmp_path,
                                rows=SimpleNamespace(asked=torch.zeros(len(groups), rows, dtype=torch.bool)),
                                traffic=SimpleNamespace(tokens=torch.zeros(len(groups), rows, 2, 4)))
 
-    monkeypatch.setattr(post_profile, "update_loss", update)
+    monkeypatch.setattr(post_profile, "update_step", update)
     monkeypatch.setattr(post_profile, "samples", batch_of)
     monkeypatch.setattr(post_profile, "collate", lambda data, device: SimpleNamespace(asked=torch.zeros(3, 7)))
     monkeypatch.setattr(post_profile, "PassStart", lambda model: None)
@@ -88,6 +87,14 @@ def test_an_update_out_of_memory_is_recorded_and_stops_the_larger_ones(tmp_path,
     out = pass_memory(model, context, other, SimpleNamespace(seed=1, data_sentences=3), [1, 2])
     assert tried == [[(10, 1)], [(2, 6)], [(10, 1), (2, 6)]] and list(out["updates"]) == ["1", "1_widest", "2"]
     assert out["updates"]["2"]["rows"] == out["largest_rows"] == 10 and out["largest_traffic"] == 6
+    # the group of the largest rows × traffic, neither the longest nor the widest, measured alone too
+    dense = tmp_path / "round_2"
+    dense.mkdir()
+    torch.save([_group(10, 1), _group(2, 6), _group(6, 4)], dense / "groups_0.pt")
+    tried.clear()
+    out = pass_memory(model, context, dense, SimpleNamespace(seed=1, data_sentences=3), [1, 2])
+    assert tried == [[(10, 1)], [(2, 6)], [(6, 4)], [(10, 1), (2, 6)]]
+    assert list(out["updates"]) == ["1", "1_widest", "1_densest", "2"]
 
 
 def test_the_update_measured_leaves_the_model_as_it_was(setup, tmp_path):  # noqa: F811
