@@ -3,7 +3,7 @@
  * wrote (`stageA.ts`).
  */
 import { describe, expect, it } from "vitest";
-import { TRAINING_OUTCOMES } from "../trainingSample";
+import { TRAINING_LOST_SEPARATION, TRAINING_OUTCOMES } from "../trainingSample";
 import {
   checkMark, crossingText, decisionText, formatElapsed, replayText, TRAINING_OUTCOME_TAG, TRAINING_OUTCOME_TEXT,
 } from "../trainingText";
@@ -15,7 +15,9 @@ describe("the outcome wording", () => {
       expect(TRAINING_OUTCOME_TAG[outcome].length).toBeGreaterThan(0);
       expect(TRAINING_OUTCOME_TEXT[outcome].length).toBeGreaterThan(0);
     }
-    expect(Object.keys(TRAINING_OUTCOME_TAG).sort()).toEqual([...TRAINING_OUTCOMES].sort());
+    // and a window's end that is no judge's outcome (stage C: a loss of separation), in the same tags and words
+    expect(Object.keys(TRAINING_OUTCOME_TAG).sort()).toEqual([...TRAINING_OUTCOMES, TRAINING_LOST_SEPARATION].sort());
+    expect(Object.keys(TRAINING_OUTCOME_TEXT).sort()).toEqual([...TRAINING_OUTCOMES, TRAINING_LOST_SEPARATION].sort());
   });
 
   it("says where the threshold was crossed and the DA check's two values with their marks", () => {

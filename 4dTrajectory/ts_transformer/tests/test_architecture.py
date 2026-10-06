@@ -694,7 +694,8 @@ def test_only_the_runners_the_executor_and_the_prior_reach_the_instructions_pack
             continue
         rel = path.relative_to(TS_DIR).as_posix()
         if any(name.split(".")[0] == "instructions" for name in _imported_names(path)):
-            assert rel.startswith(("experiments/", "autopilot/", "prior/")), f"{rel} imports the instructions package"
+            assert rel.startswith(("experiments/", "autopilot/", "prior/", "post/")), \
+                f"{rel} imports the instructions package"
 
 
 AUTOPILOT = TS_DIR / "autopilot"
@@ -755,15 +756,15 @@ def test_the_prior_reads_only_the_instruction_language():
             assert allowed, f"{rel} imports {name}"
 
 
-def test_only_the_runners_reach_the_prior():
-    """`instructions/` and `autopilot/` import no model package (their own tests above); nothing else but a runner
-    imports the prior."""
+def test_only_the_runners_and_the_post_training_reach_the_prior():
+    """`instructions/` and `autopilot/` import no model package (their own tests above); nothing else but a runner and
+    the post-training (`post/`, through prior §7 only: its own test below) imports the prior."""
     for path in _module_files():
         if path.is_relative_to(PRIOR):
             continue
         rel = path.relative_to(TS_DIR).as_posix()
         if any(name.split(".")[0] == "prior" for name in _imported_names(path)):
-            assert rel.startswith("experiments/"), f"{rel} imports the prior"
+            assert rel.startswith(("experiments/", "post/")), f"{rel} imports the prior"
 
 
 #: What the runners of the prior may take from `autopilot/` (vocabulary §6 items 3, 5, 6; D67, D69; prior §12 B4): the
@@ -817,9 +818,194 @@ def test_the_prior_runners_take_from_autopilot_only_what_its_interface_lists():
         "import autopilot.closed_loop"]
 
 
+POST = TS_DIR / "post"
+#: The post-training (post-training §8 C0) reads the instruction language, the separation rules, the day split, the plain
+#: utilities and itself — never the executor (`autopilot/`: the window loop and the runners join them), a model of the
+#: prediction paths, the training plane or a runner; and of the prior only the names of prior §7 (`PRIOR_INTERFACE`).
+POST_MAY_IMPORT = ("post.", "instructions.", "inference.separation", "inference.runway_schedule", "data.day_split",
+                   "io_utils", "repo_layout")
+#: Prior §7, the column "Code": the names stage C may import from `prior/` (in `post/` and in its runners); B9's names
+#: (prior D96) and B10's (D105–D107: the function that opens a prior run, the motion of rows) as B9's log and B10's code
+#: give them, where §7 still reads "new, B9/B10"; the round of D111 and D118–D122 (items 1 and 4: the identity as a readout
+#: shows it, the one val read, the selection's cells); B13 (D128): `holds_claim` replaced by `holds_written_claim`, as
+#: B13's code gives it where §7 still reads the old name; the claim of the val read itself (`claim_validation_read`,
+#: `lock_val_read`, `settle_written_claim`), for C10's validation readout (user, 2026-10-06; §7 item 1 lists them).
+#: Item 7's names are methods of `SpeakingLoop`, which no import shows.
+PRIOR_INTERFACE = {
+    "prior.checkpoint": {"load_checkpoint", "CHECKPOINT_SCHEMA", "open_prior", "OpenedPrior", "readable_identity",
+                         "validation_claim", "written_claim", "holds_written_claim", "spend_validation_claim",
+                         "CLAIM_SPENT_BY", "claim_validation_read", "lock_val_read", "settle_written_claim"},
+    "prior.model": {"Prior"},
+    "prior.procedure": {"PROCEDURE_MASKS", "procedure_digests", "airport_finals", "Final"},
+    "prior.inputs": {"state_inputs", "sentence_rows", "own_flight_key", "motion"},
+    "prior.loop": {"LoopRows"},
+    "prior.landings": {"Landing", "LandingIndex"},
+    "prior.source": {"airport_landings", "ArtefactSource", "require_selection_of"},
+    "prior.speaker": {"Speaker", "Position", "go_around_bound", "MOST_GO_AROUNDS", "draw", "Permitted"},
+    "prior.train": {"batch_nll", "masked_log_probability"},
+    "prior.selection": {"require_rule", "kept", "left_out", "side", "SIDES", "REASONS", "CELL"},
+    "prior.batch": {"collate", "RowTensors"},
+}
+
+
+
+def test_every_name_of_the_prior_interface_exists():
+    """A name `PRIOR_INTERFACE` lists is one its module has: a misspelt entry would let no import through and pass."""
+    import importlib
+
+    missing = [f"{module}.{name}" for module, names in PRIOR_INTERFACE.items()
+               for name in names if not hasattr(importlib.import_module(f"ts_transformer.{module}"), name)]
+    assert not missing, missing
+
+
+def _prior_imports_refused(source: str) -> list[str]:
+    """Each import of ``source`` that takes from `prior/` a name `PRIOR_INTERFACE` does not list, by the names imported
+    (a whole module of `prior/` is never imported: its other names would come with it)."""
+    refused = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.ImportFrom) and (node.module is None or _package_relative(node.module) == PACKAGE):
+            # the package itself, absolute or relative (`from ts_transformer import prior`, `from .. import prior`)
+            refused += [f"from {node.module or '.' * node.level} import prior" for a in node.names if a.name == "prior"]
+        elif isinstance(node, ast.ImportFrom):
+            module = _package_relative(node.module)
+            if module.split(".")[0] != "prior":
+                continue
+            for alias in node.names:
+                if alias.name not in PRIOR_INTERFACE.get(module, set()):
+                    refused.append(f"from {module} import {alias.name}")
+        elif isinstance(node, ast.Import):
+            refused += [f"import {_package_relative(a.name)}" for a in node.names
+                        if _package_relative(a.name).split(".")[0] == "prior"]
+    return refused
+
+
+def _post_runners() -> list[Path]:
+    """The runners of stage C and the window loop they share (post-training §8 C0)."""
+    return sorted((TS_DIR / "experiments").glob("post_*.py"))
+
+
+def test_the_post_training_reads_only_its_layers():
+    groups = {p.name for p in TS_DIR.iterdir() if (p / "__init__.py").is_file()} | {p.stem for p in TS_DIR.glob("*.py")}
+    files = [path for path in POST.rglob("*.py") if "__pycache__" not in path.parts]
+    assert files, "the post-training package is empty; this test would pass vacuously"
+    for path in files:
+        rel = path.relative_to(TS_DIR).as_posix()
+        for name in _imported_names(path):
+            top = name.split(".")[0]
+            if top not in groups or name == "post":
+                continue
+            if top == "prior":          # its names: the test below
+                assert name != "prior" and ".".join(name.split(".")[:2]) in PRIOR_INTERFACE, f"{rel} imports {name}"
+                continue
+            allowed = any((name == item[:-1] or name.startswith(item)) if item.endswith(".") else
+                          (name == item or name.startswith(item + ".")) for item in POST_MAY_IMPORT)
+            assert allowed, f"{rel} imports {name}"
+
+
+def test_stage_c_takes_from_the_prior_only_the_names_of_its_interface():
+    """Post-training §8 C0 (prior D96 (6)): `post/` and the runners of stage C import from `prior/` only the names of
+    prior §7 — read by the names imported."""
+    files = [path for path in POST.rglob("*.py") if "__pycache__" not in path.parts] + _post_runners()
+    assert _post_runners(), "no runner of stage C; this test would pass vacuously"
+    for path in files:
+        refused = _prior_imports_refused(path.read_text(encoding="utf-8"))
+        assert not refused, f"{path.relative_to(TS_DIR)}: {refused}"
+    assert not _prior_imports_refused("from ts_transformer.prior.procedure import Final, airport_finals\n")
+    assert _prior_imports_refused("from ts_transformer.prior.inputs import Heard\n"
+                                  "from ts_transformer.prior import speaker\n"
+                                  "import ts_transformer.prior.model\n"
+                                  "from ts_transformer import prior\n"
+                                  "from .. import prior\n") == [
+        "from prior.inputs import Heard", "from prior import speaker", "import prior.model",
+        "from ts_transformer import prior", "from .. import prior"]
+
+
+def test_only_the_runners_reach_the_post_training():
+    for path in _module_files():
+        if path.is_relative_to(POST):
+            continue
+        rel = path.relative_to(TS_DIR).as_posix()
+        if any(name.split(".")[0] == "post" for name in _imported_names(path)):
+            assert rel.startswith("experiments/"), f"{rel} imports the post-training"
+
+
+#: Prior §7 item 7: the module of the step of a speaker's closed loop (D106), and the names stage C's runners take from
+#: it; no other module of `experiments/` but stage C's own (`post_*`).
+SPEAKING_LOOP = "experiments.prior_speaking_loop"
+SPEAKING_LOOP_NAMES = {"SpeakingLoop", "Generated", "flight_numbers"}
+#: The Training export of stage A (A23, A36) and of stage B (B6), which stage C's export reuses (post-training C11): the
+#: user's decision of 2026-10-05 lists them in vocabulary §6 and prior §7 (rows the designer writes,
+#: `requests_from_c_to_designer.md`); by module, the names taken (a module imported whole: the module's own name).
+TRAINING_EXPORT_NAMES = {
+    "experiments.training_flights": {"crossing_payload", "last_state_cycle"},
+    "experiments.training_export": {"FORMATS", "candidate_hae_minus_msl_m", "candidates_block", "events",
+                                    "split_flights", "vocabulary_block"},
+    "experiments.training_attitude": {"attitude_payload", "executor_attitude"},
+    "experiments.prior_training_export": {"procedure_block", "unrounded"},
+}
+
+
+def _experiments_imports_refused(source: str) -> list[str]:
+    """Each import of ``source`` from `experiments/` that is neither a stage C module (`post_*`), a name of prior §7
+    item 7's module nor a name of the Training export (`TRAINING_EXPORT_NAMES`), by the names imported; a relative import is refused outright (a runner's imports are qualified,
+    L1)."""
+    refused = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.ImportFrom) and node.level:
+            refused += [f"from {'.' * node.level}{node.module or ''} import {a.name}" for a in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            module = _package_relative(node.module)
+            if module.split(".")[0] != "experiments":
+                continue
+            if module == "experiments":
+                refused += [f"from experiments import {a.name}" for a in node.names if not a.name.startswith("post_")]
+            elif module in TRAINING_EXPORT_NAMES:
+                refused += [f"from {module} import {a.name}" for a in node.names
+                            if a.name not in TRAINING_EXPORT_NAMES[module]]
+            elif module == SPEAKING_LOOP:
+                refused += [f"from {module} import {a.name}" for a in node.names if a.name not in SPEAKING_LOOP_NAMES]
+            elif not module.split(".")[1].startswith("post_"):
+                refused += [f"from {module} import {a.name}" for a in node.names]
+        elif isinstance(node, ast.Import):
+            refused += [f"import {_package_relative(a.name)}" for a in node.names
+                        if _package_relative(a.name).split(".")[0] == "experiments"
+                        and not _package_relative(a.name).startswith("experiments.post_")]
+    return refused
+
+
+def test_the_stage_c_runners_take_from_experiments_only_the_shared_step_of_the_loop():
+    """Post-training §8 C0 (prior §7 item 7, D106): the runners of stage C import from `experiments/` only stage C's own
+    modules and, of the step of a speaker's closed loop, only the names that prior §7 item 7 gives."""
+    for path in _post_runners():
+        refused = _experiments_imports_refused(path.read_text(encoding="utf-8"))
+        assert not refused, f"{path.name}: {refused}"
+    assert not _experiments_imports_refused("from ts_transformer.experiments.prior_speaking_loop import SpeakingLoop\n"
+                                            "from ts_transformer.experiments.post_window_loop import WindowLoop\n")
+    assert not _experiments_imports_refused("from ts_transformer.experiments.training_flights import last_state_cycle\n"
+                                            "from ts_transformer.experiments.training_export import split_flights\n")
+    assert _experiments_imports_refused("from ts_transformer.experiments.prior_speaking_loop import FIRST_ROWS\n"
+                                        "from ts_transformer.experiments.prior_free_generation import speak\n"
+                                        "from ts_transformer.experiments import training_flights\n"
+                                        "from ts_transformer.experiments.training_export import main\n"
+                                        "import ts_transformer.experiments.prior_train\n"
+                                        "from .prior_speaking_loop import FIRST_ROWS\n"
+                                        "from . import prior_train\n") == [
+        "from experiments.prior_speaking_loop import FIRST_ROWS", "from experiments.prior_free_generation import speak",
+        "from experiments import training_flights", "from experiments.training_export import main",
+        "import experiments.prior_train", "from .prior_speaking_loop import FIRST_ROWS", "from . import prior_train"]
+
+
+def test_the_stage_c_runners_take_from_autopilot_only_what_its_interface_lists():
+    """Post-training §8 C0: the runners of stage C import from `autopilot/` only the names of vocabulary §6 (the same
+    list as the prior's runners: items 5 and 6, and the closed-loop check)."""
+    for path in _post_runners():
+        refused = _autopilot_imports_refused(path.read_text(encoding="utf-8"))
+        assert not refused, f"{path.name}: {refused}"
+
+
 #: D73 (no code fingerprint): the trees where a check of the labeller, the executor or the closed loop runs, and the
 #: package's own helpers they import.
-NO_CODE_DIGEST_TREES = ("instructions", "autopilot", "prior", "experiments")
+NO_CODE_DIGEST_TREES = ("instructions", "autopilot", "prior", "post", "experiments")
 NO_CODE_DIGEST_FILES = ("io_utils.py", "repo_layout.py")
 #: Names of the retired code digests and their helpers, as identifiers or as text (a payload key is text).
 CODE_DIGEST_NAMES = ("logic", "logic_sha256", "executor_source_files", "executor_source_sha256", "labeller_code_files",

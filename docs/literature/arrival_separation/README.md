@@ -709,7 +709,7 @@ annotated for simultaneous approaches, PRM or offset approaches, HUR, FMA, CTRDs
 |---|---|
 | `README.md` | this index |
 | `download.sh` | re-fetches everything in `papers/`, cuts the two PDF excerpts with ghostscript, and regenerates the parsed 7360.1K CSV. It does not fetch the `../runway_assignment/` files |
-| `papers/7110.65BB_*.html` | 7110.65BB Change 3 sections: 0-0 (Explanation of Changes), 2-1, 3-9, 3-10, 5-5, 5-9, 7-4; for §2.9 also 1-2, 2-7, 4-5, 4-8, 5-1, 5-2, 5-14, 7-2, 7-9; plus the index |
+| `papers/7110.65BB_*.html` | 7110.65BB Change 3 sections: 0-0 (Explanation of Changes), 2-1, 3-9, 3-10, 5-5, 5-9, 7-4; for §2.9 also 1-2, 2-7, 4-5, 4-8, 5-1, 5-2, 5-14, 7-2, 7-9; plus the index; for §8 also 5-7 |
 | `papers/7210.3EE_*.html` | 7210.3EE Change 3, Ch. 10 Sec. 4, plus the index |
 | `cwt_supplement.csv` | this project's supplement to 7360.1K Appendix A: types the Order does not list yet, one row each with its source (`type_designator,cwt,source,added`); read with the parsed Appendix A by `inference/runway_schedule.py` `read_cwt_tables` (a type in both is refused) |
 | `papers/PCG_*.html` | P/CG Change 3: letters A, B, C, D, E, F, L, P, S, T, U, V, plus the index |
@@ -763,3 +763,126 @@ All distances are in NM at the stated point.
 | 23 | Airborne wake geometry | TBL 5-5-1 applies within 2,500 ft and less than 1,000 ft below an A–D leader, or less than 500 ft below E, or when following an instrument approach | 5-5-4 g1, g2 | T (same as row 4) |
 | 24 | Altitude reference | Indicated (barometric) MSL altitude from Mode C: 100 ft steps, valid within 300 ft of the pilot's report | 1-2-1 j; 2-7-3 c NOTE 1; 5-2-15 b1; P/CG | T. Checking it with geometric ADS-B heights: T+R. Size of the difference at our airports: N |
 | 25 | Legitimate exceptions | Visual separation and visual approaches; passing or diverging; the vacated-altitude method (may dip below 1,000 ft); compression on final is monitored, not an MOR | 7-2-1; 2-1-19 b; 5-5-7; 5-5-5 b NOTE 2; 7210.632A App. A ¶2 | T. **Share of our pairs under each: N** |
+
+## 8. D92 and the speed-word mask: the text read (2026-10-05)
+
+Why: decision D92 of the two-tier post-training design
+(`4dTrajectory/ts_transformer/docs/two_tier/design/post_training.md`, rows D31 and D92, §3) defines when an
+aircraft is "established on the final" of its runway R. Three conditions must hold: its go-around state G is
+off, it is inside the region of the final (inside the FAF and the LPV cone), and its track is within 30° of
+the course of R (the judge's "lined up", cited to 5-9-2 and TBL 5-9-1). After "go-around" the aircraft is not
+established until a runway word ends G. The separation judge's in-trail rule says that on one final the
+aircraft behind on the approach clock is responsible, and that a joining (not established) aircraft is
+responsible against an established one. The speed-word mask applies only more than 5 NM (9,260 m) from the
+threshold and cites 5-7-1 b.4. This section holds the text that D92 reads.
+
+Sources:
+- 7110.65BB Change 3: 1-2, 4-8, 5-5 and 5-9 are quoted from the saved HTML. 5-7 (Speed Adjustment, now in
+  `download.sh`) and 7-4 are quoted from the consolidated PDF (`../runway_assignment/official/…_w_Chg1-3_2026-07-09.pdf`).
+  Both were checked on 2026-10-05 against the FAA's live HTML pages and read the same. 7-6-7 is from the PDF only.
+- P/CG Change 3: the saved HTML pages for A, E, F and S.
+- Subparagraph letters come from the PDF.
+- PDF pages: 1-2-2 p. 47; 4-8-1 a6 p. 281, b NOTE 3 p. 284; 5-5-4 pp. 326–330; 5-7-1 p. 339; 5-7-3 p. 343;
+  5-9-1/5-9-2 pp. 355–356; 5-9-4 FIG 5-9-1 examples p. 358; 5-9-5…5-9-11 pp. 360–370; 7-4-4 pp. 439–440;
+  7-6-7 p. 450.
+- Every page of section 5-7 is dated 2/20/25, so Changes 1–3 did not alter it.
+- "Miles" in 7110.65BB means nautical miles (1-2-1 k, §2.9).
+
+| ¶ | topic | exact quote |
+|---|---|---|
+| **1. "Established"** | | |
+| P/CG ESTABLISHED | the only definition | "To be stable or fixed at an altitude or on a course, route, route segment, heading, instrument approach or departure procedure, etc." |
+| P/CG ESTABLISHED ON RNP (EoR) CONCEPT | EoR | "…allow aircraft operations to be safely conducted with approved reduced separation criteria once aircraft are established on a PBN segment of a published instrument flight procedure." |
+| 5-9-7 a1(b) NOTE (same text in 5-9-10 b1 NOTE) | the only observable test for being established that was found (EoR only) | "Aircraft are considered EoR on an initial or intermediate segment … after the approach clearance has been issued, read back by the pilot and the aircraft is observed on the published procedure (lateral and vertical path, and within any procedure specified speed restriction)…" |
+| 4-8-1 b NOTE 3 | a height condition | "An aircraft is not established on an approach until at or above an altitude published on that segment of the approach." |
+| 5-9-2 c | established as a pilot report (EN ROUTE, scope range above 125 NM, 231,500 m) | "…the controller must solicit and receive a pilot report that the aircraft is established on the final approach course. If the pilot has not reported established by the final approach gate, inform the pilot…" |
+| 5-9-4 c1, FIG 5-9-1 Example 4 | established on the course outside the approach segments | "Aircraft 4 is established on the final approach course beyond the approach segments, 8 miles from Alpha at 6,000 feet." (8 NM, 14,816 m; 6,000 ft, 1,828.8 m) |
+| 5-5-4 j | "established" in the reduced in-trail minimum | "2.5 nautical miles (NM) separation is authorized between aircraft established on the final approach course within 10 NM of the landing runway…" (2.5 NM, 4,630 m; 10 NM, 18,520 m) |
+| 5-9-6 b1 | dependent diagonal minima only once established | "Apply this separation standard only after aircraft are established on the parallel final approach course." |
+| 5-9-7 a1 | turn-on minima until turned on or established | "Provide a minimum of 1,000 feet vertical or a minimum of 3 miles radar separation between aircraft : (a) during turn-on to parallel final approach, or (b) until aircraft are established on a published segment of an approach authorized for Established on RNP (EoR) operations." (1,000 ft, 304.8 m; 3 NM, 5,556 m) |
+| P/CG FINAL APPROACH COURSE | no distance limit | "A bearing/radial/track of an instrument approach leading to a runway or an extended runway centerline all without regard to distance." |
+| P/CG FINAL APPROACH FIX | start of the final segment | "The fix from which the final approach (IFR) to an airport is executed and which identifies the beginning of the final approach segment." |
+| P/CG SEGMENTS OF AN INSTRUMENT APPROACH PROCEDURE, Final Approach | the final segment | "The segment between the final approach fix or point and the runway, airport, or missed approach point." ICAO term FINAL APPROACH SEGMENT: "That segment of an instrument approach procedure in which alignment and descent for landing are accomplished." |
+| P/CG APPROACH GATE | the gate | "…The gate will be established along the final approach course 1 mile from the final approach fix on the side away from the airport and will be no closer than 5 miles from the landing threshold." (1 NM, 1,852 m; 5 NM, 9,260 m) |
+| 1-2-1 | word meanings | Defines items a–p. None of them is "established". |
+| **2. Intercept angle ("lined up")** | | |
+| 5-9-1 a | where to intercept | "At least 2 miles outside the approach gate unless one of the following exists:" (2 NM, 3,704 m). a1: "…closer than 2 miles outside the approach gate but no closer than the approach gate." a2: "If specifically requested by the pilot, aircraft may be vectored to intercept the final approach course inside the approach gate but no closer than the final approach fix." |
+| **5-9-2 a** | **the angle limit** | "Assign headings that will permit final approach course interception on a track that does not exceed the interception angles specified in TBL 5-9-1." |
+| **TBL 5-9-1** | **20° / 30°** | Columns "Distance from interception point to approach gate" and "Maximum interception angle". Rows: "Less than 2 miles or triple simultaneous approaches in use" → "20 degrees"; "2 miles or more" → "30 degrees (45 degrees for helicopters)" (2 NM, 3,704 m) |
+| 5-9-2 b NOTE | intent | "The intent is to provide for a track course intercept angle judged by the controller to be no greater than specified by this procedure." |
+| 5-9-2 b1, b2 | deviations after interception | "Outside the approach gate: apply procedures in accordance with subparagraph a, if necessary, vector the aircraft for another approach." / "Inside the approach gate: inform the pilot of the aircraft's position and ask intentions." |
+| 4-8-1 a6 | 30° to a fix on the final | "…radar facilities may clear an aircraft to any fix 3 NM or more prior to the FAF, along the final approach course, at an intercept angle not greater than 30 degrees." (3 NM, 5,556 m) |
+| 7-4-4 c2(a)(1) | visual approaches, parallels 2,500 to under 4,300 ft (762–1,310.6 m) | "Established on a heading or established on a direct course to a fix or cleared on an RNAV/ instrument approach procedure which will intercept the extended centerline of the runway at an angle not greater than 30 degrees, and," |
+| 7-4-4 c3(a)(1) | the same for 4,300 ft (1,310.6 m) or more | "Assigned a heading or established on a direct course to a fix or cleared on an RNAV/instrument approach procedure which will intercept the extended centerline of the runway at an angle not greater than 30 degrees, and," |
+| 7-4-4 c2 NOTE 1, 3 (same in c3) | intent; heading against track | "The intent of the 30 degree intercept angle is to reduce the potential for overshoots of the extended centerline of the runway…" / "Variances between heading assigned to intercept the extended centerline of the runway and aircraft ground track are expected due to the effect of wind…" |
+| 1-2-2 a | the text's own "same course" | "SAME COURSES are courses whose protected airspaces are coincident, overlap, or intersect and whose angular difference is less than 45 degrees." |
+| **3. In-trail: who keeps separation** | | |
+| **5-9-5 a** | **responsibility lies with the controller** | "The radar controller performing the approach control function is responsible for separation of radar arrivals unless visual separation is provided by the tower…" / "Radar final controllers ensure that established separation is maintained between aircraft under their control and other aircraft established on the same final approach course." |
+| 5-9-6 a5; 5-9-7 a4 | the same final approach course | "Provide the minimum approved radar separation between aircraft on the same final approach course." (5-9-7 a4: "…minimum applicable radar separation…") |
+| 5-5-4 (a, b) | radar minima (§2.2) | "Separate aircraft by the following minima:" a1 "When less than 40 miles from the antenna− 3 miles." b1 "Fusion target symbol – 3 miles." (40 NM, 74,080 m; 3 NM, 5,556 m) |
+| 5-5-4 g, g1 | wake, the follower is the one separated | "Separate aircraft by the minima specified in TBL 5-5-1 in accordance with the following:" g1: "When following an aircraft conducting an instrument approach and/or operating within 2,500 feet and less than 1,000 feet below the flight path of a Category A, B, C, or D aircraft." (2,500 ft, 762 m; 1,000 ft, 304.8 m) |
+| **5-5-4 h** | **behind another aircraft, measured at the threshold** | "In addition to subparagraph g, separate an aircraft on approach behind another aircraft to the same runway by ensuring the separation minima in TBL 5-5-2 will exist at the time the preceding aircraft is over the landing threshold." NOTE: "Consider parallel runways less than 2,500 feet apart as a single runway…" (2,500 ft, 762 m) |
+| 5-7-1 a3(a) | in-trail compression | "Compensate for compression when assigning air speed adjustment in an in-trail situation by using one of the following techniques: (1) Reduce the trailing aircraft first. (2) Increase the leading aircraft first." |
+| 7-4-4 c1 | visual, parallels under 2,500 ft (762 m) | "…controllers must advise the succeeding aircraft to maintain visual separation. Do not permit an aircraft to overtake another aircraft when wake turbulence separation is required." |
+| 7-4-4 c2(b) (same in c3(b)) | visual, the joining aircraft provides separation | "…approved separation is maintained or pilot-applied visual separation is provided by the succeeding aircraft until intercepting the farther adjacent extended runway centerline." |
+| 7-4-4 c2(d) (same in c3(d)) | visual, the joining aircraft until established | "…the succeeding aircraft must be assigned a heading that will intercept the extended centerline of the nearer runway at an angle not greater than 30 degrees. Approved separation must be maintained or pilot-applied visual separation must be provided by the succeeding aircraft until it is established on the extended centerline of the nearer runway." |
+| 7-6-7 c2 | VFR aircraft being radar sequenced (2,500 ft, 762 m) | "When parallel runways are less than 2,500 feet apart, do not permit an aircraft to overtake another aircraft established on final within the facility's area of responsibility when wake turbulence separation is required." |
+| 5-9-11 | after a go-around | "…one of the aircraft executes a go-around or has its approach clearance terminated and prior to losing the approved reduced separation, control instructions must be expeditiously issued to increase separation between the applicable aircraft." |
+| **4. Speed adjustment** | | |
+| 5-7-1 | the general rule | "Keep speed adjustments to the minimum necessary to achieve or maintain required or desired spacing." |
+| 5-7-1 b | the bans | "Do not assign speed adjustment to aircraft:" |
+| **5-7-1 b4** | **the limit near the runway** | "Inside the final approach fix on final or a point 5 miles from the runway, whichever is closer to the runway." (5 NM, 9,260 m) |
+| 5-7-1 d | an approach clearance cancels assigned speeds | "Approach clearances or climb via/descend via clearances cancel any previously assigned speeds. Pilots are expected to make their own speed adjustments to fly the approach, SID, or STAR unless assigned speeds are restated." |
+| 5-7-1 g NOTE 1 | pilot tolerance | "Pilots complying with speed adjustment instructions (published or assigned) should maintain a speed within plus or minus 10 knots or 0.02 Mach number of the specified speed." (10 kt, 5.14 m/s) |
+| 5-7-2 a | methods only | "Instruct aircraft to:" followed by maintain, maintain or greater/less, highest/lowest practical, increase/reduce. It sets no limit on final. |
+| 5-7-3 c1(b), c2(b), f | minimum speeds near the runway | Turbojet: "Assign a speed not less than 170 knots when the aircraft is within 20 flying miles of the runway threshold." Reciprocating and turboprop: "…not less than 150 knots…" (same condition). f: "Lower speeds may be assigned when operationally advantageous." (170 kt, 87.5 m/s; 150 kt, 77.2 m/s; 20 NM, 37,040 m) |
+
+**Readings.** None of the following is stated in the text. Each is the project's reading or a difference
+from the text.
+
+- **A one-row test for "established".** The text gives no numeric test. The P/CG definition is generic, and
+  7110.65BB uses the word without defining it:
+  - 5-9-2 c makes it a pilot report.
+  - EoR (5-9-7 a1(b) NOTE) needs an approach clearance that has been issued and read back, plus the aircraft
+    observed on the lateral **and vertical** path and within any procedure speed restriction.
+  - 4-8-1 b NOTE 3 adds a height condition.
+
+  D92 has no clearance and no height condition, apart from what the LPV cone implies. Its combination of G,
+  region and angle is the project's reading.
+- **The region of the final = inside the FAF and the LPV cone.** The LPV cone is not in the text. "Inside the
+  FAF" matches the P/CG final approach segment. The text, however, also lets an aircraft be established on the
+  final approach course outside the FAF: FIG 5-9-1 Example 4 is established 8 NM (14,816 m) from the fix,
+  beyond the approach segments. 5-5-4 j's "within 10 NM" implies that established aircraft also exist beyond
+  10 NM, and the P/CG final approach course is "without regard to distance". D92's "established" is therefore
+  narrower than the text's.
+- **30° from the course as "lined up".** In the text, 30° is a maximum **intercept** angle for an assigned
+  heading or clearance (5-9-2 a, TBL 5-9-1, 4-8-1 a6, 7-4-4 c2/c3). It is not a test for being established.
+  TBL 5-9-1 also sets **20°** when the interception point is less than 2 NM (3,704 m) from the approach gate,
+  and 5-9-1 a puts the intercept at least 2 NM outside the gate. An intercept inside the gate is allowed only
+  on the pilot's request (a2), and never closer than the FAF. D92's region lies inside the FAF, so inside the
+  gate, where the table's applicable row is 20°. A single 30° there is the project's choice.
+- **The track used for the angle.** 5-9-2 a speaks of "a track", and 7-4-4 NOTE 3 expects heading and ground
+  track to differ. Taking the ground track from the 2 s displacement is the project's choice.
+- **Go-around and G.** The text never says when an aircraft is again established after a go-around. 5-9-11
+  only requires instructions that increase separation. The rule that a runway word ends G is the project's.
+- **"Responsible" aircraft.** The text gives separation to the controller (5-9-5 a), never to an aircraft. The
+  nearest text:
+  - the follower is the aircraft that is separated (5-5-4 g "when following", h "behind another aircraft");
+  - in-trail compression is handled by reducing the trailing aircraft first, or by increasing the leader
+    (5-7-1 a3(a));
+  - the "succeeding aircraft" provides pilot-applied visual separation, but only on visual approaches to
+    parallels (7-4-4 c2(b), (d));
+  - an aircraft may not overtake another established on final (7-4-4 c1, 7-6-7 c2).
+
+  "The aircraft behind on the approach clock answers" and "a joining aircraft answers against an established
+  one" are the project's readings of these passages. The approach clock is the project's own.
+- **The speed-word mask.**
+  - 5-7-1 b4 bans assigning **any** speed adjustment inside the limit. It is not a spacing rule.
+  - The limit is "the final approach fix on final or a point 5 miles from the runway, **whichever is closer to
+    the runway**". D92 takes 5 NM (9,260 m) in every case. Wherever the FAF is closer to the runway than 5 NM,
+    the text's limit is the FAF.
+  - Reading "from the runway" as "from the threshold" is the project's.
+  - The condition that both aircraft are established, and the prediction to the moment the leader crosses its
+    threshold, are the project's. The threshold moment follows 5-5-4 h.
+  - 5-7-1 d (an approach clearance cancels assigned speeds) has no counterpart, because the design has no
+    clearance word.

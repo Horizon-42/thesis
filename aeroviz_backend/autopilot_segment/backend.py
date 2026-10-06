@@ -50,6 +50,7 @@ from aeroviz_backend.autopilot_segment.errors import NotListed, RequestRefused, 
 from aeroviz_backend.autopilot_segment.fly import apart_from_stored, fly_segment
 from aeroviz_backend.autopilot_segment.payload import SCHEMA, segment_payload
 from aeroviz_backend.autopilot_segment.prior import PriorSegments
+from aeroviz_backend.autopilot_segment.window import WindowSegments
 
 #: An airport as the frontend's directories name it; the request's airport is a path segment.
 AIRPORT_CODE = re.compile(r"[A-Z0-9]{3,4}")
@@ -127,6 +128,8 @@ class AutopilotSegmentBackend:
         self._opening_guard = threading.Lock()
         # the Training sets of stage B (`prior.training_files.INDEX_FILE`), flown on this backend's caches and lock
         self.prior = PriorSegments(self)
+        # the window sets of stage C (`post.training_files.INDEX_FILE`), on the same caches and lock
+        self.window = WindowSegments(self)
 
     def training_set(self, airport: str, set_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
         """The set's index entry and sample (`training_files.listed_set`)."""
@@ -182,6 +185,7 @@ class AutopilotSegmentBackend:
         opened_sets = self._open_sets(log)
         log(f"autopilot warm-up: {opened_sets} sets ready in {time.perf_counter() - started:.1f} s")
         self.prior.warm_up(log)
+        self.window.warm_up(log)
 
     def _open_sets(self, log: Callable[[str], None]) -> int:
         """The loop of `warm_up`: the sets opened. What it keeps between sets (`Opened`) goes when it returns."""

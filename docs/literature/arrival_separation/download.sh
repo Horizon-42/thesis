@@ -34,6 +34,8 @@ curl -sSL -A "$UA" -o papers/7110.65BB_chap5_section_2_Beacon_ADS-B_Systems.html
 curl -sSL -A "$UA" -o papers/7110.65BB_chap5_section_14_STARS_Terminal.html               "$ATC/chap5_section_14.html"
 curl -sSL -A "$UA" -o papers/7110.65BB_chap7_section_2_Visual_Separation.html             "$ATC/chap7_section_2.html"
 curl -sSL -A "$UA" -o papers/7110.65BB_chap7_section_9_Class_B_Service_Area.html          "$ATC/chap7_section_9.html"
+# added 2026-10-05 for README section 8 (D92 and the speed-word mask: 5-7-1 b4)
+curl -sSL -A "$UA" -o papers/7110.65BB_chap5_section_7_Speed_Adjustment.html            "$ATC/chap5_section_7.html"
 
 # --- JO 7210.3EE (Change 3), Pilot/Controller Glossary (Change 3), US AIP GEN 1.7 ----------
 curl -sSL -A "$UA" -o papers/7210.3EE_index.html                     "$FOA/"

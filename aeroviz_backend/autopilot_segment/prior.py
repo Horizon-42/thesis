@@ -38,8 +38,9 @@ from ts_transformer.prior.checkpoint import written_claim
 from ts_transformer.repo_layout import REPO_ROOT
 from ts_transformer.prior import training_files as prior_files
 
-from aeroviz_backend.autopilot_segment.errors import NotListed, RequestRefused, Superseded
-from aeroviz_backend.autopilot_segment.fly import FlownSegment, apart_from_stored, fly_segment, last_state
+from aeroviz_backend.autopilot_segment.errors import ExecutorDiffers, NotListed, RequestRefused, Superseded
+from aeroviz_backend.autopilot_segment.fly import (FlownSegment, apart_from_stored, fly_segment, last_state,
+                                                    refuse_past_bound)
 from aeroviz_backend.autopilot_segment.payload import segment_payload
 
 #: MIRROR of `aeroviz-4d/src/data/trainingPriorAutopilot.ts` (`TRAINING_PRIOR_AUTOPILOT_SCHEMA`); the reader refuses
@@ -51,11 +52,13 @@ SCHEMA = "aeroviz-autopilot-prior-segment-v1"
 CLOSED_LOOP = "closedLoop"
 
 
-def apart_from_exported(result: FlownSegment, exported: dict[str, Any], batch: replay.Batch, j: int, step_s: float
+def apart_from_exported(result: FlownSegment, said: dict[str, Any], batch: replay.Batch, j: int, step_s: float
                         ) -> dict[str, float | int]:
-    """The live flight against the export's flown track of the prior's sentence (``exported``: the sentence's ``track``,
-    the 2 s rows from the first predicted step, written to 0.1 m) on the rows both have: how many and the largest
-    horizontal and vertical distance."""
+    """The live flight against the export's flown track of the prior's sentence ``said`` (its ``track``: the 2 s rows
+    from the first predicted step, unrounded) on the rows both have: how many and the largest horizontal and vertical
+    distance. Refused by name (`ExecutorDiffers`) past the executor's bound (stage A's `fly.refuse_past_bound`), or when
+    a flight flown to its outcome ends otherwise than the sentence (its outcome or end cycle; D127)."""
+    exported = said["track"]
     step_cycles = int(round(step_s / result.flown.cycle_s))
     rows = min(exported["rows"], last_state(result) // step_cycles + 1)
     cycles = np.arange(rows) * step_cycles
@@ -65,6 +68,14 @@ def apart_from_exported(result: FlownSegment, exported: dict[str, Any], batch: r
     vertical = float(np.abs(live["height"][cycles] - np.array(exported["heightMslM"][:rows])).max())
     if not (np.isfinite(horizontal) and np.isfinite(vertical)):
         raise ValueError(f"the live flight is {horizontal} m / {vertical} m from the exported track: a non-finite state")
+    flight = batch.signals[j].dataset_id
+    refuse_past_bound(horizontal, vertical, flight, "the readout's flown states")
+    if result.verdict is not None and (result.verdict.outcome, int(result.verdict.end_row)) != (said["outcome"],
+                                                                                                 said["endCycle"]):
+        raise ExecutorDiffers(f"{flight}: the live flight ends {result.verdict.outcome} at cycle "
+                              f"{int(result.verdict.end_row)}, the prior's sentence {said['outcome']} at cycle "
+                              f"{said['endCycle']}: the executor or the judge code does not fly this set as it was "
+                              f"exported; export the set again, or restore the code")
     return {"rows": int(rows), "horizontalM": horizontal, "verticalM": vertical}
 
 
@@ -232,7 +243,7 @@ class PriorSegments:
             if said is None:
                 apart = apart_from_stored(result, sentence, batch, j, words.spec.step_s)
             else:
-                apart = apart_from_exported(result, said["track"], batch, j, words.spec.step_s)
+                apart = apart_from_exported(result, said, batch, j, words.spec.step_s)
             body = segment_payload(result, batch.geometries[j], float(item["haeMinusMslM"]),
                                    np.asarray(flown_set.aero[j]), apart)
             finished = time.perf_counter()

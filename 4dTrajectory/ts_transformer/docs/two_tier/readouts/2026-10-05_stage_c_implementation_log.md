@@ -686,3 +686,27 @@ the outcome of each window; the rounds of the post-training side by side. The fr
 traffic window with the five columns of the commanded aircraft, and a click on a word flies its segment live with the
 executor of A23. New schema names; its own index beside the old one; the intent of each set; a test stack and the
 browser check (outline §6).
+
+## 23 After Claude's check of stage C: D130, the validation readout, the docstring (2026-10-06)
+
+| Step | Commit | What |
+|---|---|---|
+| Merge | `3ccb82f8`, `4882c130` | `dev-two-tier` (the design cleared, `0f4f4fff`, `b29d2c6d`; D130; then D131 and prior §7 item 1 with the claim names) |
+| D130, docstring | `02a85049` | `update_pairs` takes each groups file's branch groups in an order drawn by the pass's generator (the round's numbers: seed, round, 1), then `update_groups` at a time; the data term's sentences are drawn by the same generator after it. Test: the same numbers give the same updates, other numbers others, an update mixes groups spoken more than one update apart; the resume test stays bit for bit. `inference/separation.py`: "established" is the caller's, by D92 (comment only). Review: no S1/S2; two S3 (the test could not tell a shuffle inside an update from one of the file; a long line), both fixed |
+| The validation readout | `0c95a821` | `experiments/post_validation.py` (§8 C10): refused unless the campaign has done every round (a smoke reads earlier) and holds the round; the checks first (closed loop, edge reference); then the read's lock, the round's checkpoint (`round_model`), the claim (in the campaign's directory, reader `post_validation`, options round and device), the val recount (`require_selection_of`), and only then val opened (`split_data`); the readout is `selection_readout` on val's windows, with each airport's coverage (real windows, left out inside a loss, read); `readout.json` last, then the claim spent. `post_train`: `open_context(splits=…)`, `readout_pool`, and `selection_windows` / `selection_readout` take a split (default select; the campaign, profile and export unchanged). PRIOR_INTERFACE: `claim_validation_read`, `lock_val_read`, `settle_written_claim` (user, 2026-10-06; prior §7 item 1). Tests on the synthetic campaign, its train split standing in for val: only val opened, after the claim, no data term; a second read refused (same output, another output); a read stopped before its readout runs again only with the same options; the lock refuses a second run; a kill after the readout is settled, then refused; another round, and a campaign with rounds to do, refused before the claim; a smoke reads select, claims nothing, and gives back round 0's selection readout exactly; the config shows no val counts. Review: no S1; one S2 (the coverage not recorded: val cannot be read again to learn it) and four S3 (the lock and the settle untested, the `data` flag untested, the formal read before the last round, no end-to-end equality), all fixed but the base's formality (P48); second round: no S1/S2, one S3 (the docstring claimed the weights), fixed |
+
+Tests: every `test_post_*`, the architecture test and the backend's window segment: 135 passed.
+
+**Readings, as proposals.**
+- P46: the validation readout reads at most the campaign's `select_per_airport` real windows of each airport of the val
+  days, drawn as the selection readout draws the select days' (the same seed stream, D113 applied), with the same random
+  numbers, and states each airport's coverage. §8 C10 gives the readouts, not the count. Every val window is one option
+  away if the user wants it.
+- P47: the claim of the val read is held in the campaign's directory (the post-trained model's run, as prior D119 holds
+  it in the prior's run); its options are the round and the device (as prior D128's validation readout records its
+  split and device; this readout has one split). A second campaign has its own claim: D85's "once for each stage" is
+  guarded per campaign, as the prior's per run. With the formal read refused before the last round, a campaign stopped
+  on purpose before `rounds` has no formal read (its settings would be changed by a resume with fewer rounds).
+- P48: the readout does not refuse a campaign whose base is a smoke prior or a fold (stage B's validation readout does,
+  for its own read); `post_train` refuses neither today. The place for it is `post_train`'s formal start, which opens the
+  base's run.

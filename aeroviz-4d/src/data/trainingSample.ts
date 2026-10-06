@@ -75,6 +75,12 @@ export const TRAINING_OUTCOMES = [
   "timeout", "dynamics_failure",
 ] as const;
 export type TrainingOutcome = (typeof TRAINING_OUTCOMES)[number];
+/** MIRROR of `ts_transformer/experiments/post_window_loop.py` `LOST_SEPARATION`: a flight of a Training window of stage C
+ *  (`trainingWindowSample.ts`) ended by its caller at a loss of separation — no judge's outcome. Stage A's reader never
+ *  accepts it (its files hold the judge's outcomes only); the views draw it as an end. */
+export const TRAINING_LOST_SEPARATION = "lost_separation";
+/** How a flown flight on screen ended: the judge's outcome, or (a window's) a loss of separation. */
+export type TrainingFlownEnd = TrainingOutcome | typeof TRAINING_LOST_SEPARATION;
 
 // ── shapes ───────────────────────────────────────────────────────────────────
 
@@ -290,7 +296,7 @@ export interface TrainingCrossing {
 }
 
 export interface TrainingReplay {
-  outcome: TrainingOutcome;
+  outcome: TrainingFlownEnd;
   /** The executor's cycles from the first predicted step to the judge's outcome row. */
   endCycle: number;
   /** null: the flight did not cross the threshold. */
@@ -455,7 +461,7 @@ export function closedCycleTimeS(closed: TrainingClosedLoop, cycles: number): nu
 /** The cycle of the last state of a flight that ended at the judge's outcome row ``endCycle``: the row itself, but for a
  *  dynamics failure the failed state is left out — one before.
  *  MIRROR of `aeroviz_backend/autopilot_segment/fly.py` `last_state` and `training_export.replay_payload`. */
-export function lastStateCycle(outcome: TrainingOutcome, endCycle: number): number {
+export function lastStateCycle(outcome: TrainingFlownEnd, endCycle: number): number {
   return outcome === "dynamics_failure" ? endCycle - 1 : endCycle;
 }
 

@@ -9,7 +9,7 @@
  * `index.css`. These are chosen per column or per envelope at render time.
  */
 
-import type { TrainingColumn, TrainingOutcome } from "../data/trainingSample";
+import type { TrainingColumn, TrainingFlownEnd } from "../data/trainingSample";
 
 /** The sentence bar's surface — every colour here is validated against it; `index.css` draws `.training-sentence-bar` in it
  *  at 0.94 opacity (MIRROR: CSS cannot import it). The bar shades with it. */
@@ -85,6 +85,6 @@ export const TRAINING_DECISION_FAIL_COLOR = TRAINING_FAILURE_COLOR;
 
 /** How a flown flight ended, in one colour where it is said (the flight list's tag, the bar's chip): the replay's teal
  *  when it landed, the failure red for any other outcome. */
-export function trainingOutcomeColour(outcome: TrainingOutcome): string {
+export function trainingOutcomeColour(outcome: TrainingFlownEnd): string {
   return outcome === "landed" ? TRAINING_EXECUTOR_COLOR : TRAINING_FAILURE_COLOR;
 }

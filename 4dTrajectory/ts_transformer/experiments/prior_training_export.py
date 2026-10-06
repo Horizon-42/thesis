@@ -58,8 +58,8 @@ from ts_transformer.instructions.spec import READING_RULE
 from ts_transformer.instructions.words import COLUMNS, UNCHANGED, Words
 from ts_transformer.io_utils import file_sha256
 from ts_transformer.prior import training_files as files
-from ts_transformer.prior.checkpoint import (CHECKPOINT_SCHEMA, CLAIM_SPENT_BY, holds_claim, open_prior,
-                                             readable_identity, validation_claim)
+from ts_transformer.prior.checkpoint import (CHECKPOINT_SCHEMA, CLAIM_SPENT_BY, holds_written_claim, open_prior,
+                                             readable_identity, written_claim)
 from ts_transformer.prior.procedure import (
     GLIDEPATH_BELOW_M, PROCEDURE_MASKS, Final, airport_finals,
 )
@@ -210,19 +210,24 @@ def fly_again(instructions: Path, executor: Path, split: str, interval_s: float,
             "outcome": outcome.outcome, "endCycle": int(outcome.end_row), "timedOut": timed_out,
             "goArounds": int(loop.go_arounds[b]),
             "crossing": training_flights.crossing_payload(outcome, executed, b, geometry),
-            "track": {"rows": len(cycles), "lastCycle": int(last), "eM": stage_a_files.rounded(whole["e"][cycles], 1),
-                      "nM": stage_a_files.rounded(whole["n"][cycles], 1), "latDeg": stage_a_files.rounded(at[:, LAT], 7),
-                      "lonDeg": stage_a_files.rounded(at[:, LON], 7),
-                      "heightMslM": stage_a_files.rounded(at[:, ALT], 1),
-                      "trackDeg": stage_a_files.rounded(np.mod(whole["track"][cycles], 360.0), 2),
-                      "groundSpeedMps": stage_a_files.rounded(whole["ground_speed"][cycles], 2),
-                      "verticalRateMps": stage_a_files.rounded(whole["vertical_rate"][cycles], 2)},
+            # unrounded (D127): the live segment is checked against it within the executor's bound
+            "track": {"rows": len(cycles), "lastCycle": int(last), "eM": unrounded(whole["e"][cycles]),
+                      "nM": unrounded(whole["n"][cycles]), "latDeg": unrounded(at[:, LAT]),
+                      "lonDeg": unrounded(at[:, LON]), "heightMslM": unrounded(at[:, ALT]),
+                      "trackDeg": unrounded(np.mod(whole["track"][cycles], 360.0)),
+                      "groundSpeedMps": unrounded(whole["ground_speed"][cycles]),
+                      "verticalRateMps": unrounded(whole["vertical_rate"][cycles])},
             "attitude": attitude_payload(executor_attitude(executed, b, cycles, aero[b])),
             "goAroundProbability": stage_a_files.rounded(item.go_around_probability, 4),
             "goAroundPermitted": [int(v) for v in item.go_around_permitted],
             "onFinal": [int(v) for v in item.on_final],
             "blocked": blocked_payload(item.blocked, len(geometry.candidates), words)}
     return [out[s.index] for s in stored]
+
+
+def unrounded(values: np.ndarray) -> list[float]:
+    """Values as they are (D127: a value that a later step computes from is not rounded for display)."""
+    return [float(v) for v in np.asarray(values, dtype=np.float64)]
 
 
 # ---- one airport
@@ -334,6 +339,9 @@ def main(argv: list[str] | None = None) -> int:
     if git["dirty"] and not args.smoke:
         parser.error("the tree has uncommitted changes; a Training set is exported from a commit")
     readout_dir = args.readout if args.readout.is_absolute() else REPO_ROOT / args.readout
+    if not (readout_dir / CLAIM_SPENT_BY).exists():          # before any of its files is read (D119, D127)
+        parser.error(f"{readout_dir} holds no {CLAIM_SPENT_BY}: a readout that stopped before it was written; only a "
+                     f"written readout is exported")
     readout, stored = read_sentences(readout_dir)
     if readout["smoke"] and not args.smoke:
         parser.error(f"{readout_dir} is a smoke readout: only a --smoke set is made from it")
@@ -355,13 +363,10 @@ def main(argv: list[str] | None = None) -> int:
                          f"{PROCEDURE_MASKS} (its data or its prior changed since the readout)")
     claim = None
     if readout["split"] == "val":           # the base's one validation readout, and only it (D85)
-        claimed = validation_claim(prior_dir, files.CLAIM_READER)
-        if not holds_claim(prior_dir, files.CLAIM_READER, readout_dir):
-            raise SystemExit(f"{readout_dir}: a readout of the val days that {prior_dir}'s claim of its val read does "
-                             f"not name ({claimed}); only the base's one validation readout is exported (D85)")
-        if not (readout_dir / CLAIM_SPENT_BY).exists():
-            raise SystemExit(f"{readout_dir}: a read of the val days that stopped before it wrote its "
-                             f"{CLAIM_SPENT_BY}; only a written readout is exported (D119)")
+        if not holds_written_claim(prior_dir, files.CLAIM_READER, readout_dir):
+            raise SystemExit(f"{readout_dir}: a readout of the val days that {prior_dir}'s written claim of its val "
+                             f"read does not name ({written_claim(prior_dir, files.CLAIM_READER)}); only the base's one "
+                             f"validation readout is exported (D85, D119)")
         claim = {"reader": files.CLAIM_READER, "prior": repo_relative(prior_dir),
                  "readout": repo_relative(readout_dir)}
     signals_record = json.loads((instructions / "signals.json").read_text(encoding="utf-8"))

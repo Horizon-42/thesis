@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from ts_transformer.experiments import prior_campaign as campaign_module
@@ -251,7 +252,8 @@ def test_a_campaign_stops_when_its_code_behaves_otherwise_or_its_tree_has_change
                                      behaviour=lambda i: disk)
     with monkeypatch.context() as patch:            # this process plans with other settings than the disk's: refused
         patch.setattr(campaign_module, "FREE_GENERATION", {**campaign_module.FREE_GENERATION, "samples": 3})
-        with pytest.raises(SystemExit, match=r"sets \['free_generation'\] otherwise than this campaign's process"):
+        with pytest.raises(SystemExit, match=r"the campaign's start record sets \['free_generation'\] otherwise than "
+                                             r"this campaign's process"):
             campaign_module.open_campaign(campaign, tmp_path / "artefact", tmp_path / "executor", 4.0, git,
                                           behaviour=same)
         with pytest.raises(SystemExit, match="free_generation"):
@@ -313,7 +315,9 @@ def test_the_behaviour_check_covers_the_sentence_rows_the_selection_the_choices_
     words, days = Words(instruction_spec()), fixture_days()
     answer = prior_behaviour.behaviour(words, finals(), days)
     assert {"settings", "selection", "select_rules", "sentence_rows"} <= set(answer)
-    assert answer["selection"]["landed"]["landed"] == {"False": None, "True": "fault"}
+    assert answer["selection"]["left_out"]["landed"]["landed"] == {"False": None, "True": "fault"}
+    assert answer["selection"]["kept"]["landed"]["landed"] == {"False": True, "True": False}
+    assert answer["selection"]["side"]["all"]["crossed_too_high"] == {"False": "inside", "True": "inside"}
     assert answer["select_rules"]["tie"]["chosen"] == "D" and answer["select_rules"]["zero"]["within"] == ["B"]
     assert answer["select_rules"]["edge"]["within"] == ["A", "B"]
     assert answer["select_rules"]["variant_edge"]["chosen"] == "full"
@@ -328,8 +332,69 @@ def test_the_behaviour_check_covers_the_sentence_rows_the_selection_the_choices_
             patch_it(patch)
             changed = prior_behaviour.behaviour(words, finals(), days)
         assert changed[key] != answer[key] and changed["train_loss"] == answer["train_loss"], key
+    from ts_transformer.experiments import prior_behaviour as behaviour_module
+    from ts_transformer.experiments import prior_free_generation as generation_module
+    from ts_transformer.prior.landings import LandingIndex
+    from ts_transformer.prior.loop import LoopRows
+
+    # B13: each new part of the answer moves when what it holds changes
+    counts = LandingIndex.counts_before
+    rows_init = LoopRows.__init__
+    assert any(any(v != 0 for v in row) for row in answer["inputs"]["landings"])
+    for patch_it, keys in (
+            # the landings counted 30 s off the rows' UTC (the fixed sentence's own and same-second landings lie
+            # between two of its rows)
+            (lambda patch: patch.setattr(LandingIndex, "counts_before", lambda self, times, *, without:
+                                         counts(self, np.asarray(times) - 30.0, without=without)),
+             ("sentence_rows",)),
+            # every aircraft of the loop given the first one's landings (D105)
+            (lambda patch: patch.setattr(LoopRows, "__init__", lambda self, geometries, landings, *given, **named:
+                                         rows_init(self, geometries, [landings[0]] * len(landings), *given, **named)),
+             ("speaking_loop",)),
+            (lambda patch: patch.setattr(behaviour_module, "kept", lambda rule, outcome, faulty: True), ("selection",)),
+            (lambda patch: patch.setattr(behaviour_module, "side", lambda rule, outcome, faulty: "inside"),
+             ("selection",)),
+            (lambda patch: patch.setattr(campaign_module, "FREE_GENERATION",
+                                         {**campaign_module.FREE_GENERATION, "per_airport": 100}),
+             ("campaign_plan", "settings")),
+            (lambda patch: patch.setattr(generation_module, "draw",
+                                         lambda sentences, flights, airports, per_airport, seed: sorted(sentences)[:4]),
+             ("free_generation_draw",))):
+        with monkeypatch.context() as patch:
+            patch_it(patch)
+            changed = prior_behaviour.behaviour(words, finals(), days)
+        assert all(changed[key] != answer[key] for key in keys), keys
     loaded = subprocess.run([sys.executable, "-c", "import json; from ts_transformer.experiments.prior_campaign import "
                              "settings; print(json.dumps(settings()))"], cwd=REPO_ROOT,
                             env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}, capture_output=True, text=True,
                             check=True)
     assert json.loads(loaded.stdout) == answer["settings"] == campaign_module.settings()
+
+
+def test_a_resume_marks_spent_the_claim_of_a_val_step_killed_after_its_readout(tmp_path, monkeypatch):
+    """D128 along the campaign's path: a val step killed between its readout and its claim's mark is done (its
+    readout.json is there) and never runs again; the campaign — its loop, on the steps of its own plan — marks its claim
+    spent; a smoke campaign reads no val."""
+    campaign = tmp_path / "campaign"
+    rec = {**record(tmp_path), "smoke": None}
+    for step, chosen in (("configuration", "A"), ("variant", "full")):
+        campaign.mkdir(exist_ok=True)
+        (campaign / f"choice_{step}.json").write_text(json.dumps({"chosen": chosen}))
+    steps = campaign_module.plan(campaign, rec, "cpu")
+    val = [step for step in steps if step.runner in campaign_module.VAL_READERS and step.name.startswith("base/")]
+    assert [step.runner for step in val] == list(campaign_module.VAL_READERS)
+    for step in steps:                                                  # every step done: a resume runs none
+        step.done.parent.mkdir(parents=True, exist_ok=True)
+        if not step.done.exists():                                      # the choices' files are their own
+            step.done.write_text("{}")
+    run = campaign / "base" / "run"
+    for step in val:
+        (run / f"val_read_{step.runner}.json").write_text(json.dumps({"reader": step.runner, "out": str(step.out),
+                                                                      "utc": "x", "options": {}}))
+    campaign_module.settle_val_steps(campaign, {**rec, "smoke": {"sample": 5}}, steps)
+    assert not any("spent_utc" in json.loads(path.read_text()) for path in run.glob("val_read_*.json"))
+    git = {"head": "a" * 40, "dirty": False}
+    campaign_module.run_campaign(campaign, {**rec, "behaviour": same(None), "steps": [], "aborted": [], "running": None},
+                                 "cpu", StandIn(), lambda line: None, lambda: git, behaviour=same)
+    spent = [json.loads((run / f"val_read_{step.runner}.json").read_text()) for step in val]
+    assert len(spent) == 2 and all("spent_utc" in claim for claim in spent)

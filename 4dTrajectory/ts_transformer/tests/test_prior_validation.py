@@ -153,7 +153,7 @@ def test_a_claim_is_written_and_spent_only_with_its_readout(tmp_path):
     prior, out = tmp_path / "prior", tmp_path / "readout"
     prior.mkdir()
     assert written_claim(prior, "reader") is None
-    claim_validation_read(prior, "reader", out)
+    claim_validation_read(prior, "reader", out, {})
     assert validation_claim(prior, "reader") is not None and written_claim(prior, "reader") is None
     out.mkdir()
     with pytest.raises(ValueError, match=f"holds no {CLAIM_SPENT_BY}"):
@@ -209,10 +209,10 @@ def test_a_val_read_that_stopped_before_its_readout_runs_again_to_its_own_output
     record = json.loads((prior / "val_read_prior_validation.json").read_text())
     assert record["out"] == validation_claim(prior, "prior_validation") and "spent_utc" in record
     with pytest.raises(ValueError, match="read by prior_validation already"):
-        claim_validation_read(prior, "prior_validation", tmp_path / "readout")
+        claim_validation_read(prior, "prior_validation", tmp_path / "readout", {"split": "val"})
     (tmp_path / "readout").rename(tmp_path / "archived")           # the readout moved away later: still spent
     with pytest.raises(ValueError, match="read by prior_validation already"):
-        claim_validation_read(prior, "prior_validation", tmp_path / "readout")
+        claim_validation_read(prior, "prior_validation", tmp_path / "readout", {"split": "val"})
 
 
 def test_a_smoke_reads_the_select_days_never_the_val_days(tmp_path, monkeypatch):
@@ -300,8 +300,74 @@ def test_a_claim_names_its_readout_relative_to_the_repository(tmp_path):
     inside, outside = tmp_path / "inside", tmp_path / "outside"
     inside.mkdir()
     outside.mkdir()
-    claim_validation_read(inside, "reader", REPO_ROOT / "4dTrajectory/outputs/POOLED/prior/x/base/free_generation")
+    claim_validation_read(inside, "reader", REPO_ROOT / "4dTrajectory/outputs/POOLED/prior/x/base/free_generation", {})
     assert validation_claim(inside, "reader") == "4dTrajectory/outputs/POOLED/prior/x/base/free_generation"
-    claim_validation_read(outside, "reader", tmp_path / "readout")
+    claim_validation_read(outside, "reader", tmp_path / "readout", {})
     assert validation_claim(outside, "reader") == str(tmp_path / "readout")
     assert validation_claim(outside, "another") is None
+
+
+def test_a_kill_between_the_readout_and_the_spent_mark_is_marked_spent_by_the_next_run(tmp_path, monkeypatch):
+    """D128: killed after its readout.json and before the claim is marked spent, the read is not left open — the next
+    run finds the readout written, marks the claim spent, then refuses; the output moved away later opens nothing."""
+    from ts_transformer.prior.checkpoint import claim_validation_read
+
+    artefact, prior = base_prior(tmp_path, monkeypatch)
+    argv = ["--prior", str(prior), "--instructions", str(artefact), "--executor", str(tmp_path / "executor"),
+            "--device", "cpu", "--out", str(tmp_path / "readout")]
+    spend = runner.spend_validation_claim
+
+    def killed(*given):
+        raise KeyboardInterrupt("killed between the readout and the spent mark")
+
+    monkeypatch.setattr(runner, "spend_validation_claim", killed)
+    with pytest.raises(KeyboardInterrupt):
+        runner.main(argv)
+    claim = prior / "val_read_prior_validation.json"
+    record = json.loads(claim.read_text())
+    assert (tmp_path / "readout" / "readout.json").exists() and "spent_utc" not in record
+    assert record["options"] == {"split": "val", "device": "cpu"}
+    monkeypatch.setattr(runner, "spend_validation_claim", spend)
+    with pytest.raises(SystemExit):
+        runner.main(argv)
+    assert "spent_utc" in json.loads(claim.read_text())
+    (tmp_path / "readout").rename(tmp_path / "archived")
+    with pytest.raises(ValueError, match="read by prior_validation already"):
+        claim_validation_read(prior, "prior_validation", tmp_path / "readout", {"split": "val"})
+
+
+def test_a_second_run_to_one_output_is_refused_while_the_first_holds_the_claim(tmp_path):
+    """D128: the val read is held under an exclusive lock while its reader runs: a second run is refused by name, also
+    from another thread; once the first ends, a rerun with the same options may run, one with others may not; a claim
+    written before D128 (no options) is not run again."""
+    import threading
+
+    from ts_transformer.prior.checkpoint import claim_validation_read, lock_val_read
+
+    prior, out = tmp_path / "prior", tmp_path / "readout"
+    prior.mkdir()
+    first = lock_val_read(prior, "reader")
+    claim_validation_read(prior, "reader", out, {"seed": 1})
+    refused = []
+
+    def second():
+        try:
+            lock_val_read(prior, "reader")
+        except ValueError as error:
+            refused.append(str(error))
+
+    thread = threading.Thread(target=second)
+    thread.start()
+    thread.join()
+    assert refused and "another run holds the claim" in refused[0]
+    first.close()                                                         # the first run ended (stopped)
+    with lock_val_read(prior, "reader"):
+        with pytest.raises(ValueError, match=r"other \['seed'\]"):
+            claim_validation_read(prior, "reader", out, {"seed": 2})
+        claim_validation_read(prior, "reader", out, {"seed": 1})          # the same read again
+    assert not list(prior.glob("*.tmp"))                                  # written whole, nothing left beside it
+    old = tmp_path / "old"
+    old.mkdir()
+    (old / "val_read_reader.json").write_text(json.dumps({"reader": "reader", "out": str(out), "utc": "x"}))
+    with pytest.raises(ValueError, match="records no options"):
+        claim_validation_read(old, "reader", out, {"seed": 1})

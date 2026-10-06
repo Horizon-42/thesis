@@ -183,6 +183,8 @@ class AeroVizBackendApp:
             return self._autopilot(lambda: self.autopilot_segment_backend().fly(payload))
         if path == "/autopilot/prior-segment":     # the same, on a sentence of a Training set of stage B
             return self._autopilot(lambda: self.autopilot_segment_backend().prior.fly(payload))
+        if path == "/autopilot/window-segment":    # the same, on a window of a Training set of stage C
+            return self._autopilot(lambda: self.autopilot_segment_backend().window.fly(payload))
         if path == "/traffic/jobs":
             # one multi-aircraft job at a time: a second start is a 409, a request the roster cannot serve a 400
             try:

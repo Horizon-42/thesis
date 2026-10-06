@@ -30,7 +30,9 @@ import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "reac
 import { useApp } from "../context/AppContext";
 import useTrainingAutopilot from "../hooks/useTrainingAutopilot";
 import useTrainingPriorIndex from "../hooks/useTrainingPriorIndex";
+import useTrainingWindowIndex from "../hooks/useTrainingWindowIndex";
 import TrainingPriorSession from "./training/TrainingPriorSession";
+import TrainingWindowSession from "./training/TrainingWindowSession";
 import ProblemBox from "./training/ProblemBox";
 import TrainingFlightSession from "./training/TrainingFlightSession";
 import type { DetailsPage } from "./training/PanelParts";
@@ -45,6 +47,7 @@ import {
   type TrainingSetEntry,
 } from "../data/trainingSample";
 import { trainingPriorIndexPath } from "../data/trainingPriorSample";
+import { trainingWindowIndexPath } from "../data/trainingWindowSample";
 
 type IndexState =
   | { status: "loading" }
@@ -89,14 +92,16 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
   const [setId, setSetId] = useState<string | null>(null);
   const [setState, setSetState] = useState<SetState>({ status: "idle" });
   /** The details page while it is open: its section, and the control that opened it (the focus goes back there). */
-  /** Whose sets the panel shows: stage A's (`index_v4.json`) or stage B's prior sets (`index_prior_v2.json`, offered only where
-   *  the airport has the file). */
-  const [viewing, setViewing] = useState<"stageA" | "prior">("stageA");
+  /** Whose sets the panel shows: stage A's (`index_v4.json`), stage B's prior sets (`index_prior_v2.json`) or stage C's
+   *  window sets (`index_post_v1.json`) — B and C offered only where the airport has the file. */
+  const [viewing, setViewing] = useState<"stageA" | "prior" | "window">("stageA");
   const priorIndex = useTrainingPriorIndex(activeAirportCode || null);
-  // the switch is offered where the airport has prior sets (or a prior index to complain about); an airport with none shows
-  // stage A whatever was chosen at the last one
+  const windowIndex = useTrainingWindowIndex(activeAirportCode || null);
+  // a switch is offered where the airport has such sets (or an index to complain about); an airport without the one chosen
+  // at the last airport shows stage A
   const priorOffered = (priorIndex.status === "ready" && priorIndex.index.sets.length > 0) || priorIndex.status === "invalid";
-  const showing = priorOffered ? viewing : "stageA";
+  const windowOffered = (windowIndex.status === "ready" && windowIndex.index.sets.length > 0) || windowIndex.status === "invalid";
+  const showing = (viewing === "prior" && priorOffered) || (viewing === "window" && windowOffered) ? viewing : "stageA";
   const [shownDetails, setShownDetails] = useState<{ section: string; opener: HTMLElement } | null>(null);
   const show = useCallback((section: string) => setShownDetails((open) => (open === null ? null : { ...open, section })), []);
   const close = useCallback(() => setShownDetails(null), []);
@@ -184,14 +189,27 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
         </button>
       </header>
 
-      {priorOffered ? (
-        <label className="training-field" title="Stage A: flights read back through the closed loop. Stage B: the sentences the prior said, flown by the executor.">
+      {priorOffered || windowOffered ? (
+        <label className="training-field" title="Stage A: flights read back through the closed loop. Stage B: the sentences the prior said, flown by the executor. Stage C: windows of recorded traffic, the commanded aircraft flown on each round's words.">
           <span>Sets of</span>
-          <select value={showing} onChange={(event) => setViewing(event.target.value as "stageA" | "prior")}>
+          <select value={showing} onChange={(event) => setViewing(event.target.value as "stageA" | "prior" | "window")}>
             <option value="stageA">Stage A · read-back</option>
-            <option value="prior">Stage B · prior</option>
+            {priorOffered ? <option value="prior">Stage B · prior</option> : null}
+            {windowOffered ? <option value="window">Stage C · windows</option> : null}
           </select>
         </label>
+      ) : null}
+      {showing === "window" && windowIndex.status === "invalid" ? (
+        <ProblemBox title={`${trainingWindowIndexPath(airport)} cannot be read.`} detail={windowIndex.problem} />
+      ) : null}
+      {showing === "window" && windowIndex.status === "ready" && activeAirportCode && windowIndex.index.airport === activeAirportCode ? (
+        <>
+          {windowIndex.index.rejected.map((item) => (
+            <ProblemBox key={item.id} title={`Entry ${item.id} was rejected.`} detail={item.problem} />
+          ))}
+          {/* keyed by the airport: another airport's index never opens with this one's set, window or round */}
+          <TrainingWindowSession key={`${activeAirportCode}:${windowIndex.index.airport}`} airport={activeAirportCode} sets={windowIndex.index.sets} />
+        </>
       ) : null}
       {showing === "prior" && priorIndex.status === "invalid" ? (
         <ProblemBox title={`${trainingPriorIndexPath(airport)} cannot be read.`} detail={priorIndex.problem} />
@@ -205,7 +223,7 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
         </>
       ) : null}
 
-      {showing === "prior" ? null : <>
+      {showing !== "stageA" ? null : <>
       {indexState.status === "loading" ? <p className="training-note" role="status">Reading {trainingIndexPath(airport)} …</p> : null}
       {indexState.status === "absent" ? <EmptyState airport={airport} /> : null}
       {indexState.status === "invalid" ? (
