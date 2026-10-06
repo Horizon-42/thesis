@@ -150,11 +150,15 @@ The next free numbers: D154, O19.
 6. The speed of the closed loop (D138), by stage B's implementer on `dev-two-tier-v4` (§5 rule 1), before stage C's next
    campaign: vocabulary A44 first, since C13 uses it, then post-training C13 and prior B14. Each is measured after it is
    built (`post_profile` at C10's settings, `model_speed` of §6.2 item 10). Nothing of it is merged into `dev-two-tier`
-   while C10 runs.
+   while C10 runs. Items 5 and 6 are built and reviewed; their steps after C10 (B14's real-data check, C13's GPU check,
+   the base's speed readout, the export of stages A's and B's sets, the browser check, the merge report) go to stage
+   D's implementer (§5 rule 1).
 7. Stage D (multi-aircraft control §0.4), by stage D's implementer on `dev-multi-control` (§5 rule 1), after the
    user's decisions of its §0.1 (all decided 2026-10-06): MC0 (the interfaces of stages A, B and C that it needs, D150, D149, D152) and
    MC1 (the census). Their code and their tests on synthetic inputs while C10 runs; their checks on real data and the
-   census after C10 ends, after the steps of items 5 and 6 that wait for C10. Version 1's formal campaign after C10's
+   census after C10 ends, after the steps of items 5 and 6 that wait for C10. The order of the work: while C10 runs,
+   MC0's and MC1's code; when C10 ends, first the steps of items 5 and 6 (they hold back the merge of
+   `dev-two-tier-v4`), then MC0's checks on real data and MC1's census. Version 1's formal campaign after C10's
    chosen round; version 2 (D153) after version 1's.
 8. The user merges (§5 rule 11).
 
@@ -175,14 +179,16 @@ sections that it names.
      its worktree;
    - the user merges `dev-two-tier-v4` into `dev-two-tier` (rule 11).
 
-   One implementer develops for stages A, B and C: stage B's (the user, 2026-10-06). Stage A's implementer has no work;
-   stage C's runs C10 to its end and does not change code. Stage D (the multi-aircraft control) has an implementer of
-   its own, stage D's (the user, 2026-10-06), on its own branch `dev-multi-control` in the worktree
-   `.claude/worktrees/multi-control`, made from `dev-two-tier-v4`: two implementers cannot share one worktree. It
+   One implementer develops for every stage: stage D's (the user, 2026-10-06; it takes over stage B's implementer's
+   remaining steps, §4 items 5 and 6). Stages A's and B's implementers have no work; stage C's runs C10 to its end and
+   does not change code. Stage D's implementer keeps two branches: the work of §4 items 5 and 6 on `dev-two-tier-v4`
+   (worktree `.claude/worktrees/two-tier-v4`), and the multi-aircraft control on its own branch `dev-multi-control` in
+   the worktree `.claude/worktrees/multi-control`, made from `dev-two-tier-v4`, so that the merge of
+   `dev-two-tier-v4` does not wait for the multi-aircraft control's review. It
    brings `dev-multi-control` level with `dev-two-tier-v4` (a merge) before each milestone and before its report; it
    changes the code of stages A, B and C only where multi-aircraft control §6 says, each change written in that
-   stage's public interface first; the user merges `dev-multi-control`. On the host, stage B's measurements after C10
-   (rule 13) come before stage D's runs on real data. The implementer stages files by explicit paths and reads
+   stage's public interface first; the user merges `dev-multi-control`. On the host, the measurements of §4 items 5
+   and 6 after C10 (rule 13) come before the multi-aircraft control's runs on real data. The implementer stages files by explicit paths and reads
    `git diff --cached --stat` before each commit. A formal build or run starts from the main checkout after the user's
    merge, as B5 did, never from the development worktree. C10 (`post_train_20261006`) was launched from
    `.claude/worktrees/two-tier-v4-post` before this rule; that worktree stays untouched until C10 ends.

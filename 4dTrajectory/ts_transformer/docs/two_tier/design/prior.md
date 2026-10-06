@@ -492,8 +492,8 @@ At `d14a2f76` (B13, the close of stage B). Paths relative to `4dTrajectory/ts_tr
 ## 12 Implementation plan: stage B
 
 **Rules.** B0–B13 were built on `dev-two-tier-v4-prior`, changing no code of `instructions/` or `autopilot/` and no
-runner of stage A. From 2026-10-06 stage B's implementer builds the milestones of every stage on `dev-two-tier-v4`
-(outline §5 rule 1); the prior still reads the vocabulary only through its public interface (vocabulary §6).
+runner of stage A. From 2026-10-06 one implementer builds the milestones of every stage (outline §5 rule 1: stage
+D's, which takes over stage B's remaining steps on `dev-two-tier-v4`); the prior still reads the vocabulary only through its public interface (vocabulary §6).
 Tests use synthetic artefacts; a check on real data reads the formal artefact on the train and select days only (D85).
 The formal runs read `v12_20261005` / `v17_20261005` at Δ = 4 s. The rules of outline §5 apply.
 

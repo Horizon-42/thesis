@@ -75,8 +75,8 @@ chosen round.
    MC1, O18 from the readouts.
 2. MC0 (the interfaces) and MC1 (the census) by stage D's implementer on `dev-multi-control` (outline §5 rule 1),
    from `dev-two-tier-v4` with this document merged in. While C10 runs: the code and the tests on
-   synthetic inputs only, with few processes. After C10 ends and after stage B's measurements on the host (outline §5
-   rule 13), in this order: the checks of MC0 on real data (vocabulary
+   synthetic inputs only, with few processes. After C10 ends and after the measurements of outline §4 items 5 and 6
+   on the host (outline §5 rule 13), in this order: the checks of MC0 on real data (vocabulary
    D73's checks on the formal artefact, D149's check on real windows), then MC1's census. The user chooses O16.
 3. MC2–MC5 (version 1, D152). The formal campaign MC6 after C10's chosen round and the user's settings; the Training
    view MC7.
