@@ -29,7 +29,7 @@ vi.mock("../../context/AppContext", () => ({
 
 import TrainingPanel from "../TrainingPanel";
 import { TRAINING_PRIOR_SAMPLE_SCHEMA } from "../../data/trainingPriorSample";
-import { stageBIndex, stageBSample, stageBSampleFile } from "../../data/__tests__/stageB";
+import { stageBIndex, stageBSample, stageBSampleFile, stageBSelection } from "../../data/__tests__/stageB";
 import { chooseTrainingTab, useTrainingTabs, type TrainingTabs } from "../../data/trainingTabs";
 
 /** The tabs the session gives the bar (the bar is not rendered here: a spy reads them). */
@@ -61,6 +61,7 @@ async function openPriorSets() {
 describe("the prior's sets in the Training panel", () => {
   beforeEach(() => {
     appState.cursorS = 0;
+    appState.trainingSelection = null;
     for (const mock of [setTrainingSelection, setTrainingIntervalS, setTrainingCursorS]) mock.mockClear();
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
@@ -105,12 +106,27 @@ describe("the prior's sets in the Training panel", () => {
     const sentence = sample.flights[0].sentences[0];
     appState.cursorS = sample.flights[0].head.closedLoop["4"].startS + 4 * 5;        // Δ row 5
     await openPriorSets();
-    // the line under the list and its probability strip stay in the panel; the line opens no page (D134: no row inspector)
+    // the line stays in the panel and opens no page (D134: no row inspector)
     const line = await screen.findByTitle(/^At the cursor/);
     expect(line.textContent).toContain(`row 5: go-around ${(sentence.goAroundProbability[5] * 100).toFixed(1)} %`);
     expect(line.textContent).toContain(`altitude ${sentence.blocked.altitude[5].length}`);
     expect(screen.queryByRole("button", { name: /^At the cursor/ })).toBeNull();
-    expect(screen.getByRole("img", { name: /Probability of go-around/ })).toBeTruthy();
+  });
+
+  it("puts the probability of go-around along the sample on the cursor slider's track, and no strip of its own", async () => {
+    serve({ [INDEX_PATH]: stageBIndex(), [SAMPLE_PATH]: stageBSampleFile() });
+    const sample = stageBSample();
+    const { head, sentences } = sample.flights[0];
+    appState.trainingSelection = stageBSelection(sample, 0);                         // the bar's state: sample 0 on screen
+    await openPriorSets();
+    await waitFor(() => expect(document.querySelector('[data-mark="go-around"]')).not.toBeNull());
+    const points = document.querySelector('[data-mark="go-around"]')!.getAttribute("points")!.split(" ");
+    expect(points.length).toBe(sentences[0].goAroundProbability.length);
+    expect(document.querySelector('[data-mark="first-step"] title')!.textContent).toContain(`${head.closedLoop["4"].startS} s`);
+    expect(screen.queryByRole("img", { name: /Probability of go-around/ })).toBeNull();
+    act(() => chooseTrainingTab("closed-loop"));
+    await waitFor(() => expect(document.querySelector('[data-mark="go-around"]')).toBeNull());
+    expect(document.querySelector('[data-mark="first-step"]')).not.toBeNull();
   });
 
   it("refuses a set of another schema by name and keeps the others", async () => {

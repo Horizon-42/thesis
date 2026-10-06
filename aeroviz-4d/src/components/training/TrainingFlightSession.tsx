@@ -3,7 +3,7 @@
  * -------------------------
  * The Training panel over a stage-A set, in the layout every stage shares (outline §6.2): the list of flights (four
  * columns: the callsign, the runway, the stratum, the closed-loop sentences that landed, one for each Δ), one line per
- * readout and the Draw box; the set chooser above it is the panel's. Of the flight on screen the SENTENCE BAR'S TABS choose
+ * readout, the cursor slider (frontend §6.1: its marks the first predicted step and the corrections) and the Draw box; the set chooser above it is the panel's. Of the flight on screen the SENTENCE BAR'S TABS choose
  * the sentence — Labelled and one per Δ (`data/trainingTabs.ts`); the session maps the choice to `trainingIntervalS` (the
  * set's first Δ when the first set opens; kept across sets when the new set has it) and publishes the flight through
  * `trainingSelection` — the sentence bar, the read-back window and the 3D layer draw it.
@@ -17,6 +17,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "../../context/AppContext";
 import TrainingVocabularyNotes from "../TrainingVocabularyNotes";
+import CursorSlider from "./CursorSlider";
 import TrainingDetails, { type TrainingDetailsSection } from "./TrainingDetails";
 import { DetailsLink, DrawBox, EXPERIMENT_SECTION, LayerSwitches, type DetailsPage } from "./PanelParts";
 import { ClosedLoopSection, LabellingSection, resultSection } from "./ResultSections";
@@ -25,6 +26,7 @@ import { trainingOutcomeColour } from "../../utils/trainingWordColors";
 import {
   closedCycleTimeS,
   correctionCount,
+  trainingReadingOf,
   trainingSelectionOf,
   type TrainingFlight,
   type TrainingSample,
@@ -34,6 +36,7 @@ import { checkMark, decisionText, TRAINING_OUTCOME_TAG } from "../../data/traini
 import { publishTrainingTabs, useTrainingTabs, type TrainingTab } from "../../data/trainingTabs";
 import type { TrainingSetIntentState } from "../../data/trainingSetIntent";
 import { useTrainingSetResults } from "../../data/trainingSetResults";
+import { correctionMarks, firstStepMark } from "../../data/trainingSlider";
 
 const FLOWN_SECTION = "flown";
 const LABELLED = "labelled";
@@ -136,6 +139,13 @@ export default function TrainingFlightSession({ airport, sample, entry, details,
   }, [sample, flight, setTrainingSelection]);
   useEffect(() => () => setTrainingSelection(null), [setTrainingSelection]);
   const closed = flight === null || intervalS === null ? null : flight.closedLoop[String(intervalS)];
+  // the slider's marks (frontend §6.1): on a closed-loop sentence, its first predicted step and the rows of the words the
+  // reading added; the labelled sentence has no first predicted step of its own (each Δ has its own), so no mark
+  const marks = useMemo(() => {
+    if (sample === null || flight === null || intervalS === null) return [];
+    const reading = trainingReadingOf(flight, sample.vocabulary.stepS, intervalS);
+    return [firstStepMark(reading.originS), ...correctionMarks(reading)];
+  }, [sample, flight, intervalS]);
 
   // ── the details page: the experiment's results (outline §6.2 item 3, D134) ──
   const results = useTrainingSetResults("A", airport, entry === null ? null : entry.id);
@@ -187,6 +197,7 @@ export default function TrainingFlightSession({ airport, sample, entry, details,
                 (closed.replay.crossing?.decision ? ` · DA ${checkMark(closed.replay.crossing.decision.passed)}` : " · no DA check")} />
             <DetailsLink name="Flown flights" summary={flownSummary(sample)} onOpen={details.open(FLOWN_SECTION)} />
           </ul>
+          <CursorSlider marks={marks} />
           <DrawBox>
             <LayerSwitches />
           </DrawBox>

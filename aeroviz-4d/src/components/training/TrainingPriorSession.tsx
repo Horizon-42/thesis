@@ -8,11 +8,11 @@
  * generation, Sample 0, 1 … (`data/trainingTabs.ts`); the bar, the read-back window and the 3D layers draw it as stage A
  * draws a sentence (`trainingPriorFlightView`). The left panel has no second chooser.
  *
- * Its readouts, one line each, open the DETAILS PAGE (modal): "This sentence" and "Sentences" → Sentences; "At the cursor"
- * (the probability the prior gave "go-around", whether the procedure permitted one, on final or not, the words the masks
- * blocked) → Row inspector. Under "At the cursor" stays the probability strip of the sentence on screen (the page is
- * modal: what follows the cursor stays in the panel). The procedure's limits and the flight's other sentences are drawn in
- * 3D (`useTrainingProcedureLayer`; the Draw switches here).
+ * Its readouts, one line each: "This sentence" and "Sentences" open the DETAILS PAGE (modal) on Free generation; "At the
+ * cursor" (the probability the prior gave "go-around", whether the procedure permitted one, on final or not, the words the
+ * masks blocked) opens nothing — it follows the cursor, so it stays in the panel. Under the readouts, the cursor slider
+ * (frontend §6.1) carries, on a sample's tab, the probability of "go-around" along the sentence. The procedure's limits and
+ * the flight's other sentences are drawn in 3D (`useTrainingProcedureLayer`; the Draw switches here).
  *
  * A click on a word of the sentence on screen flies its segment live (`useTrainingPriorAutopilot`).
  */
@@ -33,12 +33,14 @@ import {
   type TrainingPriorSetEntry,
   type TrainingPriorWhich,
 } from "../../data/trainingPriorSample";
-import { readingRowAt, readingRowTimeS, trainingReadingOf, type TrainingFlownEnd } from "../../data/trainingSample";
+import { readingRowAt, trainingReadingOf, type TrainingFlownEnd } from "../../data/trainingSample";
+import { firstStepMark, goAroundLine } from "../../data/trainingSlider";
 import { checkMark, TRAINING_OUTCOME_TAG, TRAINING_OUTCOME_TEXT } from "../../data/trainingText";
 import { publishTrainingTabs, useTrainingTabs, type TrainingTab } from "../../data/trainingTabs";
 import { useTrainingSetIntent } from "../../data/trainingSetIntent";
 import { useTrainingSetResults } from "../../data/trainingSetResults";
 import { trainingOutcomeColour } from "../../utils/trainingWordColors";
+import CursorSlider from "./CursorSlider";
 import ProblemBox from "./ProblemBox";
 import TrainingDetails, { type TrainingDetailsSection } from "./TrainingDetails";
 import { DetailsLink, DrawBox, EXPERIMENT_SECTION, LayerSwitches, ReadoutLine, type DetailsPage } from "./PanelParts";
@@ -87,12 +89,12 @@ function whichOf(tab: string): TrainingPriorWhich {
   return tab === LABELLED || tab === CLOSED_LOOP ? "closedLoop" : Number(tab.slice("sample-".length));
 }
 
-/** "At the cursor": the readout's one line and, under it, the probability strip of the sentence on screen (one line high; a
- *  click moves the cursor). A leaf: it reads the Training cursor. */
+/** "At the cursor": the readout's one line (the probability along the sentence is on the cursor slider's track). A leaf: it
+ *  reads the Training cursor. */
 function AtTheCursor({ sample, flight, sentence }: {
   sample: TrainingPriorSample; flight: TrainingPriorFlight; sentence: TrainingPriorSentence | null;
 }) {
-  const { trainingCursorS, setTrainingCursorS } = useTrainingCursor();
+  const { trainingCursorS } = useTrainingCursor();
   if (sentence === null) return <ReadoutLine name="At the cursor" summary="a sample's records: choose a sample's tab (0, 1 …)" />;
   const view = trainingPriorFlightView(sample, flight, sentence.sample);
   const reading = trainingReadingOf(view, sample.vocabulary.stepS, sample.model.rowIntervalS);
@@ -101,25 +103,7 @@ function AtTheCursor({ sample, flight, sentence }: {
   const blocked = TRAINING_PRIOR_BLOCKED_COLUMNS.map((column) => `${column} ${sentence.blocked[column][row].length}`).join(", ");
   const summary = `row ${row}: go-around ${(probability[row] * 100).toFixed(1)} %, ${sentence.goAroundPermitted[row] ? "permitted" : "not permitted"}, ` +
     `${sentence.onFinal[row] ? "on final" : "not on final"} · blocked ${blocked}`;
-  const wide = 200;
-  const x = (r: number) => (r / Math.max(probability.length - 1, 1)) * wide;
-  return (
-    <>
-      <ReadoutLine name="At the cursor" summary={summary} />
-      <li className="training-prior-strip-item">
-        <svg className="training-prior-probability" viewBox={`0 0 ${wide} 12`} role="img" preserveAspectRatio="none"
-          aria-label="Probability of go-around at each word row (a click moves the cursor)" onClick={(event) => {
-            const box = event.currentTarget.getBoundingClientRect();
-            const at = Math.round(((event.clientX - box.left) / box.width) * (probability.length - 1));
-            setTrainingCursorS(readingRowTimeS(reading, Math.min(Math.max(at, 0), probability.length - 1)));
-          }}>
-          <polyline points={probability.map((p, r) => `${x(r)},${11 - p * 10}`).join(" ")} fill="none" stroke="#fb923c" strokeWidth={1}
-            vectorEffect="non-scaling-stroke" />
-          <line x1={x(row)} x2={x(row)} y1={0} y2={12} stroke="#facc15" strokeWidth={1} vectorEffect="non-scaling-stroke" />
-        </svg>
-      </li>
-    </>
-  );
+  return <ReadoutLine name="At the cursor" summary={summary} />;
 }
 
 /** Every flight's sentences (the details page's Sentences): the closed-loop one and each sample, and the landed of each sample
@@ -229,6 +213,15 @@ export default function TrainingPriorSession({ airport, sets, details }: {
   useEffect(() => () => setTrainingSelection(null), [setTrainingSelection]);
 
   const said = flight === null || which === "closedLoop" ? null : flight.sentences.find((item) => item.sample === which) ?? null;
+  // the slider's marks (frontend §6.1): the first predicted step (the prior's Δ) on every tab; on a sample's tab, the
+  // probability of "go-around" at each of its rows
+  const marks = useMemo(() => {
+    if (sample === null || flight === null) return [];
+    const first = firstStepMark(flight.head.closedLoop[String(sample.model.rowIntervalS)].startS);
+    if (said === null) return [first];
+    const reading = trainingReadingOf(trainingPriorFlightView(sample, flight, said.sample), sample.vocabulary.stepS, sample.model.rowIntervalS);
+    return [first, goAroundLine(reading, said.goAroundProbability)];
+  }, [sample, flight, said]);
 
 
   // ── the details page: the experiment's results (outline §6.2 item 3, D134) ──
@@ -286,6 +279,7 @@ export default function TrainingPriorSession({ airport, sets, details }: {
               <AtTheCursor sample={sample} flight={flight} sentence={said} />
             </ul>
           )}
+          <CursorSlider marks={marks} />
           <DrawBox legend="Draw (prior)">
             <LayerSwitches />
             <label title="each runway's region outline, glidepath lower edge, DA point and the entry point at the FAF">

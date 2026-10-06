@@ -453,6 +453,12 @@ export function readingRowAt(reading: TrainingReading, atS: number): number | nu
   return Math.min(Math.floor((atS - reading.originS) / reading.rowS + 1e-9), reading.rows - 1);
 }
 
+/** Where the time axis of a sentence ends (the sentence bar's and the cursor slider's, which start at 0): the sentence's
+ *  end, or its judged track's when that runs on. */
+export function readingAxisEndS(reading: TrainingReading): number {
+  return Math.max(reading.endS, reading.judged.tS[reading.judged.tS.length - 1]);
+}
+
 /** Flight time of a replay cycle (cycles of the set's executor, counted from the first predicted step). */
 export function closedCycleTimeS(closed: TrainingClosedLoop, cycles: number): number {
   return closed.startS + cycles * closed.cycleS;

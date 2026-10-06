@@ -81,6 +81,7 @@ import {
   correctionCount,
   wordUnreached,
   formatSeconds,
+  readingAxisEndS,
   readingRowAt,
   readingRowTimeS,
   sentenceColumnRuns,
@@ -270,7 +271,7 @@ export default function TrainingSentenceBar() {
   const reading = trainingReadingOf(flight, stepS, intervalS);
   const { closed } = reading;
   // the axis is the flight's own time from 0 to where the sentence (or the flown track) ends
-  const endS = Math.max(reading.endS, reading.judged.tS[reading.judged.tS.length - 1]);
+  const endS = readingAxisEndS(reading);
   const xFor = (seconds: number) => GUTTER + (seconds / endS) * plotW;
   const timeOf = (row: number) => readingRowTimeS(reading, row);
   const cursorRow = readingRowAt(reading, cursorS);

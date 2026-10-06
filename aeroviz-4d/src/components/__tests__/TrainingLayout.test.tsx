@@ -30,7 +30,7 @@ vi.mock("../../context/AppContext", () => ({
 import TrainingPanel from "../TrainingPanel";
 import { AEROVIZ_BACKEND_URL } from "../../pilot/pilotClient";
 import { stageBIndex, stageBSampleFile, stageBValSampleFile } from "../../data/__tests__/stageB";
-import { stageCIndex, stageCSample, stageCSampleFile, WINDOW_SET_ID } from "../../data/__tests__/stageC";
+import { stageCIndex, stageCSample, stageCSampleFile, stageCSelection, WINDOW_SET_ID } from "../../data/__tests__/stageC";
 import { chooseTrainingTab, useTrainingTabs, type TrainingTabs } from "../../data/trainingTabs";
 import { requestTrainingDetails } from "../training/PanelParts";
 import { resultsAnswer, resultsUrl } from "../../data/__tests__/trainingResults";
@@ -73,6 +73,7 @@ async function openStage(value: "prior" | "window") {
 
 describe("one layout for the three stages", () => {
   beforeEach(() => {
+    appState.trainingSelection = null;
     for (const mock of [setTrainingSelection, setTrainingIntervalS, setTrainingCursorS]) mock.mockClear();
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
@@ -107,6 +108,22 @@ describe("one layout for the three stages", () => {
     expect(page.textContent).toContain("What the post-training's rounds say in recorded traffic.");
     expect(page.textContent).toContain("post_training.md §6");
     expect(screen.getByRole("tab", { name: /Rounds/ })).toBeTruthy();
+  });
+
+  it("stage C: the cursor slider carries the window's first predicted step and, on a round's tab, its loss of separation", async () => {
+    serve(C_FILES);
+    const sample = stageCSample();
+    const lost = sample.windows.findIndex((window) => window.rounds[0].end.loss !== null);
+    appState.trainingSelection = stageCSelection(sample, lost);                       // the bar's state: that window's round
+    await openStage("window");
+    await screen.findAllByText(sample.windows[0].head.callsign);
+    fireEvent.click(screen.getByRole("list", { name: "The set's windows" }).querySelectorAll("button")[lost]);
+    const loss = sample.windows[lost].rounds[0].end.loss!;
+    await waitFor(() => expect(document.querySelector('[data-mark^="loss-"] title')?.textContent).toContain(`with ${loss.other}`));
+    expect(document.querySelector('[data-mark="first-step"] title')!.textContent).toContain(`${sample.windows[lost].firstStepS} s`);
+    act(() => chooseTrainingTab("labelled"));
+    await waitFor(() => expect(document.querySelector('[data-mark^="loss-"]')).toBeNull());
+    expect(document.querySelector('[data-mark="first-step"]')).not.toBeNull();
   });
 
   it("a results section without fields says why, and still shows the set's own rounds", async () => {

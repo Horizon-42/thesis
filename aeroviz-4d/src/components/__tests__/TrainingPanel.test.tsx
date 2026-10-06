@@ -12,7 +12,8 @@ const { appState, setTrainingSelection, setTrainingIntervalS, setTrainingAutopil
     trainingLayers: { headingBands: true, vertical: true, candidates: true },
     trainingIntervalS: 2 as number | null,
     // no word picked: the live executor asks for nothing
-    trainingSelection: null, trainingPick: null,
+    trainingSelection: null as unknown, trainingPick: null,
+    cursorS: 0,
   },
   setTrainingSelection: vi.fn(),
   setTrainingIntervalS: vi.fn(),
@@ -23,11 +24,12 @@ const { appState, setTrainingSelection, setTrainingIntervalS, setTrainingAutopil
 
 vi.mock("../../context/AppContext", () => ({
   useApp: () => ({ ...appState, setTrainingSelection, setTrainingIntervalS, setTrainingAutopilot, setTrainingLayer }),
+  useTrainingCursor: () => ({ trainingCursorS: appState.cursorS, setTrainingCursorS: vi.fn() }),
 }));
 
 import TrainingPanel from "../TrainingPanel";
 import { TRAINING_INDEX_SCHEMA, TRAINING_SAMPLE_SCHEMA } from "../../data/trainingSample";
-import { FLIGHT_KEY, stageAIndex, stageASampleFile } from "../../data/__tests__/stageA";
+import { FLIGHT_KEY, stageAIndex, stageASample, stageASampleFile, stageASelection } from "../../data/__tests__/stageA";
 import { chooseTrainingTab } from "../../data/trainingTabs";
 
 const INDEX_PATH = "data/airports/KXXX/training/index_v5.json";
@@ -55,6 +57,7 @@ describe("TrainingPanel", () => {
   beforeEach(() => {
     appState.activeAirportCode = "KXXX";
     appState.trainingIntervalS = 2;
+    appState.trainingSelection = null;
     for (const mock of [setTrainingSelection, setTrainingIntervalS, setTrainingLayer]) mock.mockClear();
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
@@ -122,6 +125,19 @@ describe("TrainingPanel", () => {
       act(() => chooseTrainingTab("labelled"));
       await waitFor(() => expect(screen.getByRole("button", { name: /^Flown flight[^s]/ }).textContent).toContain("not flown"));
       expect(setTrainingIntervalS).toHaveBeenLastCalledWith(null);
+    });
+
+    it("gives the cursor slider, on a closed-loop tab, its first predicted step and the rows of the words the reading added", async () => {
+      // the bar's state as the session publishes it: the first flight at the set's first Δ
+      appState.trainingSelection = stageASelection();
+      render(<TrainingPanel hidden={false} />);
+      await screen.findByText("KXXX:test");
+      const closed = stageASample().flights[0].closedLoop["2"];
+      const corrections = new Set(closed.events.filter((event) => event.correction).map((event) => event.row));
+      await waitFor(() => expect(document.querySelectorAll('[data-mark^="correction-"]').length).toBe(corrections.size));
+      expect(document.querySelector('[data-mark="first-step"] title')!.textContent).toContain(`${closed.startS} s`);
+      act(() => chooseTrainingTab("labelled"));
+      await waitFor(() => expect(document.querySelector("[data-mark]")).toBeNull());     // the labelled sentence: none
     });
 
     it("offers the three switches the view has, no more", async () => {

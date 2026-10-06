@@ -2,7 +2,8 @@
  * TrainingWindowSession.tsx
  * -------------------------
  * The Training panel over a window set of stage C (`data/trainingWindowSample.ts`), in the layout every stage shares
- * (outline §6.2): the set chooser with the set's intent line, the list of windows, one line per readout and the Draw box.
+ * (outline §6.2): the set chooser with the set's intent line, the list of windows, one line per readout, the cursor slider
+ * (frontend §6.1: its marks the first predicted step and the round's loss of separation) and the Draw box.
  * Of the window on screen the SENTENCE BAR'S TABS choose the sentence — Labelled (the labeller's open-loop reading of the
  * recorded flight of the commanded aircraft) and each round's sentence for it, Start (base), Round 1 …
  * (`data/trainingTabs.ts`); the bar, the read-back window and the 3D layers draw it as stage A draws a sentence (a round's
@@ -33,12 +34,15 @@ import {
   type TrainingWindowSentence,
   type TrainingWindowSetEntry,
 } from "../../data/trainingWindowSample";
+import { readingAxisEndS, trainingReadingOf } from "../../data/trainingSample";
 import { checkMark, crossingText, TRAINING_OUTCOME_TAG, TRAINING_OUTCOME_TEXT } from "../../data/trainingText";
+import { firstStepMark, lossMark } from "../../data/trainingSlider";
 import { publishTrainingTabs, useTrainingTabs, type TrainingTab } from "../../data/trainingTabs";
 import { useTrainingSetIntent } from "../../data/trainingSetIntent";
 import { useTrainingSetResults } from "../../data/trainingSetResults";
 import { trainingOutcomeColour } from "../../utils/trainingWordColors";
 import { TRAINING_WINDOW_ROLE_COLOR } from "../../hooks/useTrainingWindowLayer";
+import CursorSlider from "./CursorSlider";
 import ProblemBox from "./ProblemBox";
 import TrainingDetails, { type TrainingDetailsSection } from "./TrainingDetails";
 import { DetailsLink, DrawBox, EXPERIMENT_SECTION, LayerSwitches, type DetailsPage } from "./PanelParts";
@@ -116,19 +120,43 @@ function WindowEnd({ window, sentence }: { window: TrainingWindow; sentence: Tra
   );
 }
 
-/** The cursor at the window's row 0 when a window or round comes on screen (D129), so the other aircraft show from the
- *  start (the cursor resets to the flight's row 0, which is before the window's, with the flight on screen). A LEAF: it
- *  reads the Training cursor, which moves on every chart hover; once set, the cursor is the user's. ``flightKey``: the
- *  derived flight of the window and round — the cursor is set only once that flight is the one on screen (the session
- *  publishes it after this leaf's effect has run), never on the flight before. */
-export function WindowCursorStart({ flightKey, row0S }: { flightKey: string; row0S: number }) {
+/** The cursor of a window. When a window comes on screen, at its row 0 (D129), so the other aircraft show from the start
+ *  (the cursor resets to the flight's row 0, which is before the window's, with each flight on screen). On a change of the
+ *  round, at the window's instant it was at (frontend §6.1: the rounds of a window share its flight's clock), or at the
+ *  nearer end of the new sentence's axis (0 … ``endS``) when that does not reach it — also between Labelled and the round
+ *  whose flight it is read on (one derived flight, so the provider keeps the cursor: it is only clamped). Between those
+ *  changes the cursor is the user's. A LEAF: it reads the Training cursor, which moves on every chart hover.
+ *  ``windowKey``: the window's identity (its set and place); ``flightKey``: the derived flight of the window and round —
+ *  the cursor is set only once that flight is the one on screen (the session publishes it after this leaf's effect has
+ *  run), never on the flight before; ``labelled``: the labelled sentence is on screen. */
+export function WindowCursor({ windowKey, flightKey, labelled, row0S, endS }: {
+  windowKey: string; flightKey: string; labelled: boolean; row0S: number; endS: number;
+}) {
   const { trainingSelection } = useApp();
-  const { setTrainingCursorS } = useTrainingCursor();
+  const { trainingCursorS, setTrainingCursorS } = useTrainingCursor();
   const onScreen = trainingSelection?.flight.flightKey === flightKey;
-  // the setter belongs to the flight on screen (a new window or round, a new setter): set once for each
+  /** The sentence last on screen and its cursor's last instant. */
+  const kept = useRef<{ windowKey: string; flightKey: string; labelled: boolean; atS: number } | null>(null);
   useEffect(() => {
-    if (onScreen) setTrainingCursorS(row0S);
-  }, [onScreen, setTrainingCursorS, row0S]);
+    if (!onScreen) return;
+    const last = kept.current;
+    if (last !== null && last.flightKey === flightKey) {
+      if (last.labelled !== labelled) {
+        // the same flight read as another sentence: the provider kept the cursor; clamp it to this sentence's axis
+        last.labelled = labelled;
+        const atS = Math.min(trainingCursorS, endS);
+        last.atS = atS;
+        if (atS !== trainingCursorS) setTrainingCursorS(atS);
+        return;
+      }
+      last.atS = trainingCursorS;
+      return;
+    }
+    // another flight on screen: the setter is its own (a new flight, a new setter), set once
+    const atS = last !== null && last.windowKey === windowKey ? Math.min(last.atS, endS) : row0S;
+    kept.current = { windowKey, flightKey, labelled, atS };
+    setTrainingCursorS(atS);
+  }, [onScreen, windowKey, flightKey, labelled, row0S, endS, trainingCursorS, setTrainingCursorS]);
   return null;
 }
 
@@ -249,6 +277,16 @@ export default function TrainingWindowSession({ airport, sets, details }: {
   useEffect(() => () => setTrainingSelection(null), [setTrainingSelection]);
 
   const sentence = window === null || shown === null ? null : window.rounds.find((item) => item.round === shown) ?? null;
+  // the round's sentence on screen as the views read it, and the slider's marks (frontend §6.1): the first predicted step
+  // on every tab; on a round's tab, its loss of separation
+  const view = sample === null || window === null || shown === null ? null : trainingWindowFlightView(sample, window, shown);
+  const endS = sample === null || view === null ? 0
+    : readingAxisEndS(trainingReadingOf(view, sample.vocabulary.stepS, chosen === LABELLED ? null : sample.model.rowIntervalS));
+  const marks = useMemo(() => {
+    if (window === null || sentence === null) return [];
+    const loss = chosen === LABELLED ? null : sentence.end.loss;
+    return [firstStepMark(window.firstStepS), ...(loss === null ? [] : [lossMark(loss.timeS, loss.other)])];
+  }, [window, sentence, chosen]);
 
   // ── the details page: the experiment's results (outline §6.2 item 3, D134) ──
   const results = useTrainingSetResults("C", airport, setId);
@@ -303,8 +341,10 @@ export default function TrainingWindowSession({ airport, sets, details }: {
                   : (["recorded", "inserted", "moved"] as const).filter((role) => roles[role] > 0).map((role) => `${roles[role]} ${role}`).join(", "))} />
             </ul>
           )}
-          {window === null || shown === null ? null : (
-            <WindowCursorStart flightKey={trainingWindowFlightView(sample, window, shown).flightKey} row0S={window.row0S} />
+          <CursorSlider marks={marks} />
+          {window === null || view === null ? null : (
+            <WindowCursor windowKey={`${sample.setId}/${window.index}`} flightKey={view.flightKey} labelled={chosen === LABELLED}
+              row0S={window.row0S} endS={endS} />
           )}
           <DrawBox legend="Draw (window)">
             <LayerSwitches />
