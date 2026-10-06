@@ -616,6 +616,25 @@ hint which days hold data and which flights meet traffic).
 4. **Losses that the commanded aircraft does not answer for** (§5.2 item 4). The optimizer could also avoid
    them. This design does not, to match two-tier D93. The counts show if this choice matters.
 
+5. **The scene is not aligned with the two-tier multi-aircraft window** (the user, 2026-10-06: a serious problem, to
+   be solved later, not now). Results of this design and of the two-tier post-training cannot be compared until it is.
+   The differences, from `ts_transformer/docs/two_tier/design/post_training.md` D29, D93 and §6.1 (the two-tier
+   definitions are quoted; the "this design" column is the built code):
+
+   | Item | This design (M1, M2, the census) | Two-tier window (D93) |
+   |---|---|---|
+   | Start | The commanded record's 25 km ring entry (the arrival slice, `entry_time_utc`) | The commanded aircraft's row 0 (the instruction artefact, vocabulary §6) |
+   | End | The optimizer's flight to the threshold; traffic gathered over 2000 s (`max_duration`) | When the commanded aircraft is done (its outcome, the time limit included) or has a loss it answers for; no fixed length; go-arounds (D91) |
+   | Other aircraft | Every arrival of the airport in the air in the span (arrivals manifest, all days), judged within 30 km | Every other flight of the airport AND of the same split in the air, replayed along its record (the artefact's stored signals) |
+   | Time grid | 1 s checks on UTC multiples (MD6) | Rows of Δ = 4 s on even UTC seconds |
+   | Commanded flights | A seeded sample of all arrivals with a dynamics model (M1); every arrival landing in a block (M2); the census: all | The windows of the train and select days, the augmented starts (A, B, D), less the D113 exclusions |
+   | Data | `load_model_arrivals` (MSL) | The instruction-language artefact (v12) |
+   | All aircraft controlled | M2 | None (one aircraft commanded) |
+
+   To do (not started): define the optimizer's scenes from the two-tier windows (the same commanded flights, start, end,
+   other aircraft and grid), read through a neutral interface (§6: no new `ts_transformer` import outside
+   `traffic/rules.py` without the user's decision), then re-measure.
+
 ## 12. Key code index
 
 | What | Where |
