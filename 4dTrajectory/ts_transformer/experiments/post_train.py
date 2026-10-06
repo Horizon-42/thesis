@@ -43,9 +43,12 @@ ONE CAMPAIGN: from a clean checkout (``--smoke``: a tree with changes too; no re
 information and never compared (prior D108). A formal campaign needs its intent in `docs/experiments/intents.json`
 under the campaign's name (its directory's) before it starts (L27). RESUMABLE: a round is done when its checkpoint is
 there (the last file it writes); a rerun with the same inputs and settings continues from the last checkpoint, a round
-left half done is moved aside as ``round_<r>.aborted-<UTC>`` (outline E8) and run again; other inputs are refused. Every
-random number of a round comes from the seed and the round (the draw, the speaking's, the data term's sentences and
-its dropout, `pass_seed`), so a resumed campaign is the campaign run through.
+left half done is moved aside as ``round_<r>.aborted-<UTC>`` (outline E8) and run again; other inputs are refused. A
+rerun may raise the rounds and change nothing else (D157): the campaign goes on to the new count. The recorded paths
+are compared as this checkout reads them (`inputs_here`: a campaign recorded in a worktree resumes from another
+checkout). Every random number of a round comes from the seed and the round (the draw, the speaking's, the data term's
+sentences and its dropout, `pass_seed`), so a resumed campaign is the campaign run through, a raised one the campaign
+of the larger count from its start.
 
     python run_ts.py post_train --prior <the base's directory> --instructions <A34's artefact> --executor <its spec> \\
         --windows <the census> --out 4dTrajectory/outputs/POOLED/post/<campaign id> --rounds … (every count given)
@@ -108,6 +111,8 @@ POST_CHECKPOINT_SCHEMA = "ts-post-checkpoint-v1"
 KINDS = (REAL, INSERTED, LEADER_MOVED, MOVED_START)
 #: The intents of the published experiments (L27; post-training §8 C10: written before the launch).
 INTENTS = REPO_ROOT / "4dTrajectory" / "ts_transformer" / "docs" / "experiments" / "intents.json"
+#: The paths among a campaign's inputs (``campaign.json``), read as this checkout reads them (`inputs_here`, D157).
+INPUT_PATHS = ("prior", "instructions", "executor", "windows", "procedure_root")
 
 
 @dataclass(frozen=True)
@@ -788,20 +793,46 @@ def done_rounds(out: Path) -> int:
     return r
 
 
+def inputs_here(inputs: Mapping[str, Any]) -> dict[str, Any]:
+    """A campaign's inputs with each recorded path (`INPUT_PATHS`) as this checkout reads it (`this_checkout`, the rule
+    of the Training exports, outline §5 rule 1): a campaign recorded in a worktree is read from another checkout (D157)."""
+    from ts_transformer.experiments.training_export import this_checkout
+
+    return {**inputs, **{key: str(this_checkout(inputs[key])) for key in INPUT_PATHS}}
+
+
+def _but_rounds(inputs: Mapping[str, Any]) -> dict[str, Any]:
+    """The inputs with the rounds left out (D157: the one setting a resume may change)."""
+    return {**inputs, "settings": {k: v for k, v in inputs["settings"].items() if k != "rounds"}}
+
+
 def open_campaign(out: Path, inputs: dict[str, Any], git: dict[str, Any], checks: Any) -> dict[str, Any]:
-    """``campaign.json``: a new campaign's, or a resume's (refused unless its inputs and settings are the same); a round
-    left half done (its directory without its checkpoint) is moved aside as ``round_<r>.aborted-<UTC>``."""
+    """``campaign.json``: a new campaign's, or a resume's. A resume is refused unless its inputs are the record's — the
+    recorded paths as this checkout reads them (`inputs_here`), the rounds left out — and its rounds at least the
+    record's; more rounds raise the record's count (D157), its paths kept as recorded. Each resume adds its entry: the
+    time, the commit, the checks, the paths it read and the rounds before and after it. A round left half done (its
+    directory without its checkpoint) is moved aside as ``round_<r>.aborted-<UTC>``."""
     path = out / "campaign.json"
     if path.exists():
         record = json.loads(path.read_text(encoding="utf-8"))
-        if record["schema"] != CAMPAIGN_SCHEMA or record["inputs"] != inputs:
-            raise SystemExit(f"{out}: a campaign of other inputs or settings; a resume takes the same")
+        if record["schema"] != CAMPAIGN_SCHEMA:
+            raise SystemExit(f"{out}: a {record['schema']} campaign, not {CAMPAIGN_SCHEMA}")
+        recorded, asked = inputs_here(record["inputs"]), inputs_here(inputs)
+        if _but_rounds(recorded) != _but_rounds(asked):
+            raise SystemExit(f"{out}: a campaign of other inputs or settings; a resume takes the same, its rounds or more")
+        before, after = recorded["settings"]["rounds"], asked["settings"]["rounds"]
+        if after < before:
+            raise SystemExit(f"{out}: a campaign of {before} rounds; a resume may raise the rounds, not lower them to "
+                             f"{after}")
         left = out / f"round_{done_rounds(out)}"
         if left.exists():
             aborted = left.with_name(f"{left.name}.aborted-{utc_now().replace(':', '')}")
             left.rename(aborted)
             record["aborted"].append(aborted.name)
-        record["resumed"].append({"utc": utc_now(), "git": git, "checks": checks})
+        record["inputs"]["settings"]["rounds"] = after
+        record["resumed"].append({"utc": utc_now(), "git": git, "checks": checks,
+                                  "inputs": {key: asked[key] for key in INPUT_PATHS},
+                                  "rounds": {"before": before, "after": after}})
         write_json_atomic(path, record)
         return record
     if out.exists():

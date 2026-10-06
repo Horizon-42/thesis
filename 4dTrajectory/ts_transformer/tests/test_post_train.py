@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import asdict, replace
+from functools import partial
 from types import SimpleNamespace
 
 import numpy as np
@@ -13,9 +14,10 @@ import pytest
 import torch
 
 from ts_transformer.experiments import post_train
+from ts_transformer.experiments import training_export as export
 from ts_transformer.experiments.post_train import (
-    KINDS, Context, Settings, Speakers, batches, done_rounds, draw_round, open_campaign, run_campaign, speak_round,
-    start_model, train_pass, update_pairs, window_record,
+    INPUT_PATHS, KINDS, Context, Settings, Speakers, batches, done_rounds, draw_round, open_campaign, run_campaign,
+    speak_round, start_model, train_pass, update_pairs, window_record,
 )
 from ts_transformer.autopilot.start import Start, start_moved
 from ts_transformer.instructions.artefact import closed_loop_sentences
@@ -32,6 +34,15 @@ def _settings(**changed):
                   traffic_lr=1e-3, weight_decay=0.0, update_groups=1, data_sentences=1, select_per_airport=1,
                   traffic_hidden=16, traffic_heads=4)
     return Settings(**{**values, **changed})
+
+
+def _inputs(settings, root, **paths):
+    """A campaign's inputs, its paths under ``root``'s linked data trees (``paths``: one changed; never read here)."""
+    values = {"prior": "4dTrajectory/outputs/POOLED/prior/base/run",
+              "instructions": "4dTrajectory/outputs/POOLED/instruction_language/v",
+              "executor": "4dTrajectory/outputs/POOLED/executor/v", "windows": "4dTrajectory/outputs/POOLED/post/windows",
+              "procedure_root": "aeroviz-4d/public/data/airports", **paths}
+    return {**{key: str(root / path) for key, path in values.items()}, "settings": asdict(settings), "smoke": False}
 
 
 def _context(s):
@@ -462,7 +473,7 @@ def test_a_resumed_campaign_is_the_campaign_run_through(setup, tmp_path, monkeyp
 
     monkeypatch.setattr(post_train, "speak_round", speak)
     monkeypatch.setattr(post_train, "selection_readout", lambda *a, **k: {"KXXX": {"reward_mean": 0.0}})
-    inputs = {"settings": asdict(settings)}
+    inputs = _inputs(settings, tmp_path)
     through = tmp_path / "through"
     open_campaign(through, inputs, {"head": "x", "dirty": False}, {})
     run_campaign(through, settings, context)
@@ -493,10 +504,108 @@ def test_a_resumed_campaign_is_the_campaign_run_through(setup, tmp_path, monkeyp
     assert all(torch.equal(resumed["model"][k], state["model"][k]) for k in state["model"])
     assert any(not torch.equal(state["model"][k], v) for k, v in model.state_dict().items())   # the rounds moved it
     with pytest.raises(SystemExit, match="other inputs"):
-        open_campaign(broken, {"settings": asdict(_settings(rounds=3))}, {"head": "y", "dirty": False}, {})
+        open_campaign(broken, _inputs(replace(settings, seed=1), tmp_path), {"head": "y", "dirty": False}, {})
     (tmp_path / "stray").mkdir()
     with pytest.raises(SystemExit, match="holds no campaign"):
         open_campaign(tmp_path / "stray", inputs, {"head": "x", "dirty": False}, {})
+
+
+def _same(a, b) -> bool:
+    """Equal nested states (a checkpoint: the model, the optimizer, the identity), every tensor bit for bit."""
+    if isinstance(a, torch.Tensor):
+        return isinstance(b, torch.Tensor) and torch.equal(a, b)
+    if isinstance(a, dict):
+        return isinstance(b, dict) and a.keys() == b.keys() and all(_same(a[k], b[k]) for k in a)
+    if isinstance(a, (list, tuple)):
+        return type(a) is type(b) and len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b))
+    return a == b
+
+
+def test_a_campaign_raised_to_more_rounds_is_the_campaign_of_that_count_from_its_start(setup, tmp_path, monkeypatch):
+    """D157: a campaign of 2 rounds raised to 3 by a resume runs round 2 only, rounds 0 and 1 untouched, and its round 2
+    is the round 2 of a campaign of 3 rounds from its start: the checkpoint (the model, the optimizer and the identity,
+    bit for bit), ``round.json`` (but its commit and time) and the selection readout. The speaking writes the same
+    informative groups each round and the readout reads the weights (the resume's test); the record keeps its paths,
+    raises its count and adds the resume's entry."""
+    s = setup
+    context = _context(s)
+    three = _settings(rounds=3, per_kind={**dict.fromkeys(KINDS, 0), REAL: 1}, update_groups=1)
+    two = replace(three, rounds=2)
+    model, _ = start_model(context, three)
+    (group,) = _round(s, model, [_ahead(s["windows"][0])]).groups
+    rewarded = replace(group, continuations=(replace(group.continuations[0], reward=1.0), group.continuations[1]))
+
+    def speak(model, context, windows, settings, round_, directory, speakers):
+        torch.save([rewarded, rewarded], directory / "groups_0.pt")
+        return {"windows": len(windows), "weights": _digest(model)}
+
+    monkeypatch.setattr(post_train, "speak_round", speak)
+    monkeypatch.setattr(post_train, "selection_readout", lambda model, *a, **k: {"KXXX": {"reward_mean": _digest(model)}})
+    through, raised = tmp_path / "through", tmp_path / "raised"
+    open_campaign(through, _inputs(three, tmp_path), {"head": "x", "dirty": False}, {})
+    run_campaign(through, three, context)
+    open_campaign(raised, _inputs(two, tmp_path), {"head": "x", "dirty": False}, {})
+    run_campaign(raised, two, context)
+    kept = {path: path.read_bytes() for path in sorted(raised.glob("round_[01]/*"))}
+    passes = []
+    real = post_train.train_pass
+    monkeypatch.setattr(post_train, "train_pass", lambda *a, **k: (passes.append(1), real(*a, **k))[1])
+    record = open_campaign(raised, _inputs(three, tmp_path), {"head": "y", "dirty": False}, {"stub": True})
+    run_campaign(raised, three, context)
+    assert passes == [1] and done_rounds(raised) == 3                                      # round 2 only
+    assert {path: path.read_bytes() for path in sorted(raised.glob("round_[01]/*"))} == kept
+    assert _same(*(torch.load(c / "round_2" / "checkpoint.pt", weights_only=False) for c in (through, raised)))
+    ends = [{k: v for k, v in json.loads((c / "round_2" / "round.json").read_text()).items()
+             if k not in ("git", "finished_utc")} for c in (through, raised)]
+    assert ends[0] == ends[1] and ends[0]["pass"]["updates"] == 2
+    before = json.loads((through / "round_1" / "round.json").read_text())["selection_readout"]
+    assert ends[0]["selection_readout"] != before                         # round 2 moved the weights the readout reads
+    stored = json.loads((raised / "campaign.json").read_text())
+    assert stored == record and stored["inputs"] == _inputs(three, tmp_path)
+    (entry,) = stored["resumed"]
+    assert entry["rounds"] == {"before": 2, "after": 3} and entry["git"] == {"head": "y", "dirty": False}
+    assert entry["checks"] == {"stub": True} and entry["inputs"] == {k: _inputs(three, tmp_path)[k] for k in INPUT_PATHS}
+
+
+def test_a_resume_may_raise_the_rounds_and_change_nothing_else(tmp_path):
+    """D157: fewer rounds, or more rounds with another setting or input changed, are refused by name, and the record is
+    left as it was."""
+    settings, git = _settings(rounds=3), {"head": "x", "dirty": False}
+    out = tmp_path / "campaign"
+    open_campaign(out, _inputs(settings, tmp_path), git, {})
+    written = (out / "campaign.json").read_text()
+    with pytest.raises(SystemExit, match="not lower them to 2"):
+        open_campaign(out, _inputs(replace(settings, rounds=2), tmp_path), git, {})
+    for changed in (_inputs(replace(settings, rounds=4, seed=1), tmp_path),
+                    _inputs(replace(settings, rounds=4, update_groups=2), tmp_path),
+                    {**_inputs(replace(settings, rounds=4), tmp_path), "smoke": True},
+                    _inputs(replace(settings, rounds=4), tmp_path, executor="4dTrajectory/outputs/POOLED/executor/w")):
+        with pytest.raises(SystemExit, match="other inputs or settings"):
+            open_campaign(out, changed, git, {})
+    assert (out / "campaign.json").read_text() == written
+
+
+def test_a_campaign_recorded_in_a_worktree_resumes_from_another_checkout(tmp_path, monkeypatch):
+    """D157: the recorded paths are compared as this checkout reads them (`this_checkout`, its own test in
+    `test_training_export`): a campaign recorded under a worktree's linked data trees, the worktree deleted since,
+    resumes from the main checkout; the record keeps its paths and the resume's entry gives the paths it read; a path
+    that reads as another is refused."""
+    main = tmp_path / "thesis"
+    for tree in export.LINKED_TREES:
+        (main / tree).mkdir(parents=True)
+    monkeypatch.setattr(export, "this_checkout", partial(export.this_checkout, root=main))
+    gone, git = main / ".claude" / "worktrees" / "v4-post", {"head": "x", "dirty": False}
+    settings = _settings(rounds=2)
+    out = main / "4dTrajectory" / "outputs" / "POOLED" / "post" / "campaign"
+    open_campaign(out, _inputs(settings, gone), git, {})
+    record = open_campaign(out, _inputs(replace(settings, rounds=3), main), git, {})
+    assert record["inputs"] == _inputs(replace(settings, rounds=3), gone)
+    assert record["resumed"][0]["inputs"] == {key: _inputs(settings, main)[key] for key in INPUT_PATHS}
+    assert open_campaign(out, _inputs(replace(settings, rounds=3), gone), git, {})["resumed"][1]["inputs"] \
+        == record["resumed"][0]["inputs"]                                   # read from the deleted worktree's name too
+    with pytest.raises(SystemExit, match="other inputs"):
+        open_campaign(out, _inputs(replace(settings, rounds=3), main, windows="4dTrajectory/outputs/POOLED/post/other"),
+                      git, {})
 
 
 def test_a_formal_campaign_needs_a_clean_tree_and_its_intent(tmp_path, monkeypatch):
