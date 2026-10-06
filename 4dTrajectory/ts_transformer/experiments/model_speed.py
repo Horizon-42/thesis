@@ -233,6 +233,7 @@ def speak_prior(run: PriorRun, model: Any, group: Sequence[tuple[int, int]], see
     """The flights ``group`` (``(flight, sample)``) spoken to their end in one closed loop on ``device``, timed."""
     from ts_transformer.autopilot.start import NO_MOVE, start_moved
     from ts_transformer.experiments.prior_speaking_loop import SpeakingLoop, flight_numbers
+    from ts_transformer.prior.procedure import BATCH
     from ts_transformer.prior.speaker import MOST_GO_AROUNDS
 
     flights = sorted({f for f, _ in group})
@@ -245,7 +246,7 @@ def speak_prior(run: PriorRun, model: Any, group: Sequence[tuple[int, int]], see
     speaking = SpeakingLoop(model, timed, [f for f, _ in group], run.sentences, observed, run.flights,
                             run.prior.geometries, [run.prior.landings[run.flights[f]["airport"]] for f, _ in group],
                             run.finals, loop.words, interval_s=run.prior.interval_s, variant=model.config.variant,
-                            device=device, temperature=1.0)
+                            device=device, temperature=1.0, masks=BATCH)
     numbers = [flight_numbers(seed, sample, f) for f, sample in group]
     try:
         while speaking.observing:
