@@ -92,10 +92,11 @@ commits, the tests and the readings are in the implementation log.
 4. The window view (C11) and the window export change with the one layout of the three stages' Training views (outline
    §6.2, D133–D135: the results page, the rounds' envelopes, one block of a flown sentence), built by stage B's
    implementer.
-5. The generalisations of §9 marked "to be built" (multi-aircraft control D149, its MC0), each checked against stage
-   C's code before the change, bit for bit; nothing of them goes into C10's worktree.
+5. The generalisations of §9 marked "to be built" (multi-aircraft control D149, its MC0), by stage D's implementer
+   on `dev-multi-control` (outline §5 rule 1), each checked against stage C's code before the change, bit for bit;
+   nothing of them goes into C10's worktree.
 
-Every milestone from now on is built by stage B's implementer on `dev-two-tier-v4`, in the worktree
+Every other milestone from now on is built by stage B's implementer on `dev-two-tier-v4`, in the worktree
 `.claude/worktrees/two-tier-v4` (outline §5 rule 1). `dev-two-tier-v4-post` is merged into `dev-two-tier`; it and its
 worktree are deleted after C10 ends.
 
