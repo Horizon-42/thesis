@@ -38,6 +38,21 @@ MODE_M1, MODE_M2 = "m1", "m2"
 #: The block lengths a job takes (s): 15, 30 and 60 minutes (design IM3).
 BLOCK_LENGTHS_S = (900, 1800, 3600)
 
+#: The scenario list of an airport (design §10.6): written by ``traffic_scenarios.py``, served by the backend.
+CATALOG_SCHEMA = "traffic-scenario-catalog-v1"
+#: ``4dTrajectory/outputs``: the root the census writes its catalogs under and the backend serves them from.
+OUTPUTS_ROOT = Path(__file__).resolve().parent.parent / "outputs"
+
+
+def catalog_path(outputs_root: Path, airport: str) -> Path:
+    """Where an airport's scenario catalog lives: ``<4dTrajectory/outputs>/<ICAO>/traffic_scenarios/catalog.json``."""
+    return Path(outputs_root) / airport / "traffic_scenarios" / "catalog.json"
+
+
+def catalog_command(airport: str) -> str:
+    """The command that makes an airport's scenario catalog (what the backend's 404 names)."""
+    return f"python 4dTrajectory/optimization/traffic_scenarios.py --airport {airport}"
+
 
 def write_json_atomic(path: Path, payload: Any) -> None:
     """Write ``payload`` so that a reader polling ``path`` sees the old file or the new one, never half of it."""
