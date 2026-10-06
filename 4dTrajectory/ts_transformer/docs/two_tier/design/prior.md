@@ -72,27 +72,19 @@ The commits, test counts and measurements of every milestone are in `readouts/20
 
 | Part | State |
 |---|---|
-| B0–B4, B8–B12 | Done, each reviewed. The code is on `dev-two-tier-v4-prior` (worktree `.claude/worktrees/two-tier-v4-prior`) and in `dev-two-tier` (B12 merged at `2190fe0a`). B9: `1204fd8f`–`5313b6cd`; B10: `e4e7ba42`; B11 and outline D109: `df68c927`; B12: `39d02ef8`; stage A's line A37–A43 followed: `c072e355`, `89845fa6`, `5818fbbf`, `1777b3ec` |
-| B6 | The export, the frontend and the live segment are done and checked on smoke sets (`b079ebef`, `ce601bd7`, `aac93945`, `201b4afd`, `a280d984`; the claimed val set `df68c927`). The publication of B5's sets waits for B5 |
-| B5 | Running since 2026-10-05 22:40 UTC: `4dTrajectory/outputs/POOLED/prior/prior_base_20261006` (`ts-prior-campaign-v3`), on the artefact `v12_20261005` and the executor `v17_20261005` at Δ = 4 s, from `dev-two-tier` at `278ffcfc` (B12's code). The first campaign, `prior_base_20261005`, was stopped by the user at its step 17, to run on B12's code |
-| B13 | Done (`142272f0`, reviewed twice) on `dev-two-tier-v4-prior`; merged into `dev-two-tier` after B5. B5's results stay valid under it: the input, model, training, speaker, loop, selection, draw and choice code is byte-identical, and free generation and two epochs of training give byte-identical outputs under both |
-| B7 | After B5, B13 and B6's publication |
+| B0–B13 | Done, each reviewed, and merged: `dev-two-tier` = `dev-two-tier-v4` = `dev-two-tier-v4-prior`, the code at `d14a2f76` (full suite there: ts 1,742 passed and 1 skipped, modeling and backend 1,033, frontend Python 161). B9: `1204fd8f`–`5313b6cd`; B10: `e4e7ba42`; B11 and outline D109: `df68c927`; B12: `39d02ef8`; B13: `142272f0`; stage A's line A37–A43 followed: `c072e355`, `89845fa6`, `5818fbbf`, `1777b3ec` |
+| B5 | Done 2026-10-06 07:12 UTC: `4dTrajectory/outputs/POOLED/prior/prior_base_20261006` (`ts-prior-campaign-v3`, B12's code from `278ffcfc`; B13 leaves its results valid), on the artefact `v12_20261005` and the executor `v17_20261005` at Δ = 4 s. Chosen: configuration C, variant `full`. The base (C, `full`, the five airports) and its one validation readout, both claims spent. The data read-only with `SHA256SUMS`; the readout `readouts/2026-10-06_b5_campaign.zh.md` |
+| B6 | Done: the export, the view and the live segment (`b079ebef`, `ce601bd7`, `aac93945`, `201b4afd`, `a280d984`, `df68c927`); B5's sets published as `prior_sets_20261006` (`493dbe2b`: each fold of configuration C at its held-out airport, select days; the base's claimed val set), 10 flights × 2 sentences a set, `aeroviz-training-prior-sample-v3`; checked in the browser and on 40 sentences flown live. The view changes with the one layout of the three stages (outline §6.2, D133) |
+| B7 | Done 2026-10-06 (`d1386a77`): `docs/reference/runners.md` R56–R62; the code index of §11 |
 | Claude's checks | At `5313b6cd` (`readouts/2026-10-05_stage_b_check.zh.md`; corrections B10, D105–D108) at `44f6000f` (`readouts/2026-10-05_stage_b_check_2.zh.md`; corrections B12, D119–D122), of B12 at `2190fe0a` (`readouts/2026-10-06_stage_b_b12_check.zh.md`; corrections B13, D127, D128), and of B13 at `142272f0` (`readouts/2026-10-06_stage_b_b13_check.zh.md`: no S1, no correction; its findings on the behaviour check's coverage are dropped, outline D131). None found a leak into an input, a mask or a choice |
 
 Proposals (where the design says nothing): none open.
 
 ### 0.4 Plan
 
-1. **B5** (running, §12). A report of it reads no val count of a run's identity (D120). A val readout that stops before
-   it writes its readout is run again to the same output (D119; B5 runs B12's code).
-2. **B13** is done on stage B's branch. After B5 ends, stage B merges it into `dev-two-tier` and runs the full suite;
-   no code goes into `dev-two-tier` while B5 runs (B13's behaviour check gives another answer, which would stop
-   B5, and a resume of B5 needs B12's code).
-3. **B6's publication**, after B5 and B13 (the export of D127): the set of each fold at its held-out airport and the
-   base's claimed val set (outline D109).
-4. **B7**, after B5, B13 and B6's publication.
-5. The post-training (`post_training.md`) is built in parallel on its own branch (outline §4, D95). It reads only §7;
-   its formal runs wait for B5's base.
+1. Stage B is closed. Its implementer builds the one layout of the three stages' Training views (outline §6.2,
+   D133); no export of stage B runs again.
+2. The post-training (`post_training.md`) reads only §7 and B5's base (`prior_base_20261006`).
 
 ---
 
@@ -461,7 +453,8 @@ measured sizes belong to that prior and are not a baseline of this one.
 
 ## 11 Key code index
 
-At `278ffcfc` (B12; the code that B5 runs). Paths relative to `4dTrajectory/ts_transformer/`.
+At `d14a2f76` (B13, the close of stage B). Paths relative to `4dTrajectory/ts_transformer/`; the runners' manual is
+`docs/reference/runners.md` R56–R62.
 
 | What | Where |
 |---|---|
@@ -481,15 +474,15 @@ At `278ffcfc` (B12; the code that B5 runs). Paths relative to `4dTrajectory/ts_t
 | The log-probability under records (D96 item 3); the first-step runway | `prior/train.py:106` `masked_log_probability`, `:152` `first_step_runway` |
 | The speaker: the bound of D68, the draw, the records, observe, speak (with `accept`), copy, the masks of a row | `prior/speaker.py:72` `go_around_bound`, `:82` `draw`, `:95` `Permitted`, `:152` `Speaker`, `:208` `observe`, `:230` `speak`, `:316` `copy`, `:365` `_allowed` |
 | A final (region, edge, DA, entry height); the finals from the CIFP; the procedure masks (D64, D14, D122) | `prior/procedure.py:54` `Final`, `:84` `Final.inside`, `:95` `airport_finals`, `:119` `ProcedureMasks`, `:178` `permitted` |
-| The selection (D75, D111) and its record | `prior/selection.py:51` `left_out`, `:80` `selection_record` |
+| The selection (D75, D111) and its record | `prior/selection.py:51` `left_out`, `:61` `kept`, `:70` `side`, `:80` `selection_record` |
 | The identity of the data (§8 item 1); the val recount after the claim | `prior/source.py:45` `artefact_identity`, `:68` `require_selection_of` |
 | The artefact as sentences of a selection | `prior/source.py:87` `ArtefactSource` |
 | A run's data and a fold's held-out sentences (D39) | `prior/runs.py:51` `RunData`, `:78` `held_out_sentences` |
-| The checkpoint; the claim of the val read, its spent mark, a written claim (D119); the identity a readout shows; opening a prior run | `prior/checkpoint.py:65` `load_checkpoint`, `:103` `claim_validation_read`, `:126` `spend_validation_claim`, `:136` `written_claim`, `:146` `readable_identity`, `:164` `open_prior` |
+| The checkpoint; the val read: its lock, its claim with the reader's options, a written readout under an unspent claim, the spent mark, a written claim (D119, D128); the identity a readout shows; opening a prior run | `prior/checkpoint.py:67` `load_checkpoint`, `:89` `CLAIM_SPENT_BY`, `:99` `lock_val_read`, `:113` `claim_validation_read`, `:152` `settle_written_claim`, `:164` `spend_validation_claim`, `:174` `holds_written_claim`, `:180` `written_claim`, `:190` `readable_identity`, `:208` `open_prior` |
 | The step of a speaker's closed loop (§7 item 7) and a flight's numbers | `experiments/prior_speaking_loop.py:78` `SpeakingLoop`, `:148` `SpeakingLoop.step`, `:48` `flight_numbers` |
-| The runners: training, free generation and its readout, the validation readout, the choice, the campaign, the behaviour check | `experiments/prior_train.py:69`, `experiments/prior_free_generation.py:164`, `:122` `readout`, `experiments/prior_validation.py:95` `masks_readout`, `experiments/prior_select.py:119` `choose_configuration`, `:130` `choose_variant`, `experiments/prior_campaign.py:120` `plan`, `:246` `run_campaign`, `experiments/prior_behaviour.py:246` `behaviour` |
-| The Training export: the procedure block (§7 item 8), a prior sentence flown again | `experiments/prior_training_export.py:91` `procedure_block`, `:170` `fly_again` |
-| The backend's live segment of a prior sentence and its comparison with the export (D127) | `aeroviz_backend/autopilot_segment/prior.py:83` `PriorSegments`, `:54` `apart_from_exported` |
+| The runners: training, free generation and its readout, the validation readout, the choice, the campaign, the behaviour check | `experiments/prior_train.py:69`, `experiments/prior_free_generation.py:164`, `:122` `readout`, `experiments/prior_validation.py:115`, `:95` `masks_readout`, `experiments/prior_select.py:169`, `:119` `choose_configuration`, `:130` `choose_variant`, `experiments/prior_campaign.py:316`, `:124` `plan`, `:199` `settings`, `:252` `settle_val_steps`, `:263` `run_campaign`, `experiments/prior_behaviour.py:339`, `:285` `behaviour`, `:185` `fixed_sentence`, `:220` `selection_rules`, `:230` `campaign_plan`, `:247` `free_generation_draw`, `:257` `select_rules` |
+| The Training export: the procedure block (§7 item 8), a prior sentence flown again, the track unrounded (D127); its sample format | `experiments/prior_training_export.py:327`, `:91` `procedure_block`, `:170` `fly_again`, `:228` `unrounded`; `prior/training_files.py:35` `SAMPLE_SCHEMA` (`aeroviz-training-prior-sample-v3`) |
+| The backend's live segment of a prior sentence and its comparison with the export (D127) | `aeroviz_backend/autopilot_segment/prior.py:94` `PriorSegments`, `:55` `apart_from_exported` |
 
 ---
 
@@ -511,47 +504,10 @@ The formal runs read `v12_20261005` / `v17_20261005` at Δ = 4 s. The rules of o
 | B9 | The interface for the post-training | D96 | Done |
 | B10 | The corrections of Claude's check of stage B; the base's val set (outline D109) | D64, D72, D85, D105–D108 | Done |
 | B11 | The selection leaves out flights with a faulty observed track | D111, D118 | Done |
-| B5 | Cross-validation and the base | D39–D41, D75, D108 | Running |
+| B5 | Cross-validation and the base | D39–D41, D75, D108 | Done |
 | B12 | The corrections of Claude's second check of stage B | D108, D119–D122 | Done |
-| B13 | The corrections of Claude's check of B12 | D108, D127, D128 | Done; merged after B5 |
-| B6 | The Training view of stage B | Outline §6, D109, D127 | The view done; the publication after B5 and B13 |
-| B7 | The close of stage B | — | After B5, B13, B6 |
+| B13 | The corrections of Claude's check of B12 | D108, D127, D128 | Done |
+| B6 | The Training view of stage B | Outline §6, D109, D127 | Done |
+| B7 | The close of stage B | — | Done |
 
-The specifications of the milestones that are done are in `readouts/2026-10-05_stage_b_implementation_log.md` §3.
-
-**B5. Cross-validation and the base** (D39, D40, D41, D75, D108).
-
-- The 31 training runs of §5 as one campaign (`prior_campaign`) on a clean checkout, one at a time on the GPU: each
-  fold's training and then its free generation at its held-out airport; after step 2 the choice of the configuration,
-  after step 3 the choice of the variant (`prior_select`, the rules of §5, written as a choice); then the base and its
-  one validation readout (`prior_validation`, then free generation on the val days). 65 steps in all.
-- Before each step the behaviour check of D108; the commit of each step recorded as information. A step whose output
-  lacks its last file (a crash, a kill) is moved aside and run again; a run is never repeated otherwise.
-- Every run reads the sentences of the selection `landed` (D75, D111). For each fold: the held-out loss, the first-step
-  runway at the held-out airport, the free generation at the held-out airport (§5).
-- No criterion is applied: the user reads the results (D7).
-
-**B6. The Training view of stage B (outline §6).** The user sees what the prior says and how the executor flies it.
-
-- **Export** (`prior_training_export`). For each flight of the sample: the observed rows before the first predicted
-  step; the sentences that the prior says in free generation and their flown states (several sentences of one flight
-  side by side); the closed-loop sentence of the same flight; the outcome and the DA check of each; at each row, the
-  words that the procedure masks blocked; the region, the glidepath lower edge, the DA and the entry height of R. Every
-  prior sentence is flown again and must equal its readout's states within the executor's bound; its track is written
-  unrounded (D127). Sets: each fold of B5
-  at its held-out airport (the flights of its free generation), and the base model (its one validation readout, only
-  when claimed, outline D109). Its own schema names and its own index beside stage A's (outline §6 item 3).
-- **Frontend.** The Training view of stage A with the prior's sentences: the five columns, a choice of sentence, the
-  blocked words at a row, the procedure's limits drawn, the outcome. A click on a word flies its segment live with the
-  executor of stage A, refused past the executor's bound from the exported track or with another outcome (D127); the base's val set opens and flies live, and no other set with a val flight opens (outline
-  D109).
-- **Publication and view** (after B5). The intent of each set in `docs/experiments/intents.json`; a test stack from the
-  worktree; the browser check (outline §6 items 4–6).
-- **Tests.** The export (a sample written and read again); the frontend's readers on fixtures that the export writes;
-  a live segment equals the export's flown states.
-
-**B7. Close of stage B.** The full ts suite passes (run detached). The implementation log and
-`docs/reference/runners.md` are updated (the runners `prior_train`, `prior_select`, `prior_free_generation`,
-`prior_validation`, `prior_campaign`, `prior_behaviour`, `prior_training_export`); the report gives the code index for
-§11 (outline §5 rule 10). `dev-two-tier-v4` merges `dev-two-tier-v4-prior` (outline §5 rule 1). Report to the user: the
-commits, the readings of each fold and of the base, the choice and its rule, and what stage C needs.
+Every milestone is done; their specifications are in `readouts/2026-10-05_stage_b_implementation_log.md` §3.

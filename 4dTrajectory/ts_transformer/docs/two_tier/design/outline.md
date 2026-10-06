@@ -22,10 +22,10 @@ repository root; `readouts/` is `docs/two_tier/readouts/`. The documents of the 
 
 | Document | Part | Stage | State |
 |---|---|---|---|
-| `vocabulary.md` | The words, the labeller (open-loop and closed-loop reading), the executor, the judge; their Training view | A | Built on `dev-two-tier-v4`; A0–A42 merged into `dev-two-tier`; A43 (`60bbc901`, the backend runs no check at its start) to be merged after B5's campaign; the formal artefact `v12_20261005` / `v17_20261005` and the Training view (`closed_loop_v12_20261005`) done, the superseded artefacts deleted; Claude's check of A32–A40 done; no milestone open; the replay of the val days waits for the user (vocabulary §0.4) |
-| `prior.md` | The prior: inputs, outputs, decoding and its masks, training, a new airport; its Training view | B | Built in parallel with the end of stage A, on `dev-two-tier-v4-prior` (prior §0.3); B9 (the interface for stage C, D96) done; Claude's check of stage B done, its corrections B10 (D105–D108) before B5's formal campaign; B5 running (since 2026-10-05 22:40 UTC, on B12's code); B13 (D127, D128) done, merged after B5 |
-| `post_training.md` | The post-training in windows of traffic; the multi-aircraft work; its Training view | C | Design complete; built in parallel with the end of stage B, on `dev-two-tier-v4-post` (post-training §0.3, D95); C0–C5 and C7 done on synthetic artefacts; C6 and C8–C12 left |
-| This outline | The principles, the shared rules, the plan; the rules of each stage's Training view (§6) | — | — |
+| `vocabulary.md` | The words, the labeller (open-loop and closed-loop reading), the executor, the judge; their Training view | A | A0–A43 done and merged into `dev-two-tier`; the formal artefact `v12_20261005` / `v17_20261005` and the Training view (`closed_loop_v12_20261005`) done, the superseded artefacts deleted; Claude's check of A32–A40 done; no milestone open; the replay of the val days waits for the user (vocabulary §0.4) |
+| `prior.md` | The prior: inputs, outputs, decoding and its masks, training, a new airport; its Training view | B | Closed (B0–B13 done, B7 on 2026-10-06): B5's campaign `prior_base_20261006` done (configuration C, variant `full`, the base and its one validation readout); B6's sets published (`prior_sets_20261006`); `dev-two-tier` = `dev-two-tier-v4` = `dev-two-tier-v4-prior` (the code at `d14a2f76`) |
+| `post_training.md` | The post-training in windows of traffic; the multi-aircraft work; its Training view | C | Built on `dev-two-tier-v4-post` (post-training §0.3, D95), merged into `dev-two-tier` (2026-10-06); C0–C7, C9 and C11 (the window view) done on synthetic artefacts; C8 and C10 built on synthetic artefacts, their formal runs wait; C12 left |
+| This outline | The principles, the shared rules, the plan; the rules of each stage's Training view and the one layout of the three views (§6) | — | The one layout (§6.2, D133) not built |
 
 How a stage is reviewed against its design (leaks, what each consumer may read, the procedure, a checklist for each
 stage) is in the review guide, `docs/two_tier/review_guide.md`; it is not a design document.
@@ -86,8 +86,9 @@ both, each with its part. A new decision or open item takes the next free number
 | D85 | A readout that serves a choice of the user reports the train and select days only. Where a build needs the validation days (the closed-loop sentences of val), it writes them, but no report, summary or printed text shows a reading of them before the stage's one validation readout. Why: the user chose Δ = 4 s (vocabulary D11) on a report that showed the val rows of the readings of D34 (`readouts/2026-10-04_stage_a_a25_report.zh.md`); the train and select rows give the same order, but the validation days are read one time for each stage | Decided | User, 2026-10-05, on Claude's review of stage A |
 | D95 | Stage C is developed in parallel with the end of stage B (the user, 2026-10-05), on its own branch and worktree (§5 rule 1), by its own implementer; Claude writes its design and runs the project. Stage C never changes the code of `instructions/`, `autopilot/` or `prior/`. What it needs of them is a change of their public interfaces, made by their own stages (vocabulary D97, prior D96): code only, so that nothing of stage A is built again (the user, 2026-10-05); the changes of stage B before B5's formal campaign, because they change the draws of free generation. The formal runs of stage C wait for B5's base | Decided | User, 2026-10-05 |
 | D55 | A value that a runner fits from data and the user chooses (D15) is measured on all train days, in a scratch directory, directly after the milestone that writes the runner; the user chooses before a later milestone reads the value. A smoke build uses the chosen spec, and its flights are a random sample for each airport and split (seed 1337), not the first flights of the sorted flight keys (a key starts with the callsign, so the first flights are mostly one airline). Why: the smoke of stage A fitted its own spec on approximately 400 train flights, 373 of them one airline, with one climb piece; every smoke reading of A9–A16 used it (§5 rules 7 and 12) | Decided | User, 2026-10-04 |
-| D109 | The Training view opens the set of the base model's one validation readout (§6 item 4, prior B6) as it opens the others, and a click on a word flies its segment live: the backend rebuilds the val flight and flies the words that the readout already flew (the same states within the executor conformance tolerance), so it gives no new reading of the val days. Only that set: the frontend's reader and the backend's live segment take the splits a set may hold from its caller (stage A's own sets: train and select; stage B's prior sets: also val, for a set exported from the claimed validation readout, prior B10). Why: the export could write that set, but A23's reader and live segment accepted train and select only, so the planned publication did not open (Claude's check of stage B, 2026-10-05; vocabulary A39) | Decided | User, 2026-10-05 |
+| D109 | The Training view opens the set of the base model's one validation readout (§6.1 item 4, prior B6) as it opens the others, and a click on a word flies its segment live: the backend rebuilds the val flight and flies the words that the readout already flew (the same states within the executor conformance tolerance), so it gives no new reading of the val days. Only that set: the frontend's reader and the backend's live segment take the splits a set may hold from its caller (stage A's own sets: train and select; stage B's prior sets: also val, for a set exported from the claimed validation readout, prior B10). Why: the export could write that set, but A23's reader and live segment accepted train and select only, so the planned publication did not open (Claude's check of stage B, 2026-10-05; vocabulary A39) | Decided | User, 2026-10-05 |
 | D131 | Every review of a stage follows one standard, the same in every round (`review_guide.md` §3 step 6 and "Later rounds"): each finding gets a severity. S1 (a leak into an input, a target selection or a choice; a split violation; a second read of the validation days; a defect that changes a number the user reads, on real data, beyond its tolerance) is corrected before any formal run. S2 (a latent leak, a boundary that does not refuse, a decided rule with no test, an effect not measured and not bounded) is corrected before the formal run when the correction is cheap; else it is listed as an open item of the stage's design document (§0.2, an O number), with no milestone and no order. S3 (a corner case below 0.1 % of the windows or steps that moves no reported number beyond its tolerance, a difference within a stated bound, style) is listed in one line of the review and not reported again. A later round reads the changed code and the S1 channels only; a finding of an earlier round is not reported again. A scenario against common sense is no finding at all, whatever its correction costs: it is not reviewed, not listed and not corrected — for example the code changed while a run of it goes on, an input that no step of the pipeline makes, a file moved or edited by hand to defeat a rule, a second person working against the first. Why: four rounds of the review of stage B found no leak, and their later findings came from a deeper search of the same guard in each round, not from new defects; the deepest were guards against a code change during a campaign, which does not happen (the user: "we are not in a spy war") | Decided | User, 2026-10-06 |
+| D133 | The Training views of stages A, B and C share one layout (§6.2). The user decided: one layout with the switch between the stages kept; a set's intent read from `docs/experiments/intents.json` through the backend, with no export, set or index format changed; stage C's branch merged before the views change; stage B's implementer builds it, and for this work may change the view files of stages A and C and the backend's routes. Claude's design of the parts, on stage B's request: the left panel holds the set chooser with the set's own line of the intent registry, the item list with the same four columns, one-line readouts and the Draw switches, and no table; the sentence bar's tabs choose the sentence on screen in every stage (B: Labelled, Closed loop and the samples; C: Labelled and the rounds), and the bar's chips and notes follow the kind of that sentence; the details page in every stage, its first section the set and the experiment; what follows the cursor (B's probability of "go-around" at the cursor) stays in the left panel, since the details page is modal; shared parts, not copies. Why: B's and C's views chose the sentence in a table of the left panel, so that the bar's tab "Δ 4 s" meant the table's choice; B's details page was disabled and C's ⓘ opened nothing; no view showed a set's intent | Decided | User, 2026-10-06 (the layout, the intent's source, the order); the parts: Claude, on stage B's request |
 
 **The identity rule (D21)** (the user, 2026-10-02 and 2026-10-03). An identity binds the format (what the words and the
 payloads mean) and the data rules (the sealed test days). Code is identified by what it does on fixed inputs (a
@@ -98,12 +99,12 @@ they came from. Each document lists the identities of its parts.
 
 | Document | Decisions | Open items |
 |---|---|---|
-| Outline | D7, D20, D21, D55, D85, D95, D109, D131 | — |
+| Outline | D7, D20, D21, D55, D85, D95, D109, D131, D133 | — |
 | Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62, D66, D67, D69–D71, D73, D74, D77–D84, D86–D90, D97, D102, D111, D126 | O8 |
 | Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60, D63–D65, D68, D72, D75, D96, D105–D108, D111, D118–D122, D126–D128 | — |
 | Post-training | D29–D31, D36, D37, D76, D91–D94, D98–D101, D103–D105, D107, D110, D112–D117, D123–D125, D129, D130, D132 | O13 |
 
-The next free numbers: D133, O15.
+The next free numbers: D134, O15.
 
 ---
 
@@ -124,9 +125,9 @@ The next free numbers: D133, O15.
    the parts of stage A that it reads are on `dev-two-tier-v4`. The formal runs of stage B waited for Claude's check of
    stage A (done: `readouts/2026-10-05_stage_a_check_a32_a40.zh.md`), the user's choice of Δ (4 s) and A34's artefact. B9 (the interface for stage C, prior D96) and B10 (the
    corrections of Claude's check of stage B, prior D105–D108) come before B5's formal campaign (D95). B12 (the
-   corrections of Claude's second check, prior D119–D122) is merged; B5 runs on its code since 2026-10-05. B13 (the
-   corrections of Claude's check of B12, prior D127, D128) is done on stage B's branch and merged after B5. It ends with the Training view of stage B
-   (prior B6).
+   corrections of Claude's second check, prior D119–D122) and B13 (the corrections of Claude's check of B12, prior D127,
+   D128) are merged. B5's campaign ran on B12's code (2026-10-05 22:40 to 2026-10-06 07:12 UTC); B13 leaves its results
+   valid. The Training view of stage B (prior B6) is published, and stage B is closed (prior B7, 2026-10-06).
 3. Stage C (post-training §0.4): the post-training in windows of traffic with one aircraft commanded. Stage C is
    developed in parallel with the end of stage B (D95). A milestone of stage C starts when the parts of stages A and B
    that it reads are on its branch; what it needs of their public interfaces is made by them (vocabulary D97, prior
@@ -134,7 +135,10 @@ The next free numbers: D133, O15.
 4. Each stage ends with its own Training view (§6): the backend's live executor, the export and the frontend follow the
    stage, so that the user sees what the stage does in the frontend (the user, 2026-10-04). There is no separate
    frontend stage.
-5. The user merges (§5 rule 11).
+5. The one layout of the three stages' Training views (§6.2, D133): stage B's implementer, on one branch from
+   `dev-two-tier`; no export is run again. While it is built, no other branch changes the files of the Training view
+   (§6.2 item 7).
+6. The user merges (§5 rule 11).
 
 ---
 
@@ -214,8 +218,11 @@ sections that it names.
 ## 6 The Training view of each stage
 
 Each stage ends with a milestone that brings the frontend and the backend to that stage (the user, 2026-10-04):
-vocabulary A23, prior B6, and the Training view of the post-training (post-training §8). The user sees each stage in
-the frontend before the next one builds on it. The rules for these milestones:
+vocabulary A23, prior B6, and the Training view of the post-training (post-training C11). The user sees each stage in
+the frontend before the next one builds on it. §6.1 gives the rules for these milestones; §6.2 gives the one layout that
+the views of the three stages share.
+
+### 6.1 The rules
 
 1. **What follows the stage.** The backend's live executor (`aeroviz_backend/autopilot_segment/`, a click on a word
    flies its segment), the Training export of the stage's results, and the frontend's Training view (`aeroviz-4d`). The
@@ -238,3 +245,97 @@ the frontend before the next one builds on it. The rules for these milestones:
 6. **The check.** A published set opens and plays in the browser, and a live segment equals the flown states of the
    export from the same state with the same words (the executor conformance tolerance). The browser check runs in a
    one-shot subagent that returns a short verdict; HTTP 200 is not "it loads".
+
+### 6.2 One layout for the three stages (D133)
+
+Stages A, B and C keep their own sets, readers, sessions and live segments, and the switch between them at the top of
+the left panel ("Sets of": stage A, B or C, offered where the airport has their sets). Their views share one layout,
+built from shared parts. No export runs again; no set, index or sample format changes; the backend's live segments do
+not change.
+
+Why: B's view (prior B6) and C's (post-training C11) were built on one template that chose the sentence in a table of
+the left panel; the sentence bar's tabs then read "Labelled" and "Δ 4 s", and "Δ 4 s" meant the table's choice. B's ⓘ
+was disabled, and C's ⓘ opened nothing, because only stage A's session draws the details page. No stage's view showed
+the intent of its set. Stage A's view (A23) already has the layout that the user chose before: the sentence chosen in
+the bar's tabs, a short left panel, the tables on a details page.
+
+1. **The left panel**, top to bottom, the same in every stage:
+   - the stage switch;
+   - the set chooser: a choice of set (its id and its count of items), and under it one line: the set's own line of
+     the intent registry (item 4) and a SMOKE tag for a set whose source says smoke (stages B and C; stage A's sets
+     have no such flag). The line opens the details page on "The set and the experiment";
+   - the list of items (flights; in stage C, windows), with four columns in every stage: the callsign; the runway
+     (stage C: the recorded runway, post-training D129); the stratum (stage C: the window's kind); the outcomes of the
+     item's own sentences, as the number landed of all (stage A: its closed-loop sentences, one for each Δ; B: the
+     prior's samples; C: the rounds, and the count of other aircraft), with each sentence's outcome in the tooltip;
+   - the readouts, one line each, each opening the details page on its section (item 3);
+   - the Draw switches of the stage.
+
+   No table is in the left panel, and no block of more than one line, except the probability strip of stage B
+   (item 3).
+
+2. **The sentence bar's tabs choose the sentence on screen**, in every stage. The left panel has no second chooser:
+   one state of the app holds the choice, and the session gives the bar its tabs.
+
+   | Stage | The tabs |
+   |---|---|
+   | A | Labelled · Δ 2 s · Δ 4 s · Δ 8 s (one for each Δ of the set, as now) |
+   | B | Labelled · Closed loop · Sample 0 · Sample 1 … |
+   | C | Labelled · Start (base) · Round 1 … |
+
+   Labelled is the labeller's open-loop reading of the observed flight (stage C: of the recorded flight of the
+   commanded aircraft; for a window of kind B, its tooltip says that the window starts from a moved start). B's Closed
+   loop is stage A's closed-loop sentence of the flight at the prior's Δ. A tab of a sentence with an outcome carries a
+   small dot in the outcome's colour (`trainingOutcomeColour`), and its tooltip gives the outcome, the time and the
+   go-arounds. Many tabs wrap onto a second line (the bar measures its own height); the arrow keys move between the
+   tabs, Home and End go to the first and the last. A word of the sentence on screen flies live as now: stage A's
+   closed-loop sentences on stage A's segment, B's closed loop and samples on the prior's segment, C's rounds on the
+   window's segment; a labelled sentence does not fly.
+
+   The bar's chips and notes follow the kind of the sentence on screen: a closed-loop sentence — the outcome, the DA
+   check and the corrections; a prior sample — the outcome, the DA check and the go-arounds; a round — the outcome, the
+   reward and the loss of separation; a labelled sentence — none. The bar's ⓘ keeps its notes on how to read the bar,
+   written for that kind (only the notes of a closed-loop sentence speak of words that the reading added). Their first
+   line names the set and gives its intent line, with a link to the details page's "The set and the experiment".
+
+3. **The readouts and the details page.** Every stage has the details page (`TrainingDetails`), and the ⓘ of the
+   panel's header is never disabled: it opens the page on its first section. The page is modal (the scene and the bar
+   are inert behind it), so what follows the cursor stays in the left panel.
+
+   | Stage | Readouts in the left panel (one line each → its section) | Sections after the first two |
+   |---|---|---|
+   | A | Flown flight (at the tab's Δ: the outcome and its time, the DA check) → Flown flights; Flown flights (landed at each Δ) → Flown flights | Vocabulary; Flown flights (every flight at every Δ) |
+   | B | This sentence (the outcome and its time, the DA check, the go-arounds) → Sentences; Sentences (landed of each sample) → Sentences; At the cursor (the probability of "go-around", whether the procedure permits one, on final or not, the count of words blocked in each masked column) → Row inspector | Sentences (every flight's sentences; landed by sample and by stratum); Row inspector (at a row: the words that the procedure masks block and permit in each column they rule; a row slider that moves the cursor) |
+   | C | This round (the outcome, the reward, the loss of separation or none) → Rounds; Rounds (landed of each round) → Rounds; The window (its kind, its other aircraft by role) → The window | Rounds (every window's rounds: the outcome, the reward, the go-arounds, the words, the loss of separation); The window (its kind, its moves, its other aircraft, the round's end, the threshold, the rows where the speed-word mask acted, the faulty points) |
+
+   The first two sections in every stage: "The set and the experiment" — the campaign's title, its intent and the
+   design it names, the set's own line (item 4); what the set was made from, as the set's source gives it; its items
+   and how they were drawn; for a set exported from a claimed validation readout, the path of that readout — and "What
+   this view shows" — what an item is, what each tab is, what each Draw switch draws. Under B's line "At the cursor"
+   stays the probability strip of the sentence on screen (one line high; a click moves the cursor). Stage C has no row
+   inspector: a window set holds no records of the speaker (post-training D125).
+
+4. **The intent.** The backend serves the intent of a set: `GET /experiments/intent?run=<set id>` reads
+   `docs/experiments/intents.json` at each request (an entry committed later shows without a restart of the backend)
+   and finds the set's id among the `runs` keys of every campaign. One campaign: the answer gives the campaign's id,
+   title, intent and design and the run's line. No campaign, or more than one (run keys are not unique in the registry:
+   `S20_cv_s1337` is a run of two campaigns): the answer is an error that names the set and the campaigns found; the
+   view shows it by name, and the set still opens. The backend writes nothing. The frontend shows an intent in the one
+   form of the experiments picker (`ExperimentIntent`, the intent block of `ExperimentDetails`).
+5. **Shared parts, not copies.** One hook that loads a set (now stage A's panel and B's and C's sessions each have
+   their own); one set chooser; one item list; the bar's tabs; the details page and its state, given to every session;
+   the readout line (`DetailsLink`); the Draw box. `ProblemBox` and `trainingText` stay the one definition of problems
+   and outcome words. Each stage keeps its reader, its session and its own sections.
+6. **Tests and the check.** Vitest for each shared part, on fixtures that the exports write (§6.1 item 2); every test
+   of the three stages kept (among them: a set of another airport never opens, a stale choice after a set changes, the
+   stage switch, the cursor at a window's row 0); a test of the backend's intent answer (one campaign, none, more than
+   one). The browser check of §6.1 item 6 in each stage: the tabs choose the sentence, the details page opens from
+   every ⓘ and readout line, the intent shows, a word flies live.
+7. **Who and where.** Stage B's implementer (the user, 2026-10-06), on the branch `dev-training-layout` from
+   `dev-two-tier`, in the worktree `.claude/worktrees/training-layout`; for this work only, it may change the view files
+   of stages A and C and the backend's routes (§5 rule 1 otherwise holds). Its log is a section of stage B's
+   implementation log; a reading where this section says nothing is a proposal in stage B's requests note. While it is
+   built, no other branch changes the files of the Training view (`aeroviz-4d/src/components/Training*.tsx`,
+   `aeroviz-4d/src/components/training/`, `aeroviz-4d/src/data/training*.ts`, `aeroviz-4d/src/hooks/useTraining*.ts`,
+   their tests) or the backend's routes (`aeroviz_backend/http_server.py`). The test stack and the report follow §6.1
+   item 5.
