@@ -153,6 +153,14 @@ class SpeakingLoop:
         """``[B]`` each flight's own Δ row at the next tick (negative: it has not joined)."""
         return self.t - self.join_ticks
 
+    def joined(self) -> np.ndarray:
+        """``[B]`` bool: the flights that have joined at the next tick (observed or said: not absent)."""
+        return self.own_row() >= 0
+
+    def said_now(self) -> np.ndarray:
+        """``[B]`` bool: the flights said at the next tick (from their first predicted step on)."""
+        return self.own_row() >= self.start
+
     def observe(self, extra: Any = None) -> RowTensors:
         """Encode the next observed row (its states, the 2 s row before it; row 0 has no motion, D60), with the caller's
         input of the added modules ``extra``; its inputs."""

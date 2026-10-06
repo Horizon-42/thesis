@@ -101,6 +101,37 @@ def stage_c_scenario(s) -> dict[str, str]:
     return out
 
 
+def stage_c_batch_scenario(s, monkeypatch) -> str:
+    """Stage C's window loop on a batch of two windows (copies of the real window, `WindowLoop.copy`), the first lost
+    at its first row judged (the judge's pairs stubbed: a loss that aircraft 0 answers for, once) while the second
+    flies on: the ends, the samples and the speaker's records of both rows — the rows that the speaker says of a window
+    after its end included. Its digest."""
+    from ts_transformer.inference.separation import Loss
+    from ts_transformer.post import traffic
+
+    calls = []
+    real = traffic.losses
+
+    def judged(*args):
+        calls.append(1)
+        return [Loss(0, 0, "in_trail", "none", 1.0, 0.5, 0.0, (0,), True)] if len(calls) == 1 else real(*args)
+
+    monkeypatch.setattr(traffic, "losses", judged)
+    loop = _window_loop(s, _with_module(s["base"]), s["windows"])
+    while loop.speaking.observing:
+        loop.observe()
+    batch = loop.copy([0, 0])
+    digest = _Digest()
+    for result in batch.finish([np.random.default_rng(11), np.random.default_rng(12)]):
+        digest.result(result)
+    for rows, permitted, tokens in batch.samples("train"):
+        digest.sentence(rows, permitted, tokens)
+    speaker = batch.speaking.speaker
+    digest.add(*(np.stack(rows) for rows in speaker.forbidden.values()), np.stack(speaker.drawn_probability),
+               np.stack(speaker.go_around_probability))
+    return digest.hash.hexdigest()
+
+
 #: `stage_c_scenario`'s digests, written by stage C's code before its generalisation (dev-two-tier-v4 c7a0b6b0, the CPU,
 #: one thread).
 BEFORE_GENERALISATION = {
@@ -112,6 +143,21 @@ BEFORE_GENERALISATION = {
     "samples A": "96c0207aaba55f9089327068ca64239f1db9df538865040ed679c45e32b08ab9",
     "round real": "cf8eacd236f3e55403ef464f884ab231a60e4166de8f6dabac17ed200f518172",
 }
+
+
+#: `stage_c_batch_scenario`'s digest, written by the same code.
+BATCH_BEFORE_GENERALISATION = "8cc8c87b8df623836a2968fef9d58d59aef4b8245042cc6179874b2e06e45a0d"
+
+
+def test_a_stage_c_batch_whose_first_window_ended_is_the_code_before_its_generalisation_bit_for_bit(setup, monkeypatch):
+    """D149: a window that ended in a batch still flown is said on as before (its rows after its end, which are not its
+    sentence's, included), and the window flown on is unchanged — bit for bit (the digest)."""
+    threads = torch.get_num_threads()
+    torch.set_num_threads(1)
+    try:
+        assert stage_c_batch_scenario(setup, monkeypatch) == BATCH_BEFORE_GENERALISATION
+    finally:
+        torch.set_num_threads(threads)
 
 
 def test_stage_c_on_its_windows_is_the_code_before_its_generalisation_bit_for_bit(setup):
