@@ -1360,7 +1360,8 @@ A0–A43 are done. What each milestone built, its specification, its commits and
 build are §3–§8 and the decisions of §0.1. A new milestone is specified here before it is built, and its specification
 moves to the log when it is done (outline §5 rule 10). Open: A44.
 
-**A44. The start opened once** (outline D138), on `dev-two-tier-v4` (outline §5 rule 1), before stage C's next campaign.
+**A44. The start opened once** (outline D138), by stage B's implementer (outline §5 rule 1: one implementer for all
+stages) on `dev-two-tier-v4`, before stage C's next campaign.
 
 - `autopilot/start.py`: an object `Start`, opened for one artefact, split, Δ and executor directory, holds what every
   call of the start reads today: the opened executor (`replay.open_executor`, whose checks run once a process, D73),

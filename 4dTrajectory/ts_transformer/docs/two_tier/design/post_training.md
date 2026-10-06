@@ -86,14 +86,15 @@ commits, the tests and the readings are in the implementation log.
 1. C10 runs (D137; from `.claude/worktrees/two-tier-v4-post`, untouched until it ends); the user's criterion for the
    round (D7); the validation readout of the chosen round; then its speed (outline §6.2 item 10, `model_speed`), with no
    other job on the host or the GPU.
-2. C13 (outline D138), after vocabulary A44, before the next campaign; C10 gets none of it.
+2. C13 (outline D138), by stage B's implementer after vocabulary A44, before the next campaign; C10 gets none of it.
 3. C12.
 4. The window view (C11) and the window export change with the one layout of the three stages' Training views (outline
    §6.2, D133–D135: the results page, the rounds' envelopes, one block of a flown sentence), built by stage B's
-   implementer; while it is built, stage C changes no file of outline §6.2 item 9.
+   implementer.
 
-Every milestone from now on is built on `dev-two-tier-v4`, in the worktree `.claude/worktrees/two-tier-v4` (outline §5
-rule 1); `dev-two-tier-v4-post` is merged into `dev-two-tier` and is deleted with its worktree.
+Every milestone from now on is built by stage B's implementer on `dev-two-tier-v4`, in the worktree
+`.claude/worktrees/two-tier-v4` (outline §5 rule 1). `dev-two-tier-v4-post` is merged into `dev-two-tier`; it and its
+worktree are deleted after C10 ends.
 
 ---
 
@@ -441,9 +442,9 @@ campaign), `ts-post-checkpoint-v1`, `post-windows-census-v1`, `aeroviz-training-
 
 ## 8 Milestones not done
 
-C0–C7, C9 and C11 are done; their specifications are in the implementation log (§22). The rules of outline §5 apply.
-Stage C changes no code of `instructions/`, `autopilot/` or `prior/`; a defect in them goes to their stage, through the
-user, and a missing part of an interface is requested from its stage.
+C0–C7, C9 and C11 are done; their specifications are in the implementation log (§22). The rules of outline §5 apply:
+from 2026-10-06 stage B's implementer builds every milestone of every stage (outline §5 rule 1); stage C's implementer
+runs C10 to its end.
 
 **C8. Profile and the go-around probability** (§2 item 6). After B5's base and Claude's check of stage B.
 
@@ -466,8 +467,8 @@ user, and a missing part of an interface is requested from its stage.
   as §4 item 2. Tests: it refuses a second read; it reads no train or select window.
 - A formal campaign and its validation readout refuse a base that is not stage B's formal base (D132).
 
-**C13. The speed of a round** (outline D138), on `dev-two-tier-v4` (outline §5 rule 1), after vocabulary A44, before
-the next campaign; C10 gets none of it.
+**C13. The speed of a round** (outline D138), by stage B's implementer (outline §5 rule 1: one implementer for all
+stages) on `dev-two-tier-v4`, after vocabulary A44, before the next campaign; C10 gets none of it.
 
 - The selection readout's batches are spoken by the speaking workers (`Speakers`), each window with its own seeded
   numbers as now (`readout_numbers`); the main process sums the counts. Speaking in one process (no workers) stays a

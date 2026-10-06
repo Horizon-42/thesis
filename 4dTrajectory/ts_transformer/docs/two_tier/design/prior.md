@@ -85,7 +85,7 @@ Proposals (where the design says nothing): none open.
 1. Stage B is closed. Its implementer builds the one layout of the three stages' Training views (outline §6.2,
    D133–D135): the results page, the envelopes of the prior's sentences and the shared parts of the exports; B6's sets
    `prior_sets_20261006` are exported again in a new sample format, with the same ids (the base and the folds read only).
-2. B14 (outline D138), after the work of outline §6.2, before stage C's next campaign.
+2. B14 (outline D138), after vocabulary A44 and post-training C13, before stage C's next campaign.
 3. The post-training (`post_training.md`) reads only §7 and B5's base (`prior_base_20261006`).
 
 ---
@@ -490,8 +490,9 @@ At `d14a2f76` (B13, the close of stage B). Paths relative to `4dTrajectory/ts_tr
 
 ## 12 Implementation plan: stage B
 
-**Rules.** On the branch `dev-two-tier-v4-prior` (outline §5 rule 1). Stage B changes no code of `instructions/` or
-`autopilot/` and no runner of stage A; it reads them only through the vocabulary's public interface (vocabulary §6).
+**Rules.** B0–B13 were built on `dev-two-tier-v4-prior`, changing no code of `instructions/` or `autopilot/` and no
+runner of stage A. From 2026-10-06 stage B's implementer builds the milestones of every stage on `dev-two-tier-v4`
+(outline §5 rule 1); the prior still reads the vocabulary only through its public interface (vocabulary §6).
 Tests use synthetic artefacts; a check on real data reads the formal artefact on the train and select days only (D85).
 The formal runs read `v12_20261005` / `v17_20261005` at Δ = 4 s. The rules of outline §5 apply.
 
@@ -511,12 +512,12 @@ The formal runs read `v12_20261005` / `v17_20261005` at Δ = 4 s. The rules of o
 | B13 | The corrections of Claude's check of B12 | D108, D127, D128 | Done |
 | B6 | The Training view of stage B | Outline §6, D109, D127 | Done |
 | B7 | The close of stage B | — | Done |
-| B14 | The procedure masks over the batch | Outline D138 | Not built; after the work of outline §6.2 |
+| B14 | The procedure masks over the batch | Outline D138 | Not built; after A44 and C13 |
 
 The specifications of the milestones that are done are in `readouts/2026-10-05_stage_b_implementation_log.md` §3.
 
 **B14. The procedure masks over the batch** (outline D138), on `dev-two-tier-v4` (outline §5 rule 1), by stage B's
-implementer after the work of outline §6.2, before stage C's next campaign.
+implementer after vocabulary A44 and post-training C13, before stage C's next campaign.
 
 - `prior/procedure.py`: `ProcedureMasks` gets a mode. `per-aircraft` is today's code, unchanged, the readable reference.
   `batch` computes `track`, `after_row` and `permitted` for all the aircraft at once: each aircraft's finals gathered

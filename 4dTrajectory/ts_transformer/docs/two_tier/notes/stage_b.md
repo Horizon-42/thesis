@@ -62,6 +62,15 @@ instructions/training_files.py、experiments/post_training_export.py、post/trai
    - 报告地址和停止命令。
 9. 日志记在 B 的日志 §4。requests 文件重写：§3 第 1–4 条已进设计（outline §6.2、D134、D135）。
    不合并进 dev-two-tier：报告 dev-two-tier-v4 能否快进，由用户合并。
-10. 以上全部做完之后接着做 B14（prior.md §12、outline D138）：程序掩码的 batch 模式；
-    现在一架一架算的代码原样保留，作为可读的参照模式。两种模式必须给出相同的掩码，规格见 prior §12。
+10. 提速（outline D138）。从 2026-10-06 起三个阶段的开发都由你做（outline §5 规则 1），
+    包括 instructions/、autopilot/、post 的代码。等 C10 结束才能做的步骤（第 5 步测 base 的速度、第 7 步重导），
+    在等待期间先做这三个里程碑，按这个顺序：
+    - A44（vocabulary.md §12.1）：起点在一个进程里只打开一次（Start）。start 和 start_moved 保留为一次调用的写法。
+      改了 autopilot/，按 outline §5 规则 2 跑 closed_loop_start_check，日志里给出最大差值。
+    - C13（post_training.md §8）：选择读数分给说话的 worker 跑，单进程保留为一种模式；
+      在 fork 之前打开 Start；战役开始前检查 N 个 worker 的内存（O15）。
+    - B14（prior.md §12）：程序掩码加 batch 模式，现在一架一架算的代码原样保留，作为可读的参照模式；
+      两种模式必须给出相同的掩码。
+    每个里程碑：单文件测试 → 独立审查（只审代码）→ 显式路径提交 → 日志一行。
+    C10 在跑：这些代码都不合并进 dev-two-tier，也不碰 two-tier-v4-post 工作树。
 ```

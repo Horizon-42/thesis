@@ -139,13 +139,13 @@ The next free numbers: D139, O16.
 4. Each stage ends with its own Training view (§6): the backend's live executor, the export and the frontend follow the
    stage, so that the user sees what the stage does in the frontend (the user, 2026-10-04). There is no separate
    frontend stage.
-5. The one layout of the three stages' Training views (§6.2, D133–D135): stage B's implementer, on `dev-two-tier-v4`
+5. The one layout of the three stages' Training views (§6.2, D133–D136): stage B's implementer, on `dev-two-tier-v4`
    (§5 rule 1); the results page, the envelopes and the shared parts of the exports, the speed runner and the base's
    speed readout (§6.2 item 10), then the Training sets of stages A and B exported again. While it is built, no other work changes the files of §6.2 item 9.
-6. The speed of the closed loop (D138), on `dev-two-tier-v4` (§5 rule 1), before stage C's next campaign: vocabulary A44
-   (stage A's implementer) first, since C13 uses it; prior B14 (stage B's implementer, after the work of §6.2);
-   post-training C13 (stage C's implementer). Each is measured after it is built (`post_profile` at C10's settings,
-   `model_speed` of §6.2 item 10).
+6. The speed of the closed loop (D138), by stage B's implementer on `dev-two-tier-v4` (§5 rule 1), before stage C's next
+   campaign: vocabulary A44 first, since C13 uses it, then post-training C13 and prior B14. Each is measured after it is
+   built (`post_profile` at C10's settings, `model_speed` of §6.2 item 10). Nothing of it is merged into `dev-two-tier`
+   while C10 runs.
 7. The user merges (§5 rule 11).
 
 ---
@@ -165,16 +165,15 @@ sections that it names.
      its worktree;
    - the user merges `dev-two-tier-v4` into `dev-two-tier` (rule 11).
 
-   Two implementers can work in the one worktree at the same time. Each changes only the files of its own work, stages
-   them by explicit paths, reads `git diff --cached --stat` before each commit, and never commits a file of the other
-   (a file that both need goes to the user). A formal build or run starts from the main checkout after the user's
-   merge, as B5 did, never from the shared worktree. C10 (`post_train_20261006`) was launched from
+   One implementer develops for all three stages: stage B's (the user, 2026-10-06). Stage A's implementer has no work;
+   stage C's runs C10 to its end and does not change code. The implementer stages files by explicit paths and reads
+   `git diff --cached --stat` before each commit. A formal build or run starts from the main checkout after the user's
+   merge, as B5 did, never from the development worktree. C10 (`post_train_20261006`) was launched from
    `.claude/worktrees/two-tier-v4-post` before this rule; that worktree stays untouched until C10 ends.
 
-   Stage B never changes the code of `instructions/` or `autopilot/`; stage C never changes the code of
-   `instructions/`, `autopilot/` or `prior/`. A defect in them goes to their stage, through the user; the stage that
-   reads them gets the correction with the next merge. A part of a public interface that a later stage needs is
-   requested from the stage that owns it, through the user (vocabulary A36, D97; prior D96). The ignored data trees of each worktree (`data`,
+   The code keeps its stages' order of imports (`tests/test_architecture.py`): `instructions/` imports neither
+   `autopilot/` nor `prior/`, and so on; a change of a stage's public interface is written in that stage's document
+   before it is built (vocabulary §6, prior §7). The ignored data trees of each worktree (`data`,
    `trajectory_data_process/outputs`, `4dTrajectory/outputs`, `aeroviz-4d/public/data/airports`) are absolute links to
    LIVE data.
 2. Each milestone: read the code that it changes; write the code and its tests; run the milestone's test files; when it
