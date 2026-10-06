@@ -25,6 +25,8 @@ voice, one meaning for each word. The words were not checked one by one against 
 | Leak | Information that reaches an input but that the input must not have: the future of the flight, a sealed day, an identity of the airport, or procedure data where the design forbids it |
 | Latent leak | A leak that no consumer reads today, but that nothing in the code stops |
 | Channel | A path from a source of data to a consumer: a value, a field of an object, a set, a file |
+| Train days, select days | The days that a training reads. The gradients come from the train days. The select days are read in every epoch: they stop the training and choose the epoch, the round or a setting (the "validation" of a one-tier run is this set) |
+| Validation days (val) | Days that no training and no choice reads. They are read one time for each stage, in the stage's validation readout, to give the number that the stage reports (outline D85) |
 | Sealed day | A test day (contract C32). No code opens, labels, counts or reads it, except the final test |
 | Seam | Shared code that more than one stage uses (the data plane, `flight_scenarios/`, the start of a closed loop) |
 
@@ -43,7 +45,9 @@ voice, one meaning for each word. The words were not checked one by one against 
 4. **A value fitted from data comes from the train days only.** Check the split of every fit: grids, classes, limits,
    rules, hyperparameters, the stop of a training. The select days choose. The validation days are read one time for
    each stage. A readout that serves a choice of the user shows the train and select days only (outline D85). The test
-   days are sealed.
+   days are sealed. When a rule seals a split, search every runner for the split (its name, each `--split` option); do not
+   trust the list of runners that an order names (stage A: `instruction_figures` and `executor_turns` still read val
+   after A37 had changed the runners of its list). A check of a code change runs on the train and select days.
 5. **Check what a component holds, not only what it reads.** An object that holds a forbidden value is a channel, also
    when no law reads it today (vocabulary D81: the landed runway in the executor's frame).
 6. **Check by behaviour, not by names.** A test that scans names misses a value read through `getattr`, a dictionary or
@@ -84,7 +88,23 @@ voice, one meaning for each word. The words were not checked one by one against 
 5. **Verify.** Read the source line of each important finding. Reproduce it on data where you can (a count, a value).
    Check that a finding is not the design's own decision.
 6. **Classify.** Put each finding into one class: leak, latent leak, split (a day or a sample), boundary, end of a
-   flight, design mismatch, bug, test gap.
+   flight, design mismatch, bug, test gap. Then give it one severity (outline D131; the user, 2026-10-06: the same standard in every
+   round, so that a later round does not dig into corner cases):
+
+   | Severity | What | Action |
+   |---|---|---|
+   | S1 | A leak into an input, a target selection or a choice (the future of a flight, a sealed day, a second read of the validation days, an identity of the airport); a split violation; a defect that changes a number the user will read (a reward, an outcome, a loss, a count in a readout) on real data by more than its stated tolerance; a design mismatch that changes behaviour on real data | Corrected before any formal run. Reported with its size |
+   | S2 | A latent leak (a forbidden value held but not read); a boundary that does not refuse; a decided rule with no test; a defect whose effect on real data is not measured and not bounded | Corrected before the formal run when the correction is cheap; else listed as an open item of the stage's design document (§0.2, an O number) — no milestone, no order, not reviewed again — until the user decides |
+   | S3 | A case that real data reach in less than 0.1 % of the windows (or steps) and that changes no reported number beyond its tolerance; a difference within a stated bound (`STATE_BOUND_M`, a float tolerance); a case that needs an input the pipeline cannot make; style, names, wording | Listed in one line, no action. Not reported again in a later round |
+
+   **No finding against common sense** (outline D131): a scenario that needs the code to change while a run of it goes
+   on, an input that no step of the pipeline makes, a file moved or edited by hand to defeat a rule, or a person working
+   against the project is not a finding, whatever its correction costs. A reviewer does not look for it, and a review
+   does not list it.
+
+   A finding states its size on real data, or a bound on it; without a size or a bound it is S2 until measured. A
+   finding needs a concrete scenario on inputs that the pipeline can make. The design's own decisions (the D numbers)
+   and the readings that the user accepted are not findings, unless new evidence makes them S1.
 7. **Report to the user.** Give the findings, the most severe first. For each: what, where (`path:line`), the size on
    data, what a correction changes (a format, a rebuild of an artefact, a retraining) and its cost. Then the list of
    the channels that are clean. Ask the decisions that the user must make as questions.
@@ -94,6 +114,11 @@ voice, one meaning for each word. The words were not checked one by one against 
    the details are in the design.
 10. **After each milestone of the corrections.** Read the agent's log (§0.3). Read the key code of the correction. Write
     the user's choices into the design text. List the agent's proposals for the user.
+
+**Later rounds of a review.** A later round of the same stage reads: the code changed since the last round (its
+commits); the channels of §4 or §5 again for S1 only; and the corrections of the last round. It does not report again
+an S3 of an earlier round, a decision, or an accepted reading. A round ends when it has no S1 and no S2 without the
+user's word.
 
 ---
 
@@ -181,8 +206,9 @@ Use the design `post_training.md` and the public interfaces of the vocabulary (�
 
 ## 6 Report format of a reviewer
 
-- **Findings, the most severe first.** For each: the class (§3 step 6); `path:line`; the defect in one sentence; a
-  concrete scenario (inputs, then what goes wrong); how it was verified (read only, or run, with the scratch path).
+- **Findings, the most severe first.** For each: the class and the severity (§3 step 6); `path:line`; the defect in
+  one sentence; a concrete scenario (inputs, then what goes wrong); its size on real data or a bound on it; how it was
+  verified (read only, or run, with the scratch path). S3 findings in one line each, at the end.
 - **Checked and clean.** Each channel traced and found clean, with its evidence line.
 - No points of style or names.
 - Length: at most approximately 1,500 words.
@@ -203,6 +229,8 @@ Use the design `post_training.md` and the public interfaces of the vocabulary (�
 | The executor flew on after a crossing of another runway or the stall cut-off, which the judge takes as the end | End of a flight | 8 | D79 |
 | The first cycle of a flight had no roll-rate limit | Design mismatch | 9 | D84 |
 | The lateral error used the extended line of a segment, not the path | Design mismatch | 9 | D83 |
+| Two runners (`instruction_figures`, `executor_turns`) still read the val days after D85 had been applied to the runners of its list; a correction's own check and report also showed val flights (check of A32–A40) | Split | 4 | Vocabulary A41 |
+| The design said that an executor's states are the same bit for bit in batches of different size (from a smoke of 395 flights); a sample of 200 flights showed differences up to 7.9e-10 m (check of A32–A40) | A claim without a measurement at the size and the layout that it applies to | 11 | Vocabulary D97 (3); post-training D94 and §6.4: the states are within `STATE_BOUND_M` |
 
 **What the review found clean (examples of channels to trace):** each law of the executor read only what vocabulary
 §5.2 lists; the mass was the published landing mass of the type and the "unspecified" speed its published approach

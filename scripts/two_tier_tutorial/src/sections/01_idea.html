@@ -1,0 +1,31 @@
+<section id="s-idea">
+<h2 id="idea" data-toc="1 The idea">1 The idea</h2>
+<p>An air traffic controller does not fly the aircraft. The controller says short instructions: <em>expect runway 23R, fly heading 270, descend and maintain 3,000 feet, reduce speed to 180 knots</em>. The pilot, or the autopilot, flies these instructions.</p>
+<p>The <t zh="双层模型">two-tier model</t> copies this split into two parts.</p>
+<ul>
+<li>The upper part is the <b><t zh="先验模型">prior</t></b>. It is a language model of the controller. At each row, it says one row of words for each aircraft.</li>
+<li>The lower part is the <b><t zh="执行器">executor</t></b>. It is an autopilot. It flies <em>only</em> these words with point-mass dynamics.</li>
+<li>Between them is the <b><t zh="词表">vocabulary</t></b>, the language of the words. A <b><t zh="标注器">labeller</t></b> reads words from observed tracks. These <t zh="句子">sentences</t> train the prior.</li>
+<li>The <b>judge</b> classifies what the executor flew: did it land, or not?</li>
+<li>The <b><t zh="后训练">post-training</t></b> trains the prior again in a <t zh="闭环">closed loop</t>. The prior speaks, the executor flies, the judge decides, and a reward updates the prior.</li>
+</ul>
+
+<div data-demo="overview" data-title="The whole design: click a box"></div>
+
+<p>Why two parts? A model that outputs positions can draw a smooth line that no aircraft can fly. A model that outputs words cannot do this. The executor flies every word with real dynamics. The model must also learn the real skill: <em>when</em> to turn, descend or go around, so that the aircraft reaches the runway.</p>
+<figure class="paper" data-fig="fig01_architecture"></figure>
+
+<h3 id="principles" class="toc">The eight principles</h3>
+<p>Every part of the design follows eight principles. The outline of the design states them. Keep them in mind. They explain many choices later on.</p>
+<div class="grid2">
+<div class="card"><h4>1 · The words are the only interface</h4><p>The prior gives no control values. The executor reads the words, the aircraft dynamics and the runway geometry. It reads no procedure data.</p></div>
+<div class="card"><h4>2 · The model decides the path</h4><p>No executor law turns onto the final, follows the centreline or follows the glidepath. The model must say the words that do these things. A track that the procedure computes is not a skill of the model.</p></div>
+<div class="card"><h4>3 · Procedures are masks and judgements only</h4><p>The procedure data (glidepath, decision altitude, final approach segment) blocks words during decoding and judges the flown track. It never makes a track.</p></div>
+<div class="card"><h4>4 · Airport facts are inputs, not identities</h4><p>A word has the same meaning at all airports. Facts of the airport go into the inputs as measured values. No input is a code for the airport.</p></div>
+<div class="card"><h4>5 · One frame for the words of direction</h4><p>Heading words are relative to the course of the runway in force. The same heading word means “downwind” or “final” at all airports.</p></div>
+<div class="card"><h4>6 · Each instruction has a target and an envelope</h4><p>The labeller, the judge and the display use the same envelope code. A containment rate always comes with the width of its envelope.</p></div>
+<div class="card"><h4>7 · Inputs give only what a controller knows before the step</h4><p>A labelled word is a target of the prior, never an input. The exception is the words said before the step.</p></div>
+<div class="card"><h4>8 · No compatibility</h4><p>A changed word, spec or payload gets a new name. The code refuses an artefact of another name. There is no fallback for old files.</p></div>
+</div>
+<div class="note"><p><b>Three stages.</b> Stage A builds the vocabulary, the labeller, the executor and the judge (sections 2–8). Stage B builds the prior (section 9). Stage C builds the post-training and the multi-aircraft work (section 10). The user sees each stage in the frontend before the next stage builds on it.</p></div>
+</section>

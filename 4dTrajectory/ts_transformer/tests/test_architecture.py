@@ -686,15 +686,15 @@ def test_the_instructions_package_sits_below_the_models():
                 assert module in INSTRUCTIONS_MAY_IMPORT, f"{rel} imports {name}"
 
 
-def test_only_the_runners_and_the_executor_reach_the_instructions_package():
-    """The instruction language is consumed by the runners and the executor (`autopilot/`), which flies its words
-    (framework document §2; the prior, which learns to say them, comes back in stage B of two-tier v4)."""
+def test_only_the_runners_the_executor_and_the_prior_reach_the_instructions_package():
+    """The instruction language is consumed by the runners, the executor (`autopilot/`), which flies its words, and the
+    prior (`prior/`), which learns to say them (outline §1)."""
     for path in _module_files():
         if path.is_relative_to(INSTRUCTIONS):
             continue
         rel = path.relative_to(TS_DIR).as_posix()
         if any(name.split(".")[0] == "instructions" for name in _imported_names(path)):
-            assert rel.startswith(("experiments/", "autopilot/")), f"{rel} imports the instructions package"
+            assert rel.startswith(("experiments/", "autopilot/", "prior/")), f"{rel} imports the instructions package"
 
 
 AUTOPILOT = TS_DIR / "autopilot"
@@ -731,6 +731,90 @@ def test_only_the_runners_reach_the_executor_for_now():
 
 # D81: that the executor's laws read no vertical path is checked by behaviour, where the executor's check runs
 # (`autopilot.conformance`, the way ``moved``; `tests/test_autopilot.py`), not by a scan of names here.
+
+
+PRIOR = TS_DIR / "prior"
+#: The prior sits on the instruction language (outline §1, prior design §1): inside the package it reads the words, the
+#: grammar, the artefact and the candidates' geometry (`instructions/`), the day split the artefact was dealt by, the
+#: plain utilities and itself — never the executor or the judge (`autopilot/`: only the runners join the two), a model of
+#: the prediction paths, the training plane or a runner.
+PRIOR_MAY_IMPORT = ("prior.", "instructions.", "data.day_split", "io_utils", "repo_layout")
+
+
+def test_the_prior_reads_only_the_instruction_language():
+    groups = {p.name for p in TS_DIR.iterdir() if (p / "__init__.py").is_file()} | {p.stem for p in TS_DIR.glob("*.py")}
+    files = [path for path in PRIOR.rglob("*.py") if "__pycache__" not in path.parts]
+    assert files, "the prior package is empty; this test would pass vacuously"
+    for path in files:
+        rel = path.relative_to(TS_DIR).as_posix()
+        for name in _imported_names(path):
+            if name.split(".")[0] not in groups or name == "prior":
+                continue
+            allowed = any((name == item[:-1] or name.startswith(item)) if item.endswith(".") else
+                          (name == item or name.startswith(item + ".")) for item in PRIOR_MAY_IMPORT)
+            assert allowed, f"{rel} imports {name}"
+
+
+def test_only_the_runners_reach_the_prior():
+    """`instructions/` and `autopilot/` import no model package (their own tests above); nothing else but a runner
+    imports the prior."""
+    for path in _module_files():
+        if path.is_relative_to(PRIOR):
+            continue
+        rel = path.relative_to(TS_DIR).as_posix()
+        if any(name.split(".")[0] == "prior" for name in _imported_names(path)):
+            assert rel.startswith("experiments/"), f"{rel} imports the prior"
+
+
+#: What the runners of the prior may take from `autopilot/` (vocabulary §6 items 3, 5, 6; D67, D69; prior §12 B4): the
+#: modules of the executor, the single flight, the start of a closed loop and the judge, whole; and of the closed-loop
+#: reading only the check that its sentences may be read.
+PRIOR_RUNNER_AUTOPILOT_MODULES = {"autopilot.executor", "autopilot.single", "autopilot.start", "autopilot.judge"}
+PRIOR_RUNNER_AUTOPILOT_NAMES = {"autopilot.closed_loop": {"require_conforming_closed_loop"}}
+
+
+def _autopilot_imports_refused(source: str) -> list[str]:
+    """Each import of ``source`` that takes from `autopilot/` what `PRIOR_RUNNER_AUTOPILOT_*` does not list, by the
+    names it imports."""
+    refused = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            module = _package_relative(node.module)
+            if module.split(".")[0] != "autopilot":
+                continue
+            for alias in node.names:
+                if module in PRIOR_RUNNER_AUTOPILOT_MODULES:
+                    continue
+                if module == "autopilot" and f"autopilot.{alias.name}" in PRIOR_RUNNER_AUTOPILOT_MODULES:
+                    continue
+                if module in PRIOR_RUNNER_AUTOPILOT_NAMES and alias.name in PRIOR_RUNNER_AUTOPILOT_NAMES[module]:
+                    continue
+                refused.append(f"from {module} import {alias.name}")
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                module = _package_relative(alias.name)
+                if module.split(".")[0] == "autopilot" and module not in PRIOR_RUNNER_AUTOPILOT_MODULES:
+                    refused.append(f"import {module}")
+    return refused
+
+
+def test_the_prior_runners_take_from_autopilot_only_what_its_interface_lists():
+    """Prior §12 B4 (D67, D69): a runner of the prior imports from `autopilot/` only the modules of vocabulary §6 items
+    5 and 6 and, of `autopilot/closed_loop.py`, only `require_conforming_closed_loop` — read by the names imported."""
+    runners = sorted((TS_DIR / "experiments").glob("prior_*.py"))
+    assert runners, "no runner of the prior; this test would pass vacuously"
+    for path in runners:
+        refused = _autopilot_imports_refused(path.read_text(encoding="utf-8"))
+        assert not refused, f"{path.name}: {refused}"
+    assert not _autopilot_imports_refused("from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop\n"
+                                          "from ts_transformer.autopilot.start import anything\n"
+                                          "from ts_transformer.autopilot import judge\n")
+    assert _autopilot_imports_refused("from ts_transformer.autopilot.closed_loop import read\n"
+                                      "from ts_transformer.autopilot.replay import Batch\n"
+                                      "from ts_transformer.autopilot import flights\n"
+                                      "import ts_transformer.autopilot.closed_loop\n") == [
+        "from autopilot.closed_loop import read", "from autopilot.replay import Batch", "from autopilot import flights",
+        "import autopilot.closed_loop"]
 
 
 #: D73 (no code fingerprint): the trees where a check of the labeller, the executor or the closed loop runs, and the

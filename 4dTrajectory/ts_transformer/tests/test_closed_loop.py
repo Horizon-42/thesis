@@ -1252,6 +1252,43 @@ def test_no_start_state_and_no_stored_observed_row_reads_a_sample_after_the_firs
     assert np.array_equal(zero[3:6], one[3:6])                    # row 0 alone in its window: rows 0 and 1, as row 1
 
 
+def test_a_draw_and_an_opening_use_the_signals_they_are_given(monkeypatch):
+    """A43: `replay.draw_flights` and `training_flights.open_flights` read the split's signals only when they are not
+    given (a warm-up opens several sets of one artefact on one read), and `open_flights` hands them on."""
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from ts_transformer.experiments import training_flights
+
+    given = [SimpleNamespace(dataset_id="KXXX:a", airport="KXXX")]
+
+    def read_again(*args):
+        raise AssertionError("the split's signals were read again")
+
+    monkeypatch.setattr(replay, "load_signals", read_again)
+    monkeypatch.setattr(training_flights, "load_signals", read_again)
+    monkeypatch.setattr(replay, "load_candidates", lambda directory: {"KXXX": SimpleNamespace(candidates=[])})
+    monkeypatch.setattr(replay, "rebuild_series", lambda directory, flights: [object() for _ in flights])
+    monkeypatch.setattr(replay, "group_of", lambda series: replay.OWN)
+    drawn = replay.draw_flights(Path("i"), "train", [0], per_airport=0, seed=1, signals=given)
+    assert drawn.signals == given
+
+    seen = {}
+
+    class Stop(Exception):
+        pass
+
+    def spy(directory, split, candidates, **kwargs):
+        seen.update(kwargs)
+        raise Stop
+
+    monkeypatch.setattr(replay, "draw_flights", spy)
+    monkeypatch.setattr(training_flights, "load_sentences", lambda directory, split, spec: {"signal_index": np.array([0])})
+    with pytest.raises(Stop):
+        training_flights.open_flights(Path("i"), "train", ["KXXX:a"], SimpleNamespace(spec=None), signals=given)
+    assert seen["signals"] is given
+
+
 def test_a_references_go_around_flights_are_drawn_after_the_others_among_those_not_drawn(monkeypatch):
     """A37 (§7.2 #2, #3): the references' draw takes up to ``go_around_per_airport`` more flights whose sentence has a
     go-around, among those the first draw did not take, after them, at most that many (`draw_flights` ``at_most``);

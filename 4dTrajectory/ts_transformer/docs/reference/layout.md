@@ -490,8 +490,9 @@ sentence on a coarser row interval — and `read`), the labeller's conformance (
 (`measure`), the artefact (`artefact`, the closed-loop file format included, C38), the readout and the eye-check
 figures. Torch-free; inside the package it imports only `data.channels`, `data.coordinate_frames`, `data.day_split` and
 `io_utils` (outside it: `final_approach`, `flight_scenarios`, `aerodynamic_model.common`, `geokit`, numpy)
-(`tests/test_architecture.py::test_the_instructions_package_sits_below_the_models`), and only the runners and the
-executor (`autopilot/`, L31) consume it (`test_only_the_runners_and_the_executor_reach_the_instructions_package`). The
+(`tests/test_architecture.py::test_the_instructions_package_sits_below_the_models`), and only the runners, the
+executor (`autopilot/`, L31) and the prior (`prior/`, L32) consume it
+(`test_only_the_runners_the_executor_and_the_prior_reach_the_instructions_package`). The
 closed-loop reading flies the executor, so it lives in `autopilot/closed_loop.py`; its file format stays here, torch-free,
 for a reader that must not import the executor (the prior, stage B). The frontend's Training files (`display`,
 `training_files`) are archived with instruction-v3 (`archive/two_tier_v3_2026_10/instructions/`); stage D rebuilds them.

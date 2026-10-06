@@ -3,10 +3,10 @@
  * ended, the two times; the word in the line only once the selection has moved off it; the word and the full reading, or a
  * refusal's reason, in its tooltip.
  */
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, render, screen } from "@testing-library/react";
 
-import { TrainingAutopilotStatus } from "../TrainingAutopilotStatus";
+import { OPENING_NOTE_AFTER_MS, TrainingAutopilotStatus } from "../TrainingAutopilotStatus";
 import { parseTrainingAutopilot } from "../../data/trainingAutopilot";
 import { requestOf, stageAAnswers, stageASelection } from "../../data/__tests__/stageA";
 
@@ -49,5 +49,42 @@ describe("the sentence bar's line", () => {
     render(<TrainingAutopilotStatus selection={selection} named={false}
       view={{ status: "failed", request, problem: "the backend refused (404): no flight" }} />);
     expect(screen.getByText("Autopilot · not flown").title).toMatch(/not flown — the backend refused \(404\): no flight$/);
+  });
+});
+
+describe("an answer that takes long (vocabulary A43)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("says that the backend is opening the set once the request has flown for two seconds, and no sooner", () => {
+    vi.useFakeTimers();
+    const { request } = ready(0);
+    render(<TrainingAutopilotStatus selection={selection} view={{ status: "flying", request }} named={false} />);
+    expect(screen.getByRole("status").textContent).toBe("Autopilot · flying …");
+    act(() => { vi.advanceTimersByTime(OPENING_NOTE_AFTER_MS - 1); });
+    expect(screen.getByRole("status").textContent).toBe("Autopilot · flying …");
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(screen.getByRole("status").textContent).toBe("Autopilot · flying … the backend is opening the set");
+    expect(screen.getByRole("status").title).toContain("the backend is opening the set");
+  });
+
+  it("starts the wait again for a new request at once, and says nothing once the answer is there", () => {
+    vi.useFakeTimers();
+    const first = ready(0);
+    const { rerender } = render(<TrainingAutopilotStatus selection={selection} view={{ status: "flying", request: first.request }} named={false} />);
+    act(() => { vi.advanceTimersByTime(OPENING_NOTE_AFTER_MS); });
+    expect(screen.getByRole("status").textContent).toContain("opening the set");
+    const another = { ...first.request, row: first.request.row + 1 };
+    rerender(<TrainingAutopilotStatus selection={selection} view={{ status: "flying", request: another }} named={false} />);
+    expect(screen.getByRole("status").textContent).toBe("Autopilot · flying …");          // the first commit, no stale note
+    act(() => { vi.advanceTimersByTime(OPENING_NOTE_AFTER_MS - 500); });
+    const third = { ...first.request, row: first.request.row + 2 };                     // switched at 1.5 s: the timer restarts
+    rerender(<TrainingAutopilotStatus selection={selection} view={{ status: "flying", request: third }} named={false} />);
+    act(() => { vi.advanceTimersByTime(600); });                                         // 2.1 s after the second request
+    expect(screen.getByRole("status").textContent).toBe("Autopilot · flying …");
+    act(() => { vi.advanceTimersByTime(OPENING_NOTE_AFTER_MS); });
+    expect(screen.getByRole("status").textContent).toContain("opening the set");
+    rerender(<TrainingAutopilotStatus selection={selection} view={first.view} named={false} />);
+    act(() => { vi.advanceTimersByTime(10 * OPENING_NOTE_AFTER_MS); });
+    expect(document.body.textContent).not.toContain("opening the set");
   });
 });

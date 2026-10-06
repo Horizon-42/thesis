@@ -21,6 +21,7 @@ import {
   trainingAutopilotRequest,
   type TrainingAutopilotRequest,
 } from "../data/trainingAutopilot";
+import { trainingPriorOriginOf } from "../data/trainingPriorSample";
 
 export default function useTrainingAutopilot(backendUrl: string = AEROVIZ_BACKEND_URL): void {
   const { trainingSelection, trainingPick, setTrainingAutopilot } = useApp();
@@ -30,7 +31,8 @@ export default function useTrainingAutopilot(backendUrl: string = AEROVIZ_BACKEN
 
   // The segment picked and the attempt at it, as a key.
   const key = useMemo(() => {
-    if (trainingSelection === null || trainingPick === null) return null;
+    // a sentence of a prior set is flown by `useTrainingPriorAutopilot`
+    if (trainingSelection === null || trainingPick === null || trainingPriorOriginOf(trainingSelection.flight) !== undefined) return null;
     return JSON.stringify({ request: trainingAutopilotRequest(trainingSelection, trainingPick), attempt: trainingPick.attempt });
   }, [trainingSelection, trainingPick]);
 

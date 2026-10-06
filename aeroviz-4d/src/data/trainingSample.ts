@@ -459,6 +459,12 @@ export function lastStateCycle(outcome: TrainingOutcome, endCycle: number): numb
   return outcome === "dynamics_failure" ? endCycle - 1 : endCycle;
 }
 
+/** A word said at Δ row ``row`` after the judge's outcome (its cycle is past the flight's last state): the flight the judge read
+ *  never hears it, so it has no segment to fly (the backend refuses it). */
+export function wordUnreached(closed: TrainingClosedLoop, row: number): boolean {
+  return (row * closed.rowIntervalS) / closed.cycleS > lastStateCycle(closed.replay.outcome, closed.replay.endCycle);
+}
+
 /** One word of a column and the rows it is in force: from its row to the next word of its column (or the sentence's end). */
 export interface TrainingWordRun {
   row: number;
@@ -627,7 +633,7 @@ function parseCohort(cohort: Reader): TrainingCohort {
   };
 }
 
-function parseFormats(reader: Reader): Record<string, string> {
+export function parseFormats(reader: Reader): Record<string, string> {
   return reader.record("formats", (value, where) => {
     if (typeof value !== "string" || value.length === 0) throw new Error(`${where} is not a format name`);
     return value;
@@ -662,7 +668,7 @@ export function parseTrainingIndex(raw: unknown): Parsed<TrainingIndex> {
 
 // ── one set ──────────────────────────────────────────────────────────────────
 
-function parseVocabulary(reader: Reader): TrainingVocabulary {
+export function parseVocabulary(reader: Reader): TrainingVocabulary {
   reader.oneOf("readingRule", [TRAINING_READING_RULE]);
   reader.sameNames("columns", TRAINING_COLUMNS);
   const angleClasses = reader.children("angleClasses").map((angle, index) => {
@@ -690,7 +696,7 @@ function parseVocabulary(reader: Reader): TrainingVocabulary {
   };
 }
 
-function parseCandidates(reader: Reader): TrainingCandidate[] {
+export function parseCandidates(reader: Reader): TrainingCandidate[] {
   const candidates = reader.children("candidates").map((candidate, index) => {
     if (candidate.number("index") !== index) candidate.fail(`index is ${candidate.raw("index")}, expected ${index}`);
     const path = candidate.child("verticalPath");
@@ -710,7 +716,7 @@ function parseCandidates(reader: Reader): TrainingCandidate[] {
 }
 
 /** The word grid (``[rows][5]``, "unchanged" = -1). */
-function parseGrid(reader: Reader, key: string, rows?: number): number[][] {
+export function parseGrid(reader: Reader, key: string, rows?: number): number[][] {
   const grid = reader.list(key).map((row, index) => {
     if (!Array.isArray(row) || row.length !== TRAINING_COLUMNS.length || !row.every((value) => Number.isInteger(value))) {
       reader.fail(`${key}[${index}] is not ${TRAINING_COLUMNS.length} whole numbers, one per column`);
@@ -749,7 +755,7 @@ function parseSays(reader: Reader, column: number, value: number, candidates: Tr
 }
 
 /** A sentence's events, checked to be exactly the words of its grid, in (row, column) order. */
-function parseEvents(reader: Reader, grid: number[][], candidates: TrainingCandidate[], corrections: boolean): TrainingEvent[] {
+export function parseEvents(reader: Reader, grid: number[][], candidates: TrainingCandidate[], corrections: boolean): TrainingEvent[] {
   const events = reader.children("events").map((event) => {
     const column = event.integer("column", 0, TRAINING_COLUMNS.length - 1);
     const value = event.integer("value", TRAINING_RUNWAY_GO_AROUND, Number.MAX_SAFE_INTEGER);
@@ -770,7 +776,7 @@ function parseEvents(reader: Reader, grid: number[][], candidates: TrainingCandi
   return events;
 }
 
-function parseAttitudeOf(reader: Reader, rows: number): TrainingAttitude {
+export function parseAttitudeOf(reader: Reader, rows: number): TrainingAttitude {
   return readAttitude(reader.child("attitude"), rows);
 }
 
@@ -981,9 +987,11 @@ function parseClosedLoop(
   };
 }
 
-function parseFlight(
+/** ``closedIntervals``: the Δ the flight's `closedLoop` is listed at, in order — the set's `rowIntervalsS` (a set of stage B
+ *  lists the one Δ its prior said at: `trainingPriorSample.ts`). */
+export function parseFlight(
   reader: Reader, vocabulary: TrainingVocabulary, candidates: TrainingCandidate[], cycleS: number,
-  splits: readonly TrainingSplit[],
+  closedIntervals: readonly number[], splits: readonly TrainingSplit[],
 ): TrainingFlight {
   const runwayIndex = reader.integer("runwayIndex", 0, candidates.length - 1);
   const runway = reader.string("runway");
@@ -995,7 +1003,7 @@ function parseFlight(
   const flightKey = reader.string("flightKey");
   const observed = parseObserved(reader.child("observed"), vocabulary.stepS, haeMinusMslM);
   const closedReader = reader.child("closedLoop");
-  const expected = vocabulary.rowIntervalsS.map(String);
+  const expected = closedIntervals.map(String);
   const found = Object.keys(reader.raw("closedLoop") as Record<string, unknown>);
   if (found.length !== expected.length || found.some((key, i) => key !== expected[i])) {
     reader.fail(`closedLoop is listed at [${found.join(", ")}] s, expected the set's [${expected.join(", ")}]`);
@@ -1026,7 +1034,8 @@ export function parseTrainingSample(raw: unknown, splits: readonly TrainingSplit
     if (!Number.isInteger(vocabulary.stepS / cycleS)) {
       sample.fail(`a ${vocabulary.stepS} s row is not a whole number of ${cycleS} s cycles`);
     }
-    const flights = sample.children("flights").map((flight) => parseFlight(flight, vocabulary, candidates, cycleS, splits));
+    const flights = sample.children("flights").map((flight) => parseFlight(flight, vocabulary, candidates, cycleS,
+      vocabulary.rowIntervalsS, splits));
     const keys = new Set(flights.map((flight) => flight.flightKey));
     if (keys.size !== flights.length) sample.fail("two flights carry one flight key: a flight is its key");
     return {

@@ -248,9 +248,13 @@ def labelled_instruction_artefact(directory, split="train"):
             (120, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0)))]
     flight = instruction_flight(*fly_legs(legs, 270.0, 1110.0, -400.0, 0.0), dataset_id="KXXX:a", split=split)
     directory.mkdir(parents=True)
+    # ``runway_ends_from``: the shape of `instruction_signals.runway_ends_from()` (a mirror: the real artefacts record the
+    # runway configuration and the CIFP the candidates were read from; `training_export.candidate_hae_minus_msl_m` reads it)
     write_signals(directory, {split: [flight]},
                   {"counts": {split: {"built_usable": 1}}, "test_days": {"flights_not_opened": 0},
-                   "sources": [{"airport": "KXXX", "arrival_manifest_sha256": "0" * 64}]}, fixture_days())
+                   "sources": [{"airport": "KXXX", "arrival_manifest_sha256": "0" * 64}],
+                   "runway_ends_from": {"config": "fixture/runway_thresholds.json", "config_sha256": "0" * 64,
+                                        "cifp": "fixture/FAACIFP18", "cifp_sha256": "0" * 64}}, fixture_days())
     write_candidates(directory, {"KXXX": instruction_airport()})
     spec = instruction_spec()
     write_spec(directory, spec, {"n": 1}, {"git": {"head": "test", "dirty": False}})
@@ -281,6 +285,151 @@ def executor_inputs(signals, geometry, row=0, mass_kg=62000.0, rule=START_RULE):
         aero_params=torch.tensor([[aero.S, aero.Cl_max, aero.Cd0, aero.k, aero.stall_threshold, aero.k_stall]], dtype=f64),
         frame_params=torch.tensor(np.array([frame_params(geometry)]), dtype=f64),
         max_thrust_n=torch.tensor([aircraft.engine.max_thrust_total_n], dtype=f64))
+
+
+def prior_sentence(rng, words, *, candidates=3, rows=30, first_step=8, airport="KXXX", split="train",
+                   variant="full", flight_key=None, interval_s=2.0):
+    """A synthetic `prior.batch.SentenceRows` of ``words``' spec: random inputs, and words with a pattern a model can
+    learn (row 0 without motion, D60) — at the first predicted step a word in every column (the runway: a candidate drawn at random); after it, a
+    heading word where the first own-state input is positive (its class from the second), "unchanged" elsewhere, and
+    now and then a word of another column. The words in force follow what was said, from the row after the first
+    predicted step."""
+    import numpy as np
+
+    from ts_transformer.instructions.words import ALTITUDE, ANGLE, HEADING, RUNWAY, SPEED, UNCHANGED
+    from ts_transformer.prior.batch import (
+        CANDIDATE_FEATURES, CANDIDATE_MOTION_FEATURES, IN_FORCE_WORDS, OWN_FEATURES, OWN_MOTION_FEATURES, SentenceRows,
+        variant_features,
+    )
+
+    counts = words.class_counts()
+    width = len(variant_features(variant))
+    own = rng.normal(size=(rows, len(OWN_FEATURES))).astype(np.float32)
+    own[:, OWN_FEATURES.index("no_motion")] = 0.0
+    own[0, [OWN_FEATURES.index(name) for name in OWN_MOTION_FEATURES]] = 0.0
+    own[0, OWN_FEATURES.index("no_motion")] = 1.0
+    targets = np.full((rows, 5), UNCHANGED, dtype=np.int64)
+    targets[first_step] = [rng.integers(candidates), rng.integers(counts["heading"]),
+                           rng.integers(counts["altitude"] - 1), rng.integers(1, counts["angle"]),
+                           rng.integers(counts["speed"])]
+    for r in range(first_step + 1, rows):
+        if own[r, 0] > 0.0:
+            targets[r, HEADING] = int(abs(own[r, 1]) * 4) % counts["heading"]
+        if rng.random() < 0.1:
+            column = int(rng.choice([ALTITUDE, ANGLE, SPEED]))
+            targets[r, column] = rng.integers(counts[("altitude", "angle", "speed")[column - ALTITUDE]] - 1)
+    runway_in_force = np.full(rows, -1, dtype=np.int64)
+    heading_in_force = np.zeros((rows, 2), dtype=np.float32)
+    words_in_force = np.full((rows, len(IN_FORCE_WORDS)), -1, dtype=np.int64)
+    since = np.zeros((rows, 5), dtype=np.float32)
+    said_at = np.full(5, np.nan)
+    for r in range(first_step + 1, rows):
+        before = targets[r - 1]
+        runway_in_force[r] = before[RUNWAY] if before[RUNWAY] != UNCHANGED else runway_in_force[r - 1]
+        heading_in_force[r] = heading_in_force[r - 1]
+        if before[HEADING] != UNCHANGED:
+            angle = np.radians(words.heading_relative_deg(int(before[HEADING])))
+            heading_in_force[r] = (np.sin(angle), np.cos(angle))
+        words_in_force[r] = np.where(before[ALTITUDE:] != UNCHANGED, before[ALTITUDE:], words_in_force[r - 1])
+        said_at = np.where(before != UNCHANGED, (r - 1) * interval_s, said_at)
+        since[r] = np.log1p((r * interval_s - said_at) / 2.0) / 5.0
+    candidate_vectors = rng.normal(size=(rows, candidates, width)).astype(np.float32)
+    candidate_vectors[0][:, [CANDIDATE_FEATURES.index(name) for name in CANDIDATE_MOTION_FEATURES]] = 0.0
+    return SentenceRows(
+        flight_key=flight_key or f"{airport}:{split}:{int(rng.integers(1 << 30))}", airport=airport, split=split,
+        first_step=first_step, time_s=np.arange(rows, dtype=np.float32) * interval_s, own=own,
+        candidates=candidate_vectors,
+        runway_in_force=runway_in_force, go_around=np.zeros(rows, dtype=bool), heading_in_force=heading_in_force,
+        words_in_force=words_in_force, since=since, targets=targets)
+
+
+#: `prior_artefact`'s closed-loop sentences: the words said, rows from the first predicted step.
+PRIOR_ARTEFACT_ROWS = 30
+
+
+def prior_closed_loop_sentence(signals, words, *, interval_s, first_row=0, go_around=False, outcome="landed"):
+    """A closed-loop sentence of ``signals`` (a straight-in onto `parallel_airport`'s "09", descending) at Δ =
+    ``interval_s``, built by hand (`instructions.artefact.ClosedLoopSentence`): its states are the observed ones from its
+    2 s row ``first_row`` (a stand-in for flown ones); its words a grammatical sentence — at the first predicted step
+    "09", the course, "no level-off" with the descent class of 3°, the speed; a heading word and a speed word later;
+    with ``go_around`` a go-around (a level above and the climb) and "09" again to end it; its stored outcome (D74)
+    ``outcome``, by the judge's name (not judged: the states are the observed ones)."""
+    import numpy as np
+
+    from ts_transformer.instructions.artefact import ClosedLoopSentence, SentenceRows, Withheld
+    from ts_transformer.instructions.labeller.interval import OBSERVATION_S, interval_rows, on_interval_rows
+    from ts_transformer.instructions.words import RUNWAY_GO_AROUND, UNCHANGED
+
+    every = interval_rows(interval_s, words.spec.step_s)
+    start, said = int(round(OBSERVATION_S / interval_s)), PRIOR_ARTEFACT_ROWS
+    count = (start + said - 1) * every + 1
+    rows = slice(first_row, first_row + count)
+    states = np.stack([signals.e_m[rows], signals.n_m[rows], signals.altitude_m[rows], signals.track_deg[rows],
+                       signals.ground_speed_mps[rows], signals.vertical_rate_mps[rows]], axis=1)
+    grid = np.full((said, 5), UNCHANGED, dtype=np.int16)
+    grid[0] = [0, words.heading_index(0.0), words.altitude_no_level_off, words.angle_index(3.0), words.speed_index(75.0)]
+    grid[5, 1] = words.heading_index(5.0)
+    grid[9, 4] = words.speed_index(70.0)
+    if go_around:
+        height = signals.altitude_m[first_row + (start + 12) * every] - INSTRUCTION_AIRPORT_ELEVATION_M
+        grid[12, [0, 2, 3]] = [RUNWAY_GO_AROUND, words.altitude_index(height + 300.0), words.angle_climb]
+        grid[20, 0] = 0
+    return ClosedLoopSentence(
+        rows=SentenceRows(first_row=first_row, start=start, grid=grid, correction=np.zeros((said, 5), dtype=bool),
+                          states=states, on_interval=on_interval_rows(count, every)),
+        withheld=Withheld(runway=signals.runway, runway_index=0, landing_time_utc=signals.landing_time_utc,
+                          capture_row=-1, go_around_rows=np.zeros(0, dtype=np.int64), stratum="straight-in",
+                          outcome=outcome, timed_out=False, lateral_m=np.zeros(said), vertical_m=np.zeros(said),
+                          uncorrectable=np.zeros((said, 2), dtype=bool), observed_row=np.arange(said),
+                          matched_row=np.arange(said) * 1.0))
+
+
+def prior_artefact(directory, interval_s=2.0, airports=("KXXX",), outcomes=("landed", "landed")):
+    """A tmp instruction artefact at ``directory`` (created) as the prior reads it (vocabulary §6 items 3, 4): at each of
+    ``airports`` (`parallel_airport` under that code) two straight-in flights onto "09" on each development split (the
+    second with a go-around), the spec, the candidates with their vertical paths, each split's sentence file (the
+    labeller's reading, for the strata) and its closed-loop file at Δ = ``interval_s`` (`prior_closed_loop_sentence`;
+    the first and second flight's stored outcomes ``outcomes``). Returns ``(words, roster records by airport)``: the tracks
+    roster's records of the flights' landings (`prior.landings`)."""
+    from dataclasses import replace
+
+    from ts_transformer.instructions.airport import AirportGeometry
+    from ts_transformer.instructions.artefact import (
+        SPLITS, closed_loop_path, write_candidates, write_closed_loop, write_sentences, write_signals, write_spec,
+    )
+    from ts_transformer.instructions.labeller.read import read_flight
+    from ts_transformer.instructions.words import Words
+
+    spec = instruction_spec()
+    words = Words(spec)
+    flights = {split: [] for split in SPLITS}
+    records = {code: [] for code in airports}
+    for code in airports:
+        for split in SPLITS:
+            for i in range(2):
+                legs = [(160, 0.0, 75.0 - 2.0 * i, -1.5)]
+                flight = instruction_flight(*fly_legs(legs, 90.0, 750.0 + 30.0 * i, -400.0, 0.0),
+                                            dataset_id=f"{code}:F{split}{i}", split=split)
+                flights[split].append(replace(flight, airport=code))
+                records[code].append({"flight_key": f"F{split}{i}", "outcome": "assigned", "runway": "09",
+                                      "landing_time_utc": flight.landing_time_utc})
+    directory.mkdir(parents=True)
+    write_signals(directory, flights, {"counts": {}, "test_days": {"flights_not_opened": 0}, "sources": []},
+                  fixture_days())
+    geometries = {code: AirportGeometry.from_dict({**parallel_airport().to_dict(), "code": code}) for code in airports}
+    write_candidates(directory, geometries)
+    write_spec(directory, spec, {"n": 1}, {"git": {"head": "test", "dirty": False}})
+    for split in SPLITS:
+        write_sentences(directory, split, spec, [read_flight(f, geometries[f.airport], spec) for f in flights[split]],
+                        range(len(flights[split])))
+    (directory / "closed_loop").mkdir()
+    for split in SPLITS:
+        sentences = {k: prior_closed_loop_sentence(flight, words, interval_s=interval_s, go_around=k % 2 == 1,
+                                                   outcome=outcomes[k % 2])
+                     for k, flight in enumerate(flights[split])}
+        write_closed_loop(closed_loop_path(directory, split, interval_s), spec, executor_params_sha256="test",
+                          row_interval_s=interval_s, start_row=sentences[0].rows.start, sentences=sentences)
+    return words, records
 
 
 def closed_loop_flight(interval_s: float = 2.0):

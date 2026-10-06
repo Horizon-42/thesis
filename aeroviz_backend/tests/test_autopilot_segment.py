@@ -26,7 +26,7 @@ from ts_transformer.tests.support import closed_loop_flight
 from ts_transformer.tests.test_training_export import FIXTURE_SET, FIXTURES, stage_a_fixture
 
 from aeroviz_backend.autopilot_segment.backend import AutopilotSegmentBackend, SetFlown
-from aeroviz_backend.autopilot_segment.errors import NotListed, RequestRefused, Superseded
+from aeroviz_backend.autopilot_segment.errors import ExecutorDiffers, NotListed, RequestRefused, Superseded
 from aeroviz_backend.autopilot_segment.fly import apart_from_stored, fly_segment, segment_of
 from aeroviz_backend.autopilot_segment.payload import SCHEMA, SEGMENT_END, segment_payload
 from aeroviz_backend.http_server import AeroVizBackendApp
@@ -147,6 +147,28 @@ def set_up_set(root: Path, split: str | None = None) -> dict:
     return sample
 
 
+def set_up_sets(root: Path, airports: tuple[str, ...]) -> dict[str, dict]:
+    """The fixture set written under ``root`` for each of ``airports``, its flights named by the airport (so that the
+    sets differ, as the real ones do): each airport's sample."""
+    index, sample = stage_a_fixture()
+    samples = {}
+    for airport in airports:
+        flights = [{**item, "datasetId": f"{airport}:{item['datasetId']}"} for item in sample["flights"]]
+        samples[airport] = {**sample, "airport": airport, "flights": flights}
+        training = root / airport / "training"
+        training.mkdir(parents=True)
+        training_files.write_set(training, airport, {**index["sets"][0]}, training_files.serialise(samples[airport]), [])
+    return samples
+
+
+def signals_loaded(loads: list):
+    """The warm-up's read of a split's signals (`backend.load_signals`) replaced by one that notes what it was asked for."""
+    from unittest import mock
+
+    return mock.patch("aeroviz_backend.autopilot_segment.backend.load_signals",
+                      lambda instructions, split: loads.append((instructions, split)) or [])
+
+
 class SyntheticBackend(AutopilotSegmentBackend):
     """The service on the fixture set, its flights the synthetic ones (a synthetic flight has no artefact)."""
 
@@ -237,8 +259,7 @@ class SetUpTest(unittest.TestCase):
 
         one = flight(2.0)
         backend = AutopilotSegmentBackend(splits=training_files.SPLITS, airports_root=self.root)
-        with mock.patch("ts_transformer.autopilot.closed_loop.require_conforming_closed_loop",
-                        return_value=(one.params, {"sha256": "another"}, one.words)):
+        with mock.patch.object(replay, "open_spec", return_value=(one.params, {"sha256": "another"}, one.words)):
             with self.assertRaisesRegex(ValueError, "the set was exported with fixture"):
                 backend.executor_for(self.sample)
 
@@ -247,9 +268,9 @@ class SetUpTest(unittest.TestCase):
 
         from ts_transformer.experiments import training_flights
 
-        drawn, built = [], []
+        drawn, built, loads = [], [], []
 
-        def open_flights(instructions, split, ids, words):
+        def open_flights(instructions, split, ids, words, signals=None):
             drawn.append((split, tuple(ids)))
             return f"flights of {split}"
 
@@ -264,10 +285,11 @@ class SetUpTest(unittest.TestCase):
                                return_value=(Path("i"), Path("x"), one.params, {"sha256": "fixture"}, one.words)), \
                 mock.patch.object(training_flights, "open_flights", open_flights), \
                 mock.patch.object(training_flights, "stored_closed_loop", lambda *args: {}), \
-                mock.patch.object(training_flights, "closed_loop_batch", closed_loop_batch):
+                mock.patch.object(training_flights, "closed_loop_batch", closed_loop_batch), signals_loaded(loads):
             backend.warm_up(log=lambda line: None)
             key = self.sample["flights"][0]["datasetId"]
             self.assertEqual(drawn, [("train", (key,))])                 # none of a split it holds no flight of
+            self.assertEqual(loads, [(Path("i"), "train")])              # its signals read one time for every Δ
             self.assertEqual(built, [("flights of train", 2.0), ("flights of train", 4.0), ("flights of train", 8.0)])
             answer = backend.fly({"clientId": "p", "seq": 1, "airport": self.sample["airport"], "setId": FIXTURE_SET,
                                   "flightKey": self.sample["flights"][0]["flightKey"], "rowIntervalS": 4,
@@ -275,43 +297,82 @@ class SetUpTest(unittest.TestCase):
             self.assertEqual((len(drawn), len(built), answer["rowIntervalS"]), (1, 3, 4.0))   # kept, not drawn again
 
 
-class RefusalTest(unittest.TestCase):
-    def test_a_failed_check_is_kept_and_refused_at_once_and_a_val_flight_is_refused(self):
-        """A23 (A32): a check that fails is kept for its (artefact, executor spec), and every later request for them is
-        refused at once with its reason, the checks not run again; a set's flight of a split other than train and
-        select is refused (outline §6 item 4)."""
+    def test_the_warm_up_reads_a_splits_signals_one_time_for_all_the_sets_of_an_artefact(self):
+        """A43: the sets of the airports of one artefact share its signals; the warm-up reads each split of each artefact
+        once, not once for each set; a request outside a warm-up reads what it needs by itself."""
         from unittest import mock
 
+        from ts_transformer.experiments import training_flights
+
+        shutil_rmtree = __import__("shutil").rmtree
+        shutil_rmtree(self.root / self.sample["airport"])                  # the sets of this test: the two below
+        set_up_sets(self.root, ("KAAA", "KBBB", "KCCC"))
+        loads, taken = [], []
+        backend = AutopilotSegmentBackend(splits=training_files.SPLITS, airports_root=self.root)
+        one = flight(2.0)
+
+        def executor_for(sample):          # KAAA and KBBB fly one artefact, KCCC another
+            artefact_of = Path("j") if sample["airport"] == "KCCC" else Path("i")
+            return artefact_of, Path("x"), one.params, {"sha256": "fixture"}, one.words
+
+        with mock.patch.object(AutopilotSegmentBackend, "executor_for", lambda self, sample: executor_for(sample)), \
+                mock.patch.object(training_flights, "open_flights",
+                                  lambda instructions, split, ids, words, signals=None: taken.append(signals) or "flights"), \
+                mock.patch.object(training_flights, "stored_closed_loop", lambda *args: {}), \
+                mock.patch.object(training_flights, "closed_loop_batch",
+                                  lambda *args: (flight(args[4]).batch, [flight(args[4]).sentence])), \
+                signals_loaded(loads):
+            backend.warm_up(log=lambda line: None)
+            self.assertEqual(len(taken), 3)                                  # one draw for each set, not for each Δ
+            self.assertEqual(sorted(loads), [(Path("i"), "train"), (Path("j"), "train")])
+            self.assertTrue(all(signals == [] for signals in taken))
+            taken.clear()
+            sample = backend.training_set("KAAA", FIXTURE_SET)[1]
+            backend.set_flown(sample, "train", 4.0, Path("i2"), one.params, one.words)
+            self.assertEqual(taken, [None])                                  # no warm-up: `open_flights` reads its own
+
+
+class RefusalTest(unittest.TestCase):
+    def test_the_backend_runs_no_conformance_check_and_a_val_flight_is_refused(self):
+        """A43 (D73): the spec opens without a check of the code — `executor_for` calls none of the labeller's, the
+        executor's and the closed loop's checks, and opens the spec one time for a (artefact, executor spec); a set's
+        flight of a split other than train and select is refused (outline §6 item 4)."""
+        from unittest import mock
+
+        one = flight(2.0)
         with tempfile.TemporaryDirectory() as name:
             sample = set_up_set(Path(name))
             backend = AutopilotSegmentBackend(splits=training_files.SPLITS, airports_root=Path(name))
-            failing = mock.Mock(side_effect=ValueError("the executor flies v17's reference tracks otherwise"))
-            with mock.patch("ts_transformer.autopilot.closed_loop.require_conforming_closed_loop", failing):
-                with self.assertRaisesRegex(ValueError, "reference tracks otherwise"):
-                    backend.executor_for(sample)
+            ran = AssertionError("a conformance check ran")
+            spec = {"sha256": "fixture", "vocabulary_spec_sha256": one.words.spec.sha256}
+            loaded = mock.Mock(return_value=(one.params, spec))
+            with mock.patch("ts_transformer.autopilot.closed_loop.require_conforming_closed_loop", side_effect=ran), \
+                    mock.patch("ts_transformer.autopilot.conformance.require_conforming_executor", side_effect=ran), \
+                    mock.patch("ts_transformer.autopilot.replay.require_conforming_labeller", side_effect=ran), \
+                    mock.patch.object(replay, "open_executor", side_effect=ran), \
+                    mock.patch.object(replay, "load_spec", loaded), \
+                    mock.patch.object(replay.artefact, "load_spec", return_value=one.words.spec):    # `open_spec` itself
                 for _ in range(2):
-                    with self.assertRaisesRegex(RequestRefused, "failed its checks in this process: ValueError: the "
-                                                                "executor flies v17's reference tracks otherwise"):
-                        backend.executor_for(sample)
-            self.assertEqual(failing.call_count, 1)
-            one = flight(2.0)
+                    params, record, words = backend.executor_for(sample)[2:]
+                    self.assertEqual((params, record["sha256"]), (one.params, "fixture"))
+                    self.assertIs(words.spec, one.words.spec)
+            self.assertEqual(loaded.call_count, 1)
             with self.assertRaisesRegex(RequestRefused, "not 'val'"):
                 backend.set_flown(sample, "val", 2.0, Path("i"), one.params, one.words)
 
-
     def test_a_flight_of_another_split_is_refused_before_any_check_runs(self):
-        """A37: a request for a set's flight of a split other than train and select is refused by name before the
-        checks of its artefact and executor spec run (they open the val days' data for nothing)."""
+        """A37: a request for a set's flight of a split other than train and select is refused by name before its
+        artefact and executor spec are opened (the val days' data is opened for nothing)."""
         from unittest import mock
 
         with tempfile.TemporaryDirectory() as name:
             sample = set_up_set(Path(name), split="val")
             backend = AutopilotSegmentBackend(splits=training_files.SPLITS, airports_root=Path(name))
-            checks = mock.Mock(side_effect=AssertionError("the checks ran"))
+            checks = mock.Mock(side_effect=AssertionError("the spec was opened"))
             request = {"clientId": "page", "seq": 1, "airport": sample["airport"], "setId": FIXTURE_SET,
                        "flightKey": sample["flights"][0]["flightKey"], "rowIntervalS": 2.0, "column": "heading",
                        "row": 0}
-            with mock.patch("ts_transformer.autopilot.closed_loop.require_conforming_closed_loop", checks):
+            with mock.patch.object(replay, "open_spec", checks):
                 with self.assertRaisesRegex(RequestRefused, "not 'val'"):
                     backend.fly(request)
             self.assertEqual(checks.call_count, 0)
@@ -359,10 +420,10 @@ class CallersSplitsTest(unittest.TestCase):
                 set_up_set(Path(name), split=split)
                 drawn = []
                 backend = AutopilotSegmentBackend(splits=("train", "select", "val"), airports_root=Path(name))
-                with mock.patch.object(AutopilotSegmentBackend, "executor_for",
+                with signals_loaded([]), mock.patch.object(AutopilotSegmentBackend, "executor_for",
                                        return_value=(Path("i"), Path("x"), one.params, {"sha256": "f"}, one.words)), \
                         mock.patch.object(training_flights, "open_flights",
-                                          lambda instructions, split, ids, words: drawn.append(split) or split), \
+                                          lambda instructions, split, ids, words, signals=None: drawn.append(split) or split), \
                         mock.patch.object(training_flights, "stored_closed_loop", lambda *args: {}), \
                         mock.patch.object(training_flights, "closed_loop_batch",
                                           lambda *args: (flight(args[4]).batch, [flight(args[4]).sentence])):
@@ -382,7 +443,7 @@ class CallersSplitsTest(unittest.TestCase):
             # the service's own setup of a val flight: drawn from the artefact's val split and kept
             drawn = []
 
-            def open_flights(instructions, split, ids, words):
+            def open_flights(instructions, split, ids, words, signals=None):
                 drawn.append((split, tuple(ids)))
                 return f"flights of {split}"
 
@@ -408,27 +469,197 @@ class CallersSplitsTest(unittest.TestCase):
                 stage_a.fly(request)
 
 
+class ExecutorDifferenceTest(unittest.TestCase):
+    """A43 (D73): the backend checks what it shows by what it flies — an answer farther from the artefact's stored flown
+    states than the executor conformance's bound is refused by name, in the one function both the service and stage B's
+    hook call (`apart_from_stored`)."""
+
+    def request(self, backend, sample):
+        """The request of the last heading word: flown to the outcome, so the whole flight is compared."""
+        events = sample["flights"][0]["closedLoop"]["2"]["events"]
+        word = [e for e in events if e["column"] == HEADING][-1]
+        return {"clientId": "page", "seq": 1, "airport": sample["airport"], "setId": FIXTURE_SET,
+                "flightKey": sample["flights"][0]["flightKey"], "rowIntervalS": 2.0,
+                "column": COLUMNS[word["column"]], "row": word["row"]}
+
+    def served(self, one, params):
+        """The synthetic service, its flights flown by ``params`` (the executor that the set was not exported with, when
+        they differ from the fixture's)."""
+        class Changed(SyntheticBackend):
+            def executor_for(self, sample):
+                return Path("fixture/instruction_language"), Path("fixture/executor"), params, {"sha256": "fixture"}, one.words
+
+            def set_flown(self, sample, split, interval_s, instructions, parameters, words, opened=None):
+                return SetFlown(one.batch, [one.sentence], params)
+
+        return Changed
+
+    def test_an_executor_whose_law_changed_is_refused_by_name_on_its_first_request(self):
+        from dataclasses import replace
+
+        one = flight(2.0)
+        with tempfile.TemporaryDirectory() as name:
+            sample = set_up_set(Path(name))
+            same = self.served(one, one.params)(splits=training_files.SPLITS, airports_root=Path(name))
+            answer = same.fly(self.request(same, sample))
+            self.assertLessEqual(max(answer["stored"]["horizontalM"], answer["stored"]["verticalM"]), STATE_BOUND_M)
+            for change in ({"bank_rate_deg_s": one.params.bank_rate_deg_s / 2.0},
+                           {"path_time_constant_s": one.params.path_time_constant_s * 2.0}):
+                with self.subTest(change=change):
+                    drifted = self.served(one, replace(one.params, **change))(splits=training_files.SPLITS,
+                                                                              airports_root=Path(name))
+                    with self.assertRaisesRegex(ExecutorDiffers, rf"live executor flies .* m horizontally and .* m "
+                                                                 rf"vertically from the artefact's stored states, past "
+                                                                 rf"{STATE_BOUND_M:g} m: .*export the set again"):
+                        drifted.fly(self.request(drifted, sample))
+
+    def test_the_bound_is_the_conformance_bound_each_way(self):
+        from dataclasses import replace
+
+        one = flight(2.0)
+        row, column = [(r, c) for r, c in words_said(one.sentence) if c == HEADING and r > 0][0]
+        result = fly_segment(one.batch, one.inputs, 0, one.sentence, column, row, one.params, one.words, NEVER)
+        step = one.words.spec.step_s
+        def shifted(axis: int, metres: float):
+            states = one.sentence.rows.states.copy()          # east (0) or MSL height (2), every row
+            states[:, axis] += metres
+            return replace(one.sentence, rows=replace(one.sentence.rows, states=states))
+
+        for axis in (0, 2):
+            with self.subTest(axis=axis):
+                apart_from_stored(result, shifted(axis, 0.5 * STATE_BOUND_M), one.batch, 0, step)   # within: answered
+                with self.assertRaises(ExecutorDiffers):
+                    apart_from_stored(result, shifted(axis, 2.0 * STATE_BOUND_M), one.batch, 0, step)
+
+
+    def test_a_flight_flown_to_its_outcome_that_ends_otherwise_than_the_stored_sentence_says_is_refused(self):
+        from dataclasses import replace
+
+        one = flight(2.0)
+        row = max(r for r, c in words_said(one.sentence) if c == HEADING)
+        result = fly_segment(one.batch, one.inputs, 0, one.sentence, HEADING, row, one.params, one.words, NEVER)
+        self.assertIsNotNone(result.verdict)
+        step = one.words.spec.step_s
+        apart_from_stored(result, one.sentence, one.batch, 0, step)                      # as stored: answered
+        other = next(name for name in OUTCOMES if name != one.sentence.withheld.outcome)
+        changed = replace(one.sentence, withheld=replace(one.sentence.withheld, outcome=other))
+        with self.assertRaisesRegex(ExecutorDiffers, f"ends {result.verdict.outcome}, the artefact's stored outcome is "
+                                                     f"{other}"):
+            apart_from_stored(result, changed, one.batch, 0, step)
+        stopped = fly_segment(one.batch, one.inputs, 0, one.sentence, HEADING,
+                              min(r for r, c in words_said(one.sentence) if c == HEADING and r > 0), one.params,
+                              one.words, NEVER)
+        self.assertIsNone(stopped.verdict)
+        apart_from_stored(stopped, changed, one.batch, 0, step)         # a stopped segment has no outcome to compare
+
+
+class OpeningTest(unittest.TestCase):
+    """A43: a set is opened under its own lock and never under the request lock, so a request waits only for the opening
+    of the set that it needs — and finds it open, not opened twice."""
+
+    def test_the_warm_up_holds_no_request_lock_and_a_request_waits_only_for_its_own_set(self):
+        import threading
+        from unittest import mock
+
+        from ts_transformer.experiments import training_flights
+
+        one = flight(2.0)
+        blocked, release, opened_of = threading.Event(), threading.Event(), []
+
+        def open_flights(instructions, split, ids, words, signals=None):
+            opened_of.append(ids[0].split(":")[0])
+            if ids[0].startswith("KAAA"):                        # the warm-up reaches KAAA first and is held there
+                self.assertFalse(backend._lock.locked())         # ... holding no request lock
+                blocked.set()
+                self.assertTrue(release.wait(30.0))
+            return "flights"
+
+        lines = []
+        with tempfile.TemporaryDirectory() as name:
+            samples = set_up_sets(Path(name), ("KAAA", "KBBB"))
+            backend = AutopilotSegmentBackend(splits=training_files.SPLITS, airports_root=Path(name))
+            executor = (Path("i"), Path("x"), one.params, {"sha256": "fixture"}, one.words)
+            with mock.patch.object(AutopilotSegmentBackend, "executor_for", return_value=executor), \
+                    mock.patch.object(training_flights, "open_flights", open_flights), \
+                    mock.patch.object(training_flights, "stored_closed_loop", lambda *args: {}), \
+                    mock.patch.object(training_flights, "closed_loop_batch",
+                                      lambda *args: (flight(args[4]).batch, [flight(args[4]).sentence])), \
+                    signals_loaded([]):
+                warming = threading.Thread(target=backend.warm_up, kwargs={"log": lines.append})
+                warming.start()
+                same, kept = [], []
+                waiting = threading.Thread(target=lambda: same.append(
+                    backend.set_flown(samples["KAAA"], "train", 4.0, Path("i"), one.params, one.words)))
+                try:
+                    self.assertTrue(blocked.wait(30.0))              # the warm-up is opening KAAA
+                    other = backend.set_flown(samples["KBBB"], "train", 2.0, Path("i"), one.params, one.words)
+                    self.assertIs(other.batch, flight(2.0).batch)    # KBBB opened meanwhile, no waiting
+                    self.assertTrue(warming.is_alive() and not backend._lock.locked())
+                    waiting.start()                                  # a request for KAAA waits for its opening
+                    waiting.join(0.3)
+                    self.assertTrue(waiting.is_alive())
+                finally:
+                    release.set()
+                    warming.join(30.0)
+                    waiting.join(30.0)
+                self.assertFalse(warming.is_alive() or waiting.is_alive())
+                self.assertEqual(sorted(opened_of), ["KAAA", "KBBB"])  # each set drawn once, whoever asked
+                self.assertEqual(len(same), 1)
+                self.assertFalse([line for line in lines if "skipped" in line], lines)
+
+
 class CheckLiveTest(unittest.TestCase):
     """`check_live.compare`: a live answer against the sample's closed-loop sentence of the same flight and Δ."""
 
     @staticmethod
-    def case(offset_m: float = 0.0, stored_m: float = 0.0, end: str = "landed"):
+    def case(offset_m: float = 0.0, end: str = "landed"):
         closed = {"flownFromRow": 2, "states": {"rows": 6, "eM": [0.0] * 6, "nM": [0.0] * 6, "heightMslM": [500.0] * 6},
                   "replay": {"outcome": "landed", "endCycle": 7, "crossing": {"heightM": 15.0}}}
         answer = {"executor": {"cycleS": 1.0}, "track": {"cycle": [0, 1, 2, 3, 4], "eM": [offset_m] * 5, "nM": [0.0] * 5,
                                                           "altitudeMslM": [500.0] * 5},
-                  "stored": {"horizontalM": stored_m, "verticalM": 0.0},
                   "segment": {"end": end, "endCycle": 7}, "crossing": {"heightM": 15.0}}
         return answer, closed
 
-    def test_a_live_answer_differs_by_name_past_the_rounding_the_bound_or_the_outcome(self):
+    def test_a_live_answer_differs_by_name_past_the_rounding_or_the_outcome(self):
         from aeroviz_backend.autopilot_segment.check_live import ROUNDING_M, compare
 
         self.assertEqual(compare(*self.case(offset_m=0.09), 2.0, True), [])
         self.assertRegex(compare(*self.case(offset_m=ROUNDING_M + 0.01), 2.0, False)[0], r"^cycle 0: .* row 2$")
-        self.assertRegex(compare(*self.case(stored_m=2.0 * STATE_BOUND_M), 2.0, False)[0], "artefact's stored states")
         self.assertRegex(compare(*self.case(end="ground_contact"), 2.0, True)[0], "ended ground_contact at cycle 7")
         self.assertEqual(compare(*self.case(end="ground_contact"), 2.0, False), [])     # not its column's last word
+
+
+class CheckLiveRunTest(unittest.TestCase):
+    """A43: `check_live` is a runner — it runs the three checks for each set's artefact and executor spec before its work
+    — and a refusal of the service is a differing segment in its record, not the end of the run."""
+
+    def test_it_runs_the_checks_first_and_records_the_service_s_refusal_as_a_difference(self):
+        from unittest import mock
+
+        from ts_transformer.repo_layout import REPO_ROOT
+
+        from aeroviz_backend.autopilot_segment import check_live
+
+        class Refusing(SyntheticBackend):
+            def fly(self, payload):
+                raise ExecutorDiffers("flight: the live executor flies 3 m horizontally and 0 m vertically from the "
+                                      "artefact's stored states")
+
+        with tempfile.TemporaryDirectory() as name:
+            sample = set_up_set(Path(name))
+            gate = mock.Mock()
+            with mock.patch.object(check_live, "stage_a_service",
+                                   lambda root: Refusing(splits=training_files.SPLITS, airports_root=root)), \
+                    mock.patch("ts_transformer.autopilot.closed_loop.require_conforming_closed_loop", gate):
+                status = check_live.main(["--set-id", FIXTURE_SET, "--out", str(Path(name) / "out"),
+                                          "--airport", sample["airport"], "--root", name])
+            self.assertEqual(status, 1)
+            gate.assert_called_once_with(REPO_ROOT / sample["source"]["instructions"],
+                                         REPO_ROOT / sample["source"]["executor"])
+            record = json.loads((Path(name, "out", "check.json")).read_text(encoding="utf-8"))
+            self.assertGreater(record["segments"], 0)
+            self.assertEqual(record["differing"], record["segments"])
+            self.assertIn("3 m horizontally", record["segmentsDiffering"][0]["differ"][0])
 
 
 class FakeAutopilot:

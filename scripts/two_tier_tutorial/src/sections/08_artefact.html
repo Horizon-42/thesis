@@ -1,0 +1,40 @@
+<section id="s-artefact">
+<h2 id="artefact" data-toc="8 The artefact and its identity">8 The artefact and its identity</h2>
+<p>The labeller writes the <t zh="产物">sentence artefact</t>. It is a directory with the spec, the signals of each flight, the candidate runways, the sentences, and the closed-loop sentences for each split and each Δ. The formal artefact is <code>instruction_language/v12_20261005</code> with the executor spec <code>executor/v17_20261005</code>. Both are read-only, with a checksum file.</p>
+<table>
+<thead><tr><th>Split of the days</th><th class="num">Days</th><th>Use</th></tr></thead>
+<tbody>
+<tr><td>train</td><td class="num">53</td><td>Training</td></tr>
+<tr><td>select</td><td class="num">9</td><td>Stop of the training and the choices</td></tr>
+<tr><td>val</td><td class="num">14</td><td>One validation readout for each stage</td></tr>
+<tr><td>test</td><td class="num">14</td><td>Sealed: never opened, never labelled, never put in a scene</td></tr>
+</tbody></table>
+<p>The split is by <t zh="运行日">operating day</t> (a flight’s day is its landing day, UTC − 9 h), and the file of the split is committed. KAUS is a held-out test airport. Its data are not in the live training data.</p>
+
+<h3 id="a-identity" class="toc">8.1 What an identity binds</h3>
+<p>The rule of <span class="pill d">D21</span> is: an identity binds the <b>format</b> (what the words and the payloads mean) and the <b>data rules</b> (the sealed test days). Code is identified by <b>what it does on fixed inputs</b>, never by a hash of its source bytes. Data are identified by their flights, never by the bytes of a manifest.</p>
+<ul>
+<li>The vocabulary: the <b>spec sha</b>. It is the format.</li>
+<li>The labeller: a <b>conformance check</b>. The artefact holds a reference sample. The check labels it again with the code on disk and requires the same words, strata and refusals.</li>
+<li>The executor: a conformance check on its reference tracks (section 5.6).</li>
+<li>The closed-loop reading: its own conformance check, within the tolerance of the executor check.</li>
+<li>The flights: the stored signals. A consumer that rebuilds a flight from the harvest compares it row by row.</li>
+</ul>
+<p>Each check runs <b>every time</b>, in the process that uses the code. There is no passed record and no digest of code. Why? The earlier design named the passed records by a digest of the code. A change in a file that moved no track still refused every runner until the checks ran again. The user called a code fingerprint a bad design (<span class="pill d">D73</span>). A code change that stays within the bounds opens everything, and nothing is retrained.</p>
+
+<h3 id="a-interface" class="toc">8.2 The public interface</h3>
+<p>The other stages use stage A only through seven items. Everything else can change without a change of the other documents.</p>
+<table>
+<thead><tr><th>#</th><th>Item</th><th>Where</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>The vocabulary spec</td><td><code>instructions/spec.py</code>, <code>words.py</code></td></tr>
+<tr><td>2</td><td>The grammar (<code>apply</code> and the mask)</td><td><code>instructions/grammar.py</code></td></tr>
+<tr><td>3</td><td>The sentence artefact, the stored signals, the faults</td><td><code>instructions/artefact.py</code>, <code>faults.py</code></td></tr>
+<tr><td>4</td><td>The candidates and their geometry</td><td><code>candidates.json</code>, <code>instructions/airport.py</code></td></tr>
+<tr><td>5</td><td>The executor and the start of a closed loop</td><td><code>autopilot/executor.py</code>, <code>start.py</code></td></tr>
+<tr><td>6</td><td>The judge</td><td><code>autopilot/judge.py</code></td></tr>
+<tr><td>7</td><td>The row grid</td><td><code>instructions/labeller/interval.py</code></td></tr>
+</tbody></table>
+<p>The package rules are enforced by a test: <code>instructions/</code> imports neither <code>autopilot/</code> nor <code>prior/</code>. <code>autopilot/</code> and <code>prior/</code> import <code>instructions/</code> and not each other. The runners join them.</p>
+<p>The artefact also tells a reader which fields <b>a model must not read</b> (<span class="pill d">D82</span>): the landed runway, the landing time, the capture row, the go-around rows, the stratum, the outcome, and the errors of the closed-loop reading. They use later rows. They are for readouts and selection, never inputs. The reader gives them apart from the rows. A flight whose observed track has a faulty point (a jump, a held position, a reversal of more than 120°) is marked when the artefact is read (<span class="pill d">D111</span>).</p>
+</section>

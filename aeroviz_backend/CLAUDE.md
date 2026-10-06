@@ -25,9 +25,12 @@ frontend reads. Solver internals and defaults live in `4dTrajectory/CLAUDE.md`.
   judged. The answer (`aeroviz-autopilot-segment-v9`) is the flight every cycle from the word on, the crossing with its
   decision-altitude check when flown to the outcome, and its distance from the artefact's stored flown states (`stored`).
   Sets are read from `<airport>/training/index_v4.json` (never `index.json`); the set's sample names its artefact and
-  executor spec, opened with `replay.open_executor` (only for executor code that flies the spec's reference tracks within
-  1e-6 m). 400 a bad request, 404 not listed, 409 superseded by a later request of the same page (`clientId` + rising
-  `seq`), 500 anything else with its reason. Warmed up at start (`http_server.warm_autopilot`). `--training-airports-root`
+  executor spec, opened with `replay.open_spec`: **the backend runs no conformance check at its start** (D73, A43 — it
+  produces no compared result; the checks run where the code changes and in `check_live`), and checks what it shows by
+  what it flies: an answer farther than `STATE_BOUND_M` (1e-6 m) from the artefact's stored states is refused by name
+  (`ExecutorDiffers`, `fly.apart_from_stored`, a 500 with its reason). 400 a bad request, 404 not listed, 409 superseded by a later request of the same page (`clientId` + rising
+  `seq`), 500 anything else with its reason. Warmed up at start (`http_server.warm_autopilot`), each set under its own lock, never the request lock: a request waits
+  only for the set it needs (the page says "the backend is opening the set" after 2 s). `--training-airports-root`
   points the server at a test stack's own airports tree. `python -m aeroviz_backend.autopilot_segment.check_live` flies
   every word of a published set against its sample (outline §6 item 6).
 

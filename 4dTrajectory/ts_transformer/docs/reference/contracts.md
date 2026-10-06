@@ -427,7 +427,9 @@ grid also on its UTC Δ grid at 4 and 8 s, `labeller.interval.on_utc_grid`, or w
 that writes the labels. **Since A29 (D73, 2026-10-04) there is no passed record and no digest of code**: every process
 that uses the labeller on an artefact reads the reference again first, on the 2 s rows and every Δ grid
 (`require_conforming_labeller` → `check`, 1.7 s on a formal artefact: opening an executor spec for it, a replay, the closed
-loop, the backend at its start, the figures), and a difference refuses by name; `instruction_conformance` runs the same
+loop, the figures; **not the backend since A43**, 2026-10-05: it runs no check at its start, because it produces no compared
+result — each answer's distance from the stored states, refused past `STATE_BOUND_M`, checks what it shows, and the checks run
+where the code changes, D73), and a difference refuses by name; `instruction_conformance` runs the same
 check as information. (Until A29 a `passed-<code12>.json` per labeller code, named by the logic of `LABELLER_MODULES`,
 stood in for the check.)
 
@@ -549,7 +551,7 @@ labeller's check (C30) and the executor's (`conformance.require_conforming_execu
 reference flown again in EVERY way the executor flies (single-aircraft batch, multi-aircraft batch with staggered starts,
 the single-flight executor), states ≤ 1e-6 m horizontally and vertically, other floats ≤ 1e-6, every limit, mode, done
 cycle, outcome and word verdict equal — a difference refuses by name, the largest differences are printed for the run's
-log; `replay.open_spec` opens it without, for the check itself. **A code change whose tracks stay within the bounds opens
+log; `replay.open_spec` opens it without, for the check itself and for the backend (A43: it checks each answer instead). **A code change whose tracks stay within the bounds opens
 everything with nothing run beforehand, and no spec, training or readout is redone; one that leaves them needs a new
 spec.** No passed record, no digest of code (until A29 a `passed-<code12>.json` named by the logic of every `autopilot/`
 module stood in for the check), no clean-checkout rule for a check; `executor_conformance` runs it as information.

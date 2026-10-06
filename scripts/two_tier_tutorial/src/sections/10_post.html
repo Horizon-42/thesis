@@ -1,0 +1,56 @@
+<section id="s-post">
+<h2 id="post" data-toc="10 The post-training">10 The post-training</h2>
+<p>The prior learned to imitate. But a good imitation is not the same as a skill: the prior must <em>reach the runway</em> with its own words. The post-training trains the prior again in a closed loop. The prior speaks, the executor flies, the judge decides, and the reward comes from the outcome. Stage C builds it. The code is on the branch <code>dev-two-tier-v4-post</code>.</p>
+<div class="note warn"><p><b>Status.</b> The parts C0–C7 and C9 are built on synthetic artefacts. The parts C8 and C10–C12 (the formal runs) wait for the base model of stage B and for the review of stage B. So this section shows no result of a post-trained model. The evidence it quotes comes from the earlier design (<code>instruction-v3</code>), and the text says so.</p></div>
+
+<h3 id="t-window" class="toc">10.1 One stage, one commanded aircraft, a window of traffic</h3>
+<p>The closed loop is a <b>window of recorded traffic</b> with <b>one commanded aircraft</b> (<span class="pill d">D29</span>). The model speaks for that aircraft. The other aircraft fly their records. A window starts at row 0 of the commanded aircraft. It ends where the commanded aircraft is done, or when it loses separation that it answers for (<span class="pill d">D93</span>). The usual length is about 20 minutes, but it is not a bound.</p>
+<p>The start model is the base model <em>with a traffic attention whose output is zero</em>. There is no single-aircraft stage, for three reasons. A window with no other aircraft is exactly single-aircraft free generation. A single-aircraft reward does not see when an aircraft lands, so it does not limit the spread of the landing times. And the model must learn to land one time, in the loop where it lands. On the train days, 60 % of the windows have no leader in the air at their first predicted step.</p>
+<p><b>Windows.</b> A round draws real windows and augmented windows in equal counts (<span class="pill d">D100</span>). Window A inserts one aircraft that flies its record. Window D moves the aircraft ahead. Window B (a moved start) comes after milestone C9. A window that opens inside a loss of separation is left out of the draw (<span class="pill d">D113</span>).</p>
+
+<h3 id="t-reward" class="toc">10.2 The reward</h3>
+<p>The reward comes <b>only from the outcome</b> (<span class="pill d">D30</span>). It is 1 for a landing without a go-around on a runway of the airport’s present landing direction. It is 0.9<sup>n</sup> for a landing after n go-arounds. It is 0 for every other outcome, and for every loss of separation. There is no payment for a go-around without a landing.</p>
+<div data-demo="reward" data-title="The reward, and why a go-around is not paid"></div>
+<p>A go-around then pays when it turns a probable failure into a probable landing. With the same chance of landing before and after, it gives 0.9·p, which is less than p. A go-around that prevents a loss of separation keeps the chance of 0.9. So the same reward also teaches the go-around for traffic. “Go-around” is permitted at any row after the first predicted step (<span class="pill d">D10</span>), and the chance p is low on many flights at the start. A payment would teach a go-around where the model is not sure, not where the approach is unstable. Before the training, the design measures whether the base model says “go-around” by itself on the final. If it does, the training needs no probes.</p>
+
+<h3 id="t-branch" class="toc">10.3 Branch training</h3>
+<p>One reward for a whole sentence gives every word the same advantage. This is poor <t zh="信用分配">credit assignment</t>. <b>Branch training</b> (<span class="pill d">D37</span>, <span class="pill d">D94</span>) gives the advantage only to the words after a branch point.</p>
+<ol class="steps">
+<li>Each training window is spoken <b>one time</b>: the first sentence, with its own random numbers.</li>
+<li>If its reward is 1, the window gives <b>no sample</b>. A group whose rewards are all equal gives no gradient.</li>
+<li>If the reward is less than 1, find the event time t_E: the step of the loss of separation, of the judged outcome, or of the time limit. The <b>branch points</b> are the first predicted step and every 120 s after it, before t_E.</li>
+<li>A second pass speaks these windows again with the random numbers of their first sentences. At each branch point it <b>copies the state K = 8 times</b>: the executor’s loop, the speaker (cache and mask state), the separation judge and the window’s own state. Each copy continues with its own random numbers.</li>
+<li>A <b>branch group</b> is the first sentence and the 8 continuations of one branch point. They differ only after the branch point. The advantage of a sentence is its reward minus the mean of its group. It applies only to the words after the branch point.</li>
+</ol>
+<div data-demo="branch_training" data-title="Branch groups of one window"></div>
+<p>Why this design? (1) <b>Cost.</b> In the earlier design, speaking took about 55 % of a round, and only 37–47 % of the sentences carried a gradient. Branch training spends the extra sentences only where the first sentence failed. A continuation flies only the part after its branch point. (2) <b>Credit.</b> Only the words after the branch point differ inside a group. (3) <b>Branch points.</b> A readout of the earlier design found that a new sentence from the start rescues the most events; from 120 s before the event, fewer; from 60 s or less, few. The branch points are fixed before the run, at the start and at fixed times.</p>
+<p>A test in the code checks that a continuation with the random numbers of the first sentence says the <b>same words</b> and flies the same states, within 1e-6 m. The probabilities can differ in their last bits when the batch differs. A window that differs is counted, reported, and gives no sample in the round.</p>
+<figure class="paper" data-fig="fig13_branch_training"></figure>
+
+<h3 id="t-loss" class="toc">10.4 The loss</h3>
+<p>The loss has three parts: the <t zh="裁剪比率代理目标">clipped-ratio surrogate</t> (ε = 0.2) with the advantage of each branch group, the <t zh="KL 散度">pull to the base model</t> (weight 0.04, a KL estimate on the sampled words), and the <b>teacher-forced data term</b> (weight 1) on single-aircraft samples of the sentences in the selection <code>landed</code>. The traffic attention has its own learning rate.</p>
+<div data-demo="surrogate" data-title="The clipped surrogate, the pull to the base, the weight of a row"></div>
+<ul>
+<li>The words are scored under the speaker’s records of the permitted words, so the loss reads the same masked distribution that the speaker drew from.</li>
+<li>The <b>ratio</b> of a word is its probability under the model over its probability under a frozen copy of the model that spoke the sample. It is computed word by word.</li>
+<li>Every <b>counted row weighs the same</b>: the sum over a batch is divided by the counted rows of the batch (<span class="pill d">D115</span>).</li>
+<li><b>Dropout.</b> The surrogate and the pull run with dropout off, because the speaker spoke with dropout off. The data term runs with the dropout of the base’s training (<span class="pill d">D107</span>). With dropout on, in a check on random weights, the ratio was off by 3 % on average and 22.5 % of the rows fell outside the clip band.</li>
+</ul>
+
+<h3 id="t-traffic" class="toc">10.5 Traffic: tokens, attention and masks</h3>
+<p>The other aircraft of a window are every other flight of the airport and the split that is in the air at that step. They fly their stored signals. Their motion is the displacement in the 2 s before the row, and their R is the runway of their record from their own first predicted step on.</p>
+<ul>
+<li><b>Edge features.</b> For each other aircraft: where it is in the commanded aircraft’s frame (front, left, height difference); its place on the <t zh="进近时钟">approach clock</t> and whether the two can be compared; the relation of the two runways in force (same, single, dependent, independent, unrelated); the closing rate; the closest point of approach (time, horizontal distance, height difference); the distance that the rules require between the two; and a flag for an unknown motion. Every scale is a constant in SI units.</li>
+<li><b>Traffic attention.</b> At each layer, a module reads one token for each other aircraft: the edge features and the aircraft’s own motion (<span class="pill d">D98</span>). <b>Its output layer starts at zero</b>, and its output is zero when a row has no other aircraft. So the start model equals the base, and a window with no traffic is free generation. One token network is shared by the layers (<span class="pill d">D116</span>).</li>
+<li><b>Established on the final.</b> A function of one row: G false, the aircraft inside the region of the final of R, and its track within 20° of the course (<span class="pill d">D92</span>). After “go-around” the aircraft is not established until a runway word ends G.</li>
+<li><b>Separation judge.</b> It uses the radar minima of FAA JO 7110.65BB with the rules for visual approaches. Parallel runways at least 2,500 ft (762 m) apart are free once both aircraft are turned in. An event of a window is the first loss of separation for which the commanded aircraft answers.</li>
+<li><b>Speed-word mask.</b> A mask of the caller on the speed column. It acts only when the aircraft and the one next ahead are both established, and while the aircraft is more than 5 NM from its threshold. It is a <b>stated approximation</b>: constant rate, no turn, no wind. It acts in a band that is only 0.1–2 km wide at most runways (<span class="pill d">D101</span>).</li>
+</ul>
+<p>There is no mask for the spacing on the final. The reward (0 for a loss of separation) teaches it. A mask is designed only if the readouts show that the losses at the join dominate.</p>
+<div data-demo="traffic_scene" data-title="Edge features, and the speed-word mask"></div>
+<figure class="paper" data-fig="fig14_traffic_features"></figure>
+<figure class="paper" data-fig="fig12_post_training_loop"></figure>
+
+<h3 id="t-evidence" class="toc">10.6 What the earlier design measured</h3>
+<p>These numbers come from the multi-aircraft readouts of <code>instruction-v3</code>. They are evidence, not a result of the new design. A prior of that design, post-trained with one aircraft commanded, landed between 111 s earlier and 121 s later than its record on the select days (p10, p90). A loss of separation with the recorded traffic ended 11.5 % of its sentences. Most losses were on vectored approaches (21.6 %, against 4.0 % for straight-in). The selected round of its training had 1.75 points fewer losses on the validation days (11.1 % → 9.3 %). No readout has the <em>base</em> model of the new design in this loop.</p>
+</section>

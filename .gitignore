@@ -46,3 +46,8 @@ dynamics_comparison_history/
 # `python -m evaluation` writes its report to CWD by default; a run from the repo
 # root drops one here. Batch reports belong beside their records, not at the root.
 evaluation_report.json
+
+# the two-tier tutorial: its PDF figures and its data inputs are sources (docs/two_tier/tutorial, scripts/two_tier_tutorial)
+!4dTrajectory/ts_transformer/docs/two_tier/tutorial/figures/pdf/
+!4dTrajectory/ts_transformer/docs/two_tier/tutorial/figures/pdf/*.pdf
+!scripts/two_tier_tutorial/data/

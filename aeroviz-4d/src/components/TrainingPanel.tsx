@@ -29,6 +29,8 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
 import { useApp } from "../context/AppContext";
 import useTrainingAutopilot from "../hooks/useTrainingAutopilot";
+import useTrainingPriorIndex from "../hooks/useTrainingPriorIndex";
+import TrainingPriorSession from "./training/TrainingPriorSession";
 import ProblemBox from "./training/ProblemBox";
 import TrainingFlightSession from "./training/TrainingFlightSession";
 import type { DetailsPage } from "./training/PanelParts";
@@ -42,6 +44,7 @@ import {
   type TrainingSample,
   type TrainingSetEntry,
 } from "../data/trainingSample";
+import { trainingPriorIndexPath } from "../data/trainingPriorSample";
 
 type IndexState =
   | { status: "loading" }
@@ -86,6 +89,14 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
   const [setId, setSetId] = useState<string | null>(null);
   const [setState, setSetState] = useState<SetState>({ status: "idle" });
   /** The details page while it is open: its section, and the control that opened it (the focus goes back there). */
+  /** Whose sets the panel shows: stage A's (`index_v4.json`) or stage B's prior sets (`index_prior_v2.json`, offered only where
+   *  the airport has the file). */
+  const [viewing, setViewing] = useState<"stageA" | "prior">("stageA");
+  const priorIndex = useTrainingPriorIndex(activeAirportCode || null);
+  // the switch is offered where the airport has prior sets (or a prior index to complain about); an airport with none shows
+  // stage A whatever was chosen at the last one
+  const priorOffered = (priorIndex.status === "ready" && priorIndex.index.sets.length > 0) || priorIndex.status === "invalid";
+  const showing = priorOffered ? viewing : "stageA";
   const [shownDetails, setShownDetails] = useState<{ section: string; opener: HTMLElement } | null>(null);
   const show = useCallback((section: string) => setShownDetails((open) => (open === null ? null : { ...open, section })), []);
   const close = useCallback(() => setShownDetails(null), []);
@@ -168,11 +179,33 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
         {/* Everything read ONCE — what the module is, the vocabulary, the readouts — is on the details page, so the
             list keeps the dock's height. */}
         <button type="button" className="training-details-open" aria-haspopup="dialog" aria-label="Training details"
-          title="Training details" onClick={details.open("overview")} disabled={sample === null}>
+          title="Training details" onClick={details.open("overview")} disabled={sample === null || showing === "prior"}>
           ⓘ
         </button>
       </header>
 
+      {priorOffered ? (
+        <label className="training-field" title="Stage A: flights read back through the closed loop. Stage B: the sentences the prior said, flown by the executor.">
+          <span>Sets of</span>
+          <select value={showing} onChange={(event) => setViewing(event.target.value as "stageA" | "prior")}>
+            <option value="stageA">Stage A · read-back</option>
+            <option value="prior">Stage B · prior</option>
+          </select>
+        </label>
+      ) : null}
+      {showing === "prior" && priorIndex.status === "invalid" ? (
+        <ProblemBox title={`${trainingPriorIndexPath(airport)} cannot be read.`} detail={priorIndex.problem} />
+      ) : null}
+      {showing === "prior" && priorIndex.status === "ready" && activeAirportCode ? (
+        <>
+          {priorIndex.index.rejected.map((item) => (
+            <ProblemBox key={item.id} title={`Entry ${item.id} was rejected.`} detail={item.problem} />
+          ))}
+          <TrainingPriorSession airport={activeAirportCode} sets={priorIndex.index.sets} />
+        </>
+      ) : null}
+
+      {showing === "prior" ? null : <>
       {indexState.status === "loading" ? <p className="training-note" role="status">Reading {trainingIndexPath(airport)} …</p> : null}
       {indexState.status === "absent" ? <EmptyState airport={airport} /> : null}
       {indexState.status === "invalid" ? (
@@ -207,6 +240,7 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
           ) : null}
         </>
       ) : null}
+      </>}
     </section>
   );
 }
