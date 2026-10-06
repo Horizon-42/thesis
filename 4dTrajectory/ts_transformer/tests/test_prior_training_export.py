@@ -175,6 +175,8 @@ def stage_b_fixture(tmp_path, monkeypatch, *, texts=False):
     readout = fixture_readout(geometry.code, instructions=str(directory), executor=str(executor), prior=str(prior),
                               checkpoint_sha256=file_sha256(prior / "checkpoint.pt"))
     val_dir = tmp_path / "readout_val"
+    readout_dir.mkdir()
+    (readout_dir / "readout.json").write_text("{}")                     # the readouts written (D119, D127)
     names = {readout_dir: "fixture/readout", Path(directory): "fixture/instruction_language", executor: "fixture/executor",
              prior: "fixture/prior", val_dir: "fixture/readout_val"}
     with monkeypatch.context() as patch:
@@ -338,7 +340,8 @@ def test_the_runner_writes_a_set_and_refuses_what_it_cannot_trust(tmp_path, monk
     (prior / "checkpoint.pt").write_bytes(b"a checkpoint")
     readout = fixture_readout(geometry.code, instructions=str(directory), executor=str(executor), prior=str(prior),
                               checkpoint_sha256=file_sha256(prior / "checkpoint.pt"))
-    monkeypatch.setattr(export, "read_sentences", lambda out: (readout, stored))
+    read = []
+    monkeypatch.setattr(export, "read_sentences", lambda out: read.append(out) or (readout, stored))
     monkeypatch.setattr(export, "require_conforming_closed_loop",
                         lambda *given: (test_start._params(), {"sha256": "spec", "checks": {"stub": True}}, words))
     # the prior as `checkpoint.open_prior` opens it (its own checks: tests/test_prior_validation.py)
@@ -353,6 +356,11 @@ def test_the_runner_writes_a_set_and_refuses_what_it_cannot_trust(tmp_path, monk
     root = tmp_path / "airports"
     argv = ["--readout", str(tmp_path / "readout"), "--set-id", "one", "--root", str(root), "--per-airport", "1",
             "--smoke"]
+    with pytest.raises(SystemExit):                       # a readout without its readout.json: before any file is read
+        export.main(argv)
+    assert read == []
+    (tmp_path / "readout").mkdir()
+    (tmp_path / "readout" / "readout.json").write_text("{}")
     with pytest.raises(SystemExit):                                     # a smoke readout makes only a smoke set
         export.main(argv[:-1])
     build, built = export.build_airport, []
@@ -384,14 +392,9 @@ def test_the_runner_writes_a_set_and_refuses_what_it_cannot_trust(tmp_path, monk
         export.main([*argv[:3], "val", *argv[4:]])
     assert sorted(p.relative_to(root) for p in root.rglob("*")) == before                # nothing more written
     (prior / "val_read_prior_free_generation.json").write_text(json.dumps({"out": str(tmp_path / "readout")}))
-    # the claimed one is exported once it is written (its flights as the train readout's: the synthetic artefact has
-    # no val sentences); a claimed read that stopped before its readout.json is not (D119)
+    # the claimed one, written, is exported (its flights as the train readout's: the synthetic artefact has no val
+    # sentences)
     monkeypatch.setattr(export, "build_airport", lambda *a, **k: built[0])
-    assert not (tmp_path / "readout" / "readout.json").exists()
-    with pytest.raises(SystemExit, match="D119"):
-        export.main([*argv[:3], "val", *argv[4:]])
-    (tmp_path / "readout").mkdir(exist_ok=True)
-    (tmp_path / "readout" / "readout.json").write_text("{}")
     assert export.main([*argv[:3], "val", *argv[4:]]) == 0
 
 

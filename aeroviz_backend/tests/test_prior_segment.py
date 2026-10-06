@@ -28,13 +28,11 @@ from aeroviz_backend.autopilot_segment import prior as prior_segments
 from ts_transformer.repo_layout import REPO_ROOT
 
 from aeroviz_backend.autopilot_segment.backend import AutopilotSegmentBackend, SetFlown, stage_a_service
-from aeroviz_backend.autopilot_segment.errors import NotListed, RequestRefused, Superseded
+from aeroviz_backend.autopilot_segment.errors import ExecutorDiffers, NotListed, RequestRefused, Superseded
 from aeroviz_backend.autopilot_segment.fly import fly_segment
 from aeroviz_backend.http_server import AeroVizBackendApp
 
 CPU = torch.device("cpu")
-#: The export writes e, n and height to 0.1 m: a distance of two of them is at most 0.05 m · √2 off.
-ROUNDING_M = 0.05 * 2**0.5 + 1e-3
 FRONTEND = Path(__file__).resolve().parents[2] / "aeroviz-4d" / "src" / "data"
 FIXTURES = FRONTEND / "__tests__" / "fixtures" / "stage_b"
 
@@ -132,13 +130,41 @@ def test_every_word_of_a_prior_sentence_flown_live_is_the_exported_flight(world)
             cycles = np.arange(rows) * every_cycles(flown, params)
             for name, index in (("e", 0), ("n", 1), ("height", 2)):
                 assert float(np.abs(live[name][cycles] - reference[:rows, index]).max()) < STATE_BOUND_M, (said["sample"], row, column, name)
-            apart = prior_segments.apart_from_exported(result, said["track"], told, 0, flown.words.spec.step_s)
-            assert max(apart["horizontalM"], apart["verticalM"]) < ROUNDING_M
+            apart = prior_segments.apart_from_exported(result, said, told, 0, flown.words.spec.step_s)
+            assert max(apart["horizontalM"], apart["verticalM"]) < STATE_BOUND_M        # the track unrounded (D127)
             # a column's last word has no stop: it is flown on to the judge's outcome (an earlier word is too, when its
             # stop lies past the flight's end)
             assert last[int(column)] != int(row) or result.verdict is not None, (said["sample"], row, column)
             if result.verdict is not None:
                 assert result.verdict.outcome == said["outcome"] and int(result.verdict.end_row) == said["endCycle"]
+
+
+def test_the_live_segment_is_refused_past_the_bound_or_at_another_outcome_or_end_cycle(world):
+    """D127: an answer whose states lie past the executor's bound from the prior sentence's written track (horizontally
+    or vertically), or whose flight flown to its outcome ends at another outcome or end cycle than the sentence's, is
+    refused by name; within the bound it is answered."""
+    sample, flown = world["sample"], world["flown"]
+    said = sample["flights"][0]["prior"][0]
+    grid = np.array(said["words"], dtype=np.int16)
+    told, sentence = prior_segments.on_words(flown.set.batch, 0, flown.set.sentences[0], grid, flown.words)
+    column = HEADING if (grid[:, HEADING] != UNCHANGED).any() else int(np.nonzero(grid != UNCHANGED)[1][0])
+    row = int(np.flatnonzero(grid[:, column] != UNCHANGED)[-1])               # flown on to the judge's outcome
+    result = fly_segment(told, flown.set.inputs, 0, sentence, column, row, test_start._params(), flown.words,
+                         lambda: False)
+    assert result.verdict is not None
+    step = flown.words.spec.step_s
+
+    def shifted(name, metres):
+        return {**said, "track": {**said["track"], name: [v + metres for v in said["track"][name]]}}
+
+    for name in ("eM", "heightMslM"):
+        prior_segments.apart_from_exported(result, shifted(name, 0.5 * STATE_BOUND_M), told, 0, step)    # within
+        with pytest.raises(ExecutorDiffers, match=rf"from the readout's flown states, past {STATE_BOUND_M:g} m"):
+            prior_segments.apart_from_exported(result, shifted(name, 2.0 * STATE_BOUND_M), told, 0, step)
+    other = "landed" if said["outcome"] != "landed" else "crossed_too_high"
+    for changed in ({"outcome": other}, {"endCycle": said["endCycle"] + 1}):
+        with pytest.raises(ExecutorDiffers, match="ends .* at cycle"):
+            prior_segments.apart_from_exported(result, {**said, **changed}, told, 0, step)
 
 
 def every_cycles(flown, params):
@@ -150,10 +176,10 @@ def test_a_request_flies_the_sentence_it_names_and_says_what_it_flew(world):
     answer = backend.prior.fly(request(world))
     assert (answer["schema"], answer["setId"], answer["sentence"], answer["rowIntervalS"]) == (
         prior_segments.SCHEMA, FIXTURE_SET, 0, 4.0)
-    assert answer["segment"]["column"] == HEADING and answer["stored"]["horizontalM"] < ROUNDING_M
+    assert answer["segment"]["column"] == HEADING and answer["stored"]["horizontalM"] < STATE_BOUND_M
     other = backend.prior.fly(request(world, sentence=1, seq=2, row=world["sample"]["flights"][0]["prior"][1]["events"][1]["row"],
                                       column=COLUMNS[world["sample"]["flights"][0]["prior"][1]["events"][1]["column"]]))
-    assert other["sentence"] == 1 and other["stored"]["verticalM"] < ROUNDING_M
+    assert other["sentence"] == 1 and other["stored"]["verticalM"] < STATE_BOUND_M
     closed = world["sample"]["flights"][0]["closedLoop"]["4"]["events"]
     event = [e for e in closed if e["row"] > 0][0]
     answer = backend.prior.fly(request(world, sentence=prior_segments.CLOSED_LOOP, seq=3, row=event["row"],
@@ -378,3 +404,63 @@ def test_the_frontend_fixture_of_an_answer_is_what_the_service_answers(world):
         path.write_text(text, encoding="utf-8")
     assert path.read_text(encoding="utf-8") == text, (
         f"{path} is not what the service answers now: AEROVIZ_WRITE_FIXTURES=1 writes it again")
+
+
+def test_the_claimed_set_flies_against_a_real_claim_file_only_once_its_readout_is_written(world, tmp_path, monkeypatch):
+    """D119, D128 through the backend, no stand-in for `checkpoint.written_claim`: a claimed val set flies when the
+    prior's run holds a claim file naming its readout and the readout is written there; a claim of another readout, or
+    one whose readout.json is not written, is refused by name."""
+    from ts_transformer.prior import checkpoint
+
+    monkeypatch.setattr(prior_segments, "written_claim", checkpoint.written_claim)       # the real one
+    prior_dir, readout = tmp_path / "prior", tmp_path / "readout_val"
+    prior_dir.mkdir()
+    readout.mkdir()
+    val = world["val_sample"]
+    claim = {**val["source"]["validationClaim"], "prior": str(prior_dir), "readout": str(readout)}
+    sample = {**val, "model": {**val["model"], "prior": str(prior_dir)},
+              "source": {**val["source"], "readout": str(readout), "validationClaim": claim}}
+    root = write_extra_set(world, "real_claim", sample)
+    backend = SyntheticBackend(root, world["flown"])
+    ask = request(world, setId="real_claim", flightKey=val["flights"][0]["flightKey"], clientId="real")
+    (prior_dir / f"val_read_{claim['reader']}.json").write_text(json.dumps({"reader": claim["reader"],
+                                                                           "out": str(readout), "utc": "x"}))
+    with pytest.raises(RequestRefused, match="holds no written claim"):                 # no readout.json yet
+        backend.prior.fly(ask)
+    (readout / "readout.json").write_text("{}")
+    assert backend.prior.fly({**ask, "seq": 2})["setId"] == "real_claim"
+    (prior_dir / f"val_read_{claim['reader']}.json").write_text(json.dumps({"reader": claim["reader"],
+                                                                           "out": str(tmp_path / "another"), "utc": "x"}))
+    with pytest.raises(RequestRefused, match="holds no written claim"):
+        backend.prior.fly({**ask, "seq": 3})
+
+
+def test_the_validation_service_is_made_once_when_two_threads_ask_for_it_at_once(tmp_path, monkeypatch):
+    """The warm-up and a request may both ask for the validation service first (A43): it is made once."""
+    import threading
+    import time
+
+    from aeroviz_backend.autopilot_segment import backend as backend_module
+
+    made = []
+
+    class Slow(backend_module.AutopilotSegmentBackend):
+        def __init__(self, *given, **named):
+            made.append(1)
+            time.sleep(0.2)                                                  # widen the window both threads meet in
+            super().__init__(*given, **named)
+
+    prior = stage_a_service(tmp_path).prior
+    monkeypatch.setattr(backend_module, "AutopilotSegmentBackend", Slow)
+    got, barrier = [], threading.Barrier(2)
+
+    def ask():
+        barrier.wait()
+        got.append(prior.val_service())
+
+    threads = [threading.Thread(target=ask) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert len(made) == 1 and got[0] is got[1]

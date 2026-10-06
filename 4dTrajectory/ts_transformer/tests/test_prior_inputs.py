@@ -638,3 +638,21 @@ def test_the_val_readers_recount_the_selection_and_the_identity_binds_the_signal
     signals.write_bytes(signals.read_bytes() + b"\0")
     assert artefact_identity(directory, 4.0, landings, "landed", counted=("train", "select"))["signals_files"]["val"] != \
         identity["signals_files"]["val"]
+
+
+def test_loop_rows_take_one_first_predicted_step_for_the_batch():
+    """B12 (§7 item 2): the first predicted step is one Δ row for the batch — an array of them, a float or a bool is
+    refused by name."""
+    import torch
+
+    from ts_transformer.prior.inputs import own_flight_key
+    from ts_transformer.prior.loop import LoopRows
+
+    words, signals, record, index = flight_and_index()
+    geometry = parallel_airport()
+    for start in (np.array([8, 9]), 8.0, True):
+        with pytest.raises(ValueError, match="one Δ row for the batch"):
+            LoopRows([geometry] * 2, [index] * 2, [own_flight_key(record)] * 2, np.zeros(2), np.zeros(2, dtype=int),
+                     start, variant="full", interval_s=4.0, step_s=words.spec.step_s, device=torch.device("cpu"))
+    LoopRows([geometry] * 2, [index] * 2, [own_flight_key(record)] * 2, np.zeros(2), np.zeros(2, dtype=int), np.int64(8),
+             variant="full", interval_s=4.0, step_s=words.spec.step_s, device=torch.device("cpu"))
