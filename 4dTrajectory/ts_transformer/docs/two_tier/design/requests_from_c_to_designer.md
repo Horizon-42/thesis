@@ -5,11 +5,18 @@ names a public interface must give, and the questions that only the user can dec
 it is rewritten in full each time, never appended to, and an item leaves when it is done. The evidence and the commits
 are in the implementation log (`readouts/2026-10-05_stage_c_implementation_log.md`, cited by §).
 
-State of 2026-10-06, 18:40 (C10 `post_train_20261006` resumed at round 4 with five workers; stage C on `dev-two-tier`
-at `af36ebe8`). Items of the earlier note resolved: O13 (D137), the speed proposals (D138), the workers' memory (O15).
+**State: 2026-10-07.**
+- C14's code is `21547ad4` on `dev-two-tier-v4-post`, with P47's refusal in `75fe9ff2`; both are reviewed, and the user merges them.
+- Stage D reports its GPU and timing steps done (`1c6146bb`: C13's GPU check identical, the base's speed, the re-exports). Rounds 10–13 of `post_train_20261006` wait only for the user's merge.
+
+**Items of the earlier note that are now resolved:**
+- the update in pieces: post-training §2 item 5;
+- the extension after C10: D157, C14;
+- stage B's item 5: it has left B's note;
+- P47 (no raise after the val read is claimed): decided by the user on 2026-10-07 and built in `75fe9ff2`.
 
 | # | Request | For | Log |
 |---|---|---|---|
-| 1 | **An update of the pass in pieces** (`832555a5`, the user's decision of 2026-10-06 after C10's round 4 ran out of the GPU's memory twice, an exception to "C runs C10 without changing code"): `post.loss.update_step` computes an update's surrogate and pull piece by piece (a branch group each), each divided by the counted rows of the whole update, its backward taken at once; the data term in one piece (its dropout); one optimizer step. The loss is unchanged (§2 item 5, D115: the gradient equal to the whole update's to float rounding); its memory is a piece's (round 4's largest update: 6.3–6.5 GB whole, 1.58 GB in pieces). `update_loss` stays as the reference. Rounds 0–3 ran the whole update. The design text of §2 item 5 (and C13, built on this code by stage B's implementer) is the designer's | The designer | §26 |
-| 2 | P45, a reading for the user: a window set's flown tracks are written unrounded (prior D127 followed for windows), so a set's file is larger (1.3× on the smoke set); a formal set's size is read at its export | The user | §21 |
-| 3 | `requests_from_b_to_designer.md` §3 item 5 ("what stage C needs after B12 and B13") is followed on stage C's branch and can leave: `SpeakingLoop` with the start's observed rows (`post_window_loop.py:118`), the val read's lock, claim with its options and spent mark (`post_validation`, D132), the unrounded track of D127 (sample v2) | The designer | §18–§21, §23 |
+| 1 | **P46, how C14 records a raise of the rounds.** The raise has no list of its own. Each resume's entry in `campaign.json` holds `rounds: {before, after}` and `inputs`, the paths that resume read, beside its time, commit and checks. The raises are the entries where `before` and `after` differ. The record's `settings.rounds` holds the current count, and its paths stay as recorded. The format's name stays `ts-post-train-v1`, because D157 keeps the same campaign. Only new resume entries carry the two keys; C10's four earlier entries do not. No reader, in Python or in the frontend, reads the entries of `resumed` | The user | §27 |
+| 2 | **S3 findings from C14's review, outside C14's files.** First: `post_training_export.py:309` and `model_speed.py:376` each write out their own list of the five path keys, so the same list is now in three places. Each could import `post_train.inputs_here` / `INPUT_PATHS` instead (stage D's implementer, a small change). Second: a resume entry's `inputs` is the path after `this_checkout`, not the path as typed. The two differ only when another checkout's absolute path is given, and both name the same data | The designer | §27 |
+| 3 | **P45, a reading for the user.** A window set writes its flown tracks without rounding (prior D127 followed for windows), so a set's file is larger: 1.3 times on the smoke set. A formal set's size is read when it is exported | The user | §21 |

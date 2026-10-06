@@ -370,3 +370,26 @@ of `notes/stage_b.md` item 10: A44, C13, B14. None of it is merged into `dev-two
 | The full suite | On `65adf480`, beside C10 on 3 + 2 + 1 workers (the user: few processes while a campaign runs): ts 1,868 passed 1 skipped, modeling and backend 1,130, frontend Python 202, 15.4 min |
 | Claude's check (`readouts/2026-10-06_training_view_and_speed_check.zh.md`; D139) | No S1. S2 2 and 3: `8e911092` (reviewed): the export refuses an envelope past the flown track and keeps one at its end; the prior's directory byte for byte the same after an export. Reading 9 corrected: `8cac5191` (reviewed): a worker's own memory is its private pages and its share of the swap (`SwapPss`) less the share at the start of its measure, its peak sampled every 0.2 s (not the inherited `ru_maxrss`), plus the readout's model and the round's kept series. S2 1: an order — B14's real-data check first after C10 |
 
+
+## 6 Stage B's steps after C10 (done by stage D's implementer)
+
+Stage D's implementer took over these steps (outline §5 rule 1, §4 item 6; notes/stage_d.md 一), on `dev-two-tier-v4` in
+`.claude/worktrees/two-tier-v4`, one at a time with no other job on the host or the GPU, 2026-10-06 and 07. Before
+item 4, `dev-two-tier-v4` was brought level with `dev-two-tier` (a merge, `17bf0d73`: a fast-forward was refused, since
+an earlier merge of `dev-two-tier`'s documents into v4, `353b8af7`, was not in `dev-two-tier`; the trees equal).
+
+| # | Step | Result |
+|---|---|---|
+| 1 | B14's real-data check (prior §12 B14) | B5's fold `C_full_s1337/KRDU` spoken again with `BATCH` on the select days with its readout's options (200 flights, 2 samples, seed 1337, chunk 400, CUDA), into a scratch directory: all 400 sentences word for word its readout's; every other field of `sentences.npz` (the states, the probabilities and the permission of "go-around", on the final, the procedure blocks) equal |
+| 2 | C13's check on the GPU (post-training §8 C13) | Reading (the order gives no size): one smoke round at C10's settings with 32 windows of each kind and 20 select windows an airport (55 flown windows), in one process and with two speaking workers (O15 measured the workers first: they fit). The draw, the windows, the speaking record, the groups' bytes, the selection readout, the pass's numbers and the checkpoint's identity identical; the weights within 2.0e-7 (the pass after workers agrees to float rounding, `post_train`'s docstring) |
+| 3 | The base's speed (frontend §3 item 10, `model_speed`) | `4dTrajectory/outputs/POOLED/speed/prior_base_20261006/speed.json`: the base `prior_base_20261006/base/run`, the CPU with one thread and CUDA, batch 1 and 400; CUDA a row's p50 19.7 ms at batch 1, 171.8 ms at batch 400 |
+| 4 | The re-export (frontend §3 item 7) | `sha256sum -c` of `prior_base_20261006` before and after: OK both times. A's `closed_loop_v12_20261005` (5 airports, 40 flights each; `index_v5.json`, sample v11) and B's six sets of `prior_sets_20261006` (`prior_fold_C_<airport>_20261006`, `prior_base_val_20261006`; `index_prior_v3.json`, sample v4, naming the speed readout) exported again with the same ids. The same id is the same directory, which an export never overwrites: the old sets were moved aside first (the user's choice, 2026-10-07) as `<set-id>.v10-old` (A) and `<set-id>.v3-old` (B); the old indexes (`index_v4.json`, `index_prior_v2.json`) are left as they were and now point to the moved sets' old paths |
+| 5 | The browser check (frontend §3 item 8) | A one-shot browser agent on a test stack from the worktree (vite 5185, backend 8795; stop: `kill $(lsof -t -iTCP:5185 -sTCP:LISTEN) $(lsof -t -iTCP:8795 -sTCP:LISTEN)`), stages A and B at KRDU and KSJC: the new sets load from the new indexes; the tabs choose the sentence; the details page opens from every ⓘ and from the set's line, with the intent and the results (B's Validation only on the base's val set); B's section Speed shows the base's readout (four rows); the heading bands and the altitude tubes in 3D (the Draw switches remove them) and the bands in the charts; a word flies live (36–133 ms). No console error, no problem box. Stage C has no published set |
+
+For fronter (the view's implementer, frontend D154), seen in the browser check and not changed here: stage A's intent
+line in `docs/experiments/intents.json` still names `index_v4.json`; with a sample tab chosen in stage B, the read-back
+window's title still reads "closed loop · Δ 4 s" (its data are the sample's); in stage B's left panel the label "At the
+cursor" overlaps its text.
+
+`dev-two-tier-v4` and `dev-two-tier`: after this section's commit, `dev-two-tier-v4` is a descendant of `dev-two-tier`,
+so `dev-two-tier` fast-forwards to it.

@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import * as Cesium from "cesium";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SceneTime } from "../../utils/sceneTime";
@@ -51,16 +51,37 @@ describe("SceneTimeReadout", () => {
     expect(screen.getByRole("status").textContent).toContain("2026-05-21 17:49:23");
   });
 
-  it("redraws at most four times a second, however fast the clock ticks", () => {
+  it("does not redraw on every tick: a clock ticking every millisecond is drawn about ten times a second", () => {
     const viewer = viewerWithClockAt(0);
     app.viewer = viewer;
     render(<SceneTimeReadout />);
     act(() => { vi.advanceTimersByTime(300); moveClockTo(viewer, 60); });
     expect(screen.getByRole("status").textContent).toContain("17:48:18");
-    act(() => { vi.advanceTimersByTime(100); moveClockTo(viewer, 120); });          // 100 ms later: not yet
+    act(() => { vi.advanceTimersByTime(50); moveClockTo(viewer, 120); });           // 50 ms later: not yet
     expect(screen.getByRole("status").textContent).toContain("17:48:18");
-    act(() => { vi.advanceTimersByTime(200); moveClockTo(viewer, 120); });
+    act(() => { vi.advanceTimersByTime(60); moveClockTo(viewer, 120); });           // 110 ms after the last draw
     expect(screen.getByRole("status").textContent).toContain("17:49:18");
+  });
+
+  it("updates at least four times per second of real time at frame rates a browser really has (17 ms and 33 ms frames)", () => {
+    for (const frameMs of [17, 33]) {
+      cleanup();
+      const viewer = viewerWithClockAt(0);
+      app.viewer = viewer;
+      render(<SceneTimeReadout />);
+      // the clock runs at 60x: every frame shows a different second, so every draw is an update the screen shows
+      let shown = screen.getByRole("status").textContent;
+      let updates = 0;
+      let clockS = 0;
+      for (let elapsed = 0; elapsed < 3000; elapsed += frameMs) {
+        clockS += (frameMs / 1000) * 60;
+        act(() => { vi.advanceTimersByTime(frameMs); moveClockTo(viewer, clockS); });
+        const text = screen.getByRole("status").textContent;
+        if (text !== shown) updates += 1;
+        shown = text;
+      }
+      expect(updates / 3, `${frameMs} ms frames`).toBeGreaterThanOrEqual(4);          // three seconds of real time
+    }
   });
 
   it("shows nothing without a traffic scene", () => {

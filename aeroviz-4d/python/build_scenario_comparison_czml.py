@@ -74,15 +74,16 @@ EVAL_SUFFIX = "_eval.json"
 TRAFFIC_SUFFIX = "_traffic.json"
 # MIRROR of `4dTrajectory/optimization/traffic/loop.py` `TRAFFIC_RECORD_SCHEMA`: the only sidecar
 # schema an M1 summary's solved groups carry; any other (an M2 block sidecar included) is refused by
-# name. Pinned by the traffic mirror test.
-TRAFFIC_SCHEMA = "optimization-traffic-v2"
+# name. Pinned by the traffic mirror test. (An unsolved row has a FAILED sidecar beside its eval record,
+# `loop.TRAFFIC_FAILED_SCHEMA`: the builder never requires it and never reads it — only solved rows' sidecars.)
+TRAFFIC_SCHEMA = "optimization-traffic-v3"
 # MIRROR of `4dTrajectory/optimization/traffic/__init__.py` `M1_MODE`, `M2_MODE`: the `mode` of a traffic run's
 # `summary.json`. An M1 summary is a set of windows (each with its own neighbours, on its own clock), an M2 summary
 # is one scene (every group on one clock); both publish their sidecars. Any other `traffic:` mode is refused.
 M1_MODE, M2_MODE = "traffic:m1", "traffic:m2"
 # MIRROR of `4dTrajectory/optimization/traffic/block.py` `BLOCK_RECORD_SCHEMA`: the only sidecar schema an M2
 # summary's solved groups carry (M1 reads `TRAFFIC_SCHEMA` only); any other is refused by name.
-BLOCK_SCHEMA = "optimization-traffic-block-v2"
+BLOCK_SCHEMA = "optimization-traffic-block-v3"
 # MIRROR of `trajectory_data_process/harvest/arrivals.py` `SCHEMA_VERSION`: the only arrivals roster
 # whose `entry_time_utc` (the first kept sample's own time, to the millisecond) places two flights on
 # one clock; an older roster is refused by name.

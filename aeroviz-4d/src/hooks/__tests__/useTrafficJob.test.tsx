@@ -1,5 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { reportOf } from "../../data/__tests__/evaluationReport.fixture";
 import type { TrafficJobStatus } from "../../data/trafficJobs";
 
 const { api, setTrafficScene, fetchIndex } = vi.hoisted(() => ({
@@ -30,7 +31,12 @@ const NEXT_JOB = "20261006T130000123456Z-89abcdef";
 const REQUEST = { mode: "m1", airport: "KRDU", flightKey: "K" } as const;
 const LABEL = "K, 2026-05-21";
 const status = (over: Partial<TrafficJobStatus> = {}): TrafficJobStatus => ({
-  state: "running", progress: { done: 0, total: 1, current: null }, error: null, ...over });
+  state: "running", progress: { done: 0, total: 1, current: null, phase: "optimizing 1 of 1" }, error: null,
+  // a done status says what changed for each aircraft (INDEX lists none), how long it took and who stayed their records
+  ...(over.state === "done" ? { perAircraft: {}, timing: TIMING, stayedRecords: {} } : {}), ...over });
+const CHANGE = { type: "A320", firstSolveLosses: 3, finalLosses: 0, landingVsRecordS: 4.2, delayS: null, blockCheckLosses: null,
+  optimizeS: 5.5, optimizeCpuS: 5.1, solves: 2, failedSolves: 0 };
+const TIMING = { totalS: 30, phases: { "reading traffic": 10, optimizing: 20 } };
 const INDEX = {
   schemaVersion: "comparison-v2-generation", generation: "g", epoch: "e", startHidden: true,
   referenceSource: "canonicalObserved", evaluationReport: "r.json", groups: [],
@@ -75,7 +81,7 @@ describe("useTrafficJob", () => {
     expect(api.fetchTrafficJob).toHaveBeenCalledTimes(1);
     await settle(1999);
     expect(api.fetchTrafficJob).toHaveBeenCalledTimes(1);
-    api.fetchTrafficJob.mockResolvedValue(status({ progress: { done: 1, total: 4, current: "AAL1_05L" } }));
+    api.fetchTrafficJob.mockResolvedValue(status({ progress: { done: 1, total: 4, current: "AAL1_05L", phase: "optimizing 1 of 1" } }));
     await settle(1);
     expect(api.fetchTrafficJob).toHaveBeenCalledTimes(2);
     expect(result.current.view).toMatchObject({ phase: "running", status: { progress: { done: 1, total: 4 } } });
@@ -90,12 +96,91 @@ describe("useTrafficJob", () => {
     await settle(2000);
 
     expect(fetchIndex).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`/traffic/jobs/${JOB}/files/comparison_index\\.json$`)));
-    expect(result.current.view).toMatchObject({ phase: "done", jobId: JOB, index: INDEX, label: LABEL });
+    expect(result.current.view).toMatchObject({ phase: "done", jobId: JOB, index: INDEX, label: LABEL, perAircraft: {}, timing: TIMING });
     expect(setTrafficScene).toHaveBeenLastCalledWith({
       airportCode: "KRDU", jobId: JOB, baseUrl: expect.stringMatching(new RegExp(`/traffic/jobs/${JOB}/files/$`)) });
     const asked = api.fetchTrafficJob.mock.calls.length;
     await settle(10000);
     expect(api.fetchTrafficJob).toHaveBeenCalledTimes(asked);
+  });
+
+  it("keeps the arrivals of the block that stayed their records with the finished job", async () => {
+    const { result } = await started();
+    const stayedRecords = { "N1_05L_a_1": { callsign: "N1", type: "C172" } };
+    api.fetchTrafficJob.mockResolvedValue(status({ state: "done", stayedRecords }));
+    await settle(2000);
+    expect(result.current.view).toMatchObject({ phase: "done", stayedRecords });
+  });
+
+  it("keeps what changed for each aircraft with the finished job", async () => {
+    const { result } = await started();
+    const group = { group: "K", flightId: "K", runway: "05L", airport: "KRDU", status: "solved", finalTimeS: 1, initialState: null,
+      entities: [], czml: "a.czml" };
+    fetchIndex.mockResolvedValue({ ...INDEX, groups: [group] });
+    api.fetchTrafficJob.mockResolvedValue(status({ state: "done", perAircraft: { K: CHANGE } }));
+    await settle(2000);
+    expect(result.current.view).toMatchObject({ phase: "done", perAircraft: { K: CHANGE }, timing: TIMING });
+  });
+
+  it("fails by name when the index lists an aircraft the job's status says nothing of, and shows no scene", async () => {
+    const { result } = await started();
+    const group = { group: "K", flightId: "K", runway: "05L", airport: "KRDU", status: "solved", finalTimeS: 1, initialState: null,
+      entities: [], czml: "a.czml" };
+    fetchIndex.mockResolvedValue({ ...INDEX, groups: [group] });
+    api.fetchTrafficJob.mockResolvedValue(status({ state: "done", perAircraft: {} }));
+    await settle(2000);
+    expect(result.current.view).toEqual({
+      phase: "failed", error: `job ${JOB} lists K in its index and says nothing of what changed for it` });
+    expect(setTrafficScene).not.toHaveBeenCalledWith(expect.objectContaining({ jobId: JOB }));
+  });
+
+  describe("the aircraft drawn off the landing gates (yellow paths)", () => {
+    const group = (key: string, state: string) => ({ group: key, flightId: key, runway: "05L", airport: "KRDU", status: state,
+      finalTimeS: 1, initialState: null, entities: [], czml: "a.czml" });
+    /** The job's files: its index, and the report the index names. */
+    function serve(groups: unknown[], report: unknown) {
+      fetchIndex.mockImplementation(async (url: string) => (url.endsWith("r.json") ? report : { ...INDEX, groups }));
+    }
+    const doneWith = (...keys: string[]) => status({ state: "done", perAircraft: Object.fromEntries(keys.map((k) => [k, CHANGE])) });
+
+    it("reads the evaluation report the index names, and keeps the row of each aircraft that is off the gates", async () => {
+      const { result } = await started();
+      const row = { flight_key: "BAD", violations: ["lateral"], lateral_m: 341 };
+      serve([group("GOOD", "solved"), group("BAD", "offTarget")], reportOf([{ flight_key: "GOOD" }, row]));
+      api.fetchTrafficJob.mockResolvedValue(doneWith("GOOD", "BAD"));
+      await settle(2000);
+      expect(fetchIndex).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`/traffic/jobs/${JOB}/files/r\\.json$`)));
+      expect(result.current.view).toMatchObject({ phase: "done", offTargetRows: { BAD: row } });
+      expect(Object.keys((result.current.view as { offTargetRows: object }).offTargetRows)).toEqual(["BAD"]);   // not GOOD's
+    });
+
+    it("does not read the report when no aircraft is off the gates", async () => {
+      const { result } = await started();
+      serve([group("GOOD", "solved")], "not read");
+      api.fetchTrafficJob.mockResolvedValue(doneWith("GOOD"));
+      await settle(2000);
+      expect(fetchIndex).not.toHaveBeenCalledWith(expect.stringMatching(/r\.json$/));
+      expect(result.current.view).toMatchObject({ phase: "done", offTargetRows: {} });
+    });
+
+    it("fails by name when the report cannot be read", async () => {
+      const { result } = await started();
+      serve([group("BAD", "offTarget")], { schema_version: "nope" });
+      api.fetchTrafficJob.mockResolvedValue(doneWith("BAD"));
+      await settle(2000);
+      expect(result.current.view).toEqual({ phase: "failed", error: `job ${JOB} wrote an evaluation report the viewer cannot read` });
+      expect(setTrafficScene).not.toHaveBeenCalledWith(expect.objectContaining({ jobId: JOB }));
+    });
+
+    it("fails by name when the report has no row of an aircraft the index draws yellow", async () => {
+      const { result } = await started();
+      serve([group("BAD", "offTarget")], reportOf([{ flight_key: "OTHER" }]));
+      api.fetchTrafficJob.mockResolvedValue(doneWith("BAD"));
+      await settle(2000);
+      expect(result.current.view).toEqual({
+        phase: "failed", error: `job ${JOB}: its evaluation report has no row of BAD, which its index draws off the landing gates` });
+      expect(setTrafficScene).not.toHaveBeenCalledWith(expect.objectContaining({ jobId: JOB }));
+    });
   });
 
   it("shows a failed job's reason, with no scene", async () => {
@@ -273,7 +358,7 @@ describe("a poll that fails", () => {
     api.fetchTrafficJob.mockRejectedValueOnce(new Error("Failed to fetch"));
     await settle(2000);
     expect(result.current.view).toMatchObject({ connection: "Failed to fetch" });
-    api.fetchTrafficJob.mockResolvedValue(status({ progress: { done: 1, total: 2, current: "K" } }));
+    api.fetchTrafficJob.mockResolvedValue(status({ progress: { done: 1, total: 2, current: "K", phase: "optimizing 1 of 1" } }));
     await settle(2000);
     expect(result.current.view).toMatchObject({ phase: "running", connection: null, status: { progress: { done: 1 } } });
     const asked = api.fetchTrafficJob.mock.calls.length;

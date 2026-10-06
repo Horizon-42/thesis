@@ -6,13 +6,15 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, replace
+from functools import partial
 
 import pytest
 import torch
 
 from ts_transformer.experiments import post_train
 from ts_transformer.experiments import post_validation as validation
-from ts_transformer.experiments.post_train import KINDS, done_rounds, open_campaign, run_campaign
+from ts_transformer.experiments import training_export as export
+from ts_transformer.experiments.post_train import INPUT_PATHS, KINDS, done_rounds, open_campaign, run_campaign
 from ts_transformer.post.scene import REAL
 from ts_transformer.tests.test_post_branches import _ahead, _round
 from ts_transformer.tests.test_post_train import _context, _settings  # noqa: F401
@@ -89,6 +91,11 @@ def test_the_chosen_round_reads_the_val_days_once(campaign, tmp_path):
     with pytest.raises(ValueError, match="claimed by"):
         validation.main(_argv(out, tmp_path / "again"))
     assert not (tmp_path / "again").exists() and [a for a in asked if a[0] == "split"] == [("split", "val", True)]
+    # P47: the campaign's rounds are not raised after its val read
+    record = json.loads((out / "campaign.json").read_text())
+    raised = {**record["inputs"], "settings": {**record["inputs"]["settings"], "rounds": 2}}
+    with pytest.raises(SystemExit, match="P47"):
+        open_campaign(out, raised, {"head": "x", "dirty": False}, {})
 
 
 def test_a_read_that_stopped_runs_again_only_as_the_same_read(campaign, tmp_path, monkeypatch):
@@ -157,3 +164,37 @@ def test_the_read_is_the_selection_readout_and_waits_for_every_round(campaign, t
         validation.main(_argv(out, tmp_path / "early"))
     assert not claim.exists() and not (tmp_path / "early").exists()
     assert validation.main(_argv(out, tmp_path / "smoke_early", "--smoke")) == 0
+
+
+def test_the_campaign_s_paths_are_read_as_this_checkout_reads_them(campaign, tmp_path, monkeypatch):
+    """D157: a campaign recorded under a worktree's linked data trees (the worktree deleted since) is read from this
+    checkout: each recorded path through `this_checkout` (its own test in `test_training_export`), the record not
+    changed."""
+    out, asked, claim = campaign
+    main = tmp_path / "thesis"
+    for tree in export.LINKED_TREES:
+        (main / tree).mkdir(parents=True)
+    monkeypatch.setattr(export, "this_checkout", partial(export.this_checkout, root=main))
+    gone = main / ".claude" / "worktrees" / "v4-post"
+    record = json.loads((out / "campaign.json").read_text())
+    record["inputs"].update({key: str(gone / "4dTrajectory" / "outputs" / "POOLED" / key) for key in INPUT_PATHS})
+    (out / "campaign.json").write_text(json.dumps(record))
+    here = {key: main / "4dTrajectory" / "outputs" / "POOLED" / key for key in INPUT_PATHS}
+    read = []
+    opened, split_data = validation.open_context, validation.split_data
+    monkeypatch.setattr(validation, "require_conforming_closed_loop",
+                        lambda *a: (read.append(("checks", *a)), (None, {"checks": {}}, None))[1])
+    monkeypatch.setattr(validation, "checked_edges", lambda path: read.append(("edges", path)))
+    monkeypatch.setattr(validation, "open_context", lambda *a, **k: (read.append(("context", *a[:4], a[5])),
+                                                                      opened(*a, **k))[1])
+    monkeypatch.setattr(validation, "split_data", lambda instructions, split, words, interval_s, geometries, executor: (
+        read.append(("split", instructions, executor)),
+        split_data(instructions, split, words, interval_s, geometries, tmp_path / "executor"))[1])
+    assert validation.main(_argv(out, tmp_path / "smoke", "--smoke")) == 0
+    edges = here["windows"] / "conformance" / "edges.npz"
+    assert read == [("checks", here["instructions"], here["executor"]), ("edges", edges),
+                    ("context", here["prior"], here["instructions"], here["executor"], edges, here["procedure_root"]),
+                    ("split", here["instructions"], here["executor"])]
+    config = json.loads((tmp_path / "smoke" / "config.json").read_text())
+    assert (config["instructions"], config["executor"]) == (str(here["instructions"]), str(here["executor"]))
+    assert json.loads((out / "campaign.json").read_text()) == record

@@ -1,6 +1,6 @@
 """The interactive multi-aircraft jobs of the Optimize task (design ``4dTrajectory/docs/multi_aircraft_optimization/
-design.md`` §10.3): list an airport's arrivals of a UTC day, run ONE job at a time, report on it, serve its files,
-cancel it.
+design.md`` §10.3): list an airport's arrivals of a UTC day, serve its scenario catalog (§10.6), run ONE job at a
+time, report on it, serve its files, cancel it.
 
 A job is a subprocess of this backend's own interpreter (``4dTrajectory/optimization/traffic_job.py``), in its own
 process group at ``nice 10`` and one solver thread: casadi is not thread-safe, a long job must not block the resident
@@ -42,18 +42,24 @@ from aeroviz_backend.observed_trajectories import DEFAULT_HARVEST_ROOT, _normali
 from scenario_batch import SOLVER_THREAD_ENV
 from traffic_job_files import (
     BLOCK_LENGTHS_S,
+    CATALOG_SCHEMA,
     COMPARISON_DIR,
     INDEX_FILE,
     LOG_FILE,
     MODE_M1,
     MODE_M2,
+    OUTPUTS_ROOT,
+    PHASE_STARTING,
     PROCESS_FILE,
     PROGRESS_FILE,
     SPEC_FILE,
     STATE_CANCELLED,
+    STATE_DONE,
     STATE_FAILED,
     STATE_FILE,
     STATE_RUNNING,
+    catalog_command,
+    catalog_path,
     write_json_atomic,
 )
 from traffic_roster import landing_in, read_roster, utc_day_bounds_s
@@ -65,6 +71,8 @@ from trajectory_data_process.harvest.utc import iso_utc, iso_utc_ms, parse_iso_u
 DEFAULT_JOBS_ROOT = Path.home() / ".cache" / "aeroviz" / "traffic_jobs"
 #: Job directories kept (the newest ones), the running job's included.
 KEEP_JOBS = 5
+#: What a ``done`` ``state.json`` holds beside its state (``traffic_job_files``): the readout, what changed for each aircraft, the timing.
+DONE_FIELDS = ("summary", "perAircraft", "timing", "stayedRecords")
 #: The job's niceness (IM4).
 JOB_NICE = 10
 #: How long a cancelled job's group has to end after SIGTERM before it is killed (s).
@@ -87,6 +95,14 @@ class BadJobRequest(ValueError):
 
 class JobNotFound(LookupError):
     """No such job, or no such file of it (404)."""
+
+
+class JobStateInvalid(RuntimeError):
+    """A job's ``state.json`` says ``done`` and lacks what a done state holds (500)."""
+
+
+class CatalogUnreadable(RuntimeError):
+    """An airport's scenario catalog is on disk but is not a catalog of this schema (500)."""
 
 
 def traffic_jobs_root(port: int) -> Path:
@@ -166,12 +182,14 @@ class TrafficJobs:
         jobs_root: Path = DEFAULT_JOBS_ROOT,
         *,
         harvest_root: Path = DEFAULT_HARVEST_ROOT,
+        outputs_root: Path = OUTPUTS_ROOT,
         command: Callable[[Path, Path], list[str]] = job_command,
         typecode_of: Callable[[str], str | None] = _typecode_of_icao24,
         keep: int = KEEP_JOBS,
     ) -> None:
         self.jobs_root = Path(jobs_root)
         self.harvest_root = Path(harvest_root)
+        self.outputs_root = Path(outputs_root)
         self._command = command
         self._typecode_of = typecode_of
         self._keep = keep
@@ -199,6 +217,23 @@ class TrafficJobs:
             {"flightKey": r.flight_key, "callsign": r.callsign, "runway": r.runway,
              "type": self._typecode_of(r.icao24), "entryUtc": iso_utc_ms(r.entry_utc_s),
              "landingUtc": iso_utc(r.landing_utc_s)} for r in rows]}
+
+    def scenarios(self, airport: str) -> dict[str, Any]:
+        """The airport's scenario catalog (design §10.6), as ``traffic_scenarios.py`` wrote it. Read only.
+        :class:`FileNotFoundError` names the command that makes it; :class:`CatalogUnreadable` names the schema found."""
+        code = _normalize_airport(airport)
+        path = catalog_path(self.outputs_root, code)
+        if not path.is_file():
+            raise FileNotFoundError(f"no scenario catalog for {code} at {path}; make it with `{catalog_command(code)}`")
+        try:
+            catalog = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:       # both are ValueErrors: never the route's 400
+            raise CatalogUnreadable(f"{path} is not UTF-8 JSON ({type(exc).__name__}): {exc}") from exc
+        found = catalog.get("schema") if isinstance(catalog, dict) else None
+        if found != CATALOG_SCHEMA:
+            raise CatalogUnreadable(f"{path} has schema {found!r}, not {CATALOG_SCHEMA!r}; "
+                                    f"make it again with `{catalog_command(code)}`")
+        return catalog
 
     # ── the jobs on disk ──────────────────────────────────────────────────────
 
@@ -337,21 +372,26 @@ class TrafficJobs:
             return {"jobId": job_id}
 
     def status(self, job_id: str) -> dict[str, Any]:
-        """``{state: running | done | failed | cancelled, progress: {done, total, current}, error}`` of a job, and
-        — once ``done`` — ``summary``: the readout of ``traffic.readout`` (outcome counts; for M2 the delays and the
-        losses left after the block's final check)."""
+        """``{state: running | done | failed | cancelled, progress: {done, total, current, phase}, error}`` of a job, and
+        — once ``done`` — ``summary``, the readout of ``traffic.readout`` (outcome counts; for M2 the delays and the
+        losses left after the block's final check), ``perAircraft`` (``traffic_job_files``: what changed for each
+        aircraft, and the time spent on it), ``timing`` (the job's wall time by stage) and ``stayedRecords`` (the arrivals of an M2
+        block it could not control). ``phase`` is what the job is doing (``PHASE_STARTING`` until it has written its first progress)."""
         with self._lock:
             out = self._dir(job_id)
             running = self._settle(job_id)
             progress_path = out / PROGRESS_FILE
             progress = (json.loads(progress_path.read_text(encoding="utf-8")) if progress_path.is_file()
-                        else {"done": 0, "total": None, "current": None})
+                        else {"done": 0, "total": None, "current": None, "phase": PHASE_STARTING})
             if running:
                 return {"state": STATE_RUNNING, "progress": progress, "error": None}
             state = json.loads((out / STATE_FILE).read_text(encoding="utf-8"))
             found = {"state": state["state"], "progress": progress, "error": state["error"]}
-            if "summary" in state:
-                found["summary"] = state["summary"]
+            if state["state"] == STATE_DONE:
+                missing = [field for field in DONE_FIELDS if field not in state]
+                if missing:
+                    raise JobStateInvalid(f"job {job_id}: its state.json says done and has no {', '.join(missing)}")
+                found.update({field: state[field] for field in DONE_FIELDS})
             return found
 
     def cancel(self, job_id: str) -> dict[str, Any]:
