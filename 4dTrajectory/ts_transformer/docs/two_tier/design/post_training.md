@@ -80,7 +80,7 @@ commits, the tests and the readings are in the implementation log.
 | C8 | Done on B5's base (log §24, §25): the formal census `outputs/POOLED/post/windows_20261006` (D104, `44fb8af8`), the base's go-around on the select days, the profiles at 32 and 256 windows (`483b81d7`, `c396f9be`); Claude's proposal of O13 in log §25, for the user |
 | C10 | Done 2026-10-06 22:46: `outputs/POOLED/post/post_train_20261006`, ten rounds, read-only (log §26: the rounds' selection readouts, the GPU's memory and the pass in pieces `832555a5`). Continued to 14 rounds as the same campaign (D157, C14); then the user's criterion (D7) over the 14 rounds, then the validation readout of the chosen round |
 | C13 (D138) | Built and reviewed by stage B's implementer: `65a21c57`, O15's measure corrected (D139) `8cac5191`; merged into `dev-two-tier`. Its check on the GPU (one round, one process against N workers), by stage D's implementer, before C14 uses it |
-| C14 (D157) | Not started: its code, then rounds 10–13 from the main checkout |
+| C14 (D157) | Code done and reviewed: `21547ad4` on `dev-two-tier-v4-post` (log §27), for the user's merge. Rounds 10–13 from the main checkout wait for that merge and for stage D's GPU and timing steps |
 | The validation readout of the chosen round | Built and reviewed on synthetic artefacts (`post_validation`, `0c95a821`, log §23; D132 `483b81d7`) |
 | C12 | After C10 |
 
