@@ -12,6 +12,13 @@ the first sentence (t_E: the step of its loss of separation, of its judged outco
 advantage of each is its reward minus the mean of the group, on the rows from the branch point on (the words after the
 branch point, §2 item 9 point 5); a group whose rewards are all the same gives no sample. A first sentence in several
 groups gives a sample in each.
+
+**A window of several commanded aircraft** (multi-aircraft control D142, D143, D149; post-training §9 item 9): a group
+names the aircraft it varies (``Group.varied``, its place among the window's commanded aircraft; stage C's: 0, its one
+aircraft), its sentences are that aircraft's, its rewards the window's (the caller's rule), and each sentence counts
+its rows only from the branch point up to the aircraft's event (``Sentence.until``: the row of its end or of its loss,
+from which it is silent, D144); stage C's sentences end at their event (no bound). The numbers of each aircraft are the
+caller's rule (`experiments.post_branches.branch_round`); stage C's are D94's, below.
 """
 
 from __future__ import annotations
@@ -65,6 +72,9 @@ class Sentence:
     permitted: Permitted
     tokens: list[np.ndarray]
     reward: float
+    #: the row of its event (its end, or the row from which it is silent), after which no row is counted; None: its rows
+    #: end there (stage C's)
+    until: int | None = None
 
 
 @dataclass(frozen=True)
@@ -76,6 +86,8 @@ class Group:
     branch: int
     first: Sentence
     continuations: tuple[Sentence, ...]
+    #: the aircraft it varies: its place among the window's commanded aircraft (module docstring)
+    varied: int = 0
 
     @property
     def sentences(self) -> tuple[Sentence, ...]:
@@ -93,10 +105,11 @@ class Group:
         return max(rewards) > min(rewards)
 
 
-def samples(groups: Sequence[Group], device: torch.device) -> Samples:
+def samples(groups: Sequence[Group], device: torch.device, part_width: int = 0) -> Samples:
     """The loss's batch of the samples of ``groups`` (`post.loss.Samples`): every sentence of every informative group,
-    its advantage on the rows from its group's branch point on (and only there), the speaker's records joined and the
-    tokens padded to the longest sentence."""
+    its advantage on the rows from its group's branch point on up to its event (``Sentence.until``; and only there), the
+    speaker's records joined and the tokens padded to the longest sentence (with a caller's token part of
+    ``part_width``, `traffic_attention.traffic_of`)."""
     items = [(sentence, advantage, group.branch) for group in groups if group.informative
              for sentence, advantage in zip(group.sentences, group.advantages())]
     if not items:
@@ -105,8 +118,12 @@ def samples(groups: Sequence[Group], device: torch.device) -> Samples:
     length = rows.asked.shape[1]
     empty = np.zeros((0, items[0][0].tokens[0].shape[1]), dtype=np.float32)
     tokens = [s.tokens + [empty] * (length - len(s.tokens)) for s, _, _ in items]
-    after = torch.arange(length, device=device)[None, :] >= torch.tensor([b for _, _, b in items], device=device)[:, None]
+    steps = torch.arange(length, device=device)[None, :]
+    after = steps >= torch.tensor([b for _, _, b in items], device=device)[:, None]
     counted = rows.asked & after
+    if any(s.until is not None for s, _, _ in items):
+        until = torch.tensor([length if s.until is None else s.until for s, _, _ in items], device=device)[:, None]
+        counted = counted & (steps < until)
     advantage = torch.tensor([a for _, a, _ in items], dtype=torch.float32, device=device)[:, None] * counted
-    return Samples(rows, Permitted.join([s.permitted for s, _, _ in items]), traffic_of(tokens, device), advantage,
-                   counted)
+    return Samples(rows, Permitted.join([s.permitted for s, _, _ in items]), traffic_of(tokens, device, part_width),
+                   advantage, counted)

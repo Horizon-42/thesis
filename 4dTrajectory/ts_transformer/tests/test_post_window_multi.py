@@ -68,17 +68,24 @@ def _multi(s, joins=JOINS, shifts=None):
     one, _, _ = s["moved_loop"](NO_MOVE)
     inputs, limit = one.executor.inputs, float(one.executor.time_limit_s[0])
 
-    def loop_of(model, **options):
-        count = len(joins)
+    def start(chosen):
+        """The start of a closed loop of the flights ``chosen`` (`branch_round`'s ``start_loop``): copies of the flight,
+        each at its join step."""
+        count = len(chosen)
         many = FlightInputs(**{f.name: getattr(inputs, f.name).expand(count, *getattr(inputs, f.name).shape[1:]).clone()
                                for f in fields(FlightInputs)})
         loop = Loop(many, [s["geometry"]] * count, [test_start.A320_IAS] * count, [limit] * count, test_start._params(),
                     s["words"], interval_s=DELTA, most_go_arounds=MOST_GO_AROUNDS, device=CPU,
-                    join_ticks=np.array(joins))
-        return WindowLoop(model, loop, list(range(count)), [multi], sentences, flights, s["geometries"], {code: roster},
-                          s["finals"], s["words"], interval_s=DELTA, variant="full", edges_reference=s["reference"],
-                          faults={code: {}}, observed=observed, device=CPU, **options)
+                    join_ticks=np.array([joins[i] for i in chosen]))
+        return loop, list(chosen), {i: observed[i] for i in chosen}
 
+    def loop_of(model, **options):
+        loop, order, seen = start(list(range(len(joins))))
+        return WindowLoop(model, loop, order, [multi], sentences, flights, s["geometries"], {code: roster},
+                          s["finals"], s["words"], interval_s=DELTA, variant="full", edges_reference=s["reference"],
+                          faults={code: {}}, observed=seen, device=CPU, **options)
+
+    loop_of.parts = dict(start=start, sentences=sentences, flights=flights, rosters={code: roster})
     return multi, loop_of
 
 
@@ -286,3 +293,135 @@ def test_another_commanded_aircrafts_token_is_its_state_at_the_tick(setup):
             assert np.array_equal(loop._tokens[b][t - JOINS[b]], expected), (t, b)
             checked += 1
     assert checked >= 5
+
+
+def _round_of(s, model, rules, continuations=2):
+    """`branch_round` of the window of several aircraft, under ``rules``."""
+    from ts_transformer.experiments.post_branches import branch_round
+
+    multi, loop_of = _multi(s)
+    parts = loop_of.parts
+    return branch_round(model, parts["start"], [multi], [5], parts["sentences"], parts["flights"], s["geometries"],
+                        parts["rosters"], s["finals"], s["words"], interval_s=DELTA, variant="full",
+                        edges_reference=s["reference"], faults={s["geometry"].code: {}}, device=CPU, seed=1337,
+                        round_=0, split="train", continuations=continuations, rules=rules)
+
+
+def _rules(continuation, varied_points):
+    from ts_transformer.experiments.post_branches import Rules
+
+    return Rules(first=lambda place, member: np.random.default_rng([1, place, member]), continuation=continuation,
+                 reward=lambda results: float(sum(r.reward for r in results)),
+                 again=lambda results: sum(r.reward for r in results) < len(results), varied=varied_points)
+
+
+def test_a_continuation_of_a_varied_aircraft_on_its_own_numbers_repeats_the_first_sentence(setup):
+    """D142, D94 with several commanded aircraft: at a branch point of a varied aircraft, its continuations copy the
+    window; every other aircraft goes on from its own first-sentence stream, so a continuation whose varied aircraft is
+    given its own first-sentence stream too (advanced past the rows it said) says and flies the first sentence, for
+    every aircraft — the group's sentences equal the first, its rewards the window's sum, nothing differs; the group
+    names its varied aircraft, its branch point in that aircraft's own rows, and counts its rows only up to its event."""
+    s = setup
+    start = 4                                                        # the observed rows at Δ = 4 s
+    asked = []
+
+    def continuation(place, member, varied, tick, k):
+        asked.append((member, varied, tick, k))
+        own = np.random.default_rng([1, place, member])
+        own.random((tick - JOINS[member] - start, len(COLUMNS)))     # past the rows it said before the tick
+        return own
+
+    def varied(window, loop, rows):
+        return [(1, [JOINS[1] + start + 1])]                          # copy 1, one tick after its first predicted step
+
+    finished = []
+    real_finish = WindowLoop.finish
+
+    def finish(loop, numbers):                                       # every pass's ends, the copies' included
+        ends = real_finish(loop, numbers)
+        finished.append(ends)
+        return ends
+
+    import ts_transformer.experiments.post_window_loop as module
+
+    original = module.WindowLoop.finish
+    module.WindowLoop.finish = finish
+    try:
+        round_ = _round_of(s, _with_module(s["base"]), _rules(continuation, varied))
+    finally:
+        module.WindowLoop.finish = original
+    assert round_.spoken_again == [5] and round_.differed == []
+    first_ends, copies = finished[0], finished[1]                    # the first pass, then the continuations
+    assert len(copies) == 2 * len(JOINS)
+    for k, end in enumerate(copies):                                 # every aircraft of each continuation
+        mine = first_ends[k % len(JOINS)]
+        assert np.array_equal(end.words, mine.words) and end.outcome == mine.outcome and end.reward == mine.reward
+        assert np.allclose(end.states, mine.states, rtol=0.0, atol=STATE_BOUND_M)
+    assert {(m, v) for m, v, _, _ in asked} == {(1, 1)}               # only the varied aircraft is asked for numbers
+    (group,) = round_.groups
+    assert group.varied == 1 and group.branch == start + 1 and group.window == 5
+    first = group.first
+    for sentence in group.continuations:
+        assert np.array_equal(sentence.rows.targets, first.rows.targets) and sentence.reward == first.reward
+        assert sentence.until == first.until
+    assert first.reward == sum(r.reward for r in round_.first)
+    assert first.until is not None and first.until <= len(first.rows.time_s)
+
+
+def test_a_varied_aircraft_on_new_numbers_gives_the_group_of_its_own_rows(setup):
+    """D142: a continuation of the varied aircraft on new numbers changes its words after the branch point; the
+    samples of the group count only its rows from the branch point to its event (`Sentence.until`), the advantage the
+    window's reward less the group's mean."""
+    from dataclasses import replace as dc_replace
+
+    from ts_transformer.post.branches import samples
+
+    s = setup
+    start = 4
+    rules = _rules(lambda place, member, v, tick, k: np.random.default_rng([9, place, member, tick, k]),
+                   lambda window, loop, rows: [(0, [start + 1])])
+    round_ = _round_of(s, _with_module(s["base"]), rules, continuations=3)
+    (group,) = round_.groups
+    assert group.varied == 0 and len(group.continuations) == 3
+    assert any(not np.array_equal(c.rows.targets, group.first.rows.targets) for c in group.continuations)
+    rewarded = dc_replace(group, continuations=(dc_replace(group.continuations[0], reward=group.first.reward + 1.0),
+                                                *group.continuations[1:]))
+    batch = samples([rewarded], CPU)
+    for k, sentence in enumerate(rewarded.sentences):
+        counted = batch.counted[k].numpy()
+        rows = np.flatnonzero(counted)
+        assert rows.min() >= group.branch and rows.max() < sentence.until
+
+
+def test_the_check_of_the_second_pass_reads_an_aircraft_ended_before_the_point_and_one_not_yet_said(setup):
+    """D94 for every aircraft: an aircraft that the executor ended before the window's last branch point is compared on
+    its whole flight (the second pass says and flies the first's: nothing differs), and one whose only branch point is
+    its own first predicted step has nothing said to compare — neither makes the window differ, nor fails."""
+    s = setup
+    start = 4
+    pairs = {}
+
+    def at_its_end(window, loop, rows):                              # the later aircraft, one row before its own end
+        b = rows[1]
+        pairs["points"] = [JOINS[1] + loop.end_step(b) - 1]
+        return [(1, pairs["points"])]
+
+    rules = _rules(lambda place, member, v, tick, k: np.random.default_rng([9, place, member, tick, k]), at_its_end)
+    from ts_transformer.experiments.post_branches import branch_round
+
+    def run(rules, joins):
+        multi, loop_of = _multi(s, joins=joins)
+        parts = loop_of.parts
+        return branch_round(_with_module(s["base"]), parts["start"], [multi], [5], parts["sentences"],
+                            parts["flights"], s["geometries"], parts["rosters"], s["finals"], s["words"],
+                            interval_s=DELTA, variant="full", edges_reference=s["reference"],
+                            faults={s["geometry"].code: {}}, device=CPU, seed=1337, round_=0, split="train",
+                            continuations=2, rules=rules)
+
+    late = run(rules, (0, 200))
+    every = int(round(DELTA / s["words"].spec.step_s))
+    assert len(late.first[0].states) < pairs["points"][0] * every + 1      # the anchor ended before the point
+    assert late.spoken_again == [5] and late.differed == [] and len(late.groups) == 1
+    first = run(_rules(lambda place, member, v, tick, k: np.random.default_rng([9, place, member, tick, k]),
+                       lambda window, loop, rows: [(1, [40 + start])]), (0, 40))
+    assert first.differed == []

@@ -73,7 +73,7 @@ import torch
 from flight_scenarios.procedure_final import DEFAULT_PROCEDURE_ROOT
 
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
-from ts_transformer.autopilot.start import Start
+from ts_transformer.autopilot.start import NO_MOVE, Start
 from ts_transformer.experiments.post_branches import branch_round
 from ts_transformer.experiments.post_window_loop import (
     WindowLoop, WindowResult, checked_edges, moved_commanded, start_move_of,
@@ -168,14 +168,19 @@ class Context:
 
     def start_loop(self, split: str, windows: Sequence[Window]):
         """The ``start_loop`` of `branch_round`: the flights of ``windows`` started with their windows' moves (C9), through
-        the split's opened `Start` (C13, vocabulary A44: what `start_moved` gives, read once)."""
+        the split's opened `Start` (C13, vocabulary A44: what `start_moved` gives, read once); a window's other commanded
+        aircraft (multi-aircraft control D150) start unmoved at their join steps."""
         data = self.splits[split]
         sentences = data["sentences"]
         moves = {w.signal_index: start_move_of(w) for w in windows}
+        moves.update({i: NO_MOVE for w in windows for i in w.signal_indices[1:]})
+        joins = {i: int(step) for w in windows for i, step in zip(w.signal_indices, w.join_steps())}
+        several = any(w.joined for w in windows)
 
         def started(flights: Sequence[int]):
+            ticks = {"join_ticks": {i: joins[i] for i in flights}} if several else {}
             return data["start"].moved({i: sentences[i] for i in flights}, {i: moves[i] for i in flights},
-                                       most_go_arounds=MOST_GO_AROUNDS, device=self.device)
+                                       most_go_arounds=MOST_GO_AROUNDS, device=self.device, **ticks)
 
         return started
 
