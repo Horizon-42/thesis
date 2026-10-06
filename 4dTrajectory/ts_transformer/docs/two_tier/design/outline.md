@@ -91,6 +91,7 @@ both, each with its part. A new decision or open item takes the next free number
 | D133 | The Training views of stages A, B and C share one layout (§6.2). The user decided: one layout with the switch between the stages kept; a set's intent read from `docs/experiments/intents.json` through the backend, with no export, set or index format changed; stage C's branch merged before the views change; stage B's implementer builds it, and for this work may change the view files of stages A and C and the backend's routes. Claude's design of the parts, on stage B's request: the left panel holds the set chooser with the set's own line of the intent registry, the item list with the same four columns, one-line readouts and the Draw switches, and no table; the sentence bar's tabs choose the sentence on screen in every stage (B: Labelled, Closed loop and the samples; C: Labelled and the rounds), and the bar's chips and notes follow the kind of that sentence; the details page in every stage, its first section the set and the experiment; what follows the cursor (B's probability of "go-around" at the cursor) stays in the left panel, since the details page is modal; shared parts, not copies. Why: B's and C's views chose the sentence in a table of the left panel, so that the bar's tab "Δ 4 s" meant the table's choice; B's details page was disabled and C's ⓘ opened nothing; no view showed a set's intent | Decided | User, 2026-10-06 (the layout, the intent's source, the order); the parts: Claude, on stage B's request |
 | D134 | The Training view's details page holds the results of the experiment that made the set (§6.2 items 3, 4): stage A — the labelling (train and select only), the executor's closed-loop replay at each Δ, the set's flown flights, the vocabulary; B — the free generation the set was made from, the training, the validation (the base's val set only), the choice; C — the rounds, the checks at the campaign's start, the window. The first section is the set and the experiment, with one line of provenance; "What this view shows" and the row inspector are removed. The backend reads the results (`GET /training/results`) from the files the set names under `4dTrajectory/outputs/` and answers named fields only; no answer holds a reading that the design keeps unshown (stage A's val block, the val counts of a run's identity), and B's validation only for the set of the claimed readout. It replaces the sections of D133. Why: the user found D133's page wrong: its sections (the intent and a list of paths, usage notes, the set's own 20 sentences counted, a row inspector that repeats the bar) were Claude's reading of the page before A23 as a place for long text; that page held the experiment's results | Decided | User, 2026-10-06 (the results, read through the backend, the removals); the sections and the route: stage B's proposal, with Claude's guards of the val days |
 | D135 | Every sentence on screen is drawn with the envelopes of its words (§6.2 items 6, 7), simpler than the instruction-v3 view: lateral, each heading word's judged rows on the ground with the rows outside its band in red; vertical, each altitude word's tube as a wall with its two edges; the speed bands in the charts only; no capture turn or corridor, and only the envelopes of the sentence on screen. The export computes them: one function of stage A's Training export (`flown_sentence`) gives the block of every flown sentence in every stage (the outcome, the crossing, the track unrounded, the attitude, the envelopes), and one writer of the Training files serves the three stages. The three sample formats get new names; stage A's and B's published sets are exported again with the same ids, and the old ones are deleted once the new view is merged and checked. Stage B's implementer builds it on `dev-two-tier-v4` (§5 rule 1) and may change stage A's and C's Training exports for it. The trained base is not affected: B's export opens it read-only and writes only under `aeroviz-4d/public/data`, the base's directory is read-only with its `SHA256SUMS`, and stage C opens the base itself and reads no Training set. Why: B's and C's exports wrote no envelopes, so their sentences were drawn without them, and three copies built the block of a flown sentence | Decided | User, 2026-10-06 |
+| D136 | The Training view shows how fast the model speaks (§6.2 item 10): a runner (`model_speed`) measures, on select-day flights or windows and never on val or test, the time of the prior's step of a row and of the executor's steps of it, apart, on the CPU (one thread) and the GPU, for one aircraft at a time and for a batch of 400, with p50, p95 and the largest time of a row, the rows per second and the share of Δ = 4 s; stage B's base now, stage C's chosen round after C10; the sets name the readout and the details page shows it in a section Speed. Why: the view showed only the executor's computing time of a live segment; no readout recorded the prior's time to say a row, and only C8's profile timed the prior's step, for one batch of windows | Decided | User, 2026-10-06 (the speed in the view); the measurement and its settings: Claude's proposal |
 
 **The identity rule (D21)** (the user, 2026-10-02 and 2026-10-03). An identity binds the format (what the words and the
 payloads mean) and the data rules (the sealed test days). Code is identified by what it does on fixed inputs (a
@@ -101,12 +102,12 @@ they came from. Each document lists the identities of its parts.
 
 | Document | Decisions | Open items |
 |---|---|---|
-| Outline | D7, D20, D21, D55, D85, D95, D109, D131, D133–D135 | — |
+| Outline | D7, D20, D21, D55, D85, D95, D109, D131, D133–D136 | — |
 | Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62, D66, D67, D69–D71, D73, D74, D77–D84, D86–D90, D97, D102, D111, D126 | O8 |
 | Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60, D63–D65, D68, D72, D75, D96, D105–D108, D111, D118–D122, D126–D128 | — |
 | Post-training | D29–D31, D36, D37, D76, D91–D94, D98–D101, D103–D105, D107, D110, D112–D117, D123–D125, D129, D130, D132 | O13 |
 
-The next free numbers: D136, O15.
+The next free numbers: D137, O15.
 
 ---
 
@@ -138,8 +139,8 @@ The next free numbers: D136, O15.
    stage, so that the user sees what the stage does in the frontend (the user, 2026-10-04). There is no separate
    frontend stage.
 5. The one layout of the three stages' Training views (§6.2, D133–D135): stage B's implementer, on `dev-two-tier-v4`
-   (§5 rule 1); the results page, the envelopes and the shared parts of the exports, then the Training sets of stages A
-   and B exported again. While it is built, no other work changes the files of §6.2 item 9.
+   (§5 rule 1); the results page, the envelopes and the shared parts of the exports, the speed runner and the base's
+   speed readout (§6.2 item 10), then the Training sets of stages A and B exported again. While it is built, no other work changes the files of §6.2 item 9.
 6. The user merges (§5 rule 11).
 
 ---
@@ -251,7 +252,7 @@ the views of the three stages share.
    export from the same state with the same words (the executor conformance tolerance). The browser check runs in a
    one-shot subagent that returns a short verdict; HTTP 200 is not "it loads".
 
-### 6.2 One layout for the three stages (D133, D134, D135)
+### 6.2 One layout for the three stages (D133–D136)
 
 Stages A, B and C keep their own sets, readers, sessions and live segments, and the switch between them at the top of
 the left panel ("Sets of": stage A, B or C, offered where the airport has their sets). Their views share one layout,
@@ -318,8 +319,8 @@ envelopes of their words, because their exports wrote none (D135).
    | Stage | Sections after "The set and the experiment" | Read from (named by the set's `source` / `model`) |
    |---|---|---|
    | A | **Labelling**: labelled and refused, the reasons of the refusals, by airport — train and select only · **Closed loop**: the executor's replay of the closed-loop sentences of each split of the set at each Δ (landed and each other outcome) · **Flown flights**: the set's own flights at each Δ · **Vocabulary** | `instruction_language/<artefact>/readout.json` (its train and select blocks); `executor/<spec>/replay-closed-<split>-<Δ>s/replay.json` |
-   | B | **Free generation**: the readout the set was made from — the outcomes by airport and by stratum, the sentences inside the selection and outside it (for a faulty track, for the outcome), the words per sentence beside the labelled ones; beside it the set's own sentences counted · **Training**: the loss per epoch on train and select, the best epoch · **Validation** (the base's val set only): the teacher-forced loss per step and per column, the share of the labelled words that the procedure masks block · **The choice**: each configuration's and variant's score over its folds, the seed scale, the chosen configuration and variant | the free-generation `readout.json` of `source.readout`; `history.json` of the prior; `validation/readout.json` beside the base; `choice_configuration.json`, `choice_variant.json` of the campaign |
-   | C | **Rounds**: each round of the campaign — the reward, landed, the losses of separation, the go-arounds · **The checks**: the labeller's and the executor's checks at the campaign's start · **The window**: its kind, its moves, its other aircraft, the round's end, the threshold, the rows where the speed-word mask acted, the faulty points | `campaign.json` and `round_<n>/round.json` of `model.campaign` |
+   | B | **Free generation**: the readout the set was made from — the outcomes by airport and by stratum, the sentences inside the selection and outside it (for a faulty track, for the outcome), the words per sentence beside the labelled ones; beside it the set's own sentences counted · **Training**: the loss per epoch on train and select, the best epoch · **Validation** (the base's val set only): the teacher-forced loss per step and per column, the share of the labelled words that the procedure masks block · **Speed** (item 10) · **The choice**: each configuration's and variant's score over its folds, the seed scale, the chosen configuration and variant | the free-generation `readout.json` of `source.readout`; `history.json` of the prior; `validation/readout.json` beside the base; `choice_configuration.json`, `choice_variant.json` of the campaign; the speed readout that `source.speed` names |
+   | C | **Rounds**: each round of the campaign — the reward, landed, the losses of separation, the go-arounds · **Speed** (item 10, after C10) · **The checks**: the labeller's and the executor's checks at the campaign's start · **The window**: its kind, its moves, its other aircraft, the round's end, the threshold, the rows where the speed-word mask acted, the faulty points | `campaign.json` and `round_<n>/round.json` of `model.campaign`; the speed readout that `source.speed` names |
 
    "The set and the experiment" holds the campaign's title, intent and design, the set's own line (item 5) and one line
    of provenance: the path of the readout or campaign the set was made from. No section shows a reading that the
@@ -387,10 +388,12 @@ envelopes of their words, because their exports wrote none (D135).
    exports: the shared writer writes the same index bytes as before; `flown_sentence` gives stage A's earlier block
    within its earlier rounding, and B's and C's earlier blocks exactly, apart from the added envelopes; every export
    refuses an envelope that ends past the flown track; the base's directory has the same `SHA256SUMS` after B's
-   export. The backend: the results answer (each stage; files missing or elsewhere; no val block of stage A in any
+   export. The speed runner on synthetic artefacts: every time positive, each setting named, no val or test flight
+   read, nothing written into the model's directory. The backend: the results answer (each stage; files missing or elsewhere; no val block of stage A in any
    answer) and the intent answer (one campaign, none, more than one, none asked). The browser check of §6.1 item 6 in
    each stage: the tabs choose the sentence, the details page opens from every ⓘ and from the set's line, the results
-   and the intent show, every flown sentence shows its heading bands and altitude tubes, a word flies live.
+   and the intent show, B's section Speed shows the base's readout, every flown sentence shows its heading bands and
+   altitude tubes, a word flies live.
 9. **Who and where.** Stage B's implementer (the user, 2026-10-06), on `dev-two-tier-v4` in the worktree
    `.claude/worktrees/two-tier-v4` (§5 rule 1), after its first part on `dev-training-layout` is merged there. For this
    work only, it may change the view files
@@ -401,7 +404,31 @@ envelopes of their words, because their exports wrote none (D135).
    reading where this section says nothing is a proposal in stage B's requests note. While it is built, no other work
    changes these files: `aeroviz-4d/src/components/Training*.tsx`, `aeroviz-4d/src/components/training/`,
    `aeroviz-4d/src/data/training*.ts`, `aeroviz-4d/src/hooks/useTraining*.ts`, their tests,
-   `aeroviz-4d/src/components/ExperimentDetails.tsx`, `aeroviz_backend/http_server.py`,
+   `aeroviz-4d/src/components/ExperimentDetails.tsx`, `aeroviz_backend/http_server.py`, `experiments/model_speed.py`,
    `experiments/training_export.py`, `instructions/training_files.py`, `experiments/prior_training_export.py`,
    `prior/training_files.py`, `experiments/post_training_export.py`, `post/training_files.py`. The test stack
    and the report follow §6.1 item 5.
+10. **The model's speed (D136).** The view shows how fast the model speaks; until now it showed only the live
+    executor's computing time of a flown segment ("computed M ms"), and no readout recorded the prior's time to say a
+    row (free generation records no time; C8's profile times the prior's step of one batch of windows only). A runner
+    (`experiments/model_speed.py`, with its tests and an entry in `docs/reference/runners.md`) measures it on fixed
+    inputs:
+    - **What:** a model run (stage B: the base; stage C: the chosen round, after C10, with its traffic attention and the
+      separation masks), speaking select-day flights (B) or select windows (C) to their end through the shared step of a
+      closed loop (prior §7 item 7; C's window loop), one sample at temperature 1. No val or test day is read.
+    - **Times, each apart:** the prior's step of a row (its inputs, the model with its cache, the masks, the draw; in C,
+      the traffic attention and the separation masks too) and the executor's steps of the row; on the GPU each timed
+      between two synchronisations; the first 20 rows after loading are not timed.
+    - **Settings** (Claude's proposal; the user may change them): the CPU with one thread (as the closed loop runs) and
+      the GPU; one aircraft at a time (the time a controller in the loop waits) and a batch of 400 (free generation's
+      chunk in B5); 20 flights of each airport (seed 1337; C: the select windows of its selection readout).
+    - **Readout:** for each setting, the time of a row (p50, p95, largest, in ms), of a sentence (s), the rows per
+      second, and the share of Δ = 4 s that one row takes (the prior's step and the executor's); the device, the torch
+      version, the threads, the load of the host at the start and the commit, as information. Written into a new
+      directory, `4dTrajectory/outputs/POOLED/speed/<model run>_<date>/` (never into the read-only directory of the
+      model). It runs with no other job on the host or the GPU (§5 rule 13).
+    - **The view:** the sets of B and C name their model's speed readout (`source.speed`, written by the export; B's
+      sets are exported again after it, item 7), the results route reads it (item 4), and the details page shows it in
+      its section **Speed**, the setting of each number beside it. Stage A's view keeps the executor's time on the live
+      line.
+

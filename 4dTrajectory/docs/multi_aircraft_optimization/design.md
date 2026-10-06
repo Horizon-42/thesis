@@ -607,8 +607,10 @@ hint which days hold data and which flights meet traffic).
   windows had one).
 - **The panel.** Lists show 100 rows at a time with the count of the rest. The result shows, per controlled
   aircraft, what changed: the loss instants in its record, after the first solve and at the end, and its landing
-  against its record (M2 also its delay; an aircraft that was not flown shows no delay). While a job runs the panel
-  shows its phase and the elapsed time. While a scene is shown the clock widgets display its real UTC time.
+  against its record (M2 also its delay; an aircraft that was not flown shows no delay), and its optimization time
+  and solve count; under the summary the job's total time and the time of each phase (the user, 2026-10-06). Rows
+  are two-line cards, not tables (the dock is about 240 px wide). While a job runs the panel shows its phase and
+  the elapsed time. While a scene is shown the clock widgets and the timeline display its real UTC time.
 
 ## 11. Open questions
 
