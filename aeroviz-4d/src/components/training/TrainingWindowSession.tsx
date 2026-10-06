@@ -36,13 +36,14 @@ import {
 import { checkMark, crossingText, TRAINING_OUTCOME_TAG, TRAINING_OUTCOME_TEXT } from "../../data/trainingText";
 import { publishTrainingTabs, useTrainingTabs, type TrainingTab } from "../../data/trainingTabs";
 import { useTrainingSetIntent } from "../../data/trainingSetIntent";
+import { useTrainingSetResults } from "../../data/trainingSetResults";
 import { trainingOutcomeColour } from "../../utils/trainingWordColors";
 import { TRAINING_WINDOW_ROLE_COLOR } from "../../hooks/useTrainingWindowLayer";
 import ProblemBox from "./ProblemBox";
 import TrainingDetails, { type TrainingDetailsSection } from "./TrainingDetails";
-import { DetailsLink, DrawBox, EXPERIMENT_SECTION, OVERVIEW_SECTION, type DetailsPage } from "./PanelParts";
+import { DetailsLink, DrawBox, EXPERIMENT_SECTION, LayerSwitches, type DetailsPage } from "./PanelParts";
+import { ChecksSection, resultSection, RoundsSection, SpeedSection } from "./ResultSections";
 import { ExperimentSection, ItemList, SetChooser } from "./SetParts";
-import { NotesList } from "./NotesToggle";
 
 const ROUNDS_SECTION = "rounds";
 const WINDOW_SECTION = "window";
@@ -249,49 +250,21 @@ export default function TrainingWindowSession({ airport, sets, details }: {
 
   const sentence = window === null || shown === null ? null : window.rounds.find((item) => item.round === shown) ?? null;
 
-  // ── the details page ──────────────────────────────────────────────────────
+  // ── the details page: the experiment's results (outline §6.2 item 3, D134) ──
+  const results = useTrainingSetResults("C", airport, setId);
+  const c = results.status === "ready" && results.results.stage === "C" ? results.results : null;
   const absent = state.status === "invalid" ? `the set cannot be read: ${state.problem}` : "the set is loading";
   const roles = { recorded: 0, inserted: 0, moved: 0 };
   for (const aircraft of window?.traffic ?? []) roles[aircraft.role] += 1;
   const sections: TrainingDetailsSection[] = [
-    // the first section always has a body: the set's intent and facts come from its index entry, not its sample
+    // the first section always has a body: the set's intent and provenance come from its index entry, not its sample
     entry === null ? { id: EXPERIMENT_SECTION, title: "The set and the experiment", body: <p className="training-details-lede">The index lists no set.</p> } : {
-      id: EXPERIMENT_SECTION, title: "The set and the experiment", body: (
-        <ExperimentSection setId={entry.id} intent={intent} facts={[
-          { key: "made", name: "Made from", text: `the post-training campaign ${entry.source.campaign} (rounds ` +
-            `${entry.model.rounds.map(roundLabel).join(", ")}; Δ ${entry.model.rowIntervalS} s), on ${entry.source.instructions} and ` +
-            `${entry.source.executor}, commit ${entry.source.git.head.slice(0, 10)}${entry.source.git.dirty ? " (dirty tree)" : ""}` +
-            `${entry.source.smoke || entry.source.campaignSmoke ? " — SMOKE: not a result" : ""}` },
-          { key: "items", name: "Windows", text: `${entry.windows} of the ${entry.cohort.split} days, ${entry.cohort.perAirport} ` +
-            `drawn at this airport (seed ${entry.cohort.seed}; kinds ${entry.cohort.kinds.join(", ")}) from ${entry.cohort.pool} real ` +
-            `windows — ${entry.cohort.drawnFrom}` },
-        ]} />
-      ) },
-    { id: OVERVIEW_SECTION, title: "What this view shows", body: (
-      <>
-        <p className="training-details-lede">
-          Each window of recorded traffic with one commanded aircraft: its recorded flight and, for each round of the post-training,
-          the sentence that round's model said for it, flown by the executor among the window's other aircraft and judged.
-        </p>
-        <h4 className="training-details-subhead">The tabs of the sentence bar</h4>
-        <NotesList items={[
-          { key: "labelled", name: "Labelled", text: "the labeller's open-loop reading of the commanded aircraft's recorded flight (not flown)" },
-          { key: "start", name: "Start (base)", text: "the sentence the base model said, before any round" },
-          { key: "round", name: "r1, r2 …", text: "the sentence each round's model said (round 1, 2 …); the dot is its outcome's colour" },
-        ]} />
-        <h4 className="training-details-subhead">Window kinds</h4>
-        <NotesList items={Object.entries(TRAINING_WINDOW_KIND_TEXT).map(([kind, text]) => ({ key: kind, name: kind, text }))} />
-        <h4 className="training-details-subhead">What each switch draws</h4>
-        <NotesList items={[
-          { key: "traffic", name: "Other aircraft", text: "the other aircraft where their records have them at the cursor's time" },
-          { key: "tracks", name: "Their tracks", text: "each other aircraft's track over the window, in its role's colour" },
-          { key: "loss", name: "Loss of separation", text: "the two aircraft at the loss of separation that ended the round, joined" },
-          { key: "rounds", name: "Other rounds", text: "the flown paths of the window's other rounds, thin beside the one on screen" },
-        ]} />
-      </>
-    ) },
-    sample === null ? { id: ROUNDS_SECTION, title: "Rounds", body: null, absent }
-      : { id: ROUNDS_SECTION, title: "Rounds", body: <RoundsTable sample={sample} /> },
+      id: EXPERIMENT_SECTION, title: "The set and the experiment",
+      body: <ExperimentSection setId={entry.id} intent={intent} provenance={entry.model.campaign} /> },
+    resultSection(ROUNDS_SECTION, "Rounds", results, c === null ? null : c.rounds, (value, own) => <RoundsSection {...value} own={own} />,
+      sample === null ? <p className="experiment-details-missing">{absent}</p> : <RoundsTable sample={sample} />),
+    resultSection("speed", "Speed", results, c === null ? null : c.speed, (value) => <SpeedSection {...value} />),
+    resultSection("checks", "The checks", results, c === null ? null : c.checks, (value) => <ChecksSection {...value} />),
     window === null || sentence === null ? { id: WINDOW_SECTION, title: "The window", body: null, absent }
       : { id: WINDOW_SECTION, title: "The window", body: <WindowEnd window={window} sentence={sentence} /> },
   ];
@@ -334,6 +307,7 @@ export default function TrainingWindowSession({ airport, sets, details }: {
             <WindowCursorStart flightKey={trainingWindowFlightView(sample, window, shown).flightKey} row0S={window.row0S} />
           )}
           <DrawBox legend="Draw (window)">
+            <LayerSwitches />
             <label title="the other aircraft where their records have them at the cursor's time">
               <input type="checkbox" checked={layers.traffic} onChange={(event) => setTrainingWindowLayer("traffic", event.target.checked)} />
               Other aircraft

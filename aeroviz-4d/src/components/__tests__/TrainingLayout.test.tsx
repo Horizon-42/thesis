@@ -33,6 +33,7 @@ import { stageBIndex, stageBSampleFile, stageBValSampleFile } from "../../data/_
 import { stageCIndex, stageCSample, stageCSampleFile, WINDOW_SET_ID } from "../../data/__tests__/stageC";
 import { chooseTrainingTab, useTrainingTabs, type TrainingTabs } from "../../data/trainingTabs";
 import { requestTrainingDetails } from "../training/PanelParts";
+import { resultsAnswer, resultsUrl } from "../../data/__tests__/trainingResults";
 import { roundTabLabel } from "../training/TrainingWindowSession";
 
 const intentUrl = (setId: string) => `${AEROVIZ_BACKEND_URL.replace(/\/+$/, "")}/experiments/intent?run=${encodeURIComponent(setId)}`;
@@ -56,11 +57,11 @@ function TabsSpy() {
 }
 
 const C_FILES = {
-  "data/airports/KXXX/training/index_post_v1.json": stageCIndex(),
+  "data/airports/KXXX/training/index_post_v2.json": stageCIndex(),
   [`data/airports/KXXX/training/${WINDOW_SET_ID}/sample.json`]: stageCSampleFile(),
 };
 const B_FILES = {
-  "data/airports/KXXX/training/index_prior_v2.json": stageBIndex(),
+  "data/airports/KXXX/training/index_prior_v3.json": stageBIndex(),
   "data/airports/KXXX/training/fixture_set/sample.json": stageBSampleFile(),
   "data/airports/KXXX/training/fixture_val/sample.json": stageBValSampleFile(),
 };
@@ -108,8 +109,19 @@ describe("one layout for the three stages", () => {
     expect(screen.getByRole("tab", { name: /Rounds/ })).toBeTruthy();
   });
 
+  it("a results section without fields says why, and still shows the set's own rounds", async () => {
+    serve(C_FILES, { [resultsUrl("C", "KXXX", WINDOW_SET_ID)]: resultsAnswer("Cmissing") });
+    await openStage("window");
+    fireEvent.click(await screen.findByRole("button", { name: "Training details" }));
+    fireEvent.click(await screen.findByRole("tab", { name: /Rounds/ }));
+    const page = await screen.findByRole("dialog");
+    await waitFor(() => expect(page.textContent).toContain("campaign.json does not exist"));
+    expect(screen.getByRole("table", { name: "Every window's rounds" })).toBeTruthy();
+  });
+
   it("stage B: the ⓘ is never disabled; the claimed val set says its readout; a set without an intent says so by name", async () => {
-    serve(B_FILES, { [intentUrl("fixture_set")]: { ok: false, run: "fixture_set", campaigns: [], error: "fixture_set is a run of no campaign in intents.json" } });
+    serve(B_FILES, { [intentUrl("fixture_set")]: { ok: false, run: "fixture_set", campaigns: [], error: "fixture_set is a run of no campaign in intents.json" },
+      [resultsUrl("B", "KXXX", "fixture_val")]: resultsAnswer("Bval") });
     await openStage("prior");
     expect(await screen.findByRole("button", { name: /No intent for fixture_set: fixture_set is a run of no campaign/ })).toBeTruthy();
     const info = screen.getByRole("button", { name: "Training details" }) as HTMLButtonElement;
@@ -118,12 +130,15 @@ describe("one layout for the three stages", () => {
     await waitFor(() => expect(lastPublished()?.setId).toBe("fixture_val"));
     fireEvent.click(info);
     const page = await screen.findByRole("dialog");
-    expect(page.textContent).toContain("Validation readout");
-    expect(page.textContent).toContain("claimed by prior_free_generation");
+    // the first section: the intent and one line of provenance (D134); the results: the base's validation, for this set only
+    expect(page.textContent).toContain("made from fixture/readout_val");
+    expect(page.textContent).not.toContain("What this view shows");
+    fireEvent.click(await screen.findByRole("tab", { name: /Validation/ }));
+    expect((await screen.findByRole("dialog")).textContent).toContain("1.0800 per step");
   });
 
   it("the header's ⓘ opens a page where no session is on screen (stage B's index cannot be read), saying why", async () => {
-    serve({ "data/airports/KXXX/training/index_prior_v2.json": { schema: "aeroviz-training-prior-index-v0", airport: "KXXX", sets: [] } });
+    serve({ "data/airports/KXXX/training/index_prior_v3.json": { schema: "aeroviz-training-prior-index-v0", airport: "KXXX", sets: [] } });
     await openStage("prior");
     expect(await screen.findByText(/cannot be read/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Training details" }));
@@ -132,14 +147,15 @@ describe("one layout for the three stages", () => {
   });
 
   it("the details page opens from outside the dock (the sentence bar's notes) on its section", async () => {
-    serve(B_FILES);
+    serve(B_FILES, { [resultsUrl("B", "KXXX", "fixture_set")]: resultsAnswer("B") });
     await openStage("prior");
     await waitFor(() => expect(lastPublished()?.flight.flightKey).toContain("~prior-0"));
     const opener = document.createElement("button");
     document.body.appendChild(opener);
-    act(() => requestTrainingDetails("row-inspector", opener));
+    act(() => requestTrainingDetails("speed", opener));
     const page = await screen.findByRole("dialog");
-    expect(page.querySelector('[aria-label="The words at a row"]')).not.toBeNull();
+    await waitFor(() => expect(page.textContent).toContain("flight rows a second"));
+    expect(page.querySelector('[aria-label="The words at a row"]')).toBeNull();           // no row inspector (D134)
   });
 });
 

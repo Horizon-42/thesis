@@ -19,7 +19,7 @@
  * draws numbers.
  *
  * NO COMPATIBILITY. The index and sample schemas and the set kind are pinned below; a file that carries anything else is
- * refused by name (the schema found and the one expected). This reader never reads stage A's `index_v4.json`.
+ * refused by name (the schema found and the one expected). This reader never reads stage A's `index_v5.json`.
  *
  * SI units only. Heights in the files are MSL; the 3D scene's are ellipsoid heights (the flight's own, or the candidate
  * runway's, `haeMinusMslM` added once, here).
@@ -28,22 +28,20 @@
 import { fetchJson } from "../utils/fetchJson";
 import { attempt, parseManifest, Reader, type Parsed } from "./trainingReader";
 import {
-  lastStateCycle,
-  parseAttitudeOf,
   parseCandidates,
   parseEvents,
   parseFlight,
+  parseFlownBlock,
   parseFormats,
   parseGrid,
   parseVocabulary,
-  unwrapDegrees,
   TRAINING_OUTCOMES,
   TRAINING_READING_RULE,
   TRAINING_SPLITS,
-  readCrossing,
   type TrainingCandidate,
   type TrainingClosedLoop,
   type TrainingCrossing,
+  type TrainingEnvelopes,
   type TrainingEvent,
   type TrainingSplit,
   type TrainingFlight,
@@ -56,11 +54,11 @@ import {
 
 /** MIRROR of the exporter's `INDEX_SCHEMA` (`ts_transformer/prior/training_files.py`): the airport's index of prior sets.
  *  A name changes with its file's shape, on both sides, in the same change. */
-export const TRAINING_PRIOR_INDEX_SCHEMA = "aeroviz-training-prior-index-v2";
-/** MIRROR of `INDEX_FILE`: an index of its own beside stage A's `index_v4.json`, which this reader never reads. */
-export const TRAINING_PRIOR_INDEX_FILE = "index_prior_v2.json";
+export const TRAINING_PRIOR_INDEX_SCHEMA = "aeroviz-training-prior-index-v3";
+/** MIRROR of `INDEX_FILE`: an index of its own beside stage A's `index_v5.json`, which this reader never reads. */
+export const TRAINING_PRIOR_INDEX_FILE = "index_prior_v3.json";
 /** MIRROR of `SAMPLE_SCHEMA`: a prior set's sample (v3: each prior sentence's track written unrounded, D127). */
-export const TRAINING_PRIOR_SAMPLE_SCHEMA = "aeroviz-training-prior-sample-v3";
+export const TRAINING_PRIOR_SAMPLE_SCHEMA = "aeroviz-training-prior-sample-v4";
 /** MIRROR of `SET_KIND`: the flights of one free-generation readout. */
 export const TRAINING_PRIOR_SET_KIND = "prior-free-generation";
 /** MIRROR of the procedure masks' columns (`prior.procedure.ProcedureMasks.columns`, by `COLUMNS` name): the blocked words are
@@ -168,15 +166,15 @@ export interface TrainingPriorSentence {
   firstRow: number;
   startRow: number;
   flownFromRow: number;
+  /** The block of the flown sentence (stage A's reader, `parseFlownBlock`): outcome, end cycle, crossing, the flown
+   *  flight and the envelopes of its words. */
   outcome: TrainingOutcome;
-  /** The executor's cycles from the first predicted step to the judge's outcome row. */
   endCycle: number;
+  crossing: TrainingCrossing | null;
+  flown: TrainingTrack;
+  envelopes: TrainingEnvelopes | null;
   timedOut: boolean;
   goArounds: number;
-  /** null: the flight did not cross the threshold. */
-  crossing: TrainingCrossing | null;
-  /** The flown flight on the 2 s rows from the first predicted step, on the flight's clock, with its attitude. */
-  flown: TrainingTrack;
   /** Per word row: the probability the prior gave "go-around" there. */
   goAroundProbability: number[];
   /** Per word row: whether the procedure let a go-around be said there / whether the flight was on final. */
@@ -374,34 +372,13 @@ function parseSentence(
   if (reader.count("rows", 1) !== words.length) reader.fail(`rows is ${reader.raw("rows")}, but words holds ${words.length}`);
   // the closed-loop reading adds no word to what the prior said
   const events = parseEvents(reader, words, candidates, false);
-  const outcome = reader.oneOf("outcome", TRAINING_OUTCOMES);
-  const endCycle = reader.count("endCycle");
-  const track = reader.child("track");
-  const rows = track.count("rows", 1);
-  const lastCycle = track.count("lastCycle");
-  if (lastCycle !== lastStateCycle(outcome, endCycle)) {
-    track.fail(`lastCycle is ${lastCycle}, but a flight that ended at cycle ${endCycle} (${outcome}) has its last state at ${lastStateCycle(outcome, endCycle)}`);
-  }
-  if (rows !== Math.floor((lastCycle * cycleS) / stepS + 1e-9) + 1) {
-    track.fail(`rows is ${rows}, but ${lastCycle} cycles of ${cycleS} s are ${Math.floor((lastCycle * cycleS) / stepS + 1e-9) + 1} rows of ${stepS} s`);
-  }
-  const crossing = reader.nullableChild("crossing");
-  const startIndex = firstRow + flownFromRow;
-  const heightMslM = track.numbers("heightMslM", rows);
-  const trackDeg = track.numbers("trackDeg", rows);
-  const hae = head.haeMinusMslM;
-  const flown: TrainingTrack = {
-    tS: Array.from({ length: rows }, (_, i) => (startIndex + i) * stepS),
-    eM: track.numbers("eM", rows), nM: track.numbers("nM", rows), lat: track.numbers("latDeg", rows),
-    lon: track.numbers("lonDeg", rows), altitudeMslM: heightMslM, altitudeHaeM: heightMslM.map((value) => value + hae), trackDeg,
-    trackPlotDeg: unwrapDegrees(trackDeg, head.observed.trackPlotDeg[Math.min(startIndex, head.observed.tS.length - 1)]),
-    groundSpeedMps: track.numbers("groundSpeedMps", rows), verticalRateMps: track.numbers("verticalRateMps", rows),
-    attitude: parseAttitudeOf(reader, rows),
-  };
+  const block = parseFlownBlock(reader, TRAINING_OUTCOMES, candidates, cycleS, stepS, firstRow + flownFromRow,
+    head.haeMinusMslM, head.observed);
   const rowsSaid = words.length;
   return {
-    sample, words, events, firstRow, startRow, flownFromRow, outcome, endCycle, timedOut: reader.boolean("timedOut"),
-    goArounds: reader.count("goArounds"), crossing: crossing === null ? null : readCrossing(crossing, candidates.length), flown,
+    sample, words, events, firstRow, startRow, flownFromRow, outcome: block.outcome as TrainingOutcome, endCycle: block.endCycle,
+    crossing: block.crossing, flown: block.flown, envelopes: block.envelopes, timedOut: reader.boolean("timedOut"),
+    goArounds: reader.count("goArounds"),
     goAroundProbability: reader.numbers("goAroundProbability", rowsSaid), goAroundPermitted: parseFlags(reader, "goAroundPermitted", rowsSaid),
     onFinal: parseFlags(reader, "onFinal", rowsSaid), blocked: parseBlocked(reader, rowsSaid, vocabulary),
   };
@@ -498,8 +475,7 @@ export function trainingPriorOriginOf(flight: TrainingFlight): TrainingPriorOrig
 }
 
 /** A sentence the prior said as stage A's closed-loop sentence at Δ, so the sentence bar, the read-back window and the 3D
- *  layers read it unchanged. No envelope was judged on it (the judge's envelopes are the closed-loop sentence's own) and the
- *  reading added no word. The executor flies on to the sentence's last word, which can lie past the judge's outcome (a crossing
+ *  layers read it unchanged: its envelopes the judge's on its flown track (D135); the reading added no word. The executor flies on to the sentence's last word, which can lie past the judge's outcome (a crossing
  *  of another runway): `notReached` counts the words said after it (`wordUnreached`). */
 function closedLoopOf(model: TrainingPriorModel, flight: TrainingFlight, sentence: TrainingPriorSentence): TrainingClosedLoop {
   const closed = flight.closedLoop[String(model.rowIntervalS)];
@@ -510,7 +486,7 @@ function closedLoopOf(model: TrainingPriorModel, flight: TrainingFlight, sentenc
     cycleS: closed.cycleS, flown: sentence.flown,
     replay: {
       outcome: sentence.outcome, endCycle: sentence.endCycle, crossing: sentence.crossing, flewTheSentence: true, notReached: 0,
-      envelopes: null,
+      envelopes: sentence.envelopes,
     },
   };
   const notReached = sentence.events.filter((event) => wordUnreached(result, event.row)).length;

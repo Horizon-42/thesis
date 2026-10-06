@@ -18,7 +18,6 @@ import {
 } from "../trainingPriorSample";
 import { wordUnreached } from "../trainingSample";
 import { readingRowAt, sentenceColumnRuns, trainingReadingOf, TRAINING_READING_RULE, TRAINING_SAMPLE_SCHEMA } from "../trainingSample";
-import { allowedWords, blockedWordName } from "../../components/training/TrainingPriorSession";
 import { PRIOR_SET_ID, PRIOR_VAL_SET_ID, stageBIndex, stageBSample, stageBSampleFile, stageBValSampleFile } from "./stageB";
 import { TRAINING_SET_SPLITS, TRAINING_SPLITS } from "../trainingSample";
 
@@ -197,7 +196,9 @@ describe("a sentence as stage A's views read it", () => {
     expect(reading.loop).toBe("closed");
     expect(reading.closed!.words).toBe(flight.sentences[1].words);
     expect(reading.closed!.replay.outcome).toBe(flight.sentences[1].outcome);
-    expect(reading.closed!.replay.envelopes).toBeNull();
+    // the judge's envelopes of its words on its own flown track (D135), the export's
+    expect(reading.closed!.replay.envelopes).toBe(flight.sentences[1].envelopes);
+    expect(flight.sentences[1].envelopes!.heading.length).toBeGreaterThan(0);
     expect(sentenceColumnRuns(reading, "heading").length).toBeGreaterThan(1);
     expect(readingRowAt(reading, reading.originS)).toBe(0);
     const closed = trainingPriorFlightView(sample, flight, "closedLoop");
@@ -218,19 +219,6 @@ describe("a sentence as stage A's views read it", () => {
     const selection = trainingPriorSelectionOf(sample, trainingPriorFlightView(sample, flight, 0));
     expect(selection.vocabulary.rowIntervalsS).toEqual([4]);
     expect(selection.setId).toBe(PRIOR_SET_ID);
-  });
-});
-
-describe("the blocked words", () => {
-  const { vocabulary } = stageBSample();
-
-  it("are named as the vocabulary names them and listed as what is still allowed", () => {
-    expect(blockedWordName("altitude", 1, vocabulary)).toBe("60 m");
-    expect(blockedWordName("altitude", vocabulary.noLevelOff, vocabulary)).toBe("no level-off");
-    expect(blockedWordName("angle", 0, vocabulary)).toBe("level");
-    const everything = Array.from({ length: vocabulary.noLevelOff + 1 }, (_, value) => value);
-    expect(allowedWords("altitude", everything.slice(1), vocabulary)).toEqual([0]);
-    expect(allowedWords("angle", [], vocabulary)).toHaveLength(vocabulary.angleClasses.length);
   });
 });
 

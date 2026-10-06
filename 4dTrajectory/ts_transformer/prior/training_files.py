@@ -7,9 +7,8 @@ Not a runner, and torch-free: its reader and writer (`FILES`) raise `ValueError`
 handler and drop the request unanswered.
 
 **Beside the other sets (outline §6 item 3).** A prior set is ``<airport>/training/<set-id>/sample.json``
-(`SAMPLE_SCHEMA`), listed in ``<airport>/training/index_prior_v2.json`` (`INDEX_FILE`, `INDEX_SCHEMA`) — an index of its
-own beside stage A's ``index_v4.json`` and the instruction-v3 view's ``index.json``, which this code never reads or
-writes. Read and written by the one definition of the three stages (`instructions.training_files.TrainingFiles`): this
+(`SAMPLE_SCHEMA`), listed in ``<airport>/training/index_prior_v3.json`` (`INDEX_FILE`, `INDEX_SCHEMA`) — an index of its
+own beside stage A's and the older ones, which this code never reads or writes. Read and written by the one definition of the three stages (`instructions.training_files.TrainingFiles`): this
 module holds only stage B's constants (`FILES`).
 """
 
@@ -26,9 +25,12 @@ from ts_transformer.instructions.training_files import TrainingFiles
 #: readers give val to that set alone.
 #: Sample v3 (B13, D127): each prior sentence's flown track written unrounded (the live segment is checked against it
 #: within the executor's bound).
-INDEX_SCHEMA = "aeroviz-training-prior-index-v2"
-INDEX_FILE = "index_prior_v2.json"
-SAMPLE_SCHEMA = "aeroviz-training-prior-sample-v3"
+#: Index v3 (``index_prior_v3.json``) / sample v4 (D135, D136, 2026-10-06): each sentence's block is stage A's
+#: (`experiments.training_export.flown_sentence`), with the envelopes of its words; the set's source names its model's
+#: speed readout (``speed``).
+INDEX_SCHEMA = "aeroviz-training-prior-index-v3"
+INDEX_FILE = "index_prior_v3.json"
+SAMPLE_SCHEMA = "aeroviz-training-prior-sample-v4"
 SAMPLE_FILE = "sample.json"
 SET_KIND = "prior-free-generation"
 #: The reader of the val days whose claim a set's ``validationClaim`` names (`checkpoint.claim_validation_read`): the

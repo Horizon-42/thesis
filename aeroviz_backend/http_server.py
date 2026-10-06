@@ -71,6 +71,7 @@ class AeroVizBackendApp:
         autopilot_segment_backend: Any = None,
         experiment_intents: Path = EXPERIMENT_INTENTS,
         traffic_jobs: TrafficJobs | None = None,
+        training_results: Any = None,
     ) -> None:
         # The simulation endpoints run in-process (they are high-frequency and use
         # only casadi function evaluation, not the crash-prone NLP construction).
@@ -95,6 +96,9 @@ class AeroVizBackendApp:
         self._autopilot_segment_backend = autopilot_segment_backend
         self._autopilot_segment_lock = threading.Lock()
         self.experiment_intents = experiment_intents
+        # the Training sets' results (`training_results.TrainingResults`), opened on first use like the live executor
+        self._training_results = training_results
+        self._training_results_lock = threading.Lock()
         # The Optimize task's multi-aircraft jobs: one subprocess at a time (aeroviz_backend/traffic_jobs.py).
         self.traffic_jobs = traffic_jobs or TrafficJobs()
 
@@ -106,6 +110,15 @@ class AeroVizBackendApp:
                 self._autopilot_segment_backend = stage_a_service()
             return self._autopilot_segment_backend
 
+    def training_results(self) -> Any:
+        with self._training_results_lock:
+            if self._training_results is None:
+                from aeroviz_backend.training_results import TrainingResults
+                from ts_transformer.repo_layout import COMPARISON_AIRPORTS_ROOT
+
+                self._training_results = TrainingResults(COMPARISON_AIRPORTS_ROOT)
+            return self._training_results
+
     def handle_get(self, path: str) -> tuple[int, Any]:
         parsed = urlsplit(path)
         if parsed.path == "/health":
@@ -116,6 +129,13 @@ class AeroVizBackendApp:
             except ValueError as exc:
                 return 400, {"ok": False, "error": str(exc)}
             return experiment_intent(self.experiment_intents, run)
+        if parsed.path == "/training/results":           # a Training set's results (outline §6.2 items 3, 4; D134)
+            query = parse_qs(parsed.query, keep_blank_values=True)
+            try:
+                stage, airport, set_id = (_query_value(query, name, required=True) for name in ("stage", "airport", "set"))
+            except ValueError as exc:
+                return 400, {"ok": False, "error": str(exc)}
+            return self.training_results().answer(stage, airport, set_id)
         if parsed.path == "/simulation/aircraft":
             return 200, aircraft_catalog()
         if parsed.path == "/dynamics-comparison/history":
@@ -537,8 +557,10 @@ def main() -> None:
     else:
         from aeroviz_backend.autopilot_segment.backend import stage_a_service
 
+        from aeroviz_backend.training_results import TrainingResults
+
         app = AeroVizBackendApp(autopilot_segment_backend=stage_a_service(args.training_airports_root),
-                                traffic_jobs=traffic_jobs)
+                                traffic_jobs=traffic_jobs, training_results=TrainingResults(args.training_airports_root))
     http_server = ThreadingHTTPServer(
         (args.host, args.port),
         make_request_handler(app),

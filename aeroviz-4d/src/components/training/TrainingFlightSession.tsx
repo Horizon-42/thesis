@@ -18,8 +18,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "../../context/AppContext";
 import TrainingVocabularyNotes from "../TrainingVocabularyNotes";
 import TrainingDetails, { type TrainingDetailsSection } from "./TrainingDetails";
-import { NotesList } from "./NotesToggle";
-import { DetailsLink, DrawBox, EXPERIMENT_SECTION, LAYER_SWITCHES, LayerSwitches, OVERVIEW_SECTION, type DetailsPage } from "./PanelParts";
+import { DetailsLink, DrawBox, EXPERIMENT_SECTION, LayerSwitches, type DetailsPage } from "./PanelParts";
+import { ClosedLoopSection, LabellingSection, resultSection } from "./ResultSections";
 import { ExperimentSection, ItemList } from "./SetParts";
 import { trainingOutcomeColour } from "../../utils/trainingWordColors";
 import {
@@ -33,6 +33,7 @@ import {
 import { checkMark, decisionText, TRAINING_OUTCOME_TAG } from "../../data/trainingText";
 import { publishTrainingTabs, useTrainingTabs, type TrainingTab } from "../../data/trainingTabs";
 import type { TrainingSetIntentState } from "../../data/trainingSetIntent";
+import { useTrainingSetResults } from "../../data/trainingSetResults";
 
 const FLOWN_SECTION = "flown";
 const LABELLED = "labelled";
@@ -136,39 +137,18 @@ export default function TrainingFlightSession({ airport, sample, entry, details,
   useEffect(() => () => setTrainingSelection(null), [setTrainingSelection]);
   const closed = flight === null || intervalS === null ? null : flight.closedLoop[String(intervalS)];
 
-  // ── the details page ──────────────────────────────────────────────────────
+  // ── the details page: the experiment's results (outline §6.2 item 3, D134) ──
+  const results = useTrainingSetResults("A", airport, entry === null ? null : entry.id);
+  const a = results.status === "ready" && results.results.stage === "A" ? results.results : null;
   const absent = sample === null ? "the set is loading or cannot be read" : "";
   const sections: TrainingDetailsSection[] = [
-    // the first section always has a body: the set's intent and facts come from its index entry, not its sample
+    // the first section always has a body: the set's intent and provenance come from its index entry, not its sample
     entry === null ? { id: EXPERIMENT_SECTION, title: "The set and the experiment", body: <p className="training-details-lede">The index lists no set.</p> } : {
-      id: EXPERIMENT_SECTION, title: "The set and the experiment", body: (
-        <ExperimentSection setId={entry.id} intent={intent} facts={[
-          { key: "made", name: "Made from", text: `${entry.source.instructions} and ${entry.source.executor}, commit ` +
-            `${entry.source.git.head.slice(0, 10)}${entry.source.git.dirty ? " (dirty tree)" : ""}` },
-          { key: "cohort", name: "Flights", text: `${entry.flights} (${Object.entries(entry.cohort.splits).map(([split, count]) =>
-            `${split} ${count}`).join(", ")}; ${entry.cohort.perStratum} per stratum, seed ${entry.cohort.seed}) — ${entry.cohort.drawnFrom}` },
-        ]} />
-      ) },
-    sample === null ? { id: OVERVIEW_SECTION, title: "What this view shows", body: null, absent } : { id: OVERVIEW_SECTION, title: "What this view shows", body: (
-      <>
-        <p className="training-details-lede">
-          Each arrival read as the instructions a controller could have given — five columns: runway (or go-around), heading
-          relative to the course of the runway in force, a level above the airport elevation, an angle, a speed. The labelled
-          sentence is the labeller's reading of the observed flight; the closed-loop sentence at each row interval Δ is what the
-          closed-loop reading says to the executor from the first predicted step, the words it added marked, and the path the
-          executor flew from them beside the observed track, with the judge's outcome and the decision-altitude (DA) check.
-        </p>
-        <h4 className="training-details-subhead">The tabs of the sentence bar</h4>
-        <NotesList items={[
-          { key: "labelled", name: "Labelled", text: "the labeller's open-loop reading of the observed flight (not flown)" },
-          { key: "interval", name: "Δ 2 s, 4 s, 8 s", text: "the closed-loop sentence at that row interval, flown by the executor; the dot is its outcome's colour" },
-        ]} />
-        <h4 className="training-details-subhead">What each switch draws</h4>
-        <NotesList items={LAYER_SWITCHES.map(({ layer, colour, text, title }) => ({ key: layer, text: title, name: (
-          <><span className="training-model-swatch" style={{ background: colour }} />{text}</>) }))} />
-      </>
-    ) },
-    sample === null ? { id: "vocabulary", title: "Vocabulary", body: null, absent } : { id: "vocabulary", title: "Vocabulary", body: <TrainingVocabularyNotes sample={sample} /> },
+      id: EXPERIMENT_SECTION, title: "The set and the experiment",
+      body: <ExperimentSection setId={entry.id} intent={intent} provenance={entry.source.instructions} /> },
+    resultSection("labelling", "Labelling", results, a === null ? null : a.labelling, (splits) => <LabellingSection splits={splits} />),
+    resultSection("closed-loop", "Closed loop", results, a === null ? null : a.closedLoop,
+      (replays) => <ClosedLoopSection replays={replays} airport={airport} />),
     sample === null ? { id: FLOWN_SECTION, title: "Flown flights", body: null, absent } : { id: FLOWN_SECTION, title: "Flown flights", body: (
       <>
         <p className="training-details-lede">
@@ -178,6 +158,7 @@ export default function TrainingFlightSession({ airport, sample, entry, details,
         <FlownTable sample={sample} />
       </>
     ) },
+    sample === null ? { id: "vocabulary", title: "Vocabulary", body: null, absent } : { id: "vocabulary", title: "Vocabulary", body: <TrainingVocabularyNotes sample={sample} /> },
   ];
   return (
     <>

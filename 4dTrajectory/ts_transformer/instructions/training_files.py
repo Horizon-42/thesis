@@ -6,9 +6,9 @@ Not a runner, and torch-free: everything here raises `ValueError` (a set that is
 never `SystemExit` — a server thread would let that escape its handler and drop the request unanswered.
 
 **Beside the old sets (outline §6 item 3).** A stage-A set is ``<airport>/training/<set-id>/sample.json``
-(`SAMPLE_SCHEMA`), listed in ``<airport>/training/index_v4.json`` (`INDEX_FILE`, `INDEX_SCHEMA`) — a NEW index beside the
-instruction-v3 view's ``training/index.json``, which this code never reads or writes, so the main checkout's Training
-view keeps its sets until the user merges.
+(`SAMPLE_SCHEMA`), listed in ``<airport>/training/index_v5.json`` (`INDEX_FILE`, `INDEX_SCHEMA`) — a NEW index beside
+the older ones (``index_v4.json``, the instruction-v3 view's ``index.json``), which this code never reads or writes, so a
+checkout of the older view keeps its sets until they are deleted.
 
 **One writer for the three stages (outline §6.2 item 7).** `TrainingFiles` reads and writes the index and the sets of
 every stage, given the stage's constants: stage A's are `FILES`, stage B's and C's are in `prior.training_files` and
@@ -39,10 +39,12 @@ from ts_transformer.io_utils import utc_now
 #: their correction words, flown states, judge's outcome and decision-altitude check. Sample v10 (A32, 2026-10-05): the
 #: same shape from the closed-loop format v8 — the observed rows by the start rule (D77), a flight ending where the judge
 #: ends it (D79), the flights drawn from the closed-loop files and checked against the stored outcome (D86) — so that a
-#: view of this code never reads a v9 set.
-INDEX_SCHEMA = "aeroviz-training-index-v2"
-INDEX_FILE = "index_v4.json"
-SAMPLE_SCHEMA = "aeroviz-training-sample-v10"
+#: view of this code never reads a v9 set. Index v3 (``index_v5.json``) / sample v11 (D135, 2026-10-06): a flown sentence
+#: is the one block of every stage (`experiments.training_export.flown_sentence`), its track unrounded; the sets are
+#: listed in a new index beside v2's, which the view before D135 reads until the old sets are deleted.
+INDEX_SCHEMA = "aeroviz-training-index-v3"
+INDEX_FILE = "index_v5.json"
+SAMPLE_SCHEMA = "aeroviz-training-sample-v11"
 SAMPLE_FILE = "sample.json"
 SET_KIND = "closed-loop-readback"
 #: The splits a set draws from (outline §6 item 4, D85): the splits a readout reads.
@@ -56,6 +58,12 @@ class NotListed(ValueError):
 def rounded(values: Any, digits: int) -> list[float]:
     """Numbers at display precision, flattened: what every Training file writes."""
     return [round(float(value), digits) for value in np.asarray(values, dtype=np.float64).ravel()]
+
+
+def unrounded(values: Any) -> list[float]:
+    """Numbers as they are, flattened (prior D127: a value that a later step computes from is not rounded for display —
+    the live executor's answer is checked against a flown track within the executor's bound)."""
+    return [float(value) for value in np.asarray(values, dtype=np.float64).ravel()]
 
 
 def nullable(values: Any, digits: int) -> list[float | None]:

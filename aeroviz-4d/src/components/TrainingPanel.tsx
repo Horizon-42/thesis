@@ -10,7 +10,7 @@
  * it mounted from its first visit on, only ``hidden`` in the other tasks (`WorkbenchLeftDock`): its session — set, flight,
  * Δ, live answer — outlives a task switch.
  *
- * It reads `training/index_v4.json` and nothing else: never the instruction-v3 view's `training/index.json`. The states
+ * It reads `training/index_v5.json` and nothing else: never the instruction-v3 view's `training/index.json`. The states
  * all name what failed:
  *   ① no index                      → the path, the command, the dev-server restart (AV5)
  *   ② an index of another schema    → the schema found and the one this view reads
@@ -38,7 +38,7 @@ import TrainingPriorSession from "./training/TrainingPriorSession";
 import TrainingWindowSession from "./training/TrainingWindowSession";
 import ProblemBox from "./training/ProblemBox";
 import TrainingFlightSession from "./training/TrainingFlightSession";
-import { EXPERIMENT_SECTION, OVERVIEW_SECTION, useDetailsPage } from "./training/PanelParts";
+import { EXPERIMENT_SECTION, useDetailsPage } from "./training/PanelParts";
 import TrainingDetails from "./training/TrainingDetails";
 import { SetChooser } from "./training/SetParts";
 import useTrainingSet from "../hooks/useTrainingSet";
@@ -91,8 +91,8 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
 
   const [indexState, setIndexState] = useState<IndexState>({ status: "loading" });
   const [setId, setSetId] = useState<string | null>(null);
-  /** Whose sets the panel shows: stage A's (`index_v4.json`), stage B's prior sets (`index_prior_v2.json`) or stage C's
-   *  window sets (`index_post_v1.json`) — B and C offered only where the airport has the file. */
+  /** Whose sets the panel shows: stage A's (`index_v5.json`), stage B's prior sets (`index_prior_v3.json`) or stage C's
+   *  window sets (`index_post_v2.json`) — B and C offered only where the airport has the file. */
   const [viewing, setViewing] = useState<"stageA" | "prior" | "window">("stageA");
   const priorIndex = useTrainingPriorIndex(activeAirportCode || null);
   const windowIndex = useTrainingWindowIndex(activeAirportCode || null);
@@ -208,7 +208,6 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
         <TrainingDetails context={airport} sectionId={details.shown.section} onSection={details.show} onClose={details.close}
           opener={details.shown.opener} sections={[
             { id: EXPERIMENT_SECTION, title: "The set and the experiment", body: <p className="training-details-lede">{nothingShown}</p> },
-            { id: OVERVIEW_SECTION, title: "What this view shows", body: null, absent: nothingShown },
           ]} />
       ) : null}
       {showing !== "stageA" ? null : <>

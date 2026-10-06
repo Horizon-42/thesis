@@ -1,5 +1,5 @@
 {
- "schema": "aeroviz-training-index-v2",
+ "schema": "aeroviz-training-index-v3",
  "writtenUtc": "fixture",
  "airport": "KXXX",
  "sets": [

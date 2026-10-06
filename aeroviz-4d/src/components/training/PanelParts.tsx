@@ -26,7 +26,6 @@ export interface DetailsPage {
 
 /** The details page's two first sections in every stage (outline §6.2 item 3). */
 export const EXPERIMENT_SECTION = "experiment";
-export const OVERVIEW_SECTION = "overview";
 
 let request: { section: string; opener: HTMLElement; seq: number } | null = null;
 const requestListeners = new Set<() => void>();
@@ -83,11 +82,11 @@ export function DrawBox({ legend = "Draw", children }: { legend?: string; childr
 }
 
 /** The Draw switches, in drawing order: a short name in its own colour, what it shows in its tooltip. */
-export const LAYER_SWITCHES: Array<{ layer: keyof TrainingLayers; colour: string; text: string; title: string }> = [
+const LAYER_SWITCHES: Array<{ layer: keyof TrainingLayers; colour: string; text: string; title: string }> = [
   { layer: "headingBands", colour: TRAINING_HEADING_BAND_COLOR, text: "Heading bands",
     title: "each heading word's band over the rows it is judged on, and those rows outside it in red" },
-  { layer: "vertical", colour: TRAINING_TUBE_COLOR, text: "Altitude tubes + speed bands",
-    title: "each altitude word's tube, and on the speed chart each speed word's band" },
+  { layer: "vertical", colour: TRAINING_TUBE_COLOR, text: "Altitude tubes",
+    title: "each altitude word's tube, a wall with its two edges; in the read-back window's charts also each speed word's band" },
   { layer: "candidates", colour: TRAINING_CANDIDATE_COLOR, text: "Other candidate runways",
     title: "every runway the runway word can point at; the one the flight lands on is always drawn" },
 ];
@@ -104,6 +103,16 @@ export function LayerSwitches() {
         </label>
       ))}
     </>
+  );
+}
+
+/** A readout's one line that opens no page (it follows the cursor: outline §6.2 item 1). */
+export function ReadoutLine({ name, summary }: { name: string; summary: string }) {
+  return (
+    <li className="training-readout-line" title={`${name}: ${summary}`}>
+      <span className="training-details-link-name">{name}</span>
+      <span className="training-details-link-summary">{summary}</span>
+    </li>
   );
 }
 

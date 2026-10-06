@@ -5,7 +5,7 @@ stops before its next cycle, one that arrives after it is refused at once. The p
 requests happen to arrive in.
 
 Which flight: the request names a Training set of stage A (``airport``, ``setId``: `training_files.FILES.listed_set`, the
-airport's ``training/index_v4.json``) and a flight of it (``flightKey``); the set's sample names the instruction artefact
+airport's ``training/index_v5.json``) and a flight of it (``flightKey``); the set's sample names the instruction artefact
 and the executor spec it was exported from, and the flight's split. Which sentence: the flight's closed-loop sentence at
 ``rowIntervalS`` (one of the set's Δ). Which word: Δ row ``row`` of ``column`` (`fly.segment_of`). The set's executor
 spec opens without a check of the code: the backend produces no result that anyone compares with another, so it runs
@@ -178,7 +178,7 @@ class AutopilotSegmentBackend:
         return self._flown[key]
 
     def warm_up(self, log: Callable[[str], None] = print) -> None:
-        """Every stage-A set opened ahead of its first request: each airport's ``index_v4.json``, each set, each split and
+        """Every stage-A set opened ahead of its first request: each airport's ``index_v5.json``, each set, each split and
         Δ (`set_flown`), each set under its own lock and never under the request lock, so a request waits at most for the
         opening of the set it needs. A set it cannot open is skipped with its reason (a request for it gets all of it)."""
         started = time.perf_counter()

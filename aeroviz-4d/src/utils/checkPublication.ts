@@ -225,7 +225,7 @@ export interface TrainingChecked<T> {
 }
 
 /**
- * The Training index (`training/index_v4.json`) as the panel reads it.
+ * The Training index (`training/index_v5.json`) as the panel reads it.
  *
  * Training is checked on the OPPOSITE rule to the comparison picker above. There a bad category
  * empties the airport, so the check exists to stop that; here a bad entry is named on its own by
@@ -248,7 +248,7 @@ export function checkTrainingIndex(manifest: unknown): TrainingChecked<TrainingI
 
 /** One set's file, through the panel's own reader. */
 export function checkTrainingSet(setId: string, raw: unknown): TrainingChecked<TrainingSample> {
-  const parsed = parseTrainingSample(raw, TRAINING_SPLITS);            // the index_v4 sets are stage A's (D109)
+  const parsed = parseTrainingSample(raw, TRAINING_SPLITS);            // the index_v5 sets are stage A's (D109)
   return parsed.ok
     ? { findings: [], value: parsed.value }
     : { findings: [{ level: "error", category: setId, message: `set: ${parsed.problem}` }], value: null };

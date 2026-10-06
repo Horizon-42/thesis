@@ -3,7 +3,7 @@ of stage C (post-training §8 C11), flown live by the same single-flight executo
 (`backend.AutopilotSegmentBackend`, whose request lock, page numbering, executor spec and flown-set caches this shares).
 
 WHICH SENTENCE. The request names a window set (``airport``, ``setId``: `post.training_files.FILES.listed_set`, the airport's
-``training/index_post_v1.json``), a window of it (``window``: its place in the set's ``windows``) and ``round``: a round
+``training/index_post_v2.json``), a window of it (``window``: its place in the set's ``windows``) and ``round``: a round
 of the set's ``model.rounds`` (``"start"`` or a round's number). The commanded flight is the set's flight of the window's
 ``datasetId``; the sentence's Δ is the set's ``model.rowIntervalS``.
 

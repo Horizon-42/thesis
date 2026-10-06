@@ -180,3 +180,26 @@ def test_the_runner_reads_the_select_days_only_and_refuses_a_bad_call(tmp_path, 
     with pytest.raises(SystemExit):
         model_speed.main(["--campaign", str(tmp_path), "--round", "start", "--out", str(tmp_path / "c"), "--smoke"])
     assert "campaign, not" in capsys.readouterr().err
+
+
+def speed_readout(directory, *, smoke: bool = True, stage: str = "B"):
+    """A `model_speed` readout as a fixture of the exports (D136): its record only, the settings left empty."""
+    import json
+
+    from ts_transformer.experiments.model_speed import SPEED_SCHEMA
+
+    directory.mkdir(parents=True)
+    model = {"stage": stage, "prior": "fixture/prior"} if stage == "B" else {"stage": stage, "campaign": "fixture/campaign",
+                                                                             "round": "start"}
+    (directory / "speed.json").write_text(json.dumps({"schema": SPEED_SCHEMA, "model": model, "settings": [],
+                                                      "smoke": smoke}), encoding="utf-8")
+    return directory
+
+
+def test_a_set_names_a_speed_readout_of_its_own_stage(tmp_path):
+    """D136: a set's ``source.speed`` is a `model_speed` readout of its stage, named with the model it timed; another
+    stage's is refused by name."""
+    assert model_speed.speed_source(speed_readout(tmp_path / "b"), "B")["model"] == "fixture/prior"
+    assert model_speed.speed_source(speed_readout(tmp_path / "c", stage="C"), "C")["model"] == "fixture/campaign round start"
+    with pytest.raises(ValueError, match="of stage C, not"):
+        model_speed.speed_source(tmp_path / "c", "B")

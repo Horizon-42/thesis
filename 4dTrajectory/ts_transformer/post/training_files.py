@@ -7,8 +7,8 @@ Not a runner, and torch-free: its reader and writer (`FILES`) raise `ValueError`
 handler and drop the request unanswered.
 
 **Beside the other sets (outline §6 item 3).** A window set is ``<airport>/training/<set-id>/sample.json``
-(`SAMPLE_SCHEMA`), listed in ``<airport>/training/index_post_v1.json`` (`INDEX_FILE`, `INDEX_SCHEMA`) — an index of its
-own beside stage A's ``index_v4.json`` and stage B's ``index_prior_v2.json``, which this code never reads or writes. Read
+(`SAMPLE_SCHEMA`), listed in ``<airport>/training/index_post_v2.json`` (`INDEX_FILE`, `INDEX_SCHEMA`) — an index of its
+own beside stage A's and stage B's, which this code never reads or writes. Read
 and written by the one definition of the three stages (`instructions.training_files.TrainingFiles`): this module holds
 only stage C's constants (`FILES`).
 """
@@ -23,10 +23,12 @@ from ts_transformer.instructions.training_files import TrainingFiles
 #: (stage A's head), the other aircraft on their records, and for each round of a post-training campaign the sentence
 #: its model said for the commanded aircraft, flown, with the window's end (its outcome, a loss of separation and its
 #: other aircraft, the reward). Sample v2 (prior D127, followed for windows, 2026-10-06): a round's flown track is written
-#: unrounded — the live executor's answer is checked against it within the executor's bound.
-INDEX_SCHEMA = "aeroviz-training-window-index-v1"
-INDEX_FILE = "index_post_v1.json"
-SAMPLE_SCHEMA = "aeroviz-training-window-sample-v2"
+#: unrounded — the live executor's answer is checked against it within the executor's bound. Index v2
+#: (``index_post_v2.json``) / sample v3 (D135, 2026-10-06): each round's block is stage A's
+#: (`experiments.training_export.flown_sentence`), with the envelopes of its words.
+INDEX_SCHEMA = "aeroviz-training-window-index-v2"
+INDEX_FILE = "index_post_v2.json"
+SAMPLE_SCHEMA = "aeroviz-training-window-sample-v3"
 SAMPLE_FILE = "sample.json"
 SET_KIND = "post-training-windows"
 

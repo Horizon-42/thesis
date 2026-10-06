@@ -17,8 +17,11 @@ from flight_scenarios.fas_geometry import course_halfwidth_m, fas_course_geometr
 from ts_transformer.experiments import prior_training_export as export
 from ts_transformer.experiments.prior_free_generation import Stored
 from ts_transformer.instructions.grammar import column_words
-from ts_transformer.instructions.words import ALTITUDE, ANGLE, Words
+from ts_transformer.instructions.words import ALTITUDE, ANGLE, HEADING, UNCHANGED, Words
 from ts_transformer.instructions import training_files as stage_a_files
+from ts_transformer.instructions.artefact import load_signals
+from ts_transformer.experiments import model_speed
+from ts_transformer.tests.test_model_speed import speed_readout
 from ts_transformer.prior import training_files as files
 from ts_transformer.prior.procedure import GLIDEPATH_BELOW_M, Final
 from ts_transformer.tests.support import instruction_spec, parallel_airport
@@ -42,7 +45,7 @@ def test_a_sentence_flown_again_gives_its_readout_s_states_and_outcome(tmp_path,
     generated, stored, words, geometry = generate(tmp_path, monkeypatch, interval_s=interval_s, spy=spy)
     item = stored_of(generated, spy["flights"][0])
     (payload,) = export.fly_again(spy["directory"], tmp_path / "executor", "train", interval_s, {0: stored}, [item],
-                                  words, device=CPU)
+                                  load_signals(spy["directory"], "train"), words, device=CPU)
     assert payload["outcome"] == generated.outcome and payload["words"] == generated.words.tolist()
     assert payload["flownFromRow"] == stored.rows.start * int(round(interval_s / words.spec.step_s))
     flown = generated.states[payload["flownFromRow"]:]
@@ -53,6 +56,14 @@ def test_a_sentence_flown_again_gives_its_readout_s_states_and_outcome(tmp_path,
     assert set(payload["blocked"]) == {"altitude", "angle"}
     assert all(len(rows) == len(generated.words) for rows in payload["blocked"].values())
     assert len(payload["goAroundProbability"]) == len(payload["onFinal"]) == len(generated.words)
+    # the block of a flown sentence (D135): the envelopes of its words on its flown track, within it (a heading word
+    # whose lead runs past the end has an empty band, not judged)
+    bands = payload["envelopes"]["heading"]
+    assert bands and all(band["stopRow"] <= track["rows"] for band in bands if band["stopRow"] > band["firstRow"])
+    # each word judged from the flown row where the executor heard it: its said row × Δ / 2 s
+    every = int(round(interval_s / words.spec.step_s))
+    said_rows = [t for t, row in enumerate(generated.words) if row[HEADING] != UNCHANGED]
+    assert [band["row"] for band in bands] == [t * every for t in said_rows][: len(bands)]
 
 
 def test_a_sentence_flown_again_is_refused_unless_it_gives_the_readout_back(tmp_path, monkeypatch):
@@ -62,7 +73,7 @@ def test_a_sentence_flown_again_is_refused_unless_it_gives_the_readout_back(tmp_
 
     def again(changed):
         return export.fly_again(spy["directory"], tmp_path / "executor", "train", 4.0, {0: stored}, [changed],
-                                words, device=CPU)
+                                load_signals(spy["directory"], "train"), words, device=CPU)
 
     states = item.states.copy()
     states[-1, 2] += 1e-3                                              # a stored height a millimetre off
@@ -178,8 +189,9 @@ def stage_b_fixture(tmp_path, monkeypatch, *, texts=False):
     val_dir = tmp_path / "readout_val"
     readout_dir.mkdir()
     (readout_dir / "readout.json").write_text("{}")                     # the readouts written (D119, D127)
+    speed = speed_readout(tmp_path / "speed")
     names = {readout_dir: "fixture/readout", Path(directory): "fixture/instruction_language", executor: "fixture/executor",
-             prior: "fixture/prior", val_dir: "fixture/readout_val"}
+             prior: "fixture/prior", val_dir: "fixture/readout_val", speed: "fixture/speed"}
     with monkeypatch.context() as patch:
         patch.setattr(export, "read_sentences", lambda out: (readout, stored_sentences))
         patch.setattr(export, "require_conforming_closed_loop",
@@ -193,12 +205,13 @@ def stage_b_fixture(tmp_path, monkeypatch, *, texts=False):
         patch.setattr(export, "candidate_hae_minus_msl_m",
                       lambda runway_ends_from, geometry_: {c.ident: -33.0 for c in geometry_.candidates})
         patch.setattr(export, "repo_relative", lambda path: names[path])
+        patch.setattr(model_speed, "repo_relative", lambda path: names[path])           # the speed readout's name
         patch.setattr(export, "git_state", lambda: {"head": "fixture", "dirty": False})
         patch.setattr(stage_a_files, "utc_now", lambda: "fixture")   # the one writer's
         build, built = export.build_airport, []
         patch.setattr(export, "build_airport", lambda *a, **k: built.append(build(*a, **k)) or built[-1])
         assert export.main(["--readout", str(readout_dir), "--set-id", FIXTURE_SET, "--root", str(root),
-                            "--per-airport", "1", "--smoke"]) == 0
+                            "--per-airport", "1", "--speed", str(speed), "--smoke"]) == 0
         # the base's one validation readout, claimed (D85): its set holds val flights (outline D109). Its flights are
         # the train set's, given the split val (the synthetic artefact has no val sentences to fly again).
         heads, geometry_ = built[0]
@@ -209,13 +222,14 @@ def stage_b_fixture(tmp_path, monkeypatch, *, texts=False):
         (val_dir / "readout.json").write_text("{}")                     # the readout written: the read spent (D119)
         patch.setattr(export, "build_airport", lambda *a, **k: (val_heads, geometry_))
         assert export.main(["--readout", str(val_dir), "--set-id", FIXTURE_VAL_SET, "--root", str(root),
-                            "--per-airport", "1", "--smoke"]) == 0
+                            "--per-airport", "1", "--speed", str(speed), "--smoke"]) == 0
     training = root / geometry.code / "training"
     entry, sample = files.FILES.listed_set(training, geometry.code, FIXTURE_SET)
     val_entry, _ = files.FILES.listed_set(training, geometry.code, FIXTURE_VAL_SET)
     index = json.loads((training / files.INDEX_FILE).read_text(encoding="utf-8"))
     assert index["sets"] == [entry, val_entry]
     assert sample["source"]["validationClaim"] is None
+    assert sample["source"]["speed"] == {"readout": "fixture/speed", "model": "fixture/prior", "smoke": True}
     assert val_entry["source"]["validationClaim"] == {"reader": "prior_free_generation", "prior": "fixture/prior",
                                                       "readout": "fixture/readout_val"}
     if texts:
@@ -245,12 +259,12 @@ def test_a_set_is_written_beside_the_other_indexes_and_read_again(tmp_path, monk
     airport = sample["airport"]
     training = tmp_path / "airports" / airport / "training"
     training.mkdir(parents=True)
-    (training / "index_v4.json").write_text("{\"stage A\": true}")                     # never read or written here
+    (training / stage_a_files.INDEX_FILE).write_text("{\"stage A\": true}")         # never read or written here
     entry = export.index_entry("one", {**sample, "setId": "one"})
     files.FILES.write_set(training, airport, entry, stage_a_files.serialise({**sample, "setId": "one"}), [])
     listed, read = files.FILES.listed_set(training, airport, "one")
     assert listed == entry and read["flights"][0]["prior"][1]["sample"] == 1
-    assert (training / "index_v4.json").read_text() == "{\"stage A\": true}"
+    assert (training / stage_a_files.INDEX_FILE).read_text() == "{\"stage A\": true}"
     with pytest.raises(ValueError, match="never overwritten"):
         files.FILES.read_index(training, airport, "one")
     with pytest.raises(stage_a_files.NotListed):
@@ -355,8 +369,9 @@ def test_the_runner_writes_a_set_and_refuses_what_it_cannot_trust(tmp_path, monk
     monkeypatch.setattr(export, "candidate_hae_minus_msl_m",
                         lambda runway_ends_from, geometry_: {c.ident: -33.0 for c in geometry_.candidates})
     root = tmp_path / "airports"
+    speed = speed_readout(tmp_path / "speed")
     argv = ["--readout", str(tmp_path / "readout"), "--set-id", "one", "--root", str(root), "--per-airport", "1",
-            "--smoke"]
+            "--speed", str(speed), "--smoke"]
     with pytest.raises(SystemExit):                       # a readout without its readout.json: before any file is read
         export.main(argv)
     assert read == []
@@ -411,6 +426,7 @@ def test_the_set_names_the_artefact_and_the_executor_relative_to_the_repository(
     readout = fixture_readout("KXXX", instructions=str(REPO_ROOT / "4dTrajectory/outputs/POOLED/instruction_language/v"),
                               executor=str(REPO_ROOT / "4dTrajectory/outputs/POOLED/executor/v"))
     source = export.source_block("r", readout, Words(instruction_spec()), {"sha256": "s", "checks": {}}, {}, smoke=True,
-                                 device="cpu", claim=None)
+                                 device="cpu", claim=None, speed={"readout": "s", "model": "p", "smoke": True})
     assert (source["instructions"], source["executor"]) == ("4dTrajectory/outputs/POOLED/instruction_language/v",
                                                             "4dTrajectory/outputs/POOLED/executor/v")
+

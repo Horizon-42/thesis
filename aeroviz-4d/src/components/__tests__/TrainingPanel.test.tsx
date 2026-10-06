@@ -1,5 +1,5 @@
 /**
- * TrainingPanel: the empty state, the readable set (read from `training/index_v4.json` and nothing else), an index or a set
+ * TrainingPanel: the empty state, the readable set (read from `training/index_v5.json` and nothing else), an index or a set
  * of another schema refused by name — with the schema found and the one expected — an entry that is not a set entry, and the
  * flown flight's outcome and DA check in the dock.
  */
@@ -30,7 +30,7 @@ import { TRAINING_INDEX_SCHEMA, TRAINING_SAMPLE_SCHEMA } from "../../data/traini
 import { FLIGHT_KEY, stageAIndex, stageASampleFile } from "../../data/__tests__/stageA";
 import { chooseTrainingTab } from "../../data/trainingTabs";
 
-const INDEX_PATH = "data/airports/KXXX/training/index_v4.json";
+const INDEX_PATH = "data/airports/KXXX/training/index_v5.json";
 const OLD_INDEX_PATH = "data/airports/KXXX/training/index.json";
 const SAMPLE_PATH = "data/airports/KXXX/training/fixture_set/sample.json";
 
@@ -84,7 +84,7 @@ describe("TrainingPanel", () => {
   describe("with an export", () => {
     beforeEach(() => serve({ [INDEX_PATH]: stageAIndex(), [SAMPLE_PATH]: stageASampleFile() }));
 
-    it("reads index_v4.json and never the old view's index.json", async () => {
+    it("reads index_v5.json and never the old view's index.json", async () => {
       render(<TrainingPanel hidden={false} />);
       expect(await screen.findByText("KXXX:test")).toBeTruthy();
       const asked = fetchMock.mock.calls.map(([url]) => url);
@@ -102,7 +102,7 @@ describe("TrainingPanel", () => {
       // the set chooser's line: the set's intent (none here: the test has no backend) opens "The set and the experiment"
       fireEvent.click(await screen.findByRole("button", { name: /No intent for fixture_set/ }));
       const page = await screen.findByRole("dialog");
-      expect(page.textContent).toContain("1 (train 1, select 0; 1 per stratum");
+      expect(page.textContent).toContain("made from fixture/instruction_language");    // one line of provenance (D134)
     });
 
     it("says in the flight list how many of the flight's closed-loop sentences landed, each one's outcome in its tooltip", async () => {
@@ -128,7 +128,7 @@ describe("TrainingPanel", () => {
       render(<TrainingPanel hidden={false} />);
       await screen.findByText("KXXX:test");
       expect(screen.getAllByRole("checkbox").map((box) => box.parentElement!.textContent)).toEqual([
-        "Heading bands", "Altitude tubes + speed bands", "Other candidate runways"]);
+        "Heading bands", "Altitude tubes", "Other candidate runways"]);
       fireEvent.click(screen.getByLabelText("Heading bands"));
       expect(setTrainingLayer).toHaveBeenCalledWith("headingBands", false);
     });

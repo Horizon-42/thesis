@@ -939,9 +939,11 @@ SPEAKING_LOOP_NAMES = {"SpeakingLoop", "Generated", "flight_numbers"}
 TRAINING_EXPORT_NAMES = {
     "experiments.training_flights": {"crossing_payload", "last_state_cycle"},
     "experiments.training_export": {"FORMATS", "candidate_hae_minus_msl_m", "candidates_block", "events",
-                                    "split_flights", "vocabulary_block"},
+                                    "flown_sentence", "split_flights", "vocabulary_block"},
     "experiments.training_attitude": {"attitude_payload", "executor_attitude"},
-    "experiments.prior_training_export": {"procedure_block", "unrounded"},
+    "experiments.prior_training_export": {"procedure_block"},
+    # the speed readout a set names (outline §6.2 item 10, D136)
+    "experiments.model_speed": {"speed_source"},
 }
 
 

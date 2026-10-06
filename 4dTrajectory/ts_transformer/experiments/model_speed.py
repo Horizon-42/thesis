@@ -130,6 +130,18 @@ class TimedLoop:
         return out
 
 
+def speed_source(directory: Path, stage: str) -> dict[str, Any]:
+    """The speed readout a Training set names (``source.speed``, outline §6.2 item 10, D136): ``directory`` a readout of
+    this runner of ``stage`` ("B" or "C"), refused otherwise; its directory (repository-relative), the model it timed (a
+    stage-B fold set names the base's readout and says so by the prior it names) and whether it is a smoke."""
+    record = json.loads((directory / "speed.json").read_text(encoding="utf-8"))
+    if record["schema"] != SPEED_SCHEMA or record["model"]["stage"] != stage:
+        raise ValueError(f"{directory} is a {record['schema']} readout of stage {record['model']['stage']}, not a "
+                         f"{SPEED_SCHEMA} readout of stage {stage}")
+    timed = record["model"]["prior"] if stage == "B" else f"{record['model']['campaign']} round {record['model']['round']}"
+    return {"readout": repo_relative(directory), "model": timed, "smoke": bool(record["smoke"])}
+
+
 def prior_groups(drawn: Sequence[int], batch: int) -> list[list[tuple[int, int]]]:
     """Stage B's loops of ``batch`` flights (module docstring), each a list of ``(flight, sample)``: the drawn flights in
     loops of ``batch`` (the last one shorter), each spoken once (sample 0) — or, when ``batch`` is larger than the drawn

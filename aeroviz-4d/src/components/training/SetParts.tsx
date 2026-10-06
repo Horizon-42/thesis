@@ -7,11 +7,10 @@
  * the window's kind, the outcomes of the item's own sentences); and that first section's body.
  */
 
-import type { MouseEvent, ReactNode } from "react";
+import type { MouseEvent } from "react";
 import { ExperimentIntentBlock } from "../ExperimentDetails";
 import { INTENT_REGISTRY_PATH } from "../ExperimentDetails";
 import type { TrainingSetIntentState } from "../../data/trainingSetIntent";
-import { NotesList } from "./NotesToggle";
 
 /** A set in the chooser: its id, its count of items, its title, whether its source says smoke. */
 export interface SetChoice {
@@ -90,9 +89,9 @@ export function ItemList({ label, items, active, onSelect }: {
 }
 
 /** "The set and the experiment" (outline §6.2 item 3): the campaign's title, intent and design, the set's own line — or the
- *  problem by name — then the set's facts (what it was made from, its items and how they were drawn, a claimed readout). */
-export function ExperimentSection({ setId, intent, facts }: {
-  setId: string; intent: TrainingSetIntentState; facts: Array<{ key: string; name: ReactNode; text: string }>;
+ *  problem by name — and one line of provenance: the readout or campaign the set was made from (D134). */
+export function ExperimentSection({ setId, intent, provenance }: {
+  setId: string; intent: TrainingSetIntentState; provenance: string;
 }) {
   return (
     <>
@@ -107,8 +106,7 @@ export function ExperimentSection({ setId, intent, facts }: {
           <code>{INTENT_REGISTRY_PATH}</code> (the run key <code>{setId}</code>).
         </p>
       )}
-      <h4 className="training-details-subhead">The set</h4>
-      <NotesList items={[{ key: "id", name: <code>{setId}</code>, text: "the set's id" }, ...facts]} />
+      <p className="training-details-provenance">Set <code>{setId}</code>, made from <code>{provenance}</code></p>
     </>
   );
 }

@@ -1,6 +1,6 @@
 /**
  * The Training panel over a prior set of stage B: the switch to the prior's sets appears only where the airport has
- * `index_prior_v2.json`; a set is read, its flights and — side by side — the closed-loop sentence and each sentence the prior
+ * `index_prior_v3.json`; a set is read, its flights and — side by side — the closed-loop sentence and each sentence the prior
  * said are listed with their outcomes; a click publishes that sentence as the flight on screen; the row inspector shows the
  * probability of go-around and the words the procedure blocked at the cursor's row; a set of another schema is refused by name.
  */
@@ -39,7 +39,7 @@ function TabsSpy() {
   return null;
 }
 
-const INDEX_PATH = "data/airports/KXXX/training/index_prior_v2.json";
+const INDEX_PATH = "data/airports/KXXX/training/index_prior_v3.json";
 const SAMPLE_PATH = "data/airports/KXXX/training/fixture_set/sample.json";
 
 function jsonResponse(body: unknown) {
@@ -93,7 +93,7 @@ describe("the prior's sets in the Training panel", () => {
     await waitFor(() => expect(lastPublished().flight.flightKey).toBe(`${head.flightKey}~prior-1`));
     act(() => chooseTrainingTab("closed-loop"));
     await waitFor(() => expect(lastPublished().flight.flightKey).toBe(`${head.flightKey}~closed-loop`));
-    expect(screen.getByRole("button", { name: /^At the cursor/ }).textContent).toContain("choose a sample's tab (0, 1 …)");
+    expect(screen.getByTitle(/^At the cursor/).textContent).toContain("choose a sample's tab (0, 1 …)");
     act(() => chooseTrainingTab("labelled"));
     await waitFor(() => expect(setTrainingIntervalS).toHaveBeenLastCalledWith(null));
     expect(screen.getByRole("button", { name: /^This sentence/ }).textContent).toContain("not flown");
@@ -105,19 +105,12 @@ describe("the prior's sets in the Training panel", () => {
     const sentence = sample.flights[0].sentences[0];
     appState.cursorS = sample.flights[0].head.closedLoop["4"].startS + 4 * 5;        // Δ row 5
     await openPriorSets();
-    // the line under the list and its probability strip stay in the panel (the details page is modal)
-    const line = await screen.findByRole("button", { name: /^At the cursor/ });
+    // the line under the list and its probability strip stay in the panel; the line opens no page (D134: no row inspector)
+    const line = await screen.findByTitle(/^At the cursor/);
     expect(line.textContent).toContain(`row 5: go-around ${(sentence.goAroundProbability[5] * 100).toFixed(1)} %`);
     expect(line.textContent).toContain(`altitude ${sentence.blocked.altitude[5].length}`);
+    expect(screen.queryByRole("button", { name: /^At the cursor/ })).toBeNull();
     expect(screen.getByRole("img", { name: /Probability of go-around/ })).toBeTruthy();
-    // the full inspector is the details page's Row inspector
-    fireEvent.click(line);
-    const inspector = await screen.findByLabelText("The words at a row");
-    expect(inspector.textContent).toContain(`${(sentence.goAroundProbability[5] * 100).toFixed(1)} % said`);
-    expect(inspector.textContent).toContain(`${sentence.blocked.altitude[5].length === 0 ? "none" : sentence.blocked.altitude[5].length} blocked`);
-    expect(inspector.textContent).toContain("Blocked · angle");
-    fireEvent.change(screen.getByLabelText("Word row"), { target: { value: "9" } });
-    expect(setTrainingCursorS).toHaveBeenCalledWith(sample.flights[0].head.closedLoop["4"].startS + 9 * 4);
   });
 
   it("refuses a set of another schema by name and keeps the others", async () => {

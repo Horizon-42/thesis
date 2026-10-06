@@ -3,7 +3,7 @@ flown live by the same single-flight executor as stage A's (`backend.AutopilotSe
 numbering, executor spec and flown-set caches this shares).
 
 WHICH SENTENCE. The request names a prior set (``airport``, ``setId``: `prior.training_files.FILES.listed_set`, the airport's
-``training/index_prior_v2.json``), a flight of it (``flightKey``) and ``sentence``: a sample number of the flight's
+``training/index_prior_v3.json``), a flight of it (``flightKey``) and ``sentence``: a sample number of the flight's
 ``prior`` list (the prior's own sentence) or ``"closedLoop"`` (the flight's closed-loop sentence at the prior's Δ, which
 is stage A's). The sentence's Δ is the set's ``model.rowIntervalS``.
 

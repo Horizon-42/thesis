@@ -137,7 +137,7 @@ def _sample(set_id, airport):
 
 
 def test_a_set_goes_beside_the_old_index_and_is_never_overwritten(tmp_path):
-    """Outline §6 item 3: the set and its entry go into `index_v4.json`; the instruction-v3 view's `index.json` is never
+    """Outline §6 item 3: the set and its entry go into `index_v5.json`; the instruction-v3 view's `index.json` is never
     read or written; a set already listed, or an index another run changed, is refused."""
     training = tmp_path / "KAAA" / "training"
     training.mkdir(parents=True)
@@ -418,3 +418,54 @@ def test_a_flight_is_drawn_to_its_outcome_s_state_but_a_dynamics_failure_s_state
 
     assert [last_state_cycle(outcome, 300) for outcome in OUTCOMES] == [
         299 if outcome == "dynamics_failure" else 300 for outcome in OUTCOMES]
+
+
+#: The blocks of the flown sentences in the three stages' fixtures before D135 (outline §6.2 item 8), by the sha256 of
+#: their canonical JSON (`_digest`), the envelopes apart: stage A's as written then (its track rounded), B's and C's
+#: (their tracks unrounded, D127), and stage A's envelopes. Written from the fixtures of 65314499 before they were
+#: written again.
+EARLIER_BLOCKS = {
+    "A": {"2": "d3087166338e03edccfbdc2a93055f0330a0e55b396d2865f00c19578a18294c",
+          "4": "9635a26b7071eccc0d275f92f0f0fd575fa3e60aaec77441b64d1d3b8469d454",
+          "8": "6027c3b98b1189e7183a4c0f90423a1fdff9482c40655e788a2d4864dcc377ac"},
+    "A envelopes": {"2": "d84f98d6382bc916c477b5872c7e532c469056fadcbc3758ca25f203fabf6011",
+                    "4": "51a58e8dbf25305aadbbf4c0a38f37276c10f682c424baad0a7c2a7d62b5aca8",
+                    "8": "f84eb5558825b1fb33c4119f6aba096e1de2ca257b34a0cfc40af92ca6d0f777"},
+    "B": ["55455e7bdbafab588ca2481bc04a57e5f401e76a76e8bbb23f080fb58b101a9e",
+          "607a9c3b2b5006efa28b981ee5d9b30a5b6a83527c1cc8cea54547b7a05bb618"],
+    "C": ["ed2dffb65df1eb4b2cba44fda92087bb9f171b8992e92821003ad5f503c4a2a4",
+          "527b569e4c8b6e8dbca057bc4a40dfc1ad078009172fbb1ede07fea518d7760e",
+          "f400c0a43aca8a05fc1727d838142e82660195dbf26eee435919b55981962e7e"],
+}
+#: The digits stage A's track was written to before D135 (`files.rounded`).
+EARLIER_TRACK_DIGITS = {"eM": 1, "nM": 1, "latDeg": 7, "lonDeg": 7, "heightMslM": 1, "trackDeg": 2, "groundSpeedMps": 2,
+                        "verticalRateMps": 2}
+_BLOCK = ("outcome", "endCycle", "crossing", "track", "attitude")
+
+
+def _digest(block) -> str:
+    import hashlib
+
+    return hashlib.sha256(json.dumps(block, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+
+
+def test_the_flown_block_of_every_stage_is_its_earlier_one_with_the_envelopes():
+    """Outline §6.2 item 8 (D135): `flown_sentence` gives stage A's earlier block within its earlier rounding (its
+    envelopes unchanged), and B's and C's earlier blocks exactly, apart from the envelopes it adds — read from the
+    frontend's fixtures, which the export writes (each stage's fixture test)."""
+    fixtures = FIXTURES.parent
+    a = json.loads((fixtures / "stage_a" / FIXTURE_SET / files.SAMPLE_FILE).read_text(encoding="utf-8"))
+    for interval, sentence in a["flights"][0]["closedLoop"].items():
+        replayed = sentence["replay"]
+        block = {key: replayed[key] for key in (*_BLOCK, "flewTheSentence", "notReached")}
+        block["track"] = {key: [round(v, EARLIER_TRACK_DIGITS[key]) for v in value] if key in EARLIER_TRACK_DIGITS
+                          else value for key, value in block["track"].items()}
+        assert _digest(block) == EARLIER_BLOCKS["A"][interval], interval
+        assert _digest(replayed["envelopes"]) == EARLIER_BLOCKS["A envelopes"][interval], interval
+    b = json.loads((fixtures / "stage_b" / "fixture_set" / "sample.json").read_text(encoding="utf-8"))
+    c = json.loads((fixtures / "stage_c" / "fixture-windows" / "sample.json").read_text(encoding="utf-8"))
+    for stage, sentences in (("B", [s for f in b["flights"] for s in f["prior"]]),
+                             ("C", [r for w in c["windows"] for r in w["rounds"]])):
+        assert [_digest({key: s[key] for key in (*_BLOCK, "timedOut", "goArounds")}) for s in sentences] \
+            == EARLIER_BLOCKS[stage], stage
+        assert all(s["envelopes"] is not None and s["envelopes"]["heading"] for s in sentences), stage
