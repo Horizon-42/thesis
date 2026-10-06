@@ -407,6 +407,7 @@ branch and worktree, with a review before each commit.
 | T9 | M3 design (§5.7) | Only if T8 leaves losses that the order cannot remove | T8 | Not started |
 | T10 | M2 in the viewer (the user, 2026-10-06): (a) one directory and one `summary.json` per M2 run; (b) the builder and the frontend show a run as one scene (§9); (c) one KRDU run published | Builder and frontend tests; the publication validator; checked in the browser | T7, T8 | Done (§8.4): (a) `4e6c3ad0`; (b) `87f5f2f2`; (c) published. The legend and M1's one window: in work with T11 |
 | T11 | The Optimize task's multi-aircraft mode (§10; the user, 2026-10-06) | Backend and frontend tests; one M1 job and one 15-min M2 job on a test stack, checked in the browser | T10 | Built (§10; this commit); reviewed; real jobs on a test stack matched the batch; checked in the browser |
+| T12 | The scenario list (§10.6; the user, 2026-10-06): the census runner, its catalog per airport, `GET /traffic/scenarios`, the panel's list instead of the date | Tests; the KRDU catalog; checked in the browser by someone who is NOT told a date or a flight | T11 | Design written (§10.6) |
 
 ### 8.1 T5 readout (KRDU, seed 11, 50 windows; the reviewed M1 code with the retry of MD13, scratch output)
 
@@ -502,10 +503,10 @@ user's order). Claude reviews it.
 
 1. In the Optimize task, the user selects the mode: `Single aircraft` (the present mode, not changed),
    `Multi-aircraft: one controlled` (M1) or `Multi-aircraft: all controlled` (M2).
-2. The user selects a UTC day. The panel shows the arrivals of the airport on that day, from the arrivals
-   roster: landing time, callsign, runway, type.
-3. M1: the user selects one arrival. M2: the user sets a block, a start time (UTC) and a length. The panel
-   shows how many arrivals land in the block.
+2. The panel shows the airport's scenario list (§10.6), not a date: for M1 the arrivals whose own record
+   has a loss they answer for, for M2 the blocks of the most traffic and losses. Each row gives the time, the
+   runway(s), the aircraft and the recorded losses. The list can be sorted and filtered by runway.
+3. A click on a row selects the scenario (M1: that arrival; M2: that block, its length 15, 30 or 60 min).
 4. The user starts the job. The panel shows the progress (aircraft done of the total, the aircraft last
    finished) and a Cancel button. Start is disabled while a job runs: the user cancels first.
 5. When the job is done, the viewer shows the scene (§10.4). The panel shows one row per controlled aircraft
@@ -577,6 +578,31 @@ These are Claude's choices for this design. The user can change them.
 - Frontend: the mode selector, the job lifecycle (start, poll, cancel on a change of mode and on leaving the
   task), the comparison layer fed from a job.
 - One M1 job and one 15-min M2 job on the test stack, checked in the browser.
+
+### 10.6 Scenario list
+
+The user, 2026-10-06: the scenario is chosen from a list computed in advance, never from a date (a date gave no
+hint which days hold data and which flights meet traffic).
+
+- **Census.** `4dTrajectory/optimization/traffic_scenarios.py --airport <ICAO>`, offline, once per airport and
+  harvest. Each arrival that M1 can command (it has a dynamics model) is judged on its OWN RECORD as the flown
+  track, in its recorded traffic, with the M1 judge (`traffic.check.check`, reading VISUAL, MD2). This is the
+  same rule set as the M1 baseline, so a loss in the list means what a loss in a result means.
+- **Check step.** The census check step is an option, stated in the catalog (the M1 loop uses 1 s, MD6).
+- **M1 rows.** Every arrival with at least one loss it answers for: flight key, callsign, runway, type, entry
+  and landing UTC, the loss instants it answers for, their kinds, the tightest one (distance / required), and
+  the recorded aircraft in its window. Sorted by the loss instants. The catalog states how many arrivals were
+  judged and how many have a loss; no row is dropped.
+- **M2 rows.** For each block length (15, 30, 60 min, aligned to the length): every block in which at least
+  one arrival lands, with its start, its arrivals, its runways, and the loss instants its arrivals answer
+  for. Sorted by those losses, then by arrivals.
+- **Where.** `4dTrajectory/outputs/<ICAO>/traffic_scenarios/catalog.json` (schema
+  `traffic-scenario-catalog-v1`, with the configuration and the roster it judged), served by `GET
+  /traffic/scenarios?airport=<ICAO>`; a missing catalog is a 404 naming the command that makes it. Not in
+  `public/data`.
+- **Interpretation.** A loss in the record is a loss between recorded aircraft as flown, judged by these rules.
+  It marks dense traffic. It does not say that the optimized baseline will have a loss (T5: 7 of 50 sampled
+  windows had one).
 
 ## 11. Open questions
 
