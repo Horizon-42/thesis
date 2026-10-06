@@ -1,7 +1,7 @@
 # Related Work 论文清单
 
 依据：`docs/Final Proposal.md`（物理约束的生成式 4D 进近航迹预测：控制参数生成 → 可微运动学 → 可微惩罚约束 → 多机协调；对比三类基线；三个评价维度）。
-范围：优先选仓库中**已有**的论文，共 50 篇（其中 IPOPT 与 CasADi 两篇是这次下载补入的）。2.1、2.4–2.8 的路径相对于 `docs/literature/`（PDF 不入 git，缺失时跑对应文件夹的 `download.sh`）；**2.2、2.3 新增的路径相对于仓库根目录**（它们在 `aerodynamic_model/docs/`、`4dTrajectory/docs/`、`docs/literature/` 下，此前没有纳入清单）。
+范围：优先选仓库中**已有**的论文，共 51 篇（其中 IPOPT 与 CasADi 两篇是这次下载补入的；ICAO Doc 9854 放在 `docs/literature/aviation/`）。2.1、2.4–2.8 的路径相对于 `docs/literature/`（PDF 不入 git，缺失时跑对应文件夹的 `download.sh`）；**2.2、2.3 新增的路径相对于仓库根目录**（它们在 `aerodynamic_model/docs/`、`4dTrajectory/docs/`、`docs/literature/` 下，此前没有纳入清单）。
 ★ = 必引；其余为择引。
 
 **引用来源说明**：作者、标题以 PDF 首页为准；会议/期刊、卷期页码、DOI 用 Crossref 或出版社页面核对过，或摘自各文件夹 README 里已核对的条目。有几篇仓库里的 PDF 是预印本，而我引用的是发表版（Fioretto、BarrierNet、Jung 等），已在 `.bib` 的 `note` 里写明。
@@ -90,6 +90,7 @@ Final Proposal 的基线类别 1 是"传统优化方法"，而本仓库的 `4dTr
 | ★ | A. Gardi, R. Sabatini, T. Kistan, "Multiobjective 4D Trajectory Optimization for Integrated Avionics and Air Traffic Management Systems," *IEEE Trans. Aerospace and Electronic Systems* 55(1):170–181, 2019. DOI 10.1109/TAES.2018.2849238 | `4dTrajectory/docs/traditional/Multiobjective_4D_Trajectory_Optimization_….pdf` | 4D 轨迹优化的航空代表作 |
 | ★ | D. Gui, M. Le, Z. Huang, A. D'Ariano, "A Decision Support Framework for Aircraft Arrival Scheduling and Trajectory Optimization in Terminal Maneuvering Areas," *Aerospace* 11(5):405, 2024. DOI 10.3390/aerospace11050405 | `4dTrajectory/docs/A Decision Support Framework for Aircraft Arrival Scheduling and Trajectory Optimization in Terminal Maneuvering Areas.pdf` | 终端区下降轨迹优化 + 到达调度的联合框架，最接近本文基线 1 的设定 |
 | | Y. Zhang, Y. Long, L. Huang, Y. Zhang, S. Zhang, Y. Yin, "A Data-Driven Model Predictive Control Framework for Multi-Aircraft TMA Routing Under Travel Time Uncertainty," arXiv:2511.19452, 2025 | `docs/literature/controller_instruction_learning/papers/DataDrivenMPC-TMA_Zhang2025_…pdf` | 择引：数据驱动的多机 TMA 优化 / MPC |
+| | ICAO, *Doc 9854, Global Air Traffic Management Operational Concept*, AN/458, First Edition, 2005 | `docs/literature/aviation/doc-9854-global-atm-ops-concept.pdf` | 择引：全球 ATM 运行概念，给"战术阶段修正计划"一类运行背景提供官方出处；它不是方法论文，只用于界定运行场景 |
 | | 到达排序的经典：Erzberger & Itoh 2014、Lee & Balakrishnan 2008 | 见 2.6 | 优化类到达调度基线 |
 
 > **空白**：优化法能保证动力学与约束，但逐架求解、对终端区密集流量代价高，且不学习历史数据中的运行模式；预测类模型则相反。本文要把两者结合（见 Proposal 第 3 段）。
