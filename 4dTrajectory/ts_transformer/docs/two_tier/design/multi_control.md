@@ -500,7 +500,8 @@ default behaviour of the prior's or stage C's code. Version 1's branch groups ar
 campaign speaks its own rounds.
 
 **What it costs.** The bytes of the branch groups and the work of the loss grow with the commanded aircraft of a
-window (MC1 gives their p50 and p90): a sample holds every one of them. The module's attention scores are ticks ×
+window (MC1 gives their p50 and p90): a sample holds every one of them. An update runs in pieces of one branch group
+each (post-training §9 item 10, `update_step`), so the GPU's memory is that of one window's group. The module's attention scores are ticks ×
 aircraft² for each head and layer (about 100 for each tick of a window of ten aircraft); there are no vectors for each
 pair of aircraft, which made the archived design's 5.3 GB a layer (§9.1). MC9 measures the time and the memory at the
 formal size before the campaign (as MC5).
