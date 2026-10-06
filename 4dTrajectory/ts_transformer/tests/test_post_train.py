@@ -54,6 +54,23 @@ def select_is_train(monkeypatch):
                                                                                              *a, **k))
 
 
+def test_the_context_holds_the_base_on_its_device(monkeypatch, tmp_path):
+    """`open_context` puts the base on the context's device in eval mode, for every caller (the loss's pull reads it
+    beside the model: a base left on the CPU failed C8's first profile on the GPU). The inputs stubbed; "meta" stands in
+    for the GPU."""
+    base = torch.nn.Linear(2, 2).train()
+    base.config = SimpleNamespace(variant="full")
+    prior = SimpleNamespace(checkpoint=SimpleNamespace(model=base, identity={}), interval_s=4.0, geometries={},
+                            landings={}, selection="landed")
+    monkeypatch.setattr(post_train, "open_prior", lambda *a, **k: prior)
+    monkeypatch.setattr(post_train, "load_spec", lambda instructions: None)
+    monkeypatch.setattr(post_train, "Words", lambda spec: None)
+    monkeypatch.setattr(post_train, "ArtefactSource", lambda *a: None)
+    context = post_train.open_context(tmp_path, tmp_path, tmp_path, tmp_path, torch.device("meta"), tmp_path,
+                                      data=False, splits=())
+    assert next(context.base.parameters()).device.type == "meta" and not context.base.training
+
+
 def test_the_settings_take_a_count_of_every_kind_and_positive_sizes():
     assert set(_settings().per_kind) == set(KINDS)
     with pytest.raises(ValueError, match="each kind"):

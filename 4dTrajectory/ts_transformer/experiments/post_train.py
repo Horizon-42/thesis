@@ -179,7 +179,8 @@ def split_data(instructions: Path, split: str, words: Words, interval_s: float, 
 
 def open_context(prior_dir: Path, instructions: Path, executor: Path, edges_reference: Path, device: torch.device,
                  procedure_root: Path, *, data: bool = True, splits: Sequence[str] = ("train", "select")) -> Context:
-    """The context of a campaign: the base opened (`open_prior`: its artefact, Δ, selection and procedure masks), the
+    """The context of a campaign: the base opened (`open_prior`: its artefact, Δ, selection and procedure masks) on
+    ``device`` in eval mode (the pull of §2 item 5 reads it beside the model, `start_model`'s copy of it), the
     finals of its procedure data, the ``splits`` (the campaign's: train and select; none for `post_validation`, which
     adds val after its claim), and the data term's sentences (none for a caller that trains nothing, ``data`` False:
     the export of the Training view, the validation readout)."""
@@ -191,7 +192,7 @@ def open_context(prior_dir: Path, instructions: Path, executor: Path, edges_refe
     if data and not sentences:
         raise ValueError(f"no train sentence in the base's selection {prior.selection!r}: no data term (D36, D76)")
     return Context(instructions, executor, edges_reference, device, words, prior.interval_s,
-                   prior.checkpoint.model, prior.checkpoint.identity, prior.geometries, prior.landings,
+                   prior.checkpoint.model.to(device).eval(), prior.checkpoint.identity, prior.geometries, prior.landings,
                    {code: airport_finals(g, root=procedure_root) for code, g in prior.geometries.items()},
                    {split: split_data(instructions, split, words, prior.interval_s, prior.geometries)
                     for split in splits},
@@ -456,7 +457,6 @@ def round_model(context: Context, settings: Settings, out: Path, round_: int | N
 
 def run_campaign(out: Path, settings: Settings, context: Context) -> None:
     """The rounds not yet done (module docstring), each closed by its checkpoint."""
-    context.base.to(context.device).eval()
     model, optimizer = start_model(context, settings)
     first = done_rounds(out)
     if first:
