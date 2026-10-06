@@ -85,7 +85,7 @@ commits, the tests and the readings are in the implementation log.
 ### 0.4 Plan
 
 1. C10 runs (D137; from `.claude/worktrees/two-tier-v4-post`, untouched until it ends); the user's criterion for the
-   round (D7); the validation readout of the chosen round; then its speed (outline §6.2 item 10, `model_speed`), with no
+   round (D7); the validation readout of the chosen round; then its speed (frontend §3 item 10, `model_speed`), with no
    other job on the host or the GPU.
 2. C13 (outline D138), built by stage B's implementer; its check on the GPU after C10, by stage D's implementer
    (outline §5 rule 1); C10 gets none of it.
@@ -115,7 +115,7 @@ worktree are deleted after C10 ends.
   words and a copy of chosen aircraft), the teacher-forced loss with the sentences under a selection and the
   log-probability of given words under a record, the place for an added module, the region of a final, the step of a
   speaker's closed loop and the Training export's procedure block (items 1–8).
-- **It gives** the post-trained checkpoints and the window readouts, and their Training view (outline §6); to the
+- **It gives** the post-trained checkpoints and the window readouts, and their Training view (`frontend.md`); to the
   multi-aircraft control, its public interface (§9).
 
 ---
