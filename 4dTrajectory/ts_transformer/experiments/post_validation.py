@@ -95,7 +95,7 @@ def main(argv: list[str] | None = None) -> int:
     checked_edges(edges_reference)                                                 # D104
     device = torch.device(args.device)
     context = open_context(Path(inputs["prior"]), instructions, executor, edges_reference, device,
-                           Path(inputs["procedure_root"]), data=False, splits=())
+                           Path(inputs["procedure_root"]), formal=not args.smoke, data=False, splits=())   # D132
     model = round_model(context, settings, campaign, args.round)                   # the read's own options, checked
     if split == "val":
         claim_validation_read(campaign, CLAIM_READER, out, {"round": args.round, "device": str(device)})

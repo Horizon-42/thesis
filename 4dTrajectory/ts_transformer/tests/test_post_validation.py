@@ -48,8 +48,9 @@ def campaign(setup, tmp_path, monkeypatch, select_is_train):  # noqa: F811
     monkeypatch.setattr(validation, "git_state", lambda: {"head": "x", "dirty": False})
     monkeypatch.setattr(validation, "require_conforming_closed_loop", lambda *a: (None, {"checks": {"stub": True}}, None))
     monkeypatch.setattr(validation, "checked_edges", lambda path: None)
-    monkeypatch.setattr(validation, "open_context", lambda *a, **k: (asked.append(("context", k["splits"], k["data"])),
-                                                                      replace(context, splits={}))[1])
+    monkeypatch.setattr(validation, "open_context", lambda *a, **k: (
+        asked.append(("context", k["splits"], k["data"], k["formal"], claim.exists())),
+        replace(context, splits={}))[1])
     monkeypatch.setattr(validation, "require_selection_of", lambda *a: asked.append(("recount", a[-1], claim.exists())))
     monkeypatch.setattr(validation, "split_data", lambda instructions, split, *a: (
         asked.append(("split", split, claim.exists())), train)[1])
@@ -65,7 +66,8 @@ def test_the_chosen_round_reads_the_val_days_once(campaign, tmp_path):
     readout_dir = tmp_path / "validation"
     assert validation.main(_argv(out, readout_dir)) == 0
     # only the val days opened, after the claim; neither the train nor the select days
-    assert asked == [("context", (), False), ("recount", "val", True), ("split", "val", True)]
+    # the formal read: the base checked as stage B's formal base (D132), before the claim
+    assert asked == [("context", (), False, True, False), ("recount", "val", True), ("split", "val", True)]
     readout = json.loads((readout_dir / "readout.json").read_text())
     assert readout["split"] == "val" and readout["round"] == 0 and len(readout["windows"]) == 1
     (coverage,) = readout["coverage"].values()
@@ -112,6 +114,7 @@ def test_a_smoke_reads_the_select_days_and_claims_nothing(campaign, tmp_path, mo
     assert not claim.exists()
     assert validation.main(_argv(out, tmp_path / "smoke", "--smoke")) == 0
     assert [a for a in asked if a[0] in ("split", "recount")] == [("split", "select", False)] and not claim.exists()
+    assert asked[-2] == ("context", (), False, False, False)                     # a smoke: the base is not checked
     assert json.loads((tmp_path / "smoke" / "readout.json").read_text())["split"] == "select"
 
 

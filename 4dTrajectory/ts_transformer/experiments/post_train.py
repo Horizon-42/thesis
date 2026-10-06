@@ -81,7 +81,7 @@ from ts_transformer.post.scene import (
 from ts_transformer.post.traffic import opens_inside_loss
 from ts_transformer.post.traffic_attention import TrafficConfig, add_traffic_attention, parameter_groups
 from ts_transformer.prior.batch import RowTensors, collate
-from ts_transformer.prior.checkpoint import open_prior
+from ts_transformer.prior.checkpoint import OpenedPrior, open_prior
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.procedure import PROCEDURE_MASKS, airport_finals
 from ts_transformer.prior.source import ArtefactSource
@@ -178,12 +178,17 @@ def split_data(instructions: Path, split: str, words: Words, interval_s: float, 
 
 
 def open_context(prior_dir: Path, instructions: Path, executor: Path, edges_reference: Path, device: torch.device,
-                 procedure_root: Path, *, data: bool = True, splits: Sequence[str] = ("train", "select")) -> Context:
-    """The context of a campaign: the base opened (`open_prior`: its artefact, Δ, selection and procedure masks), the
+                 procedure_root: Path, *, formal: bool, data: bool = True, splits: Sequence[str] = ("train", "select")
+                 ) -> Context:
+    """The context of a campaign: the base opened (`open_prior`: its artefact, Δ, selection and procedure masks) on
+    ``device`` in eval mode (the pull of §2 item 5 reads it beside the model, `start_model`'s copy of it), the
     finals of its procedure data, the ``splits`` (the campaign's: train and select; none for `post_validation`, which
     adds val after its claim), and the data term's sentences (none for a caller that trains nothing, ``data`` False:
-    the export of the Training view, the validation readout)."""
+    the export of the Training view, the validation readout). ``formal`` (a formal campaign and its validation readout,
+    D132): the base must be stage B's formal base (`require_formal_base`)."""
     prior = open_prior(prior_dir, instructions, procedure_root=procedure_root)
+    if formal:
+        require_formal_base(prior)
     words = Words(load_spec(instructions))
     source = ArtefactSource(instructions, prior.interval_s, prior.checkpoint.model.config.variant, prior.landings,
                             prior.selection)
@@ -191,11 +196,23 @@ def open_context(prior_dir: Path, instructions: Path, executor: Path, edges_refe
     if data and not sentences:
         raise ValueError(f"no train sentence in the base's selection {prior.selection!r}: no data term (D36, D76)")
     return Context(instructions, executor, edges_reference, device, words, prior.interval_s,
-                   prior.checkpoint.model, prior.checkpoint.identity, prior.geometries, prior.landings,
+                   prior.checkpoint.model.to(device).eval(), prior.checkpoint.identity, prior.geometries, prior.landings,
                    {code: airport_finals(g, root=procedure_root) for code, g in prior.geometries.items()},
                    {split: split_data(instructions, split, words, prior.interval_s, prior.geometries)
                     for split in splits},
                    sentences)
+
+
+def require_formal_base(prior: OpenedPrior) -> None:
+    """D132: the base of a formal campaign and of its validation readout is stage B's formal base — refused by name when
+    its run held an airport out (a fold) or trained on a sample of the sentences (a smoke prior), the fields stage B's
+    own validation readout checks (``config.json``'s run, the checkpoint's run)."""
+    held_out, sample = prior.config["run"]["held_out"], prior.checkpoint.run["sample"]
+    if held_out is not None:
+        raise SystemExit(f"{prior.directory} is a fold (held out {held_out}), not stage B's formal base (D132)")
+    if sample is not None:
+        raise SystemExit(f"{prior.directory} is a smoke prior ({sample['per_airport_and_split']} sentences of each "
+                         f"airport and split), not stage B's formal base (D132)")
 
 
 # ---- the draw
@@ -456,7 +473,6 @@ def round_model(context: Context, settings: Settings, out: Path, round_: int | N
 
 def run_campaign(out: Path, settings: Settings, context: Context) -> None:
     """The rounds not yet done (module docstring), each closed by its checkpoint."""
-    context.base.to(context.device).eval()
     model, optimizer = start_model(context, settings)
     first = done_rounds(out)
     if first:
@@ -529,7 +545,7 @@ def main(argv: list[str] | None = None) -> int:
     edges_reference = census / "conformance" / "edges.npz"
     checked_edges(edges_reference)                                                 # D104
     context = open_context(prior_dir, instructions, executor, edges_reference, torch.device(args.device),
-                           procedure_root)
+                           procedure_root, formal=not args.smoke)                  # D132
     inputs = {"prior": str(prior_dir), "instructions": str(instructions), "executor": str(executor),
               "windows": str(census), "procedure_root": str(procedure_root), "settings": asdict(settings),
               "smoke": args.smoke}

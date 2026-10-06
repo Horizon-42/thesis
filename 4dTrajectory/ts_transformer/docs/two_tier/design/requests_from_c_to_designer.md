@@ -5,16 +5,12 @@ names a public interface must give, and the questions that only the user can dec
 it is rewritten in full each time, never appended to, and an item leaves when it is done. The evidence and the commits
 are in the implementation log (`readouts/2026-10-05_stage_c_implementation_log.md`, cited by §).
 
-State of 2026-10-06. **No open request.** Every item of the note of 2026-10-05 is resolved:
+State of 2026-10-06 (branch `dev-two-tier-v4-post` at `483b81d7`).
 
-| Item | Resolved by |
-|---|---|
-| Window B's ranges (P28) | Post-training D123 (`51f9a404`) |
-| The readings of C6, C9, D114 and C10 (P26, P27, P29–P31, P33–P36, P38, P39) | Post-training D125 |
-| A round's windows share their flights (P32); the loss branch point by branch point; D113 at the draw; one command of a flight a batch (P31) | Post-training D124 |
-| The Training export's rows in vocabulary §6 and prior §7 | Vocabulary §6 item 8, prior §7 item 8, D126 |
-| P37: a window set carries no per-row speaker records | Post-training D125 (the window view does not show them) |
-| The window view (P42–P44, log §19) | Post-training D129, as proposed; ordered in `notes/stage_c.md` |
+| # | Request | For | Log |
+|---|---|---|---|
+| 1 | P45, a reading for the user: a window set's flown tracks are written unrounded (prior D127 followed for windows), so a set's file is larger (1.3× on the smoke set); a formal set's size is read at its export | The user | §21 |
+| 2 | `requests_from_b_to_designer.md` §3 item 5 ("what stage C needs after B12 and B13") is followed on stage C's branch and can leave: `SpeakingLoop` with the start's observed rows (`post_window_loop.py:118`), the val read's lock, claim with its options and spent mark (`post_validation`, D132), the unrounded track of D127 (sample v2) | The designer | §18–§21, §23 |
 
-The plan: C11's last points (D129) now; then B13 when stage B commits it. The formal C8 (`post_profile`) and C10
-(`post_train`) wait for B5's base and Claude's check of stage B, C10 also for the user's criteria; C12 after C10.
+The inputs the formal C10 waits for are in the design: O13 (Claude proposes from C8's report) and the user's criteria
+(D7). C8 runs now (§0.3).
