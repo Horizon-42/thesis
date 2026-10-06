@@ -4,6 +4,7 @@ fixture of `test_post_window_loop`); every write root under tmp."""
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict, replace
 from types import SimpleNamespace
 
@@ -13,8 +14,8 @@ import torch
 
 from ts_transformer.experiments import post_train
 from ts_transformer.experiments.post_train import (
-    KINDS, Context, Settings, batches, done_rounds, draw_round, open_campaign, run_campaign, start_model, train_pass,
-    update_pairs,
+    KINDS, Context, Settings, Speakers, batches, done_rounds, draw_round, open_campaign, run_campaign, speak_round,
+    start_model, train_pass, update_pairs, window_record,
 )
 from ts_transformer.instructions.artefact import closed_loop_sentences
 from ts_transformer.post.scene import INSERTED, LEADER_MOVED, MOVED_START, NO_START_MOVE, REAL
@@ -152,6 +153,80 @@ def test_the_pass_shuffles_each_file_s_groups_by_the_round_s_numbers(tmp_path, m
     assert any(max(c) - min(c) >= settings.update_groups for c in chunks)
 
 
+def test_speakers_give_the_groups_and_the_record_of_speaking_here(setup, tmp_path, monkeypatch):
+    """Two worker processes speak a round's two batches (two short windows of the one flight, `short_round`'s, drawn by
+    the workers too: the draw is patched before the fork): the same groups files, byte for byte, and the same record as
+    speaking here; the round's model file is gone after; a worker refuses a batch whose windows are not the campaign's;
+    one worker is no speakers."""
+    s = setup
+    context = _context(s)
+    settings = _settings(continuations=2)
+    model, _ = start_model(context, settings)
+    windows = [_ahead(s["windows"][0])] * 2
+    monkeypatch.setattr(post_train, "draw_round", lambda context, per_kind, rng: (windows, {}))
+    assert len(batches(windows, settings.batch_windows)) == 2
+    here, there = tmp_path / "here", tmp_path / "there"
+    here.mkdir()
+    there.mkdir()
+    record = speak_round(model, context, windows, settings, 0, here)
+    speakers = Speakers(context, settings, 2, CPU)
+    try:
+        assert speak_round(model, context, windows, settings, 0, there, speakers) == record
+    finally:
+        speakers.close()
+    assert sorted(p.name for p in there.iterdir()) == ["groups_0.pt", "groups_1.pt"]
+    assert all((here / name).read_bytes() == (there / name).read_bytes() for name in ("groups_0.pt", "groups_1.pt"))
+    torch.save(model.state_dict(), tmp_path / "state.pt")
+    wrong = [{**window_record(windows[0]), "row0_s": windows[0].row0_s + 4.0}]
+    with pytest.raises(ValueError, match="other windows"):
+        post_train._speak(0, str(tmp_path / "state.pt"), str(tmp_path), 0, [0], wrong)
+    with pytest.raises(ValueError, match="2 or more"):
+        Speakers(context, settings, 1, CPU)
+
+
+def _digest(model) -> float:
+    return float(sum(p.detach().double().sum() for p in model.parameters()))
+
+
+def test_each_speaker_speaks_with_the_round_s_model_and_a_dead_one_fails_the_round(setup, tmp_path, monkeypatch):
+    """Through the pool: in two rounds with two different models, every batch is spoken with that round's model (the
+    worker reloads it each round) and the campaign's windows; a worker that dies fails the round with
+    `BrokenProcessPool`, never hangs it. (The workers' one thread, `_initialise_speaker`, is not tested here: the suite
+    runs with one OpenMP thread, where a fork never hangs.)"""
+    from concurrent.futures.process import BrokenProcessPool
+
+    s = setup
+    context = _context(s)
+    settings = _settings(continuations=2)
+    windows = [_ahead(s["windows"][0])] * 2
+    monkeypatch.setattr(post_train, "draw_round", lambda context, per_kind, rng: (windows, {}))
+
+    def spoken(model, context, windows, places, settings, round_, directory, k):
+        if round_ == 9:
+            os._exit(1)
+        return {"round": round_, "k": k, "digest": _digest(model), "windows": [window_record(windows[i]) for i in places]}
+
+    monkeypatch.setattr(post_train, "speak_batch", spoken)
+    speakers = Speakers(context, settings, 2, CPU)
+    places = batches(windows, settings.batch_windows)
+    try:
+        for round_, shift in ((0, 0.01), (1, -0.02)):
+            model, _ = start_model(context, settings)
+            with torch.no_grad():
+                for p in model.parameters():
+                    p.add_(shift)
+            parts = speakers.speak(model, windows, places, round_, tmp_path)
+            assert [(x["round"], x["k"]) for x in parts] == [(round_, 0), (round_, 1)]
+            assert all(abs(x["digest"] - _digest(model)) < 1e-6 for x in parts)
+            assert [x["windows"] for x in parts] == [[window_record(windows[i]) for i in p] for p in places]
+            assert not (tmp_path / "speaking_model.pt").exists()
+        with pytest.raises(BrokenProcessPool):
+            speakers.speak(model, windows, places, 9, tmp_path)
+        assert not (tmp_path / "speaking_model.pt").exists()
+    finally:
+        speakers.close()
+
+
 def short_round(monkeypatch, s):
     """The round's windows replaced by one short window (its own flight inserted 8 s ahead: lost at its first row flown,
     one branch point), so a round flies only a few rows; the draw has its own test, the real window's whole flight
@@ -195,7 +270,7 @@ def test_a_resumed_campaign_is_the_campaign_run_through(setup, tmp_path, monkeyp
     (group,) = _round(s, model, [_ahead(s["windows"][0])]).groups
     rewarded = replace(group, continuations=(replace(group.continuations[0], reward=1.0), group.continuations[1]))
 
-    def speak(model, context, windows, settings, round_, directory):
+    def speak(model, context, windows, settings, round_, directory, speakers):
         torch.save([rewarded, rewarded], directory / "groups_0.pt")
         return {"windows": len(windows)}
 

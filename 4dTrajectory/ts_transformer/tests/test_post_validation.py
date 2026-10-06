@@ -33,7 +33,7 @@ def campaign(setup, tmp_path, monkeypatch, select_is_train):  # noqa: F811
     (group,) = _round(s, model, [_ahead(s["windows"][0])]).groups
     rewarded = replace(group, continuations=(replace(group.continuations[0], reward=1.0), group.continuations[1]))
     with monkeypatch.context() as patch:
-        patch.setattr(post_train, "speak_round", lambda model, context, windows, settings, round_, directory: (
+        patch.setattr(post_train, "speak_round", lambda model, context, windows, settings, round_, directory, speakers: (
             torch.save([rewarded], directory / "groups_0.pt"), {"windows": 1})[1])
         out = tmp_path / "campaign"
         inputs = {"prior": str(tmp_path / "prior"), "instructions": str(s["directory"]),

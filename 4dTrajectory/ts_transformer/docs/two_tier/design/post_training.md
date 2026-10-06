@@ -76,7 +76,7 @@ commits, the tests and the readings are in the implementation log.
 |---|---|
 | C0–C7, C9, C11 | Built and reviewed on synthetic artefacts; C1, C2 and C9 also on A34's artefact (log §2–§21) |
 | C8 | Done on B5's base (log §24, §25): the formal census `outputs/POOLED/post/windows_20261006` (D104, `44fb8af8`), the base's go-around on the select days, the profiles at 32 and 256 windows (`483b81d7`, `c396f9be`); Claude's proposal of O13 in log §25, for the user |
-| C10 | Running: `outputs/POOLED/post/post_train_20261006`, launched 2026-10-06 from `e5f54dd4` with the user's settings of O13 (log §25, §26); about 25 h. The criterion that chooses the round (D7) is the user's, before the validation readout |
+| C10 | Running: `outputs/POOLED/post/post_train_20261006`, relaunched 2026-10-06 13:27 from the worktree at `e045d5c3` with the user's settings of O13 and three speaking workers (`0268e0ad`; log §25, §26). The criterion that chooses the round (D7) is the user's, before the validation readout |
 | The validation readout of the chosen round | Built and reviewed on synthetic artefacts (`post_validation`, `0c95a821`, log §23; D132 `483b81d7`) |
 | C12 | After C10 |
 
