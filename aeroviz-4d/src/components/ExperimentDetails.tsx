@@ -8,7 +8,7 @@
  * panel) keeps the `Model` rows in view and folds the other sections behind a disclosure.
  */
 
-import type { ExperimentParameterRow } from "../data/airportData";
+import type { ExperimentIntent, ExperimentParameterRow } from "../data/airportData";
 import type { ExperimentOption } from "../utils/trajectoryResultSources";
 
 /** Where a missing intent is written — the publisher reads it, and refuses to publish without. */
@@ -39,6 +39,36 @@ function ParameterSection({ title, rows }: { title: string; rows: ExperimentPara
   );
 }
 
+/** An intent in its one form (the picker's, and the Training view's set, outline §6.2 item 4): the run's own line, the
+ *  variant's, the campaign's question and — unless compact — the design it names. */
+export function ExperimentIntentBlock({ intent, compact = false, runTag = "This run" }: {
+  intent: ExperimentIntent; compact?: boolean; runTag?: string;
+}) {
+  return (
+    <div className="experiment-details-intent" aria-label="Experiment intent">
+      <p>
+        <span className="experiment-details-tag">{runTag}</span>
+        {intent.run}
+      </p>
+      {intent.variant ? (
+        <p>
+          <span className="experiment-details-tag">This variant</span>
+          {intent.variant}
+        </p>
+      ) : null}
+      <p className="experiment-details-campaign">
+        <span className="experiment-details-tag">Campaign</span>
+        {intent.group}
+      </p>
+      {intent.design && !compact ? (
+        <p className="experiment-details-design">
+          Design: <code>{intent.design}</code>
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 interface ExperimentDetailsProps {
   experiment: ExperimentOption;
   compact?: boolean;
@@ -66,29 +96,7 @@ export default function ExperimentDetails({ experiment, compact = false }: Exper
         </header>
       )}
 
-      {intent ? (
-        <div className="experiment-details-intent" aria-label="Experiment intent">
-          <p>
-            <span className="experiment-details-tag">This run</span>
-            {intent.run}
-          </p>
-          {intent.variant ? (
-            <p>
-              <span className="experiment-details-tag">This variant</span>
-              {intent.variant}
-            </p>
-          ) : null}
-          <p className="experiment-details-campaign">
-            <span className="experiment-details-tag">Campaign</span>
-            {intent.group}
-          </p>
-          {intent.design && !compact ? (
-            <p className="experiment-details-design">
-              Design: <code>{intent.design}</code>
-            </p>
-          ) : null}
-        </div>
-      ) : (
+      {intent ? <ExperimentIntentBlock intent={intent} compact={compact} /> : (
         <p className="experiment-details-missing">
           No intent recorded — this run was published before intents were stamped. Add it to{" "}
           <code>{INTENT_REGISTRY_PATH}</code> and refresh the published labels.

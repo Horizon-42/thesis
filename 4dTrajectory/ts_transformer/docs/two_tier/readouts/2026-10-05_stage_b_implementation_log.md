@@ -333,3 +333,19 @@ results stay valid. The report gives the changed names for §7.
 `prior_validation`, `prior_campaign`, `prior_behaviour`, `prior_training_export`); the report gives the code index for
 §11 (outline §5 rule 10). `dev-two-tier-v4` merges `dev-two-tier-v4-prior` (outline §5 rule 1). Report to the user: the
 commits, the readings of each fold and of the base, the choice and its rule, and what stage C needs.
+
+## 4 The Training view's one layout (outline §6.2, D133)
+
+Built by stage B's implementer on `dev-training-layout` (from `docs-training-view` `4fa9f2ee`, which holds D133; `dev-two-tier` merged in, with D133 as `b2911b89`), worktree
+`.claude/worktrees/training-layout`, at the user's order of 2026-10-06 (notes/stage_b.md); for this work it changed the
+view files of stages A and C and the backend's routes.
+
+| Part | State |
+|---|---|
+| The layout (§6.2 items 1–5) | `38297528` (reviewed twice): the left panel the same in every stage — the stage switch; the set chooser with the set's own intent line and a SMOKE tag, opening the details page on "The set and the experiment"; the item list with four columns; one line per readout; the Draw box; no table (stage B keeps "At the cursor" and its probability strip). The sentence bar's tabs choose the sentence in every stage (one state, `data/trainingTabs.ts`: the session gives the tabs, the bar chooses; a dot in the outcome's colour; the arrow keys, Home and End); the bar's chips and notes follow the kind of sentence (closed loop, prior sample, round, labelled); the notes' first line is the set and its intent line, with a link to the details page. The details page in every stage, its ⓘ never disabled (a page with the reason when no session is on screen), its first section built from the set's index entry and intent. Backend `GET /experiments/intent?run=<set id>` (one campaign; none 404 or several 409 named; read at each request); the frontend shows it in the experiments picker's form (`ExperimentIntentBlock`, extracted from `ExperimentDetails.tsx` unchanged). Shared parts: `hooks/useTrainingSet.ts`, `training/SetParts.tsx` (`SetChooser`, `ItemList`, `ExperimentSection`), `PanelParts.tsx` (`useDetailsPage`, `requestTrainingDetails`, `DrawBox`) |
+| Short tab labels | `e0aceffd` (reviewed; the user, 2026-10-06): stage B's samples by their number (0, 1 …), stage C's rounds r1, r2 …; the tooltips keep the full names |
+| Tests | Vitest 756 (13 new: the tabs' state and keys, the intent's answers read from the fixture the backend test writes, the one loader, the details page's requests, the layout in stages B and C, the bar's chips and notes by kind, the short labels); every test of the three stages kept, adapted where it clicked a left-panel table. The backend: `test_http_server.py` (one campaign, none, several; the route pinned; `fixtures/training_intent/answers.json` written by it). Full suite on the branch: ts 1,840 passed 1 skipped, modeling and backend 1,042, frontend Python 161 |
+| The check | A test stack from the worktree (vite 5185, backend 8795, a scratch airports root: the live data with stage C's smoke set `c11-smoke-windows` at KRDU, copied in by links). A one-shot browser agent, all three stages at KRDU: the tabs choose the sentence and the chips follow; every ⓘ and readout line opens the details page; the intent shows (stage C's smoke set says by name that it has none); a word flies live in each stage (A Δ 4 s, B sample 0, C round 0) |
+| After merging `dev-two-tier` (`aa221e86`: D133 as `b2911b89`, the multi-aircraft optimizer; one conflict in `http_server.py`, both sides kept) | Vitest 957 passed, tsc clean; full suite: ts 1,840 passed 1 skipped, modeling and backend 1,122, frontend Python 202; `dev-two-tier` fast-forwards to the branch |
+| Proposals (where §6.2 says nothing) | In stage B's requests note §1 |
+
