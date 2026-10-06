@@ -577,8 +577,10 @@ def _gpu_used() -> int:
 
 def pass_memory_of(context: Context, settings: Settings, directory: Path) -> dict[str, Any] | None:
     """O15: this process's GPU memory in one update of the pass (`post_profile.pass_memory`: forward and backward on
-    the `Settings.update_groups` longest groups written in ``directory`` with the data term's sentences): its peak (the
-    CUDA context and the most the allocator held in any update measured) and what it holds after; None on the CPU.
+    the `Settings.update_groups` longest groups written in ``directory`` with the data term's sentences, and on one
+    group — the longest, the widest and the densest alone: an update runs in pieces of a group each, post-training §2
+    item 5, so its peak is its largest piece's): its peak (the CUDA context and the most the allocator held in any
+    update measured) and what it holds after; None on the CPU.
     Refused by name when the update did not form (fewer groups written than an update takes) or ran out of memory.
     APPROXIMATION, stated: the groups of one batch (a round's longest may need more: `post_profile` measures that
     bound); the optimizer's state (twice the parameters) is not in it."""
@@ -588,7 +590,7 @@ def pass_memory_of(context: Context, settings: Settings, directory: Path) -> dic
 
     device = context.device
     model, optimizer = start_model(context, settings)
-    measured = pass_memory(model, context, directory, settings, [settings.update_groups])
+    measured = pass_memory(model, context, directory, settings, sorted({1, settings.update_groups}))
     update = measured["updates"][str(settings.update_groups)]
     if update == "fewer groups held":
         raise SystemExit(f"the pass's memory is not measured (O15): the measured batch wrote "
@@ -667,17 +669,19 @@ def require_workers_fit(speakers: Speakers, context: Context, settings: Settings
 
 # ---- the training pass
 def update_pairs(directory: Path, data: Sequence[Any], settings: Settings, rng: np.random.Generator,
-                 device: torch.device) -> Iterator[tuple[Samples, RowTensors]]:
+                 device: torch.device) -> Iterator[tuple[list[Samples], RowTensors]]:
     """The updates of a round's pass (module docstring, step 4): its written groups, file by file in the order they were
     spoken, each file's groups in an order shuffled by ``rng`` (the round's numbers; D130: an update mixes branch points
-    and windows), `Settings.update_groups` at a time (a file's last update may hold fewer), each paired with
+    and windows), `Settings.update_groups` at a time (a file's last update may hold fewer; each group a piece of it,
+    `post.loss.update_step`: its memory a group's), each paired with
     `Settings.data_sentences` sentences of ``data`` drawn by ``rng``. A file is read when its first update is drawn."""
     for path in sorted(directory.glob("groups_*.pt"), key=lambda p: int(p.stem.split("_")[1])):
         loaded: list[Group] = torch.load(path, weights_only=False)
         groups = [loaded[int(i)] for i in rng.permutation(len(loaded))]
         for k in range(0, len(groups), settings.update_groups):
             chosen = rng.choice(len(data), size=min(settings.data_sentences, len(data)), replace=False)
-            yield samples(groups[k:k + settings.update_groups], device), collate([data[int(i)] for i in chosen], device)
+            yield ([samples([group], device) for group in groups[k:k + settings.update_groups]],   # a piece a group
+                   collate([data[int(i)] for i in chosen], device))
 
 
 def pass_seed(seed: int, round_: int) -> int:

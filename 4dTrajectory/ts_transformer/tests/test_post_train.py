@@ -114,9 +114,9 @@ def test_the_pass_reads_the_groups_file_by_file_a_few_at_a_time(setup, tmp_path)
     torch.save([rewarded] * 3, directory / "groups_0.pt")          # 3 groups: an update of 2, then of 1
     torch.save([], directory / "groups_1.pt")                      # a batch without an informative group
     torch.save([rewarded], directory / "groups_10.pt")             # read after groups_1 (by number, not by name)
-    sizes = [p.rows.asked.shape[0] for p, _ in update_pairs(directory, context.data, settings,
-                                                            np.random.default_rng(0), CPU)]
-    assert sizes == [6, 3, 3]                                      # 3 sentences a group
+    updates = list(update_pairs(directory, context.data, settings, np.random.default_rng(0), CPU))
+    sizes = [[piece.rows.asked.shape[0] for piece in pieces] for pieces, _ in updates]
+    assert sizes == [[3, 3], [3], [3]]                             # a piece a group, 3 sentences each
     before = [p.detach().clone() for p in model.parameters()]
     passed = train_pass(model, context, optimizer, directory, settings, np.random.default_rng(0))
     assert passed["updates"] == 3 and np.isfinite(passed["loss"]) and not model.training
@@ -138,8 +138,8 @@ def test_the_pass_shuffles_each_file_s_groups_by_the_round_s_numbers(tmp_path, m
     settings = _settings(update_groups=3)
 
     def updates(seed):
-        return [chunk for chunk, _ in update_pairs(directory, list(range(4)), settings, np.random.default_rng(seed),
-                                                   CPU)]
+        return [[g for piece in pieces for g in piece]           # each piece one group (`samples` returns it)
+                for pieces, _ in update_pairs(directory, list(range(4)), settings, np.random.default_rng(seed), CPU)]
 
     chunks = updates([1337, 0, 1])
     first = [g for chunk in chunks for g in chunk]
@@ -341,6 +341,33 @@ def test_the_memory_sampler_sees_a_peak_freed_before_the_end_and_raises_its_fail
     with pytest.raises(RuntimeError, match="the memory sampler failed"):
         with post_train._PeakSampler(0):
             time.sleep(3 * post_train.PEAK_SAMPLE_S)
+
+
+def test_the_pass_memory_measures_one_group_alone_and_takes_the_largest_peak(monkeypatch):
+    """O15 with the update in pieces (post-training §2 item 5): the memory rule asks the profile for one group as well as
+    for an update's groups, so the widest and the densest group alone are measured, and the pass's peak is the largest
+    of every update measured (here the densest group's)."""
+    from pathlib import Path
+
+    from ts_transformer.experiments import post_profile
+
+    asked = []
+
+    def measure(model, context, directory, settings, counts):
+        asked.append(list(counts))
+        return {"groups_written": 9, "updates": {"1": {"gpu_peak_reserved_gib": 1.0},
+                                                 "1_densest": {"gpu_peak_reserved_gib": 3.0},
+                                                 "4": {"gpu_peak_reserved_gib": 2.0}}}
+
+    monkeypatch.setattr(post_profile, "pass_memory", measure)
+    monkeypatch.setattr(post_train, "start_model", lambda context, settings: (None, None))
+    monkeypatch.setattr(post_train, "_gpu_used", lambda: 5 << 30)
+    monkeypatch.setattr(torch.cuda, "memory_reserved", lambda device: 1 << 30)
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
+    out = post_train.pass_memory_of(SimpleNamespace(device=torch.device("cuda")), SimpleNamespace(update_groups=4),
+                                    Path("groups"))
+    assert asked == [[1, 4]]
+    assert out == {"peak": (5 << 30) - (1 << 30) + (3 << 30), "now": 5 << 30, "groups": 9}
 
 
 def test_n_workers_are_refused_by_name_where_one_workers_measured_memory_does_not_fit(setup, monkeypatch):

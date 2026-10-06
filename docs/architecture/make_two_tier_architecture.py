@@ -1,6 +1,7 @@
 """Draw the two-tier model architecture figure (SVG -> PDF) for the thesis.
 
-Summary figure of 4dTrajectory/ts_transformer/docs/two_tier/two_tier_framework.zh.md:
+Summary figure of 4dTrajectory/ts_transformer/docs/two_tier/design/ (outline, vocabulary, prior,
+post_training):
 the prior (tier 1) speaks instruction words, the executor (tier 2) flies them, and the words
 are the only interface. Offline: observed tracks -> labeller -> sentences -> prior training.
 
@@ -39,22 +40,28 @@ LABELS = {
     "en": {
         "offline": "Offline: data → language",
         "observed": ("Observed arrivals", "ADS-B approach tracks"),
-        "labeller": ("Labeller", "tracks → instructions"),
-        "sentences": ("Instruction sentences", "six columns per 2 s step"),
-        "columns": ["Runway", "Approach", "Heading", "Altitude", "Descent angle", "Speed"],
+        "labeller": ("Labeller", "tracks → words, then corrected", "in closed loop with the executor"),
+        "sentences": ("Instruction sentences", "five columns per 4 s row"),
+        "columns": [
+            ("Runway", "candidate · go-around"),
+            ("Heading", "5° grid, rel. to runway"),
+            ("Altitude", "40 levels · no level-off"),
+            ("Angle", "level · descent 1–4 · climb"),
+            ("Speed", "5 m/s grid · unspecified"),
+        ],
         "loop": "Closed loop: two-tier generation",
-        "context": ("Context", "candidate runways,", "landing history, traffic"),
-        "prior": ("Tier 1 · Prior", "autoregressive Transformer", "speaks every 2 s"),
-        "masks": ("Decode masks", "vocabulary rules", "glidepath floor", "separation"),
+        "context": ("Inputs", "own state, runway frames,", "landings, traffic"),
+        "prior": ("Tier 1 · Prior", "autoregressive Transformer", "speaks one row every 4 s"),
+        "masks": ("Decode masks", "grammar rules", "procedure masks", "separation"),
         "executor": ("Tier 2 · Executor", "rule-based autopilot", "point-mass dynamics", "flies every 1 s"),
         "words": ("instruction words", "the only interface"),
         "state": ("Flight state", "4D trajectory"),
         "feedback": "state feedback",
         "training": "Training of the prior",
         "stages": [
-            ("① Pre-training", "teacher forcing", "on sentences"),
-            ("② Post-training", "landing reward in loop,", "procedure masks"),
-            ("③ Multi-aircraft", "traffic attention,", "separation"),
+            ("① Pre-training", "teacher forcing on", "closed-loop sentences"),
+            ("② Post-training", "landing reward in loop,", "branch training"),
+            ("③ Multi-aircraft", "windows of traffic,", "separation"),
         ],
         "trains": "trains",
         "outcome": "landing outcome",
@@ -63,22 +70,28 @@ LABELS = {
     "zh": {
         "offline": "离线：数据 → 语言",
         "observed": ("观测进场航迹", "ADS-B 进近轨迹"),
-        "labeller": ("标注器", "航迹 → 指令"),
-        "sentences": ("指令句子", "每 2 s 一步，六列词"),
-        "columns": ["跑道", "进近", "航向", "高度", "下降角", "速度"],
+        "labeller": ("标注器", "航迹 → 指令词，再与执行器", "闭环飞行并加纠正词"),
+        "sentences": ("指令句子", "每 4 s 一行，五列词"),
+        "columns": [
+            ("跑道", "候选跑道 · 复飞"),
+            ("航向", "5° 格，相对跑道方向"),
+            ("高度", "40 级 · 不改平"),
+            ("下降角", "平飞 · 下降 1–4 · 爬升"),
+            ("速度", "5 m/s 格 · 未指定"),
+        ],
         "loop": "闭环：两层生成",
-        "context": ("上下文", "候选跑道、", "落地情况、其他飞机"),
-        "prior": ("上层 · 先验", "自回归 Transformer", "每 2 s 说一步指令"),
-        "masks": ("解码屏蔽", "词表相容规则", "下滑道下沿", "间隔"),
+        "context": ("输入", "自身状态、跑道坐标系、", "落地情况、其他飞机"),
+        "prior": ("上层 · 先验", "自回归 Transformer", "每 4 s 说一行指令"),
+        "masks": ("解码屏蔽", "语法规则", "程序屏蔽", "间隔"),
         "executor": ("下层 · 执行器", "规则自动驾驶", "点质量动力学", "每 1 s 飞一步"),
         "words": ("指令词", "两层之间唯一的接口"),
         "state": ("飞行状态", "4D 轨迹"),
         "feedback": "状态反馈",
         "training": "先验的训练",
         "stages": [
-            ("① 预训练", "teacher forcing", "在句子产物上"),
-            ("② 后训练", "闭环落地奖励、", "程序屏蔽"),
-            ("③ 多机", "交通注意力、", "间隔"),
+            ("① 预训练", "teacher forcing，", "闭环句子"),
+            ("② 后训练", "闭环落地奖励、", "分支训练"),
+            ("③ 多机", "交通窗口、", "间隔"),
         ],
         "trains": "训练",
         "outcome": "落地结果",
@@ -151,14 +164,15 @@ def draw(lang):
 
     # ---- offline column: tracks -> labeller -> sentences ------------------------------------
     g.box(15, 78, 160, 58, PALETTE["data"], list(t["observed"]))
-    g.box(15, 168, 160, 58, PALETTE["data"], list(t["labeller"]))
+    g.box(15, 168, 160, 58, PALETTE["data"], list(t["labeller"]), size=10.5, line_h=15)
     g.rect(15, 262, 160, 238, *PALETTE["data"])
     g.text(95, 283, t["sentences"][0], size=13, bold=True)
-    g.text(95, 300, t["sentences"][1], size=11.5, fill=PALETTE["mute"])
-    for i, name in enumerate(t["columns"]):
-        y = 314 + i * 28
-        g.rect(30, y, 130, 24, "white", PALETTE["data"][1], r=5, sw=1)
-        g.text(95, y + 16.5, name, size=12)
+    g.text(95, 299, t["sentences"][1], size=11.5, fill=PALETTE["mute"])
+    for i, (name, values) in enumerate(t["columns"]):
+        y = 310 + i * 38
+        g.rect(21, y, 148, 34, "white", PALETTE["data"][1], r=5, sw=1)
+        g.text(95, y + 15, name, size=12, bold=True)
+        g.text(95, y + 28, values, size=10, fill=PALETTE["mute"])
     g.arrow([(95, 136), (95, 168)])
     g.arrow([(95, 226), (95, 262)])
 

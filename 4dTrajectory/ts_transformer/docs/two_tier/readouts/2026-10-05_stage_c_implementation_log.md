@@ -840,3 +840,17 @@ criterion is applied (D7).
 | The GPU cache | `ea2050ff` | With speakers on the GPU, the campaign's process releases the memory it cached in the last pass before each round's speaking (about 4.6 GB reserved after the pass; three workers speaking need about 3 GB: round 1 would have run out of memory). Review: no findings |
 | A supervisor | — | A detached script beside the campaign (the user's rule: five workers when the load is below 10): at round 0's checkpoint it resumed the campaign on the fixed code with five workers (load 2.9, 13 GB of host memory, other processes 0.5 GB of the GPU) |
 | Four workers | — | The GPU sampler showed round 0's pass at 7.0 of the GPU's 7.6 GB with three idle workers holding their contexts; five would very likely run round 1's pass out of memory. The five-worker process was stopped in its start checks and the campaign resumed at 14:41 with four (round 1 begun and moved aside as `round_1.aborted-…`); the supervisor reports only. The GPU, not the CPU, caps the workers at four on this card |
+
+**Rounds 1–3, and round 4 out of the GPU's memory (2026-10-06).** Rounds 1–3 with four workers (14:41–16:44): the
+selection readout's mean reward KMSY / KRDU / KSJC / KSMF / KSTL — round 1 0.8745 / 0.80 / 0.845 / 0.78 / 0.7945,
+round 2 0.835 / 0.77 / 0.83 / 0.79 / 0.785, round 3 0.875 / 0.80 / 0.855 / 0.775 / 0.815 (no criterion, D7). Round 4's
+pass ran out of the GPU's memory at 17:16 (four workers; the main process at 6.2 GB) and again on its resume with three
+(the main process at 6.3 GB): round 4's groups reach 668 rows and traffic 7 (13 groups past 480 rows; the C8 profile
+saw 480 and 4), and an update of four groups is padded to its longest and widest. Both half rounds moved aside
+(`round_4.aborted-…`).
+
+| Step | Commit | What |
+|---|---|---|
+| The pass in pieces | `832555a5` | The user's decision (2026-10-06; an exception to `notes/stage_c.md`'s "C runs C10 without changing code"): `post.loss.update_step` — each branch group a piece, its surrogate and pull divided by the whole update's counted rows, its backward at once; the data term whole (its dropout); `update_loss` kept as the reference and checked equal (parts to 1e-6, gradients to rounding, the clipped counts equal; a piece normalised by its own rows fails the test). `update_pairs` yields a piece a group; the profile measures pieces, with the group of the largest rows × traffic beside (a proxy, not a bound; `ts-post-profile-v3`). Review in two rounds: two S2 (a test of the branches not updated; the profile's bound wording), four S3; all fixed. On round 4's real groups with round 3's model: an update of the four largest (668 rows, traffic 7) peaks at 1.58 GB, the same for one, two or four groups |
+| Merge | `af36ebe8` | `dev-two-tier` (docs only: D137–D139, the notes) into the branch; `dev-two-tier` fast-forwarded to it |
+| Resume | — | From the worktree at `af36ebe8`, 18:36, five workers (load 1.3, 23 GB of host memory, the GPU 0.5 GB used; the speaking's peak about 1.24 GB a worker): round 4 from round 3's checkpoint. Rounds 0–3 ran the whole update; rounds 4–9 run it in pieces (the same loss, float rounding apart) |
