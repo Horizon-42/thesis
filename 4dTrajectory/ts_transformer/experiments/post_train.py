@@ -23,8 +23,8 @@ EACH ROUND r:
 5. **The selection readout** (`selection_readout`): a fixed set of real windows of the select days (drawn once with the
    seed, D113 applied; the same numbers every round), the first pass only, by airport: the rewards, the outcomes (a loss
    of separation among them), the rows the speed-word mask acted (D101), the steps reading a faulty point and the losses
-   near one (D114). No criterion is applied (D7); the validation days are never read here (a window readout reads them
-   once, for the chosen round).
+   near one (D114). No criterion is applied (D7); the validation days are never read here (`post_validation` reads
+   them once, for the chosen round, with the same readout).
 6. **The round's record** ``round_<r>/round.json`` (the draw, its windows, the speaking, the bytes of its groups, the
    pass, the readout, the commit as information), then **its checkpoint** ``round_<r>/checkpoint.pt`` (§4 item 3): the
    model, the optimizer and the identity (`identity`); then its groups files are deleted (only its own pass reads
@@ -178,10 +178,11 @@ def split_data(instructions: Path, split: str, words: Words, interval_s: float, 
 
 
 def open_context(prior_dir: Path, instructions: Path, executor: Path, edges_reference: Path, device: torch.device,
-                 procedure_root: Path, *, data: bool = True) -> Context:
+                 procedure_root: Path, *, data: bool = True, splits: Sequence[str] = ("train", "select")) -> Context:
     """The context of a campaign: the base opened (`open_prior`: its artefact, Δ, selection and procedure masks), the
-    finals of its procedure data, the train and select splits, and the data term's sentences (none for a caller that
-    trains nothing, ``data`` False: the export of the Training view)."""
+    finals of its procedure data, the ``splits`` (the campaign's: train and select; none for `post_validation`, which
+    adds val after its claim), and the data term's sentences (none for a caller that trains nothing, ``data`` False:
+    the export of the Training view, the validation readout)."""
     prior = open_prior(prior_dir, instructions, procedure_root=procedure_root)
     words = Words(load_spec(instructions))
     source = ArtefactSource(instructions, prior.interval_s, prior.checkpoint.model.config.variant, prior.landings,
@@ -193,7 +194,7 @@ def open_context(prior_dir: Path, instructions: Path, executor: Path, edges_refe
                    prior.checkpoint.model, prior.checkpoint.identity, prior.geometries, prior.landings,
                    {code: airport_finals(g, root=procedure_root) for code, g in prior.geometries.items()},
                    {split: split_data(instructions, split, words, prior.interval_s, prior.geometries)
-                    for split in ("train", "select")},
+                    for split in splits},
                    sentences)
 
 
@@ -320,28 +321,36 @@ def readout_numbers(seed: int, place: int) -> np.random.Generator:
     return np.random.default_rng([seed, 1 << 30, place])
 
 
-def selection_windows(context: Context, settings: Settings) -> list[Window]:
+def selection_windows(context: Context, settings: Settings, split: str = "select") -> list[Window]:
     """The selection readout's windows (module docstring, step 5): at most ``select_per_airport`` real windows of each
-    airport of the select days, drawn once with the seed from those that do not open inside a loss (D113)."""
-    windows, separations = context.splits["select"]["windows"], context.separations
+    airport of the select days (``split``; the val days for `post_validation`, drawn alike), drawn once with the seed
+    from those that do not open inside a loss (D113)."""
     rng = np.random.default_rng([settings.seed, 1 << 31])
     out = []
-    for code in sorted(context.geometries):
-        mine = [w for w in windows if w.scene.geometry.code == code
-                and not opens_inside_loss(w, separations[code], context.finals[code], context.words.spec.step_s)]
+    for mine in readout_pool(context, split).values():
         out += [mine[int(i)] for i in sorted(rng.choice(len(mine), min(settings.select_per_airport, len(mine)),
                                                         replace=False))]
     return out
 
 
-def selection_readout(model: Prior, context: Context, windows: Sequence[Window], settings: Settings
-                      ) -> dict[str, Any]:
-    """Step 5 of a round: the select windows' first pass (no branch), its ends by airport (module docstring)."""
-    select = context.splits["select"]
+def readout_pool(context: Context, split: str) -> dict[str, list[Window]]:
+    """Each airport's real windows of ``split`` that do not open inside a loss (D113), in airport order: what the
+    readout's windows are drawn from."""
+    windows, separations = context.splits[split]["windows"], context.separations
+    return {code: [w for w in windows if w.scene.geometry.code == code
+                   and not opens_inside_loss(w, separations[code], context.finals[code], context.words.spec.step_s)]
+            for code in sorted(context.geometries)}
+
+
+def selection_readout(model: Prior, context: Context, windows: Sequence[Window], settings: Settings,
+                      split: str = "select") -> dict[str, Any]:
+    """Step 5 of a round: the select windows' first pass (no branch), its ends by airport (module docstring); the
+    same readout of ``split``'s windows (`post_validation`: the val days)."""
+    select = context.splits[split]
     counted: dict[str, dict[str, Any]] = {}
     for places in batches(windows, settings.batch_windows):
         batch = [windows[p] for p in places]
-        loop, order, observed = context.start_loop("select", batch)([w.signal_index for w in batch])
+        loop, order, observed = context.start_loop(split, batch)([w.signal_index for w in batch])
         ends = WindowLoop(model, loop, order, batch, select["sentences"], select["flights"], context.geometries,
                           context.rosters, context.finals, context.words, interval_s=context.interval_s,
                           variant=context.variant, edges_reference=context.edges_reference, faults=select["faults"],
