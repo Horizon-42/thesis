@@ -141,8 +141,8 @@ The next free numbers: D159, O19.
    that it reads are on its branch; what it needs of their public interfaces is made by them (vocabulary D97, prior
    D96). Its formal runs wait for B5's base and Claude's check of stage B. It ends with the Training view of stage C.
    C10 is done (2026-10-06 22:46, ten rounds). The user continues it to 14 rounds as the same campaign (post-training
-   D157, C14): its code on `dev-two-tier-v4`, its rounds 10–13 after the user's fast-forward of `dev-two-tier` and
-   C13's check on the GPU; then the user's criterion (D7) over the 14 rounds and the validation readout.
+   D157, C14), by stage C's implementer (the user, 2026-10-06): its code on `dev-two-tier-v4-post`, its rounds 10–13
+   after the user's merge of that branch, C13's check on the GPU and the other GPU and timing steps of item 6; then the user's criterion (D7) over the 14 rounds and the validation readout.
 4. Each stage ends with its own Training view (`frontend.md`): the backend's live executor, the export and the frontend
    follow the stage, so that the user sees what the stage does in the frontend (the user, 2026-10-04). From 2026-10-06
    the Training view has its own design document and its own implementer, fronter (frontend D154).
@@ -171,7 +171,8 @@ The next free numbers: D159, O19.
    be merged and go on from the newest commit): `dev-two-tier-v4` with the frontend document and C14's design
    (`7e581b88`), and `dev-traffic-scenarios` (the optimizer's, outside this design, `780b7bfc`). The work goes on from
    there: stage D's implementer brings `dev-two-tier-v4` level with `dev-two-tier` (a fast-forward) and does the steps
-   of item 6 and C14's code on it; `dev-multi-control` merges `dev-two-tier`; fronter's `dev-frontend` is made from
+   of item 6 on it; stage C's implementer brings `dev-two-tier-v4-post` level with `dev-two-tier` and builds C14 on
+   it; `dev-multi-control` merges `dev-two-tier`; fronter's `dev-frontend` is made from
    `dev-two-tier`. Not merged, kept as records: `dev-kaus-parts` and `dev-airport-embedding` (D158), `dev-step9-one-commanded`
    (the archived multi-aircraft design's step 9) and `wip-r32-leg-timing` (not adopted).
 10. The user merges (§5 rule 11).
@@ -189,13 +190,14 @@ sections that it names.
    - before its first commit, and before a milestone that a new design commit holds, the implementer brings
      `dev-two-tier-v4` level with `dev-two-tier` (a fast-forward, or a merge of `dev-two-tier` when both moved);
    - work begun on another branch (stage B's `dev-training-layout`) is merged into `dev-two-tier-v4` and goes on there;
-     a stage branch whose work is all in `dev-two-tier` (`dev-two-tier-v4-prior`, `dev-two-tier-v4-post`) is deleted with
+     a stage branch whose work is all in `dev-two-tier` (`dev-two-tier-v4-prior`) is deleted with
      its worktree;
    - the user merges `dev-two-tier-v4` into `dev-two-tier` (rule 11).
 
    One implementer develops for every stage: stage D's (the user, 2026-10-06; it takes over stage B's implementer's
-   remaining steps, §4 items 5 and 6). Stages A's and B's implementers have no work; stage C's runs C10 to its end and
-   does not change code. Stage D's implementer keeps two branches: the work of §4 items 5 and 6 on `dev-two-tier-v4`
+   remaining steps, §4 items 5 and 6). Stages A's and B's implementers have no work. Stage C's builds and runs C14, C10's
+   later rounds (the user, 2026-10-06), on `dev-two-tier-v4-post` in `.claude/worktrees/two-tier-v4-post`, first
+   brought level with `dev-two-tier` (a fast-forward), and changes no other code. Stage D's implementer keeps two branches: the work of §4 items 5 and 6 on `dev-two-tier-v4`
    (worktree `.claude/worktrees/two-tier-v4`), and the multi-aircraft control on its own branch `dev-multi-control` in
    the worktree `.claude/worktrees/multi-control`, made from `dev-two-tier-v4`, so that the merge of
    `dev-two-tier-v4` does not wait for the multi-aircraft control's review. It
