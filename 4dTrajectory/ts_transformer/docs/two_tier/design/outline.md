@@ -94,6 +94,7 @@ both, each with its part. A new decision or open item takes the next free number
 | D131 | Every review of a stage follows one standard, the same in every round (`review_guide.md` §3 step 6 and "Later rounds"): each finding gets a severity. S1 (a leak into an input, a target selection or a choice; a split violation; a second read of the validation days; a defect that changes a number the user reads, on real data, beyond its tolerance) is corrected before any formal run. S2 (a latent leak, a boundary that does not refuse, a decided rule with no test, an effect not measured and not bounded) is corrected before the formal run when the correction is cheap; else it is listed as an open item of the stage's design document (§0.2, an O number), with no milestone and no order. S3 (a corner case below 0.1 % of the windows or steps that moves no reported number beyond its tolerance, a difference within a stated bound, style) is listed in one line of the review and not reported again. A later round reads the changed code and the S1 channels only; a finding of an earlier round is not reported again. A scenario against common sense is no finding at all, whatever its correction costs: it is not reviewed, not listed and not corrected — for example the code changed while a run of it goes on, an input that no step of the pipeline makes, a file moved or edited by hand to defeat a rule, a second person working against the first. Why: four rounds of the review of stage B found no leak, and their later findings came from a deeper search of the same guard in each round, not from new defects; the deepest were guards against a code change during a campaign, which does not happen (the user: "we are not in a spy war") | Decided | User, 2026-10-06 |
 | D138 | The speed of the closed loop (§4 item 6). A faster form of a computation is added beside the readable one, never in its place: the readable one stays a mode and the reference, and a check on fixed inputs requires both to give the same result before the faster one is used in a process (as the executor's ways to fly, vocabulary D73); no result changes (words, masks, states, rewards). Three parts, each in its stage's code: (1) vocabulary A44, the start opened once in a process (the split's signals, the arrival records, the candidates, the sentences' offsets and the opened executor held by one object; each flight's series rebuilt once), `start` and `start_moved` kept as the one-call form; (2) prior B14, the procedure masks in two modes, one aircraft at a time (today's code, the reference) and the whole batch at once; (3) post-training C13, the selection readout's batches spoken by the speaking workers, one process kept as a mode, and the start opened before the workers fork so that they share its memory. Not done: speaking on the CPU with about ten workers (other float numbers: another campaign; the host's memory is shared), batches of 128, a compiled executor or judge. A campaign that runs keeps its code: C10 (`post_train_20261006`) gets none of it. Why: C10 speaks bound by the CPU. One batch of 28 windows took 74 s under cProfile: the start about 35 % (each call reads the whole split's signals and arrival records again), the procedure masks about 19 % (Python loops over the aircraft; the grammar's column mask is already over the batch), the inputs, edges and scene about 11 %, the set-up of compiled kernels about 13 % (once a process), the prior's forward pass about 7 %, the executor, the judge and the copies about 15 %. A round of C10's settings takes about 60 min with three workers, about 5 min of it the selection readout in the main process (stage C's log §26). Expected: a batch about 40 % shorter and a round about 35–40 min with three workers; each part is measured after it is built, never assumed | Decided | User, 2026-10-06 (stages A and C made faster; the readable mask code kept as a mode); the parts: stage C's proposals (a)–(c), with Claude's reading that the slow masks are stage B's procedure code, not the grammar |
 | D139 | Stage B's readings of frontend §3 and D138, accepted as built (stage B's requests note, 2026-10-06): (1) the speed's batch of 400 is the 100 drawn flights (20 an airport) repeated in turn, copy k of a flight its sample k; (2) stage C's export requires `--speed` too, and a fold set of stage B names the base's readout, saying which model it timed; (3) the results route answers 400 for an airport that is no airport code and 409 by name for a set of another format, and a section whose file is of another format, elsewhere or missing gives that section's problem by name while the others show; (4) stage A's closed-loop section reads the replays of the set's own splits at each Δ of the set; (5) the earlier blocks are checked against the sha256 of each fixture's earlier block, held in the test (a digest of output data, not of code); (6) stage C's page has a section Speed too; (7) A44's `Start` keeps each flight's series until `release`, not the arrival records (holding them would change the harvest's loader, which training reads; a flight's first start still reads its airport's manifests, about 1 % of a batch); (8) B14's check takes 0.6–1.7 s an airport once a process (a grid about each final and a sweep down each course, so that a 0.2 m change of a limit is found); (9) C13's memory rule (O15): N times one worker's measured peak, the main process's growth in one update and the other workers' held memory must fit the host and the GPU — with the parent's shared pages taken out of a worker's peak and the worker's kept model and series counted in | Decided | User, 2026-10-06 (each reading in turn; (9) with the over-count corrected, Claude's review `readouts/2026-10-06_training_view_and_speed_check.zh.md`) |
+| D158 | **KAUS is read in three parts** (the user, 2026-10-03). KAUS, the held-out test airport (prior §5), is not read all at once: its 97 operating days are dealt one time into three parts of 33, 32 and 32 days (grouped by half year, April–September and October–March; each group sorted by sha256(seed:day) with the seed 1337; the groups dealt in turn to the parts), so that later models still find flights that no model read. The deal is committed in code (`data/held_out_split_kaus_20261003.json`, `data/held_out_split.py`; branch `dev-kaus-parts`, `9e254341`). A part is opened by a commit, never by a flag; a part that is not opened is sealed as a test day is. Part 1 was opened on 2026-10-03 for a sentence artefact of the earlier vocabulary (instruction-v3: `4dTrajectory/outputs/POOLED/instruction_language/heldout_kaus_part1_20261003`). `dev-kaus-parts` is not merged (the user, 2026-10-06): its other work belongs to the archived design (R46 tests the airport embedding that D5 removed; R47 reads the instruction-v3 labeller). The deal comes into `dev-two-tier` with the final test of KAUS, which also names the part that it reads | Decided | User, 2026-10-03 (three parts, the seed, part 1 opened); not merged: user, 2026-10-06 |
 
 **The identity rule (D21)** (the user, 2026-10-02 and 2026-10-03). An identity binds the format (what the words and the
 payloads mean) and the data rules (the sealed test days). Code is identified by what it does on fixed inputs (a
@@ -104,14 +105,14 @@ they came from. Each document lists the identities of its parts.
 
 | Document | Decisions | Open items |
 |---|---|---|
-| Outline | D7, D20, D21, D55, D85, D95, D131, D138, D139 | — |
+| Outline | D7, D20, D21, D55, D85, D95, D131, D138, D139, D158 | — |
 | Training view (`frontend.md`) | D109, D133–D136, D154–D156 | — |
 | Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62, D66, D67, D69–D71, D73, D74, D77–D84, D86–D90, D97, D102, D111, D126 | O8 |
 | Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60, D63–D65, D68, D72, D75, D96, D105–D108, D111, D118–D122, D126–D128 | — |
-| Post-training | D29–D31, D36, D37, D76, D91–D94, D98–D101, D103–D105, D107, D110, D112–D117, D123–D125, D129, D130, D132, D137 | O15 |
+| Post-training | D29–D31, D36, D37, D76, D91–D94, D98–D101, D103–D105, D107, D110, D112–D117, D123–D125, D129, D130, D132, D137, D157 | O15 |
 | Multi-aircraft control | D140–D153 | O16, O18 |
 
-The next free numbers: D157, O19.
+The next free numbers: D159, O19.
 
 ---
 
@@ -139,6 +140,9 @@ The next free numbers: D157, O19.
    developed in parallel with the end of stage B (D95). A milestone of stage C starts when the parts of stages A and B
    that it reads are on its branch; what it needs of their public interfaces is made by them (vocabulary D97, prior
    D96). Its formal runs wait for B5's base and Claude's check of stage B. It ends with the Training view of stage C.
+   C10 is done (2026-10-06 22:46, ten rounds). The user continues it to 14 rounds as the same campaign (post-training
+   D157, C14): its code on `dev-two-tier-v4` before the merge of item 9, its rounds 10–13 after that merge and C13's
+   check on the GPU; then the user's criterion (D7) over the 14 rounds and the validation readout.
 4. Each stage ends with its own Training view (`frontend.md`): the backend's live executor, the export and the frontend
    follow the stage, so that the user sees what the stage does in the frontend (the user, 2026-10-04). From 2026-10-06
    the Training view has its own design document and its own implementer, fronter (frontend D154).
@@ -151,18 +155,26 @@ The next free numbers: D157, O19.
    built (`post_profile` at C10's settings, `model_speed` of frontend §3 item 10). Nothing of it is merged into `dev-two-tier`
    while C10 runs. Items 5 and 6 are built and reviewed; their steps after C10 (B14's real-data check, C13's GPU check,
    the base's speed readout, the export of stages A's and B's sets, the browser check, the merge report) go to stage
-   D's implementer (§5 rule 1).
+   D's implementer (§5 rule 1). They come first now that C10 is done (the user, 2026-10-06: the merge waits for them).
 7. Stage D (multi-aircraft control §0.4), by stage D's implementer on `dev-multi-control` (§5 rule 1), after the
    user's decisions of its §0.1 (all decided 2026-10-06): MC0 (the interfaces of stages A, B and C that it needs, D150, D149, D152) and
    MC1 (the census). Their code and their tests on synthetic inputs while C10 runs; their checks on real data and the
    census after C10 ends, after the steps of items 5 and 6 that wait for C10. The order of the work: while C10 runs,
    MC0's and MC1's code; when C10 ends, first the steps of items 5 and 6 (they hold back the merge of
-   `dev-two-tier-v4`), then MC0's checks on real data and MC1's census. Version 1's formal campaign after C10's
-   chosen round; version 2 (D153) after version 1's.
+   `dev-two-tier-v4`), then MC0's checks on real data and MC1's census. While C14's rounds run (item 3), the
+   multi-aircraft control's code and tests on synthetic inputs only (§5 rule 13); its checks on real data and its
+   census after C14. Version 1's formal campaign after the chosen round of the 14; version 2 (D153) after version 1's.
 8. The Training view (frontend §0.4), by fronter on `dev-frontend` (§5 rule 1): F1 (the cursor slider) and F2 (windows
    of several commanded aircraft, with stage C's) now, light on the host while C10 runs; F3 (stage D's parts) after
    stage D's MC0; F4 (stage D's export and sets) after its MC4.
-9. The user merges (§5 rule 11).
+9. The merge into `dev-two-tier` (the user, 2026-10-06: every branch but the multi-aircraft control's). First
+   `dev-traffic-scenarios` (the optimizer's, outside this design; it does not touch the two-tier code). Then
+   `dev-two-tier-v4` with the frontend document, after the steps of item 6 and C14's code: stage D's implementer merges
+   `dev-two-tier` into it, runs the full ts suite, Vitest and the backend's tests, and reports; the user fast-forwards
+   `dev-two-tier`. `dev-multi-control` and fronter's `dev-frontend` stay their own branches and merge `dev-two-tier`
+   after it. Not merged, kept as records: `dev-kaus-parts` and `dev-airport-embedding` (D158), `dev-step9-one-commanded`
+   (the archived multi-aircraft design's step 9) and `wip-r32-leg-timing` (not adopted).
+10. The user merges (§5 rule 11).
 
 ---
 
@@ -193,7 +205,10 @@ sections that it names.
    and 6 after C10 (rule 13) come before the multi-aircraft control's runs on real data. The implementer stages files by explicit paths and reads
    `git diff --cached --stat` before each commit. A formal build or run starts from the main checkout after the user's
    merge, as B5 did, never from the development worktree. C10 (`post_train_20261006`) was launched from
-   `.claude/worktrees/two-tier-v4-post` before this rule; that worktree stays untouched until C10 ends.
+   `.claude/worktrees/two-tier-v4-post` before this rule; its later rounds (C14) and its validation readout run from
+   the main checkout and read the paths that it recorded there as `this_checkout` maps them (post-training D157).
+   After the merge of §4 item 9, stage D's implementer removes the worktrees and deletes the branches whose work is all
+   in `dev-two-tier` (each worktree's data links unlinked first; `git branch -d`, never `-D`).
 
    The Training view (`frontend.md`) has an implementer of its own, fronter (the user, 2026-10-06; frontend D154), on
    its own branch `dev-frontend` in the worktree `.claude/worktrees/frontend`, made from `dev-two-tier-v4` and merged

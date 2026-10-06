@@ -303,7 +303,7 @@ words that all masks permitted in each column (§7, items 3 and 4).
 **The data.** Teacher forcing on the closed-loop sentences of the selection `landed` (D75, D111), split by operating
 day (the artefact's day split, `data/day_split_20260924.json`; test days sealed). A run reads the train and select days
 of its airports only; the validation days are read one time, by the base's validation readout. KAUS is a held-out test
-airport only: it is read one time, at the end of the whole chain.
+airport only: it is read at the end of the whole chain, each of its three parts one time (outline D158).
 
 **The loss.** At every asked row (a row of the sentence at or after the first predicted step), the cross entropy of each
 of the five columns, each head reading the true words of the earlier columns of the row. The per-step loss of a set of
