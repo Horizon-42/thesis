@@ -1532,3 +1532,115 @@ the user chooses (D55). Tests: `tests/test_start_rules.py`.
 
     python run_ts.py start_rules --row-interval-s 4 --workers 4 --parts 8 \
         --instructions <scratch artefact> --executor <its executor spec> --out <new dir>
+
+### R56 · `run_ts.py prior_train` — the prior of stage B: one run on every airport, or one fold (prior design §12 B3, B8; D39–D41, D75)
+
+2026-10-04, two-tier v4 milestone B3 (the archived v3 runner of the same name is R15). One training run on the
+artefact's train days, stopped on its select days (patience, `max_epochs`; the state of the best select epoch is kept),
+under a selection rule (`--selection all|landed`, D75; `landed` also leaves out a flight stage A marks as faulty, D111).
+`--held-out <airport>` makes a fold: it trains on the other airports alone and scores the held-out airport's select days
+after training (`held_out.json`: the teacher-forced loss per step and the first-step runway, top-1). The shape and the
+training values are flags (configuration A is the default; `prior_campaign` passes B, C, D). Before training, the
+largest batches' memory is measured at the run's size and the run refuses to start if GPU or host would not hold it
+(`memory.json`; `--memory-check-only` stops there). `--sample N` is a smoke (N sentences of each airport and split, a
+fixed seed: no result). Writes a new `--out`: `config.json` (`ts-prior-checkpoint-v8`; its identity holds the data the
+run read, each split's selection counts and signals sha256 — never shown for val, D120), `checkpoint.pt`, `history.json`,
+`procedure_masks.json` (the masks' set and the procedure data's digests, §8 item 2). It prints the selection of train and
+select only (D85). From a clean tree unless a smoke. Measured (B5, configuration C at Δ = 4 s on `v12_20261005`): 35 s an
+epoch on all five airports, a fold 11–20 min, the base 17 min (25 epochs). Tests: `tests/test_prior_train.py`.
+
+    python run_ts.py prior_train --instructions <artefact> --executor <spec> --row-interval-s 4 --variant full \
+        --selection landed [--held-out KSJC] --out <new dir>
+
+### R57 · `run_ts.py prior_free_generation` — the prior speaks, the executor flies (prior design §12 B4; D68–D72, D96, D106, D119, D128)
+
+2026-10-04 (the archived v3 runner of the same name is R17). A prior run (`checkpoint.open_prior`) speaks to `--per-airport`
+flights of each airport of a split, drawn with `--seed` (D55), `--samples` times each; each flight starts through the
+start of a closed loop (`autopilot.start.start_moved`, `NO_MOVE`) and the shared step (`prior_speaking_loop.SpeakingLoop`):
+the speaker under the procedure masks and D68's bound, each flight's own random numbers (`flight_numbers`), the
+executor flying each row (a row it refuses leaves the loop as it was), the judge's outcome. Writes a new `--out`:
+`config.json`, `sentences.jsonl`, `sentences.npz` (`ts-prior-free-generation-v4`: words, states, the probability and
+permission of "go-around", the rows on the final, the words the masks blocked), and `readout.json` LAST — by airport and
+stratum, the flights the prior's selection keeps and those it leaves out for a faulty track or by their stored outcome
+apart (D111). `--split val` is the base's one val readout (D85): the run takes the val read's lock (`lock_val_read`),
+checks every option, then claims the read with its options (D128) before reading val, and marks the claim spent once
+`readout.json` is written; a rerun goes only to the claimed output with the same options; a smoke never reads val.
+`--chunk` flights fly in one loop (the campaign passes it). From a clean tree unless a smoke. Measured (B5): a fold's
+400 sentences at one airport 3–5 min, the base's 2,000 on val 8.4 min (CPU loop, one thread). Tests:
+`tests/test_prior_free_generation.py`.
+
+    python run_ts.py prior_free_generation --prior <prior_train run> --instructions <artefact> --executor <spec> \
+        --split select --airports KSJC --out <new dir>
+
+### R58 · `run_ts.py prior_validation` — the base's one val readout without its free generation (prior design §12 B5; D85, D119, D128)
+
+2026-10-05. On the base (not a fold, not a smoke prior): the teacher-forced loss per step of the val sentences under its
+selection, pooled and by airport, and the share of the labelled words the procedure masks block, inside the selection and
+outside it by reason. Claims the val read as `prior_free_generation` does (its own claim, `val_read_prior_validation.json`;
+its options: the split and the device); `--split select --smoke` reads the select days instead (a smoke never reads
+val). Writes a new `--out`: `config.json`, then `readout.json` (`ts-prior-validation-v3`). 161 s for the base of B5.
+Tests: `tests/test_prior_validation.py`.
+
+### R59 · `run_ts.py prior_select` — the choices of the cross-validation (prior design §5; D39, D40)
+
+2026-10-05. `--step configuration` after steps 1 and 2: the score of an arm is the mean held-out loss of its five folds;
+the seed scale the difference of configuration A's two seeds; among the configurations within twice the seed scale of the
+best, the fewest parameters, a tie of parameters to the lower score (the user, 2026-10-05). `--step variant` after step
+3: `constants` only if better than `full` by more than twice the seed scale. A fold is read only complete and of its arm
+(every shape and training value, the seed, the selection `landed`, one data identity) and with a finite score. Writes
+`choice_<step>.json` once (`ts-prior-choice-v1`). The campaign runs it; its rules are part of the behaviour check.
+Tests: `tests/test_prior_campaign.py`.
+
+### R60 · `run_ts.py prior_campaign` — B5 as one campaign: 31 training runs, the choices, the base and its val readout (prior design §5, §12 B5; D108)
+
+2026-10-05. Steps, one at a time on the GPU, each a runner in its own process with its log: configurations A, B, C, D
+(variant `full`, seed 1337) and A again (seed 2024) on the five folds, each fold's free generation at its held-out
+airport (select, 200 flights × 2); `prior_select --step configuration`; the chosen configuration's `constants` folds;
+`prior_select --step variant`; the base on every airport, `prior_validation` and `prior_free_generation --split val`.
+Every training run reads `landed`. Before each step: a clean tree (unless a smoke) and the behaviour check
+(`prior_behaviour`, R61) giving the start's answer bit for bit — its settings (seeds, selection, configurations, free
+generation, temperature, D68's bound) are the code on the disk's; a difference stops the campaign by name; each step's
+commit is recorded as information only. Resumable: a step is done when its last file exists; a step a kill left is moved
+aside as `<dir>.aborted-<UTC>` and run again; a done val step's claim is marked spent if a kill left it unmarked. `--smoke
+N` runs every step small. Writes `campaign.json` (`ts-prior-campaign-v3`), the steps' directories, `logs/`. B5
+(`prior_base_20261006`, 2026-10-05 22:40 → 10-06 07:12 UTC, 65 steps): configuration C, variant `full`; the readout
+`docs/two_tier/readouts/2026-10-06_b5_campaign.zh.md`. Tests: `tests/test_prior_campaign.py`.
+
+    python run_ts.py prior_campaign --instructions 4dTrajectory/outputs/POOLED/instruction_language/v12_20261005 \
+        --executor 4dTrajectory/outputs/POOLED/executor/v17_20261005 --row-interval-s 4 \
+        --out 4dTrajectory/outputs/POOLED/prior/<campaign id>
+
+### R61 · `run_ts.py prior_behaviour` — the behaviour check of the prior's code on fixed inputs (prior design §12 B10, B12, B13; D108)
+
+2026-10-05. On the CPU with one thread, as JSON: two steps of training on a fixed synthetic set (the losses), rows said by
+the speaker with fixed numbers (words, probabilities), the configuration values a run reads, the first-step runway, the
+`constants` loss, the inputs of fixed rows and of a fixed sentence (`inputs.sentence_rows`; a real-format flight key,
+landings counted in the 30 min before its rows, its own between two rows), the shared closed-loop step on a straight
+flying stand-in (each aircraft its own landings), the selection (`left_out`, `kept`, `side`) over every rule, outcome and
+mark, `prior_select`'s rules at their edges, the campaign's plan of a fixed record, free generation's draw, and the
+campaign's settings — every number as its float's hex. Reads only the artefact's spec, its first airport's candidates and
+finals and its day split. The campaign compares it before each step (results of different code are compared once the code
+behaves the same on fixed inputs, never by an equal commit). 2–3 s. Tests: `tests/test_prior_campaign.py`.
+
+### R62 · `run_ts.py prior_training_export` — the Training sets of stage B: a free-generation readout's flights flown again (prior design §12 B6; D109, D127)
+
+2026-10-05 (the archived v3 export is R13). From one written free-generation readout (refused before any file is read when
+it holds no `readout.json`) and its prior: `--per-airport` flights of each airport drawn with `--seed`, each with stage A's
+flight payload (`training_export.split_flights` at the prior's Δ: the observed track, the open-loop and the closed-loop
+sentence) and every sentence the prior said, flown again through the start and refused unless it gives the readout's
+states within the executor conformance's bound and its outcome; its words, flown track (unrounded, D127), attitude,
+crossing, DA check, the probability of "go-around" and the blocked words of each row; each candidate's region, glidepath
+lower edge, DA and entry height. A val readout is exported only when the prior's written claim names it
+(`checkpoint.holds_written_claim`, D109): its set's `validationClaim` names it, and only that set holds val flights.
+Writes `<root>/<airport>/training/<set-id>/sample.json` (`aeroviz-training-prior-sample-v3`) and its entry in
+`index_prior_v2.json` (`aeroviz-training-prior-index-v2`), beside stage A's index, never over a listed set; from a clean
+tree unless a smoke. The live segment of a prior sentence is the backend's `POST /autopilot/prior-segment`
+(`aeroviz_backend/autopilot_segment/prior.py`): refused past the executor's bound from the written track or at another
+outcome or end cycle (D127); a claimed set flies on a second stage-A service of the sealed readings, only with its readout
+written. Published 2026-10-06: `prior_fold_C_<airport>_20261006` (the five folds) and `prior_base_val_20261006`
+(intent `prior_sets_20261006`), 1.2–1.9 MB a set, 1–3 min a set on the CPU; 40 sentences flown live within 4e-9 m. A set
+written after the frontend's dev server started is served as HTML until the server restarts. The frontend's fixtures
+(`aeroviz-4d/src/data/__tests__/fixtures/stage_b/`) are written by this code (`AEROVIZ_WRITE_FIXTURES=1`). Tests:
+`tests/test_prior_training_export.py`, `aeroviz_backend/tests/test_prior_segment.py`.
+
+    python run_ts.py prior_training_export --readout <prior_free_generation dir> --set-id <id> [--per-airport 10]

@@ -5,9 +5,9 @@ A must change for stage B, and the design text that stage B's work now needs. It
 rewritten in full each time, never appended to, and an item leaves when it is done. The evidence and the commits are in
 the implementation log (`readouts/2026-10-05_stage_b_implementation_log.md` §1).
 
-State of 2026-10-06. B5 done (`prior_base_20261006`, 07:12Z); B13 merged (`dev-two-tier` = `dev-two-tier-v4` =
-`dev-two-tier-v4-prior` at `d14a2f76`, full suite passed); B6 published (the five folds of configuration C and the base's
-val set, `prior_sets_20261006`), checked live. Open: the Training view's design (§3 item 3), then B7.
+State of 2026-10-06. Stage B is closed (B7): B5 done, B13 merged, B6 published and checked live; `dev-two-tier` =
+`dev-two-tier-v4` = `dev-two-tier-v4-prior` (the code at `d14a2f76`, full suite passed); `docs/reference/runners.md`
+R56–R62. Open: the Training view's design (§3 item 3).
 
 ## 1 Readings for the user to decide
 
@@ -69,11 +69,30 @@ None yet: the Training view's change (§3 item 3) touches stage A's files (`Trai
       and `trainingText` stay the one definition of problems and outcome words.
    6. **Tests and checks.** Vitest for each shared part; each stage's tests kept; a browser check by a one-shot agent.
 
+4. **§11, the key code index at `d14a2f76`** (B13's names; the rows not listed keep their lines): the checkpoint, the
+   val read and its claim — `prior/checkpoint.py:67` `load_checkpoint`, `:89` `CLAIM_SPENT_BY`, `:99` `lock_val_read`,
+   `:113` `claim_validation_read`, `:152` `settle_written_claim`, `:164` `spend_validation_claim`, `:174`
+   `holds_written_claim`, `:180` `written_claim`, `:190` `readable_identity`, `:208` `open_prior`; the selection —
+   `prior/selection.py:51` `left_out`, `:61` `kept`, `:70` `side`; the speaker — `prior/speaker.py:208`
+   `Speaker.observe`, `:230` `Speaker.speak` (with `accept`); the step of the closed loop —
+   `experiments/prior_speaking_loop.py:78` `SpeakingLoop` (the start's observed rows), `:148` `SpeakingLoop.step`;
+   the runners — `experiments/prior_train.py:69`, `experiments/prior_free_generation.py:164`,
+   `experiments/prior_validation.py:115`, `experiments/prior_select.py:169` (`:119` `choose_configuration`),
+   `experiments/prior_campaign.py:316` (`:199` `settings`, `:252` `settle_val_steps`, `:263` `run_campaign`),
+   `experiments/prior_behaviour.py:339` (`:285` `behaviour`, `:185` `fixed_sentence`, `:220` `selection_rules`,
+   `:230` `campaign_plan`, `:247` `free_generation_draw`, `:257` `select_rules`); the Training export —
+   `experiments/prior_training_export.py:91` `procedure_block`, `:170` `fly_again`, `:228` `unrounded`, `:327`
+   `main`, `prior/training_files.py:35` `SAMPLE_SCHEMA` (v3); the backend — `aeroviz_backend/autopilot_segment/prior.py:94`
+   `PriorSegments`, `:55` `apart_from_exported`. The runners' manual: `docs/reference/runners.md` R56–R62.
+5. **What stage C needs after B12 and B13** (its branch follows when it merges): `SpeakingLoop(model, loop, order,
+   sentences, observed, flights, …)` — the start's observed rows (`start_moved`'s), `post_window_loop.py` still calls
+   the old order; `LoopRows(…, start: int)`; `Speaker.speak(…, accept)` and its two refusals (a row marked first otherwise
+   than "nothing in force", positions not one for each row); a val read: `lock_val_read` then
+   `claim_validation_read(…, options)`, `spend_validation_claim` after the readout (D119, D128); the behaviour check's
+   answer and `ts-prior-campaign-v3`; the Training sample `aeroviz-training-prior-sample-v3` (the track unrounded, D127).
+
 ## 4 The plan
 
 - **The Training view** (§3 item 3): the designer adds it to the doc; the user merges stage C's branch and decides who
   implements it.
-- **B7** closes stage B: `docs/reference/runners.md` entries for the new runner `prior_behaviour` and the changes to
-  `prior_campaign`, `prior_free_generation`, `prior_validation`, `prior_select` and `prior_training_export`; the code
-  index for §11; the report to the user (the commits, the readings of each fold and of the base, the choice and its
-  rule, what stage C needs).
+- Stage B's milestones are done (B0–B13); B7's report is §3 items 4 and 5 and the implementation log.
