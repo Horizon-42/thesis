@@ -29,6 +29,9 @@
    用绝对路径链到 live 数据。多机控制只在这条分支上做；阶段 B 的收尾在 dev-two-tier-v4 上做。
 4. 多机控制的每个里程碑之前、每次报告之前，把 dev-two-tier-v4 合进 dev-multi-control。
 5. 不碰 .claude/worktrees/two-tier-v4-post（C10 正在跑）；不合并进 dev-two-tier，由用户合并。
+6. Training 视图的代码（前端 Training 页、后端 Training 路由和实时航段、各阶段的 Training 导出和 training_files 模块）
+   归 fronter（frontend.md D154）：你不改这些文件。阶段 B 收尾里的重导和浏览器检查照旧由你跑；
+   多机控制的 Training 视图（multi_control MC7）不是你的。
 
 一、C10 运行期间：多机控制的编码（只写代码，只用合成输入，只跑改动模块的测试，进程少，线程 1）
 1. MC0 · 阶段 A（vocabulary §6 item 5）：
