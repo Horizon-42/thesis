@@ -4,7 +4,7 @@
 2026-10-06，Claude 写，用户转发。上一条（B13）已做完（`142272f0`）。
 
 ```
-B13 复审完：没有要修的（readouts/2026-10-06_stage_b_b13_check.zh.md）；四条守卫覆盖的问题列为 prior §0.2 O14，现在不做。
+B13 复审完：没有要修的（readouts/2026-10-06_stage_b_b13_check.zh.md）；行为检查的覆盖不再加（outline D131）。
 依据：prior.md §0.3、§0.4，outline D131（复审标准）。
 
 1. 现在什么代码都不改。B5 在跑（主树 dev-two-tier，prior_base_20261006，B12 的代码）：不碰主树代码，不用 GPU。

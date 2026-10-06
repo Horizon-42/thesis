@@ -63,9 +63,7 @@ The decision numbers are shared by all documents (outline §3).
 
 ### 0.2 Open items
 
-| # | Item | Proposal | § |
-|---|---|---|---|
-| O14 | The behaviour check of D108 does not see four changes of the code (S2 of Claude's check of B13, outline D131; found by mutation): (1) of `LoopRows`' row time, first rows or own key (the loop's fixture has its landings 11–15 min before its rows and its own after them, so the counts are the same on every row); (2) of the landings window moved 1 s earlier (no landing 1 s before a row or 30 min 1 s before one); (3) of a swap of two candidates whose counts are equal on every row; (4) of a step's done file (the plan's answer holds each step's runner and arguments, as B13 asks). Each matters only when the code changes while a campaign runs, which §0.4 forbids, and B5 runs on B12's code | Before any later campaign of stage B: the loop's fixture with landings around its rows (one between two rows, one at a row's time, one 30 min before a row, one 1 s before a row, its own between two rows, a first row other than 0 and an entry time of its own for each aircraft), a different count on each candidate, the done file in the plan's answer; a test for each. Cheap; it changes the answer, so not under B5 | §12 B5, B13 |
+None.
 
 ### 0.3 Implementation
 
@@ -79,7 +77,7 @@ The commits, test counts and measurements of every milestone are in `readouts/20
 | B5 | Running since 2026-10-05 22:40 UTC: `4dTrajectory/outputs/POOLED/prior/prior_base_20261006` (`ts-prior-campaign-v3`), on the artefact `v12_20261005` and the executor `v17_20261005` at Δ = 4 s, from `dev-two-tier` at `278ffcfc` (B12's code). The first campaign, `prior_base_20261005`, was stopped by the user at its step 17, to run on B12's code |
 | B13 | Done (`142272f0`, reviewed twice) on `dev-two-tier-v4-prior`; merged into `dev-two-tier` after B5. B5's results stay valid under it: the input, model, training, speaker, loop, selection, draw and choice code is byte-identical, and free generation and two epochs of training give byte-identical outputs under both |
 | B7 | After B5, B13 and B6's publication |
-| Claude's checks | At `5313b6cd` (`readouts/2026-10-05_stage_b_check.zh.md`; corrections B10, D105–D108) at `44f6000f` (`readouts/2026-10-05_stage_b_check_2.zh.md`; corrections B12, D119–D122), of B12 at `2190fe0a` (`readouts/2026-10-06_stage_b_b12_check.zh.md`; corrections B13, D127, D128), and of B13 at `142272f0` (`readouts/2026-10-06_stage_b_b13_check.zh.md`: no S1, four S2 in O14, no correction). None found a leak into an input, a mask or a choice |
+| Claude's checks | At `5313b6cd` (`readouts/2026-10-05_stage_b_check.zh.md`; corrections B10, D105–D108) at `44f6000f` (`readouts/2026-10-05_stage_b_check_2.zh.md`; corrections B12, D119–D122), of B12 at `2190fe0a` (`readouts/2026-10-06_stage_b_b12_check.zh.md`; corrections B13, D127, D128), and of B13 at `142272f0` (`readouts/2026-10-06_stage_b_b13_check.zh.md`: no S1, no correction; its findings on the behaviour check's coverage are dropped, outline D131). None found a leak into an input, a mask or a choice |
 
 Proposals (where the design says nothing): none open.
 
@@ -89,7 +87,7 @@ Proposals (where the design says nothing): none open.
    it writes its readout is run again to the same output (D119; B5 runs B12's code).
 2. **B13** is done on stage B's branch. After B5 ends, stage B merges it into `dev-two-tier` and runs the full suite;
    no code goes into `dev-two-tier` while B5 runs (B13's behaviour check gives another answer, which would stop
-   B5, and a resume of B5 needs B12's code). O14 before any later campaign of stage B.
+   B5, and a resume of B5 needs B12's code).
 3. **B6's publication**, after B5 and B13 (the export of D127): the set of each fold at its held-out airport and the
    base's claimed val set (outline D109).
 4. **B7**, after B5, B13 and B6's publication.

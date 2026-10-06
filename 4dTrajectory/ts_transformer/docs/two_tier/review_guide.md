@@ -97,6 +97,11 @@ voice, one meaning for each word. The words were not checked one by one against 
    | S2 | A latent leak (a forbidden value held but not read); a boundary that does not refuse; a decided rule with no test; a defect whose effect on real data is not measured and not bounded | Corrected before the formal run when the correction is cheap; else listed as an open item of the stage's design document (§0.2, an O number) — no milestone, no order, not reviewed again — until the user decides |
    | S3 | A case that real data reach in less than 0.1 % of the windows (or steps) and that changes no reported number beyond its tolerance; a difference within a stated bound (`STATE_BOUND_M`, a float tolerance); a case that needs an input the pipeline cannot make; style, names, wording | Listed in one line, no action. Not reported again in a later round |
 
+   **No finding against common sense** (outline D131): a scenario that needs the code to change while a run of it goes
+   on, an input that no step of the pipeline makes, a file moved or edited by hand to defeat a rule, or a person working
+   against the project is not a finding, whatever its correction costs. A reviewer does not look for it, and a review
+   does not list it.
+
    A finding states its size on real data, or a bound on it; without a size or a bound it is S2 until measured. A
    finding needs a concrete scenario on inputs that the pipeline can make. The design's own decisions (the D numbers)
    and the readings that the user accepted are not findings, unless new evidence makes them S1.
