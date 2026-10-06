@@ -884,3 +884,8 @@ Rounds 0–3 ran the whole update, 4–9 the update in pieces (the same loss to 
 (D7): the user's criterion chooses the round, then the validation readout reads val once (`post_validation`, D132).
 A landing share over 1,000 windows carries about ±1.2 points of binomial noise. `campaign.json` records its inputs
 under the worktree's path: the validation readout reads them, so the worktree is kept until it has run.
+
+**The user's decisions after C10 (2026-10-06).** The criterion that chooses the round (D7): the earliest round within the
+selection readout's noise (about one point) of the best — round 6 (landed 85.1 %, lost separation 11.3 %, mean reward
+0.842; the best is round 8 at 0.849). The validation readout is NOT run yet: the post-training may be extended; the
+worktree `two-tier-v4-post` is kept (its `campaign.json` paths) until the user decides.
