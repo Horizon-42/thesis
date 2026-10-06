@@ -182,7 +182,8 @@ worktree are deleted after C10 ends.
    and random numbers every round. The user sets the criterion that chooses the round (D7). The validation days are read
    one time, by the validation readout of the chosen round (outline D85). The airport generalization of the design is
    chosen in stage B (D39) and tested at the end on KAUS.
-8. **Later, optional.** A stage with every aircraft of a window commanded starts from the model of item 7.
+8. **Later, optional.** A stage with every aircraft of a window commanded starts from the model of item 7: stage D,
+   its own document `multi_control.md`.
 9. **Branch training (D37, D94).** The samples of a round:
    1. Each training window (one commanded aircraft) is spoken one time: the first sentence, with the window's own
       random numbers.
