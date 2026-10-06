@@ -13,6 +13,11 @@ roster less the sealed test days) with the window's changes:
 A landing that a shift puts on a sealed test day is left out and counted with the index's sealed landings (C32); one
 that a shift puts on a day outside the day split is refused by the index itself (`LandingIndex`, prior D105). The
 commanded aircraft's own landing stays in the index: the function of a loop's row leaves it out by its key (D31, D63).
+
+**A window of several commanded aircraft** (multi-aircraft control D147 item 1, D149; post-training §9 item 2): each
+commanded aircraft's landings (`commanded_landings`) are the window's, less every other commanded aircraft's own (its
+recorded landing is that aircraft's future), with its own at its record's time in the window (moved by its shift in a
+compressed window), which the function of a loop's row leaves out by its key. A stage C window: the window's landings.
 """
 
 from __future__ import annotations
@@ -29,6 +34,24 @@ from ts_transformer.prior.landings import Landing, LandingIndex
 def roster_key(dataset_id: str, airport: str) -> str:
     """The tracks roster's key of a flight of the signals (`prior.inputs.own_flight_key`)."""
     return own_flight_key({"dataset_id": dataset_id, "airport": airport})
+
+
+def commanded_landings(window: Window, roster: LandingIndex) -> list[LandingIndex]:
+    """Each commanded aircraft's landings in ``window`` (module docstring), the anchor first."""
+    base = window_landings(window, roster)
+    if not window.joined:
+        return [base]
+    airport = window.scene.geometry.code
+    landings = {landing.flight_key: landing for landing in base.landings}
+    own = [roster_key(record.key, airport) for record in window.commanded_all]
+    shifts = [0.0, *(item.shift_s for item in window.joined)]
+    out = []
+    for key, shift in zip(own, shifts):
+        kept = {k: landing for k, landing in landings.items() if k not in own}
+        kept[key] = replace(landings[key], time_s=landings[key].time_s + shift)
+        out.append(LandingIndex(base.runways, tuple(sorted(kept.values(), key=lambda item: (item.time_s, item.flight_key))),
+                                base.sealed, base.days))
+    return out
 
 
 def window_landings(window: Window, roster: LandingIndex) -> LandingIndex:

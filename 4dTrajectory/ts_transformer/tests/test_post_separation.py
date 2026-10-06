@@ -163,3 +163,31 @@ def test_the_ramp_reaches_its_target_and_holds_it():
         assert ramp_distance_m(t, 70.0, np.array([target]), 0.8)[0] == pytest.approx(5_000.0)
     with pytest.raises(ValueError):
         ramp_time_s(1_000.0, -5.0, 60.0, 1.0)
+
+
+def test_every_loss_of_a_step_with_its_responsible_and_the_commanded_aircrafts_first():
+    """Multi-aircraft control D149 (post-training §9 item 3): `step_losses` gives every loss of a step — the pairs and the
+    wake at the threshold — each with the ones the rules make responsible; `commanded_loss` is the first that aircraft
+    0 answers for (`answered_loss`), as before."""
+    from ts_transformer.post.traffic import answered_loss, scene_aircraft, step_losses
+
+    geometry = airport()
+    separation, fin = airport_separation(geometry), finals(geometry)
+    heavy = _one("heavy", -50.0, h=115.0, category="B", last=True)              # over its threshold now
+    close = _one("me", -50.0 - 4.0 * NM_M, h=500.0, category="F")                # 4 NM behind: B → F needs 5 NM
+    other = _one("other", -50.0 - 4.5 * NM_M, h=520.0, category="F")             # 0.5 NM behind "me": in trail
+    aircraft = scene_aircraft(_set(close, other), _set(heavy))
+    scene = traffic(aircraft, geometry, separation, fin, 2.0)
+    over = np.array([False, False, True])
+    found = step_losses(scene, over, separation)
+    assert found and all(loss.responsible for loss in found)
+    assert any(set(loss.responsible) == {1} for loss in found)                   # "other" behind "me" answers
+    from ts_transformer.inference.separation import AT_THRESHOLD
+
+    wake = [loss for loss in found if loss.kind == AT_THRESHOLD]
+    assert [(loss.i, loss.j, loss.responsible) for loss in wake] == [(2, 0, (0,))]     # the wake behind the heavy
+    first = next(loss for loss in found if 0 in loss.responsible)                # the first that "me" answers for
+    assert answered_loss(found, 0) is first and commanded_loss(scene, over, separation) == first
+    assert answered_loss(found, 2) is None
+    with pytest.raises(ValueError, match="one commanded aircraft"):
+        joined(_set(close, other), _set(heavy))

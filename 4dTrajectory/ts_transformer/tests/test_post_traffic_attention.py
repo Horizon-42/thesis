@@ -184,3 +184,59 @@ def test_one_token_network_shared_by_the_layers_embeds_a_step_once():
     shared = {id(p) for p in modules[0].tokens.parameters()}
     counted = [id(p) for g in parameter_groups(model, 1e-4, 1e-3) for p in g["params"]]
     assert shared <= set(counted) and len(counted) == len(set(counted))  # the shared parameters once
+
+
+def test_a_token_part_starts_at_zero_and_a_module_without_one_is_as_before():
+    """Multi-aircraft control D149, D152 (post-training §9 item 7): a caller's token part (its inputs beside the edge
+    features, its own projection from zero, its own format name) leaves every output as the module without it gives
+    until its weights move, then changes them; a module without a part keeps its state (a stage C checkpoint loads into
+    it); the part is given exactly when the module has one, and `traffic_of` splits the rows' columns."""
+    from ts_transformer.post.traffic_attention import add_token_part
+
+    base, rows, rng = _setup()
+    model = _with_module(base)
+    _randomize(model)
+    keys = set(model.state_dict())
+    width = 6
+    plain = _traffic(np.random.default_rng(1), 3, rows.present.shape[1])
+    tokens = [[np.concatenate((t, np.random.default_rng(2).normal(size=(len(t), width)).astype(np.float32)), axis=1)
+               for t in aircraft] for aircraft in _rows_of(plain)]
+    parted = traffic_of(tokens, CPU, part_width=width)
+    assert torch.equal(parted.tokens, plain.tokens) and torch.equal(parted.present, plain.present)
+    assert parted.part.shape == (*plain.tokens.shape[:3], width)
+    with torch.no_grad():
+        before, _ = model.encode(rows, plain)
+    copy_ = copy.deepcopy(model)
+    part = add_token_part(copy_, width, "test-token-part-v1")
+    assert part.schema == "test-token-part-v1" and set(copy_.state_dict()) - keys == {
+        name for name in copy_.state_dict() if "part" in name}
+    with torch.no_grad():
+        same, _ = copy_.encode(rows, parted)
+    assert torch.equal(same, before)
+    with torch.no_grad():
+        part.project.weight.normal_()
+        moved, _ = copy_.encode(rows, parted)
+    assert not torch.equal(moved, before)
+    with pytest.raises(ValueError, match="exactly when the module has one"):
+        with torch.no_grad():
+            copy_.encode(rows, plain)
+    with pytest.raises(ValueError, match="exactly when the module has one"):
+        with torch.no_grad():
+            model.encode(rows, parted)
+    with pytest.raises(ValueError, match="has a token part already"):
+        add_token_part(copy_, width, "again")
+    fresh = _with_module(base)
+    fresh.load_state_dict(model.state_dict())                               # a checkpoint without a part loads as before
+    with torch.no_grad():
+        again, _ = fresh.eval().encode(rows, plain)
+    assert torch.equal(again, before)
+    groups = parameter_groups(copy_, prior_lr=1e-4, traffic_lr=1e-3)
+    assert any(p is part.project.weight for p in groups[1]["params"])         # the part learns at the module's rate
+
+
+def _rows_of(traffic):
+    """Each aircraft's rows of tokens back from a `Traffic` without a part."""
+    out = []
+    for b in range(traffic.tokens.shape[0]):
+        out.append([traffic.tokens[b, r][traffic.present[b, r]].numpy() for r in range(traffic.tokens.shape[1])])
+    return out

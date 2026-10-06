@@ -58,14 +58,18 @@ class _Digest:
 
 
 def stage_c_scenario(s) -> dict[str, str]:
-    """Stage C on its synthetic windows (one commanded aircraft each): the window loop of a real window, of window A
+    """Stage C on its synthetic windows (one commanded aircraft each): the traffic module's state as a checkpoint holds
+    it (names, shapes, first values: a stage C checkpoint loads into it), the window loop of a real window, of window A
     (its own flight inserted ahead: lost at its first row) and of window B (its start moved), each with its samples; a
     branch round of window A and of the real window; the samples of window A's group with rewards that differ. Their
     digests, by part."""
     model = _with_module(s["base"])
     (window,) = s["windows"]
     moved = moved_start_window(window, np.random.default_rng(1), turn_deg=15.0, height_m=300.0, speed_scale=0.1)
-    out = {}
+    digest = _Digest()                    # the module's state as a stage C checkpoint holds it: names, shapes, values
+    for name, value in _with_module(s["base"], weights=False).state_dict().items():
+        digest.add(name, tuple(value.shape), value)
+    out = {"module": digest.hash.hexdigest()}
     for name, chosen in (("real", window), ("A", _ahead(window)), ("B", moved)):
         digest = _Digest()
         loop = _window_loop(s, model, [chosen])
@@ -100,6 +104,7 @@ def stage_c_scenario(s) -> dict[str, str]:
 #: `stage_c_scenario`'s digests, written by stage C's code before its generalisation (dev-two-tier-v4 c7a0b6b0, the CPU,
 #: one thread).
 BEFORE_GENERALISATION = {
+    "module": "8ef2cf46f1b72b4b62813330bf8f53bb59819a99862dc087c036e978031b4122",
     "window real": "62e8e4e86314c20be46d9a70988b9cefbfb9a7cc9939bc6a7994c73a2a3b4026",
     "window A": "7c76b34704ab763318ce39232634b1315b276cc0c9cc94104f968c87bedd0444",
     "window B": "afe5951db940afbdd830714c5485771f9046e14c5d22bf852e4efd37deaba271",

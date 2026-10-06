@@ -113,3 +113,27 @@ def test_an_inserted_landing_on_a_test_day_is_left_out_and_a_flight_missing_from
     missing = replace(roster, landings=tuple(x for x in roster.landings if x.flight_key != "far"))
     with pytest.raises(KeyError):
         window_landings(inserted, missing)
+
+
+def test_each_commanded_aircraft_counts_the_window_less_the_others_own_landings(built):
+    """Multi-aircraft control D147 item 1, D149 (post-training §9 item 2): in a window of several commanded aircraft,
+    each one's landings are the window's less every other commanded aircraft's own, with its own at its record's time
+    (moved by its shift); a stage C window gives the window's landings."""
+    from ts_transformer.post.landings import commanded_landings
+    from ts_transformer.post.scene import Joined
+
+    windows, roster, _, _ = built
+    a, b, c = windows[:3]
+    assert commanded_landings(a, roster) == [window_landings(a, roster)]
+    shift = -2 * DELTA
+    window = replace(a, joined=(Joined(b.commanded, b.signal_index),
+                                Joined(c.commanded.shifted(shift, DELTA), c.signal_index, shift_s=shift)))
+    keys = [roster_key(r.key, "KXXX") for r in window.commanded_all]
+    landed = {landing.flight_key: landing for landing in roster.landings}
+    indexes = commanded_landings(window, roster)
+    assert len(indexes) == 3
+    for k, index in enumerate(indexes):
+        held = {landing.flight_key: landing for landing in index.landings}
+        assert set(held) == set(landed) - (set(keys) - {keys[k]})
+        assert held[keys[k]].time_s == landed[keys[k]].time_s + (shift if k == 2 else 0.0)
+        assert all(held[key] == landed[key] for key in held if key not in keys)

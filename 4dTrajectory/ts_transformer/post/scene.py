@@ -31,6 +31,13 @@ three numbers (`StartMove`), and the loop's caller gives them to the start (`aut
 
 What is drawn from the record — the commanded aircraft's landed runway and landing time, the order on the approach
 clock at the first predicted step — chooses windows and fills the census. It is never an input of the prior.
+
+**A window of several commanded aircraft** (multi-aircraft control D146, D149; post-training §9 item 1). The commanded
+flight above is the window's anchor; a window may hold more commanded aircraft after it (`Window.joined`, `Joined`):
+each with its record as the window replays it (moved earlier by its shift, a whole number of Δ, in a compressed
+window), its place in the split's signals, and its row 0 on the window's steps at or after the anchor's (its join
+step). The other aircraft of a step are then every flight in the air but the commanded ones. Stage C's windows hold
+none: their steps, their others and everything read of them are as before.
 """
 
 from __future__ import annotations
@@ -271,6 +278,17 @@ class MovedScene:
 
 
 @dataclass(frozen=True)
+class Joined:
+    """A commanded aircraft of a window after its anchor (module docstring): its record as the window replays it (moved
+    by ``shift_s`` in a compressed window; its labelled G cleared, as the anchor's), its place in the split's signals
+    and its shift (s, a whole number of Δ)."""
+
+    record: Recorded
+    signal_index: int
+    shift_s: float = 0.0
+
+
+@dataclass(frozen=True)
 class Window:
     """One window (module docstring): its kind, the commanded flight (its record, from which the start of a closed loop
     rebuilds it, without its labelled G: its G is its words' in the loop), its scene of the other aircraft and, for an
@@ -283,15 +301,29 @@ class Window:
     moved: tuple[tuple[str, float], ...] = field(default=())
     #: window B's move of the commanded aircraft's start (`StartMove`; every other window moves nothing)
     start_move: StartMove = field(default_factory=lambda: NO_START_MOVE)
+    #: the commanded aircraft after the anchor (module docstring; stage C's windows: none)
+    joined: tuple[Joined, ...] = field(default=())
 
     def __post_init__(self) -> None:
         if self.kind not in WINDOW_KINDS:
             raise ValueError(f"a window is one of {WINDOW_KINDS}, not {self.kind!r}")
         if (self.kind == MOVED_START) != (self.start_move != NO_START_MOVE):
             raise ValueError("window B, and only it, moves its commanded aircraft's start")
-        if self.commanded.go_around.any():
+        if self.commanded.go_around.any() or any(j.record.go_around.any() for j in self.joined):
             raise ValueError(f"{self.commanded.key}: the commanded aircraft's G comes from its words in force, never from "
                              "its labelled sentence (a withheld field)")
+        if len({r.key for r in self.commanded_all}) != len(self.joined) + 1:
+            raise ValueError(f"{self.commanded.key}: a window commands each flight once")
+        interval = self.scene.interval_s
+        if any(item.record.airport != self.commanded.airport or item.shift_s > 0.0 for item in self.joined):
+            raise ValueError(f"{self.commanded.key}: a commanded aircraft of the window lands at its airport, moved "
+                             f"toward the anchor (earlier) or not at all")
+        for item in self.joined:
+            steps = (item.record.first_step_s - self.first_step_s) / interval
+            if abs(steps - round(steps)) > 1e-9 or round(steps) < 0 or abs(item.shift_s / interval
+                                                                             - round(item.shift_s / interval)) > 1e-9:
+                raise ValueError(f"{item.record.key}: a commanded aircraft joins at a whole step at or after the "
+                                 f"anchor's row 0, shifted by a whole number of {interval:g} s rows")
 
     @property
     def row0_s(self) -> float:
@@ -306,8 +338,29 @@ class Window:
         """The UTC epoch of the window's step ``step`` (step 0 is the commanded aircraft's row 0): a multiple of Δ."""
         return self.row0_s + step * self.scene.interval_s
 
+    @property
+    def commanded_all(self) -> tuple[Recorded, ...]:
+        """The records of the commanded aircraft, the anchor first (module docstring)."""
+        return (self.commanded, *(item.record for item in self.joined))
+
+    @property
+    def signal_indices(self) -> tuple[int, ...]:
+        """The commanded aircraft's places in the split's signals, the anchor first."""
+        return (self.signal_index, *(item.signal_index for item in self.joined))
+
+    def join_steps(self) -> np.ndarray:
+        """``[commanded]`` each commanded aircraft's row 0 on the window's steps (the anchor's 0)."""
+        interval = self.scene.interval_s
+        return np.array([int(round((r.first_step_s - self.first_step_s) / interval)) for r in self.commanded_all],
+                        dtype=np.int64)
+
     def others_at(self, step: int) -> AircraftAt:
-        return self.scene.others_at(self.step_s(step), self.commanded.key)
+        """The recorded aircraft in the air at step ``step``: every flight of the scene but the commanded ones."""
+        if not self.joined:
+            return self.scene.others_at(self.step_s(step), self.commanded.key)
+        time_s, commanded = self.step_s(step), {r.key for r in self.commanded_all}
+        return AircraftAt.of([f.at_step(time_s, self.scene.interval_s) for f in self.scene.in_air(time_s)
+                              if f.key not in commanded])
 
 
 def airport_scenes(directory: Path, split: str, spec: VocabularySpec, interval_s: float,
