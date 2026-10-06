@@ -84,7 +84,7 @@ describe("the envelopes of every stage's flown sentences (D135)", () => {
     const c = stageCSample();
     const readings = [
       trainingReadingOf(trainingPriorFlightView(b, b.flights[0], 0), b.vocabulary.stepS, b.model.rowIntervalS),
-      trainingReadingOf(trainingWindowFlightView(c, c.windows[0], c.windows[0].rounds[c.windows[0].rounds.length - 1].round),
+      trainingReadingOf(trainingWindowFlightView(c, c.windows[0], c.windows[0].commanded[0], c.windows[0].rounds[c.windows[0].rounds.length - 1].round),
         c.vocabulary.stepS, c.model.rowIntervalS),
     ];
     for (const reading of readings) {

@@ -308,13 +308,14 @@ describe("the bar's chips and notes follow the kind of the sentence on screen (o
     // a round that crossed the threshold with a DA check (the fixture's rounds did not cross): the bar still shows no DA chip
     const crossing = stageASample().flights[0].closedLoop["2"].replay.crossing!;
     expect(crossing.decision).not.toBeNull();
-    sample.windows[0].rounds[0].crossing = crossing;
+    sample.windows[0].commanded[0].rounds[0].crossing = crossing;
     appState.trainingSelection = stageCSelection(sample, 0, "start");
     appState.trainingIntervalS = sample.model.rowIntervalS;
     render(<TrainingSentenceBar />);
-    const end = sample.windows[0].rounds[0].end;
-    expect(chips()).toContain(`reward ${end.reward.toFixed(2)}`);
-    expect(chips().some((text) => (end.loss === null ? text === "no loss of separation" : text.startsWith("loss of separation")))).toBe(true);
+    const said = sample.windows[0].commanded[0].rounds[0];
+    const lost = sample.windows[0].rounds[0].losses.length > 0;
+    expect(chips()).toContain(`reward ${said.reward.toFixed(2)}`);
+    expect(chips().some((text) => (lost ? text.startsWith("loss of separation") : text === "no loss of separation"))).toBe(true);
     expect(chips().some((text) => /correction|DA /.test(text))).toBe(false);
   });
 

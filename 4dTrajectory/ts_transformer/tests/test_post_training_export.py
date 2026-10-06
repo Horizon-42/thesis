@@ -70,12 +70,16 @@ def test_a_window_s_sentence_its_end_and_its_traffic(setup):
     context = _context(s)
     ahead, real = _ahead(s["windows"][0]), s["windows"][0]
     model = round_model(context, _settings(), s["directory"], None)
-    (lost, judged), observed = export.fly_round(model, context, "train", [ahead, real], 2, 1337)
+    (lost, judged), (lost_end, judged_end), observed = export.fly_round(model, context, "train", [ahead, real], 2, 1337)
     assert np.array_equal(observed[1], s["stored"].rows.states[: len(observed[1])])     # no move: the stored rows
-    assert lost["outcome"] == "lost_separation" and lost["crossing"] is None
-    assert lost["end"]["loss"]["other"] == real.commanded.key + INSERTED_SUFFIX and lost["end"]["reward"] == 0.0
-    assert lost["end"]["loss"]["step"] == s["stored"].rows.start + 1
-    assert judged["outcome"] != "lost_separation" and judged["end"]["loss"] is None
+    assert lost["outcome"] == "lost_separation" and lost["crossing"] is None and lost["reward"] == 0.0
+    # the window's loss: its two aircraft, the commanded one answering for it, and it costs W (D30's reward 0)
+    (loss,) = lost_end["losses"]
+    assert loss["aircraft"] == [real.commanded.key, real.commanded.key + INSERTED_SUFFIX]
+    assert loss["answering"] == [real.commanded.key] and loss["costsW"] is True
+    assert loss["step"] == s["stored"].rows.start + 1
+    assert judged["outcome"] != "lost_separation" and judged_end["losses"] == []
+    assert lost["silentFromRow"] is None and judged["silentFromRow"] is None             # stage C: none is silent
     for said in (lost, judged):
         track = said["track"]
         assert track["rows"] == len(track["eM"]) == len(track["heightMslM"]) == len(said["attitude"]["headingDeg"])
@@ -103,9 +107,14 @@ def test_a_window_s_sentence_its_end_and_its_traffic(setup):
     assert np.allclose(np.diff(inserted["tS"]), 2.0)
     assert len(inserted["tS"]) == len(inserted["latDeg"]) == len(inserted["heightMslM"])
     assert export.traffic_payload(real, real.commanded.end_s, _hae(s)) == []          # one flight: nobody else
-    window = export.window_payload(ahead, [export.START], [lost], observed[0], _hae(s), s["words"].spec.step_s)
-    assert window["kind"] == INSERTED and window["rounds"][0]["round"] == export.START and window["movedStart"] is None
-    assert window["firstStepS"] == pytest.approx(ahead.first_step_s - ahead.row0_s)
+    window = export.window_payload(ahead, [export.START], [lost], [lost_end], observed[0], _hae(s),
+                                   s["words"].spec.step_s)
+    # the window format of stages C and D (frontend §5.7): stage C's one commanded aircraft, at the window's row 0
+    (aircraft,) = window["commanded"]
+    assert window["kind"] == INSERTED and window["c"] is None and window["rounds"] == [{"round": export.START, **lost_end}]
+    assert aircraft["datasetId"] == ahead.commanded.key and aircraft["joinS"] == 0.0 and aircraft["shiftS"] is None
+    assert aircraft["rounds"] == [{"round": export.START, **lost}] and aircraft["movedStart"] is None
+    assert aircraft["firstStepS"] == pytest.approx(ahead.first_step_s - ahead.row0_s)
 
 
 def test_the_rounds_stand_side_by_side_and_a_foreign_checkpoint_is_refused(setup, tmp_path, monkeypatch):
@@ -130,6 +139,7 @@ def test_the_rounds_stand_side_by_side_and_a_foreign_checkpoint_is_refused(setup
         kinds=[REAL], seed=1337, params=test_start._params(), hae_minus_msl_m=_hae(s))
     (window,) = windows
     assert [r["round"] for r in window["rounds"]] == [export.START, 0] and flights[0]["haeMinusMslM"] == -33.0
+    assert [r["round"] for r in window["commanded"][0]["rounds"]] == [export.START, 0]
     state = torch.load(campaign / "round_0" / "checkpoint.pt", weights_only=False)
     state["identity"]["seed"] = 7
     torch.save(state, campaign / "round_0" / "checkpoint.pt")

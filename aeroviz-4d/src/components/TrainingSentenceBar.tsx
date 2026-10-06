@@ -53,7 +53,7 @@ import useMeasuredWidth from "../hooks/useMeasuredWidth";
 import { chooseTrainingTab, tabForKey, useTrainingTabs } from "../data/trainingTabs";
 import { useTrainingSetIntent } from "../data/trainingSetIntent";
 import { trainingPriorOriginOf } from "../data/trainingPriorSample";
-import { trainingWindowOriginOf } from "../data/trainingWindowSample";
+import { lossesOf, otherOf, trainingWindowOriginOf } from "../data/trainingWindowSample";
 import { EXPERIMENT_SECTION, requestTrainingDetails } from "./training/PanelParts";
 import {
   TRAINING_AUTOPILOT_COLOR,
@@ -264,6 +264,8 @@ export default function TrainingSentenceBar() {
   // THE KIND OF THE SENTENCE ON SCREEN — its chips and notes follow it (outline §6.2 item 2)
   const priorOrigin = trainingPriorOriginOf(flight);
   const windowOrigin = trainingWindowOriginOf(flight);
+  // a round's loss of separation that the commanded aircraft on screen is in (stage C's: the one that ended its window)
+  const windowLoss = windowOrigin === undefined ? null : lossesOf(windowOrigin.end, windowOrigin.aircraft.datasetId)[0] ?? null;
   const kind: "labelled" | "closed" | "sample" | "round" = intervalS === null ? "labelled"
     : priorOrigin?.sentence ? "sample" : windowOrigin !== undefined ? "round" : "closed";
   const stepS = vocabulary.stepS;
@@ -355,12 +357,12 @@ export default function TrainingSentenceBar() {
         ) : null}
         {kind === "round" && windowOrigin !== undefined ? (
           <>
-            <span className="training-chip" title="the round's reward for the commanded aircraft">reward {windowOrigin.sentence.end.reward.toFixed(2)}</span>
-            <span className="training-chip" title={windowOrigin.sentence.end.loss === null ? "no loss of separation ended the round"
-              : `a loss of separation with ${windowOrigin.sentence.end.loss.other}: ${windowOrigin.sentence.end.loss.distanceM.toFixed(0)} m of ` +
-                `${windowOrigin.sentence.end.loss.requiredM.toFixed(0)} m required`}
-              style={windowOrigin.sentence.end.loss === null ? undefined : { color: TRAINING_DECISION_FAIL_COLOR, borderColor: "currentColor" }}>
-              {windowOrigin.sentence.end.loss === null ? "no loss of separation" : `loss of separation · ${windowOrigin.sentence.end.loss.other}`}
+            <span className="training-chip" title="the round's reward for the commanded aircraft">reward {windowOrigin.sentence.reward.toFixed(2)}</span>
+            <span className="training-chip" title={windowLoss === null ? "no loss of separation ended the round"
+              : `a loss of separation with ${otherOf(windowLoss, windowOrigin.aircraft.datasetId)}: ${windowLoss.distanceM.toFixed(0)} m of ` +
+                `${windowLoss.requiredM.toFixed(0)} m required`}
+              style={windowLoss === null ? undefined : { color: TRAINING_DECISION_FAIL_COLOR, borderColor: "currentColor" }}>
+              {windowLoss === null ? "no loss of separation" : `loss of separation · ${otherOf(windowLoss, windowOrigin.aircraft.datasetId)}`}
             </span>
           </>
         ) : null}

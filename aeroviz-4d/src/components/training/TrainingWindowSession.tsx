@@ -4,8 +4,10 @@
  * The Training panel over a window set of stage C (`data/trainingWindowSample.ts`), in the layout every stage shares
  * (outline §6.2): the set chooser with the set's intent line, the list of windows, one line per readout, the cursor slider
  * (frontend §6.1: its marks the first predicted step and the round's loss of separation) and the Draw box.
- * Of the window on screen the SENTENCE BAR'S TABS choose the sentence — Labelled (the labeller's open-loop reading of the
- * recorded flight of the commanded aircraft) and each round's sentence for it, Start (base), Round 1 …
+ * A window holds a list of commanded aircraft (frontend §5.7, the window format of stages C and D); stage C's windows
+ * hold one, and this view shows it (stage D's aircraft strip chooses among several, F3). Of the window on screen the
+ * SENTENCE BAR'S TABS choose the sentence — Labelled (the labeller's open-loop reading of the recorded flight of the
+ * commanded aircraft) and each round's sentence for it, Start (base), Round 1 …
  * (`data/trainingTabs.ts`); the bar, the read-back window and the 3D layers draw it as stage A draws a sentence (a round's
  * sentence is published as a closed-loop sentence at the set's Δ, `trainingWindowFlightView`). The left panel has no
  * second chooser.
@@ -25,11 +27,16 @@ import useTrainingSet from "../../hooks/useTrainingSet";
 import { setTrainingWindowLayer, useTrainingWindowLayers } from "../../data/trainingWindowLayers";
 import {
   fetchTrainingWindowSample,
+  lossesOf,
+  onAircraftClock,
+  otherOf,
   trainingWindowFlightView,
   trainingWindowSelectionOf,
   windowShiftText,
   type TrainingWindow,
+  type TrainingWindowAircraft,
   type TrainingWindowRound,
+  type TrainingWindowRoundEnd,
   type TrainingWindowSample,
   type TrainingWindowSentence,
   type TrainingWindowSetEntry,
@@ -67,10 +74,12 @@ export function roundLabel(round: TrainingWindowRound): string {
   return round === "start" ? "start (base)" : `round ${round}`;
 }
 
-/** The window on screen and its round's end. */
-function WindowEnd({ window, sentence }: { window: TrainingWindow; sentence: TrainingWindowSentence }) {
-  const loss = sentence.end.loss;
-  const move = window.startMove;
+/** The window on screen and its round's end for the commanded aircraft on screen. */
+function WindowEnd({ window, aircraft, sentence, end }: {
+  window: TrainingWindow; aircraft: TrainingWindowAircraft; sentence: TrainingWindowSentence; end: TrainingWindowRoundEnd;
+}) {
+  const losses = lossesOf(end, aircraft.datasetId);
+  const move = aircraft.startMove;
   const roles = { recorded: 0, inserted: 0, moved: 0 };
   for (const aircraft of window.traffic) roles[aircraft.role] += 1;
   return (
@@ -93,28 +102,29 @@ function WindowEnd({ window, sentence }: { window: TrainingWindow; sentence: Tra
       <div>
         <dt>End</dt>
         <dd style={{ color: trainingOutcomeColour(sentence.outcome) }}>
-          {TRAINING_OUTCOME_TEXT[sentence.outcome]} · reward {sentence.end.reward.toFixed(2)}
+          {TRAINING_OUTCOME_TEXT[sentence.outcome]} · reward {sentence.reward.toFixed(2)}
         </dd>
       </div>
-      {loss === null ? null : (
-        <div>
+      {losses.map((loss) => (
+        <div key={`${loss.step}-${otherOf(loss, aircraft.datasetId)}`}>
           <dt>Loss of separation</dt>
           <dd>
-            with {loss.other} at {(loss.timeS - window.firstStepS).toFixed(0)} s ({loss.kind}, {loss.relation}) ·{" "}
+            with {otherOf(loss, aircraft.datasetId)} at {(onAircraftClock(aircraft, loss.timeS) - aircraft.firstStepS).toFixed(0)} s
+            ({loss.kind}, {loss.relation}) ·{" "}
             {loss.distanceM.toFixed(0)} m of {loss.requiredM.toFixed(0)} m required · {loss.verticalM.toFixed(0)} m apart in height
             {loss.wakeKnown ? "" : " · wake category unknown"}
-            {sentence.end.lossReadsFault ? " · the other aircraft read a faulty point near it" : ""}
+            {loss.readsFault ? " · the other aircraft read a faulty point near it" : ""}
           </dd>
         </div>
-      )}
+      ))}
       {sentence.crossing === null ? null : <div><dt>Threshold</dt><dd>{crossingText(sentence.crossing)}</dd></div>}
       <div>
         <dt>Speed-word mask</dt>
-        <dd>acted on {sentence.end.speedMaskRows} row{sentence.end.speedMaskRows === 1 ? "" : "s"}</dd>
+        <dd>acted on {sentence.speedMaskRows} row{sentence.speedMaskRows === 1 ? "" : "s"}</dd>
       </div>
       <div>
         <dt>Faulty points</dt>
-        <dd>{sentence.end.faultySteps === 0 ? `${checkMark(true)} no step read one` : `${sentence.end.faultySteps} steps where a recorded aircraft read one`}</dd>
+        <dd>{end.faultySteps === 0 ? `${checkMark(true)} no step read one` : `${end.faultySteps} steps where a recorded aircraft read one`}</dd>
       </div>
     </dl>
   );
@@ -160,12 +170,14 @@ export function WindowCursor({ windowKey, flightKey, labelled, row0S, endS }: {
   return null;
 }
 
-/** A round's ending as the tabs, lines and tables say it: the outcome, its time, the reward, the loss of separation. */
-function ending(window: TrainingWindow, sentence: TrainingWindowSentence): string {
-  const seconds = sentence.flown.tS[sentence.flown.tS.length - 1] - window.firstStepS;
-  const loss = sentence.end.loss;
-  return `${TRAINING_OUTCOME_TAG[sentence.outcome]} at ${seconds.toFixed(0)} s · reward ${sentence.end.reward.toFixed(2)} · ` +
-    (loss === null ? "no loss of separation" : `loss of separation with ${loss.other}`);
+/** A round's ending for a commanded aircraft as the tabs, lines and tables say it: the outcome, its time, the reward, the
+ *  losses of separation it is in. */
+function ending(aircraft: TrainingWindowAircraft, sentence: TrainingWindowSentence, end: TrainingWindowRoundEnd): string {
+  const seconds = sentence.flown.tS[sentence.flown.tS.length - 1] - aircraft.firstStepS;
+  const losses = lossesOf(end, aircraft.datasetId);
+  return `${TRAINING_OUTCOME_TAG[sentence.outcome]} at ${seconds.toFixed(0)} s · reward ${sentence.reward.toFixed(2)} · ` +
+    (losses.length === 0 ? "no loss of separation"
+      : `loss of separation with ${losses.map((loss) => otherOf(loss, aircraft.datasetId)).join(", ")}`);
 }
 
 /** A round's tab label (outline §6.2 item 2): short, r1, r2 … (the user, 2026-10-06); its tooltip says what it is. */
@@ -173,16 +185,16 @@ export function roundTabLabel(round: TrainingWindowRound): string {
   return round === "start" ? "Start (base)" : `r${round}`;
 }
 
-/** The window's tabs. */
-function windowTabs(window: TrainingWindow): TrainingTab[] {
+/** The tabs of a commanded aircraft of a window. */
+function windowTabs(window: TrainingWindow, aircraft: TrainingWindowAircraft): TrainingTab[] {
   return [
     { id: LABELLED, label: "Labelled", outcome: null,
       title: "The labeller's open-loop reading of the recorded flight of the commanded aircraft; not flown" +
         (window.kind === "B" ? ". This window starts from a moved start (window B): the reading is of the flight as recorded" : "") },
-    ...window.rounds.map((sentence) => ({
+    ...aircraft.rounds.map((sentence, place) => ({
       id: roundTab(sentence.round), label: roundTabLabel(sentence.round), outcome: sentence.outcome,
       title: `The sentence ${roundLabel(sentence.round)}'s model said for the commanded aircraft, flown by the executor among the ` +
-        `window's other aircraft — ${ending(window, sentence)} · ${sentence.goArounds} go-around${sentence.goArounds === 1 ? "" : "s"}`,
+        `window's other aircraft — ${ending(aircraft, sentence, window.rounds[place])} · ${sentence.goArounds} go-around${sentence.goArounds === 1 ? "" : "s"}`,
     })),
   ];
 }
@@ -197,19 +209,22 @@ function RoundsTable({ sample }: { sample: TrainingWindowSample }) {
           <tr><th scope="col">window</th>{rounds.map((round) => <th key={String(round)} scope="col">{roundLabel(round)}</th>)}</tr>
         </thead>
         <tbody>
-          {sample.windows.map((window) => (
-            <tr key={window.index}>
-              <th scope="row" title={window.head.flightKey}>{window.head.callsign} · {window.kind}</th>
-              {rounds.map((round) => {
-                const sentence = window.rounds.find((item) => item.round === round);
-                return sentence === undefined ? <td key={String(round)}>–</td> : (
-                  <td key={String(round)} style={{ color: trainingOutcomeColour(sentence.outcome) }} title={TRAINING_OUTCOME_TEXT[sentence.outcome]}>
-                    {ending(window, sentence)} · {sentence.goArounds} go-arounds · {sentence.events.length} words
-                  </td>
-                );
-              })}
-            </tr>
-          ))}
+          {sample.windows.map((window) => {
+            const [aircraft] = window.commanded;
+            return (
+              <tr key={window.index}>
+                <th scope="row" title={aircraft.head.flightKey}>{aircraft.head.callsign} · {window.kind}</th>
+                {rounds.map((round, place) => {
+                  const sentence = aircraft.rounds[place];
+                  return (
+                    <td key={String(round)} style={{ color: trainingOutcomeColour(sentence.outcome) }} title={TRAINING_OUTCOME_TEXT[sentence.outcome]}>
+                      {ending(aircraft, sentence, window.rounds[place])} · {sentence.goArounds} go-arounds · {sentence.events.length} words
+                    </td>
+                  );
+                })}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </>
@@ -219,7 +234,7 @@ function RoundsTable({ sample }: { sample: TrainingWindowSample }) {
 /** The landed of each round over the set's windows. */
 function roundsSummary(sample: TrainingWindowSample): string {
   return sample.model.rounds.map((round) => {
-    const said = sample.windows.flatMap((window) => window.rounds.filter((item) => item.round === round));
+    const said = sample.windows.flatMap((window) => window.commanded.flatMap((aircraft) => aircraft.rounds.filter((item) => item.round === round)));
     return `${roundLabel(round)}: ${said.filter((item) => item.outcome === "landed").length}/${said.length} landed`;
   }).join(" · ");
 }
@@ -241,10 +256,12 @@ export default function TrainingWindowSession({ airport, sets, details }: {
   const sample = state.status === "ready" ? state.sample : null;
   const place = sample === null ? null : placed !== null && placed.setId === sample.setId ? placed.index : 0;
   const window = sample === null || place === null ? null : sample.windows[place] ?? null;
+  // the commanded aircraft on screen: stage C's windows command one (stage D's strip chooses among several, F3)
+  const aircraft = window === null ? null : window.commanded[0];
 
   // ── the tabs: the session gives them, the bar chooses (outline §6.2 item 2) ──
   const scope = sample === null || window === null ? null : `C/${airport}/${sample.setId}/window-${window.index}`;
-  const tabList = useMemo(() => (window === null ? [] : windowTabs(window)), [window]);
+  const tabList = useMemo(() => (window === null || aircraft === null ? [] : windowTabs(window, aircraft)), [window, aircraft]);
   const shared = useTrainingTabs();
   const last = useRef<string | null>(null);
   // a window opens on the last tab chosen where it has one, else on its last round
@@ -264,29 +281,33 @@ export default function TrainingWindowSession({ airport, sets, details }: {
   const shown: TrainingWindowRound | null = window === null ? null
     : chosen === LABELLED ? window.rounds[window.rounds.length - 1].round
       : window.rounds.find((item) => roundTab(item.round) === chosen)!.round;
+  const shownPlace = window === null || shown === null ? -1 : window.rounds.findIndex((item) => item.round === shown);
   useEffect(() => {
     if (sample !== null) setTrainingIntervalS(chosen === LABELLED ? null : sample.model.rowIntervalS);
   }, [sample, chosen, setTrainingIntervalS]);
   useEffect(() => {
-    if (sample === null || window === null || shown === null) {
+    if (sample === null || window === null || aircraft === null || shown === null) {
       setTrainingSelection(null);
       return;
     }
-    setTrainingSelection(trainingWindowSelectionOf(sample, trainingWindowFlightView(sample, window, shown)));
-  }, [sample, window, shown, setTrainingSelection]);
+    setTrainingSelection(trainingWindowSelectionOf(sample, trainingWindowFlightView(sample, window, aircraft, shown)));
+  }, [sample, window, aircraft, shown, setTrainingSelection]);
   useEffect(() => () => setTrainingSelection(null), [setTrainingSelection]);
 
-  const sentence = window === null || shown === null ? null : window.rounds.find((item) => item.round === shown) ?? null;
+  const sentence = aircraft === null || shownPlace < 0 ? null : aircraft.rounds[shownPlace];
+  const end = window === null || shownPlace < 0 ? null : window.rounds[shownPlace];
   // the round's sentence on screen as the views read it, and the slider's marks (frontend §6.1): the first predicted step
-  // on every tab; on a round's tab, its loss of separation
-  const view = sample === null || window === null || shown === null ? null : trainingWindowFlightView(sample, window, shown);
+  // on every tab; on a round's tab, the losses of separation the aircraft is in
+  const view = sample === null || window === null || aircraft === null || shown === null ? null
+    : trainingWindowFlightView(sample, window, aircraft, shown);
   const endS = sample === null || view === null ? 0
     : readingAxisEndS(trainingReadingOf(view, sample.vocabulary.stepS, chosen === LABELLED ? null : sample.model.rowIntervalS));
   const marks = useMemo(() => {
-    if (window === null || sentence === null) return [];
-    const loss = chosen === LABELLED ? null : sentence.end.loss;
-    return [firstStepMark(window.firstStepS), ...(loss === null ? [] : [lossMark(loss.timeS, loss.other)])];
-  }, [window, sentence, chosen]);
+    if (aircraft === null || end === null) return [];
+    const losses = chosen === LABELLED ? [] : lossesOf(end, aircraft.datasetId);
+    return [firstStepMark(aircraft.firstStepS),
+      ...losses.map((loss) => lossMark(onAircraftClock(aircraft, loss.timeS), otherOf(loss, aircraft.datasetId)))];
+  }, [aircraft, end, chosen]);
 
   // ── the details page: the experiment's results (outline §6.2 item 3, D134) ──
   const results = useTrainingSetResults("C", airport, setId);
@@ -303,8 +324,8 @@ export default function TrainingWindowSession({ airport, sets, details }: {
       sample === null ? <p className="experiment-details-missing">{absent}</p> : <RoundsTable sample={sample} />),
     resultSection("speed", "Speed", results, c === null ? null : c.speed, (value) => <SpeedSection {...value} />),
     resultSection("checks", "The checks", results, c === null ? null : c.checks, (value) => <ChecksSection {...value} />),
-    window === null || sentence === null ? { id: WINDOW_SECTION, title: "The window", body: null, absent }
-      : { id: WINDOW_SECTION, title: "The window", body: <WindowEnd window={window} sentence={sentence} /> },
+    window === null || aircraft === null || sentence === null || end === null ? { id: WINDOW_SECTION, title: "The window", body: null, absent }
+      : { id: WINDOW_SECTION, title: "The window", body: <WindowEnd window={window} aircraft={aircraft} sentence={sentence} end={end} /> },
   ];
 
   const choices = sets.map((item) => ({ id: item.id, count: `${item.windows} windows`, title: item.title,
@@ -324,17 +345,20 @@ export default function TrainingWindowSession({ airport, sets, details }: {
         <>
           <ItemList label="The set's windows" active={window === null ? null : String(window.index)}
             onSelect={(key) => setPlaced({ setId: sample.setId, index: Number(key) })}
-            items={sample.windows.map((item) => ({
-              key: String(item.index), callsign: item.head.callsign, runway: `recorded ${item.head.runway}`,
-              runwayTitle: "the runway the flight landed on in the record (a round's sentence may say another)", stratum: item.kind,
-              landed: item.rounds.filter((s) => s.outcome === "landed").length, of: item.rounds.length,
-              more: `${item.traffic.length} other`, title: item.head.flightKey,
-              outcomes: item.rounds.map((s) => `${roundLabel(s.round)}: ${TRAINING_OUTCOME_TAG[s.outcome]}`).join("; "),
-            }))} />
-          {window === null || sentence === null ? null : (
+            items={sample.windows.map((item) => {
+              const [anchor] = item.commanded;
+              return {
+                key: String(item.index), callsign: anchor.head.callsign, runway: `recorded ${anchor.head.runway}`,
+                runwayTitle: "the runway the flight landed on in the record (a round's sentence may say another)", stratum: item.kind,
+                landed: anchor.rounds.filter((s) => s.outcome === "landed").length, of: anchor.rounds.length,
+                more: `${item.traffic.length} other`, title: anchor.head.flightKey,
+                outcomes: anchor.rounds.map((s) => `${roundLabel(s.round)}: ${TRAINING_OUTCOME_TAG[s.outcome]}`).join("; "),
+              };
+            })} />
+          {window === null || aircraft === null || sentence === null || end === null ? null : (
             <ul className="training-details-links" aria-label="Readouts">
               <DetailsLink name="This round" onOpen={details.open(ROUNDS_SECTION)}
-                summary={chosen === LABELLED ? "the labelled sentence (not flown)" : `${roundLabel(sentence.round)}: ${ending(window, sentence)}`} />
+                summary={chosen === LABELLED ? "the labelled sentence (not flown)" : `${roundLabel(sentence.round)}: ${ending(aircraft, sentence, end)}`} />
               <DetailsLink name="Rounds" onOpen={details.open(ROUNDS_SECTION)} summary={roundsSummary(sample)} />
               <DetailsLink name="The window" onOpen={details.open(WINDOW_SECTION)} summary={`${TRAINING_WINDOW_KIND_TEXT[window.kind]} · ` +
                 (window.traffic.length === 0 ? "no other aircraft"
@@ -342,9 +366,9 @@ export default function TrainingWindowSession({ airport, sets, details }: {
             </ul>
           )}
           <CursorSlider marks={marks} />
-          {window === null || view === null ? null : (
+          {window === null || aircraft === null || view === null ? null : (
             <WindowCursor windowKey={`${sample.setId}/${window.index}`} flightKey={view.flightKey} labelled={chosen === LABELLED}
-              row0S={window.row0S} endS={endS} />
+              row0S={aircraft.clockS} endS={endS} />
           )}
           <DrawBox legend="Draw (window)">
             <LayerSwitches />

@@ -1,11 +1,13 @@
-"""``POST /autopilot/window-segment``: a word's segment of the commanded aircraft's sentence in a window of a Training set
+"""``POST /autopilot/window-segment``: a word's segment of a commanded aircraft's sentence in a window of a Training set
 of stage C (post-training §8 C11), flown live by the same single-flight executor as stage A's
 (`backend.AutopilotSegmentBackend`, whose request lock, page numbering, executor spec and flown-set caches this shares).
 
 WHICH SENTENCE. The request names a window set (``airport``, ``setId``: `post.training_files.FILES.listed_set`, the airport's
-``training/index_post_v2.json``), a window of it (``window``: its place in the set's ``windows``) and ``round``: a round
-of the set's ``model.rounds`` (``"start"`` or a round's number). The commanded flight is the set's flight of the window's
-``datasetId``; the sentence's Δ is the set's ``model.rowIntervalS``.
+``training/index_post_v3.json``), a window of it (``window``: its place in the set's ``windows``), one of the window's
+commanded aircraft (``aircraft``: its ``datasetId``; the window format of stages C and D holds a list of them, frontend
+D156 — stage C's one) and ``round``: a round of the set's ``model.rounds`` (``"start"`` or a round's number). The
+commanded flight is the set's flight of that ``datasetId``; the sentence's Δ is the set's ``model.rowIntervalS``. The
+other aircraft, commanded or recorded, fly their states of the round and do not react (frontend §5.5).
 
 THE SENTENCE IS FLOWN AS THE EXPORT FLEW IT. The export flew the window through the start of a closed loop
 (`autopilot.start.start_moved`) from the commanded flight's first predicted step, its start moved for window B; here the
@@ -14,10 +16,10 @@ the first predicted step moved as the start moves them (`autopilot.start.moved_s
 the start state), and the sentence's words grid replaced by the round's words (`prior.on_words`). The other aircraft are
 not flown: the executor reads only the words (vocabulary §6 item 5). The answer is checked against the export's flown
 track, written unrounded (`prior.apart_from_exported`, prior D127 followed for windows: refused by name past the
-executor's bound, or at another outcome or end cycle). A word after the window's end (its
-outcome, or the end of the row of its loss of separation) has no segment. A window ended at a loss of separation ends
-there live too (`fly_window_segment`): no segment runs past the window's last state, and none is judged — the judge has
-no outcome for a flight its caller ended (post-training D93).
+executor's bound, or at another outcome or end cycle). A word after the aircraft's end (its
+outcome, or the end of the row of its loss of separation) has no segment. An aircraft whose flight ended at a loss of
+separation ends there live too (`fly_window_segment`): no segment runs past its last state, and none is judged — the
+judge has no outcome for a flight its caller ended (post-training D93).
 
 WARMED UP AT START (`warm_up`, run beside stage A's and stage B's): every listed window set opened at its Δ, each under
 its own lock (stage A's `set_flown`), never the request lock.
@@ -36,6 +38,7 @@ import numpy as np
 from ts_transformer.autopilot import replay
 from ts_transformer.experiments import training_flights
 from ts_transformer.autopilot.start import Move, moved_signals
+from ts_transformer.experiments.post_window_loop import LOST_SEPARATION
 from ts_transformer.instructions import training_files
 from ts_transformer.instructions.words import COLUMNS
 from ts_transformer.io_utils import utc_now
@@ -48,8 +51,9 @@ from aeroviz_backend.autopilot_segment.prior import apart_from_exported, on_word
 
 #: MIRROR of `aeroviz-4d/src/data/trainingWindowAutopilot.ts` (`TRAINING_WINDOW_AUTOPILOT_SCHEMA`); the reader refuses
 #: anything else by name. A name changes with the payload's shape, on both sides, in one change. v1 (C11, 2026-10-05):
-#: stage A's segment answer with the window and the round whose sentence it flew.
-SCHEMA = "aeroviz-autopilot-window-segment-v1"
+#: stage A's segment answer with the window and the round whose sentence it flew. v2 (frontend D156, 2026-10-07): the
+#: request names the commanded aircraft (``aircraft``), the answer gives it back with the window's end in that round.
+SCHEMA = "aeroviz-autopilot-window-segment-v2"
 #: The round of a set's ``model.rounds`` that names the model at the start of the campaign (`post_training_export.START`).
 START = "start"
 
@@ -102,8 +106,8 @@ def is_moved(move: dict[str, float]) -> bool:
 
 
 class WindowSegments:
-    """``fly(payload)`` for ``POST /autopilot/window-segment``: ``{clientId, seq, airport, setId, window, round, column,
-    row}``, on ``backend``'s caches, lock and page numbering."""
+    """``fly(payload)`` for ``POST /autopilot/window-segment``: ``{clientId, seq, airport, setId, window, aircraft,
+    round, column, row}``, on ``backend``'s caches, lock and page numbering."""
 
     def __init__(self, backend: Any) -> None:
         self.backend = backend
@@ -156,6 +160,7 @@ class WindowSegments:
         airport = str(_field(payload, "airport"))
         set_id = str(_field(payload, "setId"))
         place = _whole(_field(payload, "window"), "window")
+        named = str(_field(payload, "aircraft"))
         which = _field(payload, "round")
         column_name = _field(payload, "column")
         row = _whole(_field(payload, "row"), "row")
@@ -176,13 +181,19 @@ class WindowSegments:
                 raise NotListed(f"Training set {set_id} at {airport} has {len(sample['windows'])} windows, no window "
                                 f"{place}")
             window = sample["windows"][place]
-            said = [r for r in window["rounds"] if r["round"] == which]
-            if len(said) != 1:
+            commanded = [a for a in window["commanded"] if a["datasetId"] == named]
+            if len(commanded) != 1:
+                raise NotListed(f"window {place} of set {set_id} commands no aircraft {named!r} (it commands "
+                                f"{', '.join(a['datasetId'] for a in window['commanded'])})")
+            aircraft = commanded[0]
+            said = [r for r in aircraft["rounds"] if r["round"] == which]
+            ended = [r for r in window["rounds"] if r["round"] == which]
+            if len(said) != 1 or len(ended) != 1:
                 raise NotListed(f"window {place} of set {set_id} has no round {which!r}")
-            said = said[0]
-            items = [item for item in sample["flights"] if item["datasetId"] == window["datasetId"]]
+            said, ended = said[0], ended[0]
+            items = [item for item in sample["flights"] if item["datasetId"] == named]
             if len(items) != 1:
-                raise ValueError(f"set {set_id} holds {len(items)} flights of window {place}'s {window['datasetId']}")
+                raise ValueError(f"set {set_id} holds {len(items)} flights of window {place}'s {named}")
             item = items[0]
             _require_split(item["split"], backend.splits)        # before any check runs (A37)
             instructions, executor, params, record, words = backend.executor_for(sample)
@@ -194,10 +205,10 @@ class WindowSegments:
             opened = time.perf_counter()
             j = flown_set.position[item["datasetId"]]
             batch, inputs, sentence = flown_set.batch, flown_set.inputs, flown_set.sentences[j]
-            if is_moved(window["startMove"]):
-                batch, inputs = moved_start(batch, j, window["startMove"], params.start_rule)
+            if is_moved(aircraft["startMove"]):
+                batch, inputs = moved_start(batch, j, aircraft["startMove"], params.start_rule)
             batch, sentence = on_words(batch, j, sentence, np.array(said["words"], dtype=np.int16), words)
-            lost = said["end"]["loss"] is not None
+            lost = said["outcome"] == LOST_SEPARATION
             result = fly_window_segment(batch, inputs, j, sentence, COLUMNS.index(column_name), row, params, words,
                                         superseded, said["track"]["lastCycle"] if lost else None)
             answering = time.perf_counter()
@@ -206,9 +217,9 @@ class WindowSegments:
                                    np.asarray(inputs.aero_params[j].cpu().numpy()), apart)
             finished = time.perf_counter()
         return {
-            "ok": True, "schema": SCHEMA, "airport": airport, "setId": set_id, "window": place, "round": which,
-            "datasetId": item["datasetId"], "rowIntervalS": interval, "computedUtc": utc_now(),
-            "windowEnd": said["end"],
+            "ok": True, "schema": SCHEMA, "airport": airport, "setId": set_id, "window": place, "aircraft": named,
+            "round": which, "datasetId": item["datasetId"], "rowIntervalS": interval, "computedUtc": utc_now(),
+            "reward": said["reward"], "windowEnd": {"losses": ended["losses"], "faultySteps": ended["faultySteps"]},
             "timing": {"waitS": round(started - asked, 3), "openS": round(opened - started, 3),
                        "flyS": round(result.fly_s, 3), "cycles": int(result.flown.commands.shape[1]),
                        "judgeS": round(result.judge_s, 3), "answerS": round(finished - answering, 3),

@@ -19,7 +19,7 @@ describe("the flown block of every stage", () => {
     if (!a.ok || !b.ok || !c.ok) throw new Error("a fixture does not parse");
     const replays = Object.values(a.value.flights[0].closedLoop).map((closed) => closed.replay.envelopes);
     const samples = b.value.flights.flatMap((flight) => flight.sentences.map((sentence) => sentence.envelopes));
-    const rounds = c.value.windows.flatMap((window) => window.rounds.map((round) => round.envelopes));
+    const rounds = c.value.windows.flatMap((window) => window.commanded.flatMap((aircraft) => aircraft.rounds.map((round) => round.envelopes)));
     for (const [stage, envelopes] of [["A", replays], ["B", samples], ["C", rounds]] as const) {
       expect(envelopes.length, stage).toBeGreaterThan(0);
       for (const one of envelopes) expect(one?.heading.length, stage).toBeGreaterThan(0);
@@ -37,7 +37,7 @@ describe("the flown block of every stage", () => {
     expect(parsed.ok).toBe(false);
     if (!parsed.ok) expect(parsed.problem).toContain("past the");
     const c = stageCSampleFile();
-    const round = c.windows[0].rounds[0];
+    const round = c.windows[0].commanded[0].rounds[0];
     const last = round.envelopes.heading.findLast((one: Record<string, number>) => one.stopRow > one.firstRow);
     const more = round.track.rows + 2 - last.stopRow;
     last.stopRow += more;

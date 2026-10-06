@@ -2,9 +2,10 @@
 traffic that the frontend's Training view reads: the commanded flight's head (stage A's: its observed track, open-loop
 sentence and closed-loop sentence at the campaign's Δ, `training_export.split_flights`), the other aircraft on their
 records over the window, and for each chosen round of a post-training campaign the sentence its model said for the
-commanded aircraft, flown — its words, flown track and attitude, outcome and crossing — with the window's end (a loss
-of separation, its other aircraft and the minimum it broke; the reward; the rows the speed-word mask acted; the steps
-reading a faulty point, D114).
+commanded aircraft, flown — its words, flown track and attitude, outcome and crossing, its reward and the rows the
+speed-word mask acted — and the window's end (its losses of separation, each with its two aircraft, the one that answers
+and the minimum it broke; the steps reading a faulty point, D114). The window format is stages C's and D's
+(`post.training_files`, frontend D156): its commanded aircraft are a list, here of one.
 
 WHICH WINDOWS. ``--per-airport`` real windows of each airport of ``--split`` (train or select; the val days are read
 only by a planned readout, outline §6 item 4), drawn once with ``--seed`` from those that do not open inside a loss
@@ -27,7 +28,7 @@ CHECKS: the closed loop's (`require_conforming_closed_loop`, D69, with the label
 features' reference of the campaign's census (D104), here first.
 
 WRITES a set ``<root>/<airport>/training/<set-id>/sample.json`` and its entry in
-``<root>/<airport>/training/index_post_v2.json`` (`post.training_files`); refused when the set exists. Every airport is
+``<root>/<airport>/training/index_post_v3.json`` (`post.training_files`); refused when the set exists. Every airport is
 built before any is written. From a clean tree (the set records the commit) unless ``--smoke``; a smoke campaign gives
 only a smoke set.
 
@@ -108,12 +109,13 @@ def chosen_windows(context: Context, split: str, airport: str, per_airport: int,
 
 
 # ---- flying a round's model
-def sentence_payload(loop: WindowLoop, b: int, result: WindowResult, window: Window, first_row: int,
-                     executed: Any, aero: np.ndarray, reference: Any, words: Words) -> dict[str, Any]:
-    """Window ``b``'s sentence as the Training view draws it (module docstring): its words and their events, the block
-    of a flown sentence (`training_export.flown_sentence`: the executor's record on the 2 s rows from the first predicted
-    step, its attitude, outcome, crossing and the envelopes of its words) and the window's end. ``reference``: the
-    commanded flight's observed signals (its identity)."""
+def sentence_payload(loop: WindowLoop, b: int, result: WindowResult, first_row: int, executed: Any, aero: np.ndarray,
+                     reference: Any, words: Words) -> dict[str, Any]:
+    """Window ``b``'s commanded aircraft's sentence as the Training view draws it (module docstring): its words and
+    their events, the block of a flown sentence (`training_export.flown_sentence`: the executor's record on the 2 s rows
+    from the first predicted step, its attitude, outcome, crossing and the envelopes of its words), its reward, the row
+    from which it is silent (none: stage C's window ends at its loss, D93) and the rows the speed-word mask acted.
+    ``reference``: the commanded flight's observed signals (its identity)."""
     closed = loop.speaking.loop
     geometry = closed.geometries[b]
     first = loop.speaking.start
@@ -128,27 +130,37 @@ def sentence_payload(loop: WindowLoop, b: int, result: WindowResult, window: Win
     # unrounded (prior D127, followed for windows): the live segment is checked against it within the executor's bound
     block = flown_sentence(executed, b, geometry, reference, result.words, closed.interval_s, aero[b], words,
                            outcome=result.outcome, end_cycle=end_cycle, last_cycle=last, crossing=crossing)
-    loss = None if result.loss is None else {
-        "step": int(result.loss_step), "timeS": round(window.step_s(result.loss_step) - window.row0_s, 3),
-        "other": result.other, "kind": result.loss.kind, "relation": result.loss.relation,
-        "requiredM": round(result.loss.required_m, 1), "distanceM": round(result.loss.distance_m, 1),
-        "verticalM": round(result.loss.vertical_m, 1), "wakeKnown": bool(result.loss.wake_known)}
     return {
         "rows": len(result.words), "words": result.words.astype(int).tolist(),
         "events": events(result.words, None, geometry, words), "firstRow": first_row, "startRow": first,
         "flownFromRow": first * loop.every, **block, "timedOut": result.outcome == TIMEOUT,
-        "goArounds": int(result.go_arounds),
-        "end": {"reward": float(result.reward), "loss": loss, "speedMaskRows": int(result.speed_mask_rows),
-                "faultySteps": int(result.faulty_steps), "lossReadsFault": bool(result.loss_reads_fault)}}
+        "goArounds": int(result.go_arounds), "reward": float(result.reward), "silentFromRow": None,
+        "speedMaskRows": int(result.speed_mask_rows)}
+
+
+def round_end_payload(result: WindowResult, window: Window) -> dict[str, Any]:
+    """Window ``window``'s end in a round: its losses of separation — stage C's at most one, which its commanded
+    aircraft answers for and which costs W (its reward is 0, D30) — each with its step and time from the window's row 0,
+    its two aircraft, the minimum it broke and whether the other aircraft read a faulty point near it (D114); and the
+    steps at which a recorded aircraft read a faulty point."""
+    losses = [] if result.loss is None else [{
+        "step": int(result.loss_step), "timeS": round(window.step_s(result.loss_step) - window.row0_s, 3),
+        "aircraft": [window.commanded.key, result.other], "answering": [window.commanded.key],
+        "kind": result.loss.kind, "relation": result.loss.relation, "requiredM": round(result.loss.required_m, 1),
+        "distanceM": round(result.loss.distance_m, 1), "verticalM": round(result.loss.vertical_m, 1),
+        "wakeKnown": bool(result.loss.wake_known), "readsFault": bool(result.loss_reads_fault), "costsW": True}]
+    return {"losses": losses, "faultySteps": int(result.faulty_steps)}
 
 
 def fly_round(model: Prior, context: Context, split: str, windows: Sequence[Window], batch_windows: int, seed: int
-              ) -> tuple[list[dict[str, Any]], list[np.ndarray]]:
+              ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[np.ndarray]]:
     """Every window flown by ``model`` (module docstring), in batches that command each flight once, each with its
-    fixed numbers: their sentence payloads and the observed rows before the first predicted step the start gave each
-    (window B's moved, `start_moved`), in the order of ``windows``."""
+    fixed numbers: their commanded aircraft's sentence payloads, their ends (`round_end_payload`) and the observed rows
+    before the first predicted step the start gave each (window B's moved, `start_moved`), in the order of
+    ``windows``."""
     data = context.splits[split]
     out: dict[int, dict[str, Any]] = {}
+    ends: dict[int, dict[str, Any]] = {}
     starts: dict[int, np.ndarray] = {}
     for places in batches(windows, batch_windows):
         batch = [windows[p] for p in places]
@@ -161,10 +173,12 @@ def fly_round(model: Prior, context: Context, split: str, windows: Sequence[Wind
         executed = loop.executor.flown()
         aero = loop.executor.inputs.aero_params.cpu().numpy()
         for b, (place, window, result) in enumerate(zip(places, batch, results)):
-            out[place] = sentence_payload(flown, b, result, window, data["sentences"][window.signal_index].rows.first_row,
+            out[place] = sentence_payload(flown, b, result, data["sentences"][window.signal_index].rows.first_row,
                                           executed, aero, data["signals"][window.commanded.key], context.words)
+            ends[place] = round_end_payload(result, window)
             starts[place] = observed[window.signal_index]
-    return [out[p] for p in range(len(windows))], [starts[p] for p in range(len(windows))]
+    return ([out[p] for p in range(len(windows))], [ends[p] for p in range(len(windows))],
+            [starts[p] for p in range(len(windows))])
 
 
 # ---- the window's traffic
@@ -212,19 +226,24 @@ def start_payload(window: Window, observed: np.ndarray) -> dict[str, Any] | None
             "lonDeg": stage_a_files.rounded(lon, 7), "heightMslM": stage_a_files.rounded(observed[:, 2], 1)}
 
 
-def window_payload(window: Window, rounds: Sequence[str | int], said: Sequence[dict[str, Any]], observed: np.ndarray,
-                   hae_minus_msl_m: dict[str, float], step_s: float) -> dict[str, Any]:
-    """A window as the set holds it: its commanded flight (``datasetId``: its head is the set's flight of that id), kind,
-    row 0, first predicted step, moves (window B's moved observed rows, `start_payload`), its traffic over the longest
-    of its rounds, and each round's sentence."""
+def window_payload(window: Window, rounds: Sequence[str | int], said: Sequence[dict[str, Any]],
+                   ends: Sequence[dict[str, Any]], observed: np.ndarray, hae_minus_msl_m: dict[str, float],
+                   step_s: float) -> dict[str, Any]:
+    """A window as the set holds it (frontend §5.7): its kind and c (none: stage C's windows are not compressed), its
+    commanded aircraft — stage C's one (``datasetId``: its head is the set's flight of that id), which joins
+    at the window's row 0 and is not moved in time, with its first predicted step, its start move (window B's moved
+    observed rows, `start_payload`) and each round's sentence —, the recorded aircraft moved in time (window D), the
+    traffic over the longest of its rounds, and each round's end (`round_end_payload`)."""
     longest = max(len(s["track"]["eM"]) for s in said)
     end_s = window.first_step_s + (longest - 1) * step_s
-    return {"datasetId": window.commanded.key, "kind": window.kind, "row0S": window.row0_s,
-            "firstStepS": round(window.first_step_s - window.row0_s, 3), "startMove": start_move_payload(window),
-            "movedStart": start_payload(window, observed),
+    aircraft = {"datasetId": window.commanded.key, "joinS": 0.0, "shiftS": None,
+                "firstStepS": round(window.first_step_s - window.row0_s, 3), "startMove": start_move_payload(window),
+                "movedStart": start_payload(window, observed),
+                "rounds": [{"round": r, **s} for r, s in zip(rounds, said)]}
+    return {"kind": window.kind, "c": None, "commanded": [aircraft],
             "moved": [[key, shift] for key, shift in window.moved],
             "traffic": traffic_payload(window, end_s, hae_minus_msl_m),
-            "rounds": [{"round": r, **s} for r, s in zip(rounds, said)]}
+            "rounds": [{"round": r, **e} for r, e in zip(rounds, ends)]}
 
 
 # ---- one airport, the set
@@ -235,16 +254,17 @@ def build_airport(context: Context, campaign: Path, settings: Any, airport: str,
     windows, drawn = chosen_windows(context, split, airport, per_airport, kinds, seed)
     flown = [fly_round(round_model(context, settings, campaign, None if r == START else int(r)), context, split,
                        windows, settings.batch_windows, seed) for r in rounds]
-    said = [payloads for payloads, _ in flown]
-    observed = flown[0][1]                      # the start's rows: the same for every round (the move is the window's)
+    said = [payloads for payloads, _, _ in flown]
+    ends = [round_ends for _, round_ends, _ in flown]
+    observed = flown[0][2]                      # the start's rows: the same for every round (the move is the window's)
     ids = sorted({w.commanded.key for w in windows})
     heads, _ = split_flights(context.instructions, split, ids, (context.interval_s,), params, context.words,
                              device=context.device)
     for head in heads:
         head["haeMinusMslM"] = hae_minus_msl_m[head["runway"]]
     step_s = context.words.spec.step_s
-    return heads, [window_payload(w, rounds, [s[k] for s in said], observed[k], hae_minus_msl_m, step_s)
-                   for k, w in enumerate(windows)], drawn
+    return heads, [window_payload(w, rounds, [s[k] for s in said], [e[k] for e in ends], observed[k], hae_minus_msl_m,
+                                  step_s) for k, w in enumerate(windows)], drawn
 
 
 def sample_of(set_id: str, context: Context, airport: str, hae_minus_msl_m: dict[str, float], source: dict[str, Any],

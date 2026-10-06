@@ -35,6 +35,7 @@ import { chooseTrainingTab, useTrainingTabs, type TrainingTabs } from "../../dat
 import { requestTrainingDetails } from "../training/PanelParts";
 import { resultsAnswer, resultsUrl } from "../../data/__tests__/trainingResults";
 import { roundTabLabel } from "../training/TrainingWindowSession";
+import { otherOf } from "../../data/trainingWindowSample";
 
 const intentUrl = (setId: string) => `${AEROVIZ_BACKEND_URL.replace(/\/+$/, "")}/experiments/intent?run=${encodeURIComponent(setId)}`;
 const json = (body: unknown, ok = true) => ({ ok, status: ok ? 200 : 404, headers: { get: () => "application/json" }, text: async () => JSON.stringify(body) });
@@ -57,7 +58,7 @@ function TabsSpy() {
 }
 
 const C_FILES = {
-  "data/airports/KXXX/training/index_post_v2.json": stageCIndex(),
+  "data/airports/KXXX/training/index_post_v3.json": stageCIndex(),
   [`data/airports/KXXX/training/${WINDOW_SET_ID}/sample.json`]: stageCSampleFile(),
 };
 const B_FILES = {
@@ -85,7 +86,7 @@ describe("one layout for the three stages", () => {
       intent: "What the post-training's rounds say in recorded traffic.", design: "post_training.md §6", line: "The fixture's windows." } });
     await openStage("window");
     const sample = stageCSample();
-    const head = sample.windows[0].head;
+    const head = sample.windows[0].commanded[0].head;
     expect((await screen.findAllByText(head.callsign)).length).toBe(sample.windows.length);
     expect(screen.queryByRole("table")).toBeNull();                                      // no table in the left panel
     const column = screen.getAllByText(/landed ·/).find((node) => node.classList.contains("training-flight-executor"))!;
@@ -113,14 +114,16 @@ describe("one layout for the three stages", () => {
   it("stage C: the cursor slider carries the window's first predicted step and, on a round's tab, its loss of separation", async () => {
     serve(C_FILES);
     const sample = stageCSample();
-    const lost = sample.windows.findIndex((window) => window.rounds[0].end.loss !== null);
+    const lost = sample.windows.findIndex((window) => window.rounds[0].losses.length > 0);
     appState.trainingSelection = stageCSelection(sample, lost);                       // the bar's state: that window's round
     await openStage("window");
-    await screen.findAllByText(sample.windows[0].head.callsign);
+    await screen.findAllByText(sample.windows[0].commanded[0].head.callsign);
     fireEvent.click(screen.getByRole("list", { name: "The set's windows" }).querySelectorAll("button")[lost]);
-    const loss = sample.windows[lost].rounds[0].end.loss!;
-    await waitFor(() => expect(document.querySelector('[data-mark^="loss-"] title')?.textContent).toContain(`with ${loss.other}`));
-    expect(document.querySelector('[data-mark="first-step"] title')!.textContent).toContain(`${sample.windows[lost].firstStepS} s`);
+    const [aircraft] = sample.windows[lost].commanded;
+    const [loss] = sample.windows[lost].rounds[0].losses;
+    await waitFor(() => expect(document.querySelector('[data-mark^="loss-"] title')?.textContent)
+      .toContain(`with ${otherOf(loss, aircraft.datasetId)}`));
+    expect(document.querySelector('[data-mark="first-step"] title')!.textContent).toContain(`${aircraft.firstStepS} s`);
     act(() => chooseTrainingTab("labelled"));
     await waitFor(() => expect(document.querySelector('[data-mark^="loss-"]')).toBeNull());
     expect(document.querySelector('[data-mark="first-step"]')).not.toBeNull();

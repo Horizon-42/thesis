@@ -29,7 +29,7 @@ import { stageASample, stageASelection } from "../../data/__tests__/stageA";
 import { stageBSample } from "../../data/__tests__/stageB";
 import { trainingPriorFlightView } from "../../data/trainingPriorSample";
 import { stageCSample } from "../../data/__tests__/stageC";
-import { trainingWindowFlightView } from "../../data/trainingWindowSample";
+import { onAircraftClock, otherOf, trainingWindowFlightView } from "../../data/trainingWindowSample";
 
 const STEP_S = 2;
 
@@ -184,14 +184,16 @@ describe("each stage's marks", () => {
     expect(line.points[3]).toEqual([readingRowTimeS(reading, 3), sentence.goAroundProbability[3]]);
   });
 
-  it("C: a red tick at the round's loss of separation, on the flight's clock", () => {
+  it("C: a red tick at the round's loss of separation, on the aircraft's flight clock", () => {
     const sample = stageCSample();
-    const window = sample.windows.find((item) => item.rounds.some((round) => round.end.loss !== null))!;
-    const loss = window.rounds[0].end.loss!;
-    const mark = lossMark(loss.timeS, loss.other);
-    expect(mark.kind === "tick" && mark.atS).toBe(loss.timeS);
+    const window = sample.windows.find((item) => item.rounds[0].losses.length > 0)!;
+    const [aircraft] = window.commanded;
+    const [loss] = window.rounds[0].losses;
+    const atS = onAircraftClock(aircraft, loss.timeS);
+    const mark = lossMark(atS, otherOf(loss, aircraft.datasetId));
+    expect(mark.kind === "tick" && mark.atS).toBe(atS);
     // the loss falls on the round's sentence's axis
-    const reading = trainingReadingOf(trainingWindowFlightView(sample, window, window.rounds[0].round), STEP_S, sample.model.rowIntervalS);
-    expect(loss.timeS).toBeLessThanOrEqual(readingAxisEndS(reading));
+    const view = trainingWindowFlightView(sample, window, aircraft, window.rounds[0].round);
+    expect(atS).toBeLessThanOrEqual(readingAxisEndS(trainingReadingOf(view, STEP_S, sample.model.rowIntervalS)));
   });
 });
