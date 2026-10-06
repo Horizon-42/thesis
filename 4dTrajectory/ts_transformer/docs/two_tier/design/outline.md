@@ -92,6 +92,7 @@ both, each with its part. A new decision or open item takes the next free number
 | D134 | The Training view's details page holds the results of the experiment that made the set (§6.2 items 3, 4): stage A — the labelling (train and select only), the executor's closed-loop replay at each Δ, the set's flown flights, the vocabulary; B — the free generation the set was made from, the training, the validation (the base's val set only), the choice; C — the rounds, the checks at the campaign's start, the window. The first section is the set and the experiment, with one line of provenance; "What this view shows" and the row inspector are removed. The backend reads the results (`GET /training/results`) from the files the set names under `4dTrajectory/outputs/` and answers named fields only; no answer holds a reading that the design keeps unshown (stage A's val block, the val counts of a run's identity), and B's validation only for the set of the claimed readout. It replaces the sections of D133. Why: the user found D133's page wrong: its sections (the intent and a list of paths, usage notes, the set's own 20 sentences counted, a row inspector that repeats the bar) were Claude's reading of the page before A23 as a place for long text; that page held the experiment's results | Decided | User, 2026-10-06 (the results, read through the backend, the removals); the sections and the route: stage B's proposal, with Claude's guards of the val days |
 | D135 | Every sentence on screen is drawn with the envelopes of its words (§6.2 items 6, 7), simpler than the instruction-v3 view: lateral, each heading word's judged rows on the ground with the rows outside its band in red; vertical, each altitude word's tube as a wall with its two edges; the speed bands in the charts only; no capture turn or corridor, and only the envelopes of the sentence on screen. The export computes them: one function of stage A's Training export (`flown_sentence`) gives the block of every flown sentence in every stage (the outcome, the crossing, the track unrounded, the attitude, the envelopes), and one writer of the Training files serves the three stages. The three sample formats get new names; stage A's and B's published sets are exported again with the same ids, and the old ones are deleted once the new view is merged and checked. Stage B's implementer builds it on `dev-two-tier-v4` (§5 rule 1) and may change stage A's and C's Training exports for it. The trained base is not affected: B's export opens it read-only and writes only under `aeroviz-4d/public/data`, the base's directory is read-only with its `SHA256SUMS`, and stage C opens the base itself and reads no Training set. Why: B's and C's exports wrote no envelopes, so their sentences were drawn without them, and three copies built the block of a flown sentence | Decided | User, 2026-10-06 |
 | D136 | The Training view shows how fast the model speaks (§6.2 item 10): a runner (`model_speed`) measures, on select-day flights or windows and never on val or test, the time of the prior's step of a row and of the executor's steps of it, apart, on the CPU (one thread) and the GPU, for one aircraft at a time and for a batch of 400, with p50, p95 and the largest time of a row, the rows per second and the share of Δ = 4 s; stage B's base now, stage C's chosen round after C10; the sets name the readout and the details page shows it in a section Speed. Why: the view showed only the executor's computing time of a live segment; no readout recorded the prior's time to say a row, and only C8's profile timed the prior's step, for one batch of windows | Decided | User, 2026-10-06 (the speed in the view); the measurement and its settings: Claude's proposal |
+| D138 | The speed of the closed loop (§4 item 6). A faster form of a computation is added beside the readable one, never in its place: the readable one stays a mode and the reference, and a check on fixed inputs requires both to give the same result before the faster one is used in a process (as the executor's ways to fly, vocabulary D73); no result changes (words, masks, states, rewards). Three parts, each in its stage's code: (1) vocabulary A44, the start opened once in a process (the split's signals, the arrival records, the candidates, the sentences' offsets and the opened executor held by one object; each flight's series rebuilt once), `start` and `start_moved` kept as the one-call form; (2) prior B14, the procedure masks in two modes, one aircraft at a time (today's code, the reference) and the whole batch at once; (3) post-training C13, the selection readout's batches spoken by the speaking workers, one process kept as a mode, and the start opened before the workers fork so that they share its memory. Not done: speaking on the CPU with about ten workers (other float numbers: another campaign; the host's memory is shared), batches of 128, a compiled executor or judge. A campaign that runs keeps its code: C10 (`post_train_20261006`) gets none of it. Why: C10 speaks bound by the CPU. One batch of 28 windows took 74 s under cProfile: the start about 35 % (each call reads the whole split's signals and arrival records again), the procedure masks about 19 % (Python loops over the aircraft; the grammar's column mask is already over the batch), the inputs, edges and scene about 11 %, the set-up of compiled kernels about 13 % (once a process), the prior's forward pass about 7 %, the executor, the judge and the copies about 15 %. A round of C10's settings takes about 60 min with three workers, about 5 min of it the selection readout in the main process (stage C's log §26). Expected: a batch about 40 % shorter and a round about 35–40 min with three workers; each part is measured after it is built, never assumed | Decided | User, 2026-10-06 (stages A and C made faster; the readable mask code kept as a mode); the parts: stage C's proposals (a)–(c), with Claude's reading that the slow masks are stage B's procedure code, not the grammar |
 
 **The identity rule (D21)** (the user, 2026-10-02 and 2026-10-03). An identity binds the format (what the words and the
 payloads mean) and the data rules (the sealed test days). Code is identified by what it does on fixed inputs (a
@@ -102,12 +103,12 @@ they came from. Each document lists the identities of its parts.
 
 | Document | Decisions | Open items |
 |---|---|---|
-| Outline | D7, D20, D21, D55, D85, D95, D109, D131, D133–D136 | — |
+| Outline | D7, D20, D21, D55, D85, D95, D109, D131, D133–D136, D138 | — |
 | Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62, D66, D67, D69–D71, D73, D74, D77–D84, D86–D90, D97, D102, D111, D126 | O8 |
 | Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60, D63–D65, D68, D72, D75, D96, D105–D108, D111, D118–D122, D126–D128 | — |
-| Post-training | D29–D31, D36, D37, D76, D91–D94, D98–D101, D103–D105, D107, D110, D112–D117, D123–D125, D129, D130, D132 | O13 |
+| Post-training | D29–D31, D36, D37, D76, D91–D94, D98–D101, D103–D105, D107, D110, D112–D117, D123–D125, D129, D130, D132, D137 | O15 |
 
-The next free numbers: D137, O15.
+The next free numbers: D139, O16.
 
 ---
 
@@ -138,10 +139,14 @@ The next free numbers: D137, O15.
 4. Each stage ends with its own Training view (§6): the backend's live executor, the export and the frontend follow the
    stage, so that the user sees what the stage does in the frontend (the user, 2026-10-04). There is no separate
    frontend stage.
-5. The one layout of the three stages' Training views (§6.2, D133–D135): stage B's implementer, on `dev-two-tier-v4`
+5. The one layout of the three stages' Training views (§6.2, D133–D136): stage B's implementer, on `dev-two-tier-v4`
    (§5 rule 1); the results page, the envelopes and the shared parts of the exports, the speed runner and the base's
    speed readout (§6.2 item 10), then the Training sets of stages A and B exported again. While it is built, no other work changes the files of §6.2 item 9.
-6. The user merges (§5 rule 11).
+6. The speed of the closed loop (D138), by stage B's implementer on `dev-two-tier-v4` (§5 rule 1), before stage C's next
+   campaign: vocabulary A44 first, since C13 uses it, then post-training C13 and prior B14. Each is measured after it is
+   built (`post_profile` at C10's settings, `model_speed` of §6.2 item 10). Nothing of it is merged into `dev-two-tier`
+   while C10 runs.
+7. The user merges (§5 rule 11).
 
 ---
 
@@ -160,15 +165,15 @@ sections that it names.
      its worktree;
    - the user merges `dev-two-tier-v4` into `dev-two-tier` (rule 11).
 
-   Two implementers can work in the one worktree at the same time. Each changes only the files of its own work, stages
-   them by explicit paths, reads `git diff --cached --stat` before each commit, and never commits a file of the other
-   (a file that both need goes to the user). A formal build or run starts from the main checkout after the user's
-   merge, as B5 did, never from the shared worktree.
+   One implementer develops for all three stages: stage B's (the user, 2026-10-06). Stage A's implementer has no work;
+   stage C's runs C10 to its end and does not change code. The implementer stages files by explicit paths and reads
+   `git diff --cached --stat` before each commit. A formal build or run starts from the main checkout after the user's
+   merge, as B5 did, never from the development worktree. C10 (`post_train_20261006`) was launched from
+   `.claude/worktrees/two-tier-v4-post` before this rule; that worktree stays untouched until C10 ends.
 
-   Stage B never changes the code of `instructions/` or `autopilot/`; stage C never changes the code of
-   `instructions/`, `autopilot/` or `prior/`. A defect in them goes to their stage, through the user; the stage that
-   reads them gets the correction with the next merge. A part of a public interface that a later stage needs is
-   requested from the stage that owns it, through the user (vocabulary A36, D97; prior D96). The ignored data trees of each worktree (`data`,
+   The code keeps its stages' order of imports (`tests/test_architecture.py`): `instructions/` imports neither
+   `autopilot/` nor `prior/`, and so on; a change of a stage's public interface is written in that stage's document
+   before it is built (vocabulary §6, prior §7). The ignored data trees of each worktree (`data`,
    `trajectory_data_process/outputs`, `4dTrajectory/outputs`, `aeroviz-4d/public/data/airports`) are absolute links to
    LIVE data.
 2. Each milestone: read the code that it changes; write the code and its tests; run the milestone's test files; when it
