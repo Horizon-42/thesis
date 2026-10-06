@@ -79,7 +79,7 @@ def test_the_settings_take_a_count_of_every_kind_and_positive_sizes():
 
 
 def test_a_batch_commands_each_flight_once_in_signal_order():
-    windows = [SimpleNamespace(signal_index=i) for i in (3, 3, 1, 2, 3, 1)]
+    windows = [SimpleNamespace(signal_index=i, signal_indices=(i,)) for i in (3, 3, 1, 2, 3, 1)]   # stage C: one aircraft
     out = batches(windows, 2)
     assert sorted(p for b in out for p in b) == list(range(6))
     for b in out:
@@ -568,3 +568,76 @@ def test_a_formal_campaign_checks_its_base_and_a_smoke_does_not(tmp_path, monkey
         with pytest.raises(RuntimeError, match="opened"):
             post_train.main(argv + extra)
     assert asked == [True, False] and not (tmp_path / "campaign_20991231").exists()
+
+
+def test_a_stage_gives_the_campaigns_round_its_parts_and_stage_cs_is_the_campaign_as_before(setup, tmp_path, monkeypatch):
+    """Post-training §9 item 11 (multi-aircraft control D149): `run_campaign` is the round's skeleton; a stage gives it
+    its parts — the model at the start, the selection set, the draw, the speaking, the readout, the checkpoint's
+    identity — in that order; stage C's stage (`STAGE_C`, the default) runs the campaign it ran: a campaign run through a
+    stage that wraps `STAGE_C`'s parts leaves the same checkpoint, bit for bit."""
+    from dataclasses import fields as dataclass_fields
+
+    s = setup
+    short_round(monkeypatch, s)
+    settings = _settings(rounds=1, continuations=2)
+    called = []
+
+    def wrapped(name, part):
+        def call(*args, **kwargs):
+            called.append(name)
+            return part(*args, **kwargs)
+        return call
+
+    spy = post_train.Stage(**{f.name: wrapped(f.name, getattr(post_train.STAGE_C, f.name))
+                              for f in dataclass_fields(post_train.Stage)})
+    states = []
+    for name, stage in (("plain", post_train.STAGE_C), ("spied", spy)):
+        out = tmp_path / name
+        open_campaign(out, {"settings": asdict(settings)}, {"head": "x", "dirty": False}, {})
+        run_campaign(out, settings, _context(s), stage=stage)
+        states.append(torch.load(out / "round_0" / "checkpoint.pt", weights_only=False))
+    assert called == ["start_model", "selection", "draw", "speak", "readout", "record", "identity"]
+    assert states[0]["model"].keys() == states[1]["model"].keys()
+    assert all(torch.equal(states[0]["model"][k], states[1]["model"][k]) for k in states[0]["model"])
+    assert states[0]["identity"] == states[1]["identity"]
+    assert post_train.run_campaign.__defaults__[-1] is post_train.STAGE_C
+
+
+def test_a_chosen_round_opens_as_the_start_of_a_later_stage_with_its_identity(setup, tmp_path, monkeypatch):
+    """Post-training §9 item 12: `open_round` opens a campaign's round (its checkpoint's model, in eval mode, checked
+    against the campaign's identity on the base) and gives its identity; a round not done and a directory without a
+    campaign are refused."""
+    s = setup
+    short_round(monkeypatch, s)
+    settings = _settings(rounds=1, continuations=2)
+    out = tmp_path / "campaign"
+    open_campaign(out, {"settings": asdict(settings), "smoke": False}, {"head": "x", "dirty": False}, {})
+    context = _context(s)
+    run_campaign(out, settings, context)
+    model, identity = post_train.open_round(out, 0, context, formal=True)
+    state = torch.load(out / "round_0" / "checkpoint.pt", weights_only=False)
+    assert identity == state["identity"] and not model.training
+    assert all(torch.equal(value, state["model"][name]) for name, value in model.state_dict().items())
+    with pytest.raises(ValueError, match="not a round done"):
+        post_train.open_round(out, 1, context, formal=True)
+    with pytest.raises(FileNotFoundError):
+        post_train.open_round(tmp_path / "nowhere", 0, context, formal=True)
+    smoke = tmp_path / "smoke"
+    open_campaign(smoke, {"settings": asdict(settings), "smoke": True}, {"head": "x", "dirty": True}, {})
+    run_campaign(smoke, settings, context)
+    with pytest.raises(ValueError, match="a smoke campaign"):
+        post_train.open_round(smoke, 0, context, formal=True)
+    post_train.open_round(smoke, 0, context, formal=False)                 # a smoke start opens it
+
+
+def test_a_batch_commands_each_flight_once_with_windows_of_several_aircraft():
+    """Multi-aircraft control D146: windows that share any commanded flight (an anchor or a later aircraft) go to
+    different batches; stage C's windows of one aircraft as before."""
+    window = lambda indices: SimpleNamespace(signal_index=indices[0], signal_indices=tuple(indices))  # noqa: E731
+    windows = [window((1, 4)), window((2,)), window((4, 6)), window((3, 5)), window((5,))]
+    out = batches(windows, 10)
+    for batch in out:
+        held = [i for p in batch for i in windows[p].signal_indices]
+        assert len(held) == len(set(held))
+        assert [windows[p].signal_index for p in batch] == sorted(windows[p].signal_index for p in batch)
+    assert out == [[0, 1, 3], [2, 4]]

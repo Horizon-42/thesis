@@ -132,6 +132,80 @@ def stage_c_batch_scenario(s, monkeypatch) -> str:
     return digest.hash.hexdigest()
 
 
+def stage_c_campaign_scenario(s, tmp_path, monkeypatch) -> dict[str, str]:
+    """Stage C's campaign (post-training §9 item 11): (a) two rounds of its own draw, nothing stubbed; (b) two rounds whose
+    speaking writes informative groups, so that the pass updates the model. Each: the digest of its round records (the
+    commit, the time and the bytes of the groups written left out), its checkpoints' states and identities."""
+    import json
+    from dataclasses import asdict
+
+    from ts_transformer.experiments import post_train
+    from ts_transformer.post.scene import REAL
+    from ts_transformer.tests.test_post_train import _context, _settings
+
+    def digest_of(out):
+        digest = _Digest()
+        for r in range(2):
+            record = json.loads((out / f"round_{r}" / "round.json").read_text())
+            # the commit and the time, and the bytes of the groups written (information: a branch group of MC0 holds two
+            # fields more, `Sentence.until` and `Group.varied`, so its pickle is a few bytes longer), are left out
+            record.pop("git"), record.pop("finished_utc"), record.pop("groups_bytes")
+            digest.add(json.dumps(record, sort_keys=True))
+            state = torch.load(out / f"round_{r}" / "checkpoint.pt", weights_only=False)
+            digest.add(json.dumps(state["identity"], sort_keys=True))
+            for name, value in state["model"].items():
+                digest.add(name, value)
+            digest.add(repr(state["optimizer"]["param_groups"]))
+            for key, held in sorted(state["optimizer"]["state"].items()):
+                for name, value in sorted(held.items()):
+                    digest.add(key, name, torch.as_tensor(value))
+        return digest.hash.hexdigest()
+
+    out = {}
+    settings = _settings(rounds=2, per_kind={**dict.fromkeys(post_train.KINDS, 0), REAL: 1}, continuations=2)
+    drawn = tmp_path / "drawn"
+    post_train.open_campaign(drawn, {"settings": asdict(settings)}, {"head": "x", "dirty": False}, {})
+    post_train.run_campaign(drawn, settings, _context(s))
+    out["campaign drawn"] = digest_of(drawn)
+    settings = _settings(rounds=2, update_groups=1)
+    model, _ = post_train.start_model(_context(s), settings)
+    (group,) = _round(s, model, [_ahead(s["windows"][0])]).groups
+    rewarded = replace(group, continuations=(replace(group.continuations[0], reward=1.0), group.continuations[1]))
+
+    def speak(model, context, windows, settings, round_, directory, speakers):
+        torch.save([rewarded, rewarded], directory / "groups_0.pt")
+        return {"windows": len(windows)}
+
+    monkeypatch.setattr(post_train, "speak_round", speak)
+    monkeypatch.setattr(post_train, "draw_round", lambda context, per_kind, rng: ([_ahead(s["windows"][0])], {}))
+    updated = tmp_path / "updated"
+    post_train.open_campaign(updated, {"settings": asdict(settings)}, {"head": "x", "dirty": False}, {})
+    post_train.run_campaign(updated, settings, _context(s))
+    assert json.loads((updated / "round_1" / "round.json").read_text())["pass"]["updates"] == 2
+    out["campaign updated"] = digest_of(updated)
+    return out
+
+
+#: `stage_c_campaign_scenario`'s digests, written by stage C's campaign before the stage skeleton (c7a0b6b0's
+#: `run_campaign`, the CPU, one thread).
+CAMPAIGN_BEFORE_GENERALISATION = {
+    "campaign drawn": "7a1c9f9473c25cdd8e237e2089a6a7cd11aee7c9939746a61bb50c22802612d5",
+    "campaign updated": "41e218c4710fc0549da3ec89bd5546c55011fd0c2511c05bfbe29a2827dbb583",
+}
+
+
+def test_stage_cs_campaign_is_the_campaign_before_the_skeleton_bit_for_bit(setup, tmp_path, monkeypatch):
+    """D149, post-training §9 item 11: stage C's campaign through the round's skeleton (`Stage`, `STAGE_C`) writes the
+    records, checkpoints and identities that its campaign wrote before, bit for bit (a draw not stubbed, a pass that
+    updates)."""
+    threads = torch.get_num_threads()
+    torch.set_num_threads(1)
+    try:
+        assert stage_c_campaign_scenario(setup, tmp_path, monkeypatch) == CAMPAIGN_BEFORE_GENERALISATION
+    finally:
+        torch.set_num_threads(threads)
+
+
 #: `stage_c_scenario`'s digests, written by stage C's code before its generalisation (dev-two-tier-v4 c7a0b6b0, the CPU,
 #: one thread).
 BEFORE_GENERALISATION = {
