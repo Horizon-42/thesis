@@ -29,6 +29,16 @@ caller keeps and gives back, `Permitted`; `train.masked_log_probability` gives t
 the probability and the permission of "go-around" (D72); the words the procedure masks blocked (B6). The caller's input
 of the added modules (§7 item 5, ``extra``) is passed to the model at every row it encodes or says. `copy` gives chosen
 aircraft of a speaker, repeats permitted: their cache, procedure masks, words in force, go-arounds and records.
+
+**A row of several roles** (multi-aircraft control D150, §6.3 item 3; prior §7 item 3). The aircraft of a loop may join
+it at their own ticks, so one row of the batch (`say`) may hold aircraft of three roles (`ABSENT`, `OBSERVED`, `SAID`),
+each in that order along its own rows: the network runs once on the whole row; an absent aircraft's row is written into
+the cache as not present (`Past.present` false: no later row reads it) and changes nothing of it; an observed one's
+as `observe` writes it; a said one's words are drawn as `speak` draws them, with its numbers and masks. The mark of the
+first predicted step is each aircraft's own. The records of a row (``forbidden`` … ``drawn_probability``) are kept for
+every row in which some aircraft is said, ``[B, …]`` each, with ``said_rows`` the aircraft said in it; `permitted`
+gives each aircraft its own said rows. `observe` and `speak` are the forms of a row in which every aircraft has one role
+(`speak` is `say` with every aircraft said).
 """
 
 from __future__ import annotations
@@ -63,6 +73,9 @@ def class_words(column: int, classes: np.ndarray) -> np.ndarray:
                         np.where(classes == RUNWAY_GO_AROUND_CLASS, RUNWAY_GO_AROUND, classes - RUNWAY_FIXED_CLASSES))
     return classes - 1
 
+
+#: The roles of an aircraft in a row of a loop (module docstring, D150): not joined yet, in its observed rows, said.
+ABSENT, OBSERVED, SAID = 0, 1, 2
 
 #: The most go-arounds a flight may say in free generation (D68); a caller forbids "go-around" after them
 #: (`go_around_bound`).
@@ -193,6 +206,10 @@ class Speaker:
         self.permitted_own: list[np.ndarray] = []
         #: per row said: ``[B, 5]`` the probability of each word said in the distribution it was drawn from
         self.drawn_probability: list[np.ndarray] = []
+        #: per row said: ``[B]`` bool, the aircraft said in it (module docstring: a row of several roles)
+        self.said_rows: list[np.ndarray] = []
+        # each aircraft's role in the last row it was given (`ABSENT` before any)
+        self._role = np.full(len(finals), ABSENT, dtype=np.int64)
         # the go-arounds each aircraft has said (D68: a caller bounds them with `go_around_bound`; `go_arounds`)
         self._go_arounds = np.zeros(len(finals), dtype=np.int64)
         # each aircraft's time of the last row encoded or said: a row comes later
@@ -226,8 +243,8 @@ class Speaker:
             procedure.track(at.e_m, at.n_m, at.height_m, self._go_around())
         _, _, past = self.model.extend(rows, self.past, extra)
         self.past, self.procedure, self._last_s = past, procedure, times[:, -1]
+        self._role = np.full(len(self._heard), OBSERVED, dtype=np.int64)
 
-    @torch.no_grad()
     def speak(self, row: RowTensors, at: Position, numbers: np.ndarray, caller: Mapping[int, np.ndarray] | None = None,
               extra: Any = None, accept: Callable[[np.ndarray], None] | None = None) -> np.ndarray:
         """Say one row (``row``: its inputs, ``[B, 1]``; ``at``: where each aircraft is): ``[B, 5]`` words, in the
@@ -236,36 +253,63 @@ class Speaker:
         caller's last step with the row's words before the speaker keeps it (a closed loop's executor, vocabulary D80):
         when it refuses, the speaker is as it was (its cache's rows past the kept ones are written over). A row whose mark of
         the first predicted step is not, for each aircraft, whether nothing is in force yet is refused before any change
-        (the masks of the first step read the mark: a later row marked first would draw without "unchanged")."""
+        (the masks of the first step read the mark: a later row marked first would draw without "unchanged"). `say` with
+        every aircraft said."""
+        return self.say(row, at, np.full(len(self._heard), SAID, dtype=np.int64), numbers, caller, extra, accept)
+
+    @torch.no_grad()
+    def say(self, row: RowTensors, at: Position, roles: np.ndarray, numbers: np.ndarray,
+            caller: Mapping[int, np.ndarray] | None = None, extra: Any = None,
+            accept: Callable[[np.ndarray], None] | None = None) -> np.ndarray:
+        """One row of aircraft of several roles (module docstring; ``roles`` ``[B]``, each `ABSENT`, `OBSERVED` or
+        `SAID`, in that order along an aircraft's rows; the row present for each aircraft not absent): the said
+        aircraft's words, as `speak` says them, ``[B, 5]`` (`UNCHANGED` for the others, which are given to ``accept``
+        so). An observed aircraft's row is encoded as `observe` encodes it; an absent one's changes nothing of it.
+        Refused before any change: roles out of order (an aircraft is observed only before a row is said to it), a
+        row's presence not its role, a mark of the first predicted step that is not, for each said aircraft, whether
+        nothing is in force yet (and on no other aircraft)."""
         if row.present.shape[1] != 1:
             raise ValueError(f"a speaker says one row at a time, not {row.present.shape[1]}")
+        count = len(self._heard)
+        roles = np.asarray(roles)
+        if roles.shape != (count,) or not np.isin(roles, (ABSENT, OBSERVED, SAID)).all():
+            raise ValueError(f"a role (ABSENT, OBSERVED or SAID) for each of the {count} aircraft, got {roles!r}")
+        if (roles < self._role).any():
+            raise ValueError(f"aircraft {np.flatnonzero(roles < self._role)[:5].tolist()}: an aircraft's rows are absent, "
+                             f"then observed, then said")
+        said_now, present = roles == SAID, roles != ABSENT
+        if not np.array_equal(row.present[:, 0].cpu().numpy(), present):
+            raise ValueError("a row is present for each aircraft not absent, and only for those")
         nothing = np.array([heard.state is None for heard in self._heard])
         marked = row.first[:, 0].cpu().numpy()
-        if (marked != nothing).any():
-            wrong = np.flatnonzero(marked != nothing).tolist()
+        if (marked != (nothing & said_now)).any():
+            wrong = np.flatnonzero(marked != (nothing & said_now)).tolist()
             raise ValueError(f"aircraft {wrong[:5]}: the row's mark of the first predicted step is not whether nothing is "
                              f"in force yet (the first step is the row said first)")
         require_eval(self.model, "the speaker")
         numbers = np.asarray(numbers, dtype=np.float64)
-        if numbers.shape != (len(self._heard), len(COLUMNS)) or not ((numbers >= 0.0) & (numbers < 1.0)).all():
-            raise ValueError(f"the numbers of a row: [{len(self._heard)}, {len(COLUMNS)}] in [0, 1), not "
+        if numbers.shape != (count, len(COLUMNS)) or not ((numbers >= 0.0) & (numbers < 1.0)).all():
+            raise ValueError(f"the numbers of a row: [{count}, {len(COLUMNS)}] in [0, 1), not "
                              f"{numbers.shape}")
-        times = self._in_time_order(row.time_s)
+        times = row.time_s.cpu().numpy().astype(np.float64)
+        if not (times[present, 0] > self._last_s[present]).all():
+            raise ValueError("a row at or before the time of the last row encoded or said: rows come in time order")
         caller = dict(caller or {})
         # every change is made on copies, and kept only once every column of the row has a word
-        procedure = self.procedure.select(range(len(self._heard)))
+        procedure = self.procedure.select(range(count))
         procedure.track(at.e_m, at.n_m, at.height_m, self._go_around())
         h, tokens, past = self.model.extend(row, self.past, extra)
         g = h
-        count = len(self.in_force)
         said = np.zeros((count, 0), dtype=np.int64)
         permitted_row, forbidden_row, drawn_row = [], [], np.zeros((count, len(COLUMNS)))
+        others = torch.as_tensor(~said_now, device=h.device)[:, None]
         for column in range(len(COLUMNS)):
             logits = self.model.column_logits(column, g, tokens, row.valid, row.first)[:, 0]
             allowed = self._allowed(column, said, at, caller, procedure)
-            permitted = torch.as_tensor(allowed[:, : logits.shape[-1]], device=logits.device)
-            if allowed[:, logits.shape[-1]:].any():
+            if allowed[said_now, logits.shape[-1]:].any():
                 raise ValueError(f"column {COLUMNS[column]}: a mask permits a word the model has no class for")
+            # an aircraft not said draws a word that no one keeps: every class of the model permitted to it
+            permitted = torch.as_tensor(allowed[:, : logits.shape[-1]], device=logits.device) | others
             masked = logits.masked_fill(~permitted, float("-inf"))
             if torch.isneginf(masked).all(dim=-1).any():
                 raise ValueError(f"column {COLUMNS[column]}: an aircraft has no permitted word (D62)")
@@ -280,17 +324,23 @@ class Speaker:
             drawn_row[:, column] = drawn.gather(-1, chosen)[:, 0].double().cpu().numpy()
             g = self.model.after_choice(column, g, chosen, tokens)
             said = np.concatenate((said, class_words(column, chosen.cpu().numpy())), axis=1)
+        said = np.where(said_now[:, None], said, UNCHANGED)
         runway, go_around = self._runway_after(said[:, RUNWAY])
         blocked = {c: ~procedure.permitted(c, runway, go_around, at.e_m, at.n_m, at.height_m) for c in procedure.columns}
         heard = [aircraft.copy() for aircraft in self._heard]
-        for heard_b, step, height, time_s in zip(heard, said, at.height_m, row.time_s[:, 0].tolist()):
-            heard_b.hear(step, float(height), time_s)
+        for b in np.flatnonzero(said_now):
+            heard[b].hear(said[b], float(at.height_m[b]), float(row.time_s[b, 0]))
         procedure.after_row(at.e_m, at.n_m, at.height_m, go_around)      # a row that ends G starts the stretch (D64)
+        procedure.keep(self.procedure, ~present)                          # an absent aircraft takes nothing on
         if accept is not None:
             accept(said)
         # the row is said: kept
-        self.past, self.procedure, self._heard, self._last_s = past, procedure, heard, times[:, 0]
+        self.past, self.procedure, self._heard = past, procedure, heard
+        self._last_s = np.where(present, times[:, 0], self._last_s)
+        self._role = roles.astype(np.int64)
         self._go_arounds = self._go_arounds + (said[:, RUNWAY] == RUNWAY_GO_AROUND)
+        if not said_now.any():
+            return said
         for column, value in enumerate(forbidden_row):
             self.forbidden[column].append(value)
         self.go_around_probability.append(go_around_drawn)
@@ -300,23 +350,36 @@ class Speaker:
         self.permitted_times.append(row.time_s[:, 0].cpu().numpy().copy())
         self.permitted_own.append(row.own[:, 0].cpu().numpy().copy())
         self.drawn_probability.append(drawn_row)
+        self.said_rows.append(said_now.copy())
         return said
 
     def permitted(self) -> Permitted:
-        """The words every mask permitted at each row said so far (D96 item 3), for the caller to keep."""
+        """The words every mask permitted at each row said so far (D96 item 3), for the caller to keep: each aircraft's
+        own said rows, in order (module docstring: a row of several roles; an aircraft said in fewer rows than another
+        has its later rows padded as `Permitted.join` pads them)."""
         if not self.permitted_rows:
             raise ValueError("the speaker has said no row yet")
+        said = np.stack(self.said_rows, axis=1)                          # [B, rows]
+        rows = int(said.sum(axis=1).max())
+
+        def own_rows(value: np.ndarray, fill: Any) -> np.ndarray:        # [B, rows, ...] → each aircraft's said rows first
+            out = np.full((value.shape[0], rows, *value.shape[2:]), fill, dtype=value.dtype)
+            for b in range(value.shape[0]):
+                kept = value[b, said[b]]
+                out[b, : len(kept)] = kept
+            return out
+
         masks = []
         for c in range(len(COLUMNS)):
             width = max(row[c].shape[1] for row in self.permitted_rows)
-            masks.append(np.stack([np.pad(row[c], ((0, 0), (0, width - row[c].shape[1]))) for row in self.permitted_rows],
-                                  axis=1))
-        return Permitted(tuple(masks), np.stack(self.permitted_times, axis=1), np.stack(self.permitted_own, axis=1),
-                         self.temperature)
+            masks.append(own_rows(np.stack([np.pad(row[c], ((0, 0), (0, width - row[c].shape[1])))
+                                            for row in self.permitted_rows], axis=1), False))
+        return Permitted(tuple(masks), own_rows(np.stack(self.permitted_times, axis=1), np.nan),
+                         own_rows(np.stack(self.permitted_own, axis=1), 0.0), self.temperature)
 
     def copy(self, indices: Sequence[int]) -> Speaker:
         """A speaker of the aircraft ``indices`` of this one (repeats permitted), in that order (D96 item 5): their cache,
-        the state of their procedure masks, their words heard, their go-arounds and their records. Continued with the
+        the state of their procedure masks, their words heard, their go-arounds, their roles and their records. Continued with the
         same inputs and numbers, a copy of every aircraft says what this speaker says, bit for bit."""
         indices = list(indices)
         out = object.__new__(Speaker)
@@ -335,6 +398,8 @@ class Speaker:
         out.permitted_times = [row[indices] for row in self.permitted_times]
         out.permitted_own = [row[indices] for row in self.permitted_own]
         out.drawn_probability = [row[indices] for row in self.drawn_probability]
+        out.said_rows = [row[indices] for row in self.said_rows]
+        out._role = self._role[indices].copy()
         out._go_arounds = self._go_arounds[indices].copy()
         out._last_s = self._last_s[indices].copy()
         return out

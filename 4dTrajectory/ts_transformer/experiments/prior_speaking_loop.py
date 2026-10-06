@@ -16,6 +16,16 @@ time limit, or the dynamics), or when the caller ends it (`end`: a loss of separ
 flight is halted and keeps, as its inputs, the finite state of the row it ended in: the speaker still says its rows
 (a batch is said together), which are not its sentence's. Its outcome is the judge's (`Loop.outcome`, item 6). This
 module imports nothing else of `autopilot/` (`tests/test_architecture.py`, D69).
+
+**Join ticks** (multi-aircraft control D150, §6.3 item 4; prior §7 item 7). The flights of the loop may join it at their
+own ticks (the start's `Loop.join_ticks`, read from the loop: one definition): at tick t a flight is absent before its
+join tick j, observed from it to its first predicted step (its own rows 0 … s − 1, the start's observed rows), then
+said while it is flown. `step` advances one tick for every flight, each by its own clock (the speaker's row of several
+roles, `Speaker.say`; the executor's step once the loop's clock reaches tick s, where a flight of join tick 0 starts);
+`observe` is the phase of a loop whose join ticks are all 0. Each flight's records, words, states and sentence are of its
+own rows from its row 0 (`sentences`, `said`, `states`, `generated`). A landing may be added to chosen flights' landings
+while the loop runs (`add_landing`, `LoopRows.add_landing`); a copy keeps them and the join ticks. With every join tick 0
+the loop is the loop without join ticks, bit for bit.
 """
 
 from __future__ import annotations
@@ -34,11 +44,11 @@ from ts_transformer.instructions.labeller.interval import interval_rows
 from ts_transformer.instructions.words import COLUMNS, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words
 from ts_transformer.prior.batch import RowTensors, SentenceRows
 from ts_transformer.prior.inputs import own_flight_key
-from ts_transformer.prior.landings import LandingIndex, utc_s
+from ts_transformer.prior.landings import Landing, LandingIndex, utc_s
 from ts_transformer.prior.loop import LoopRows
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.procedure import PER_AIRCRAFT, Final
-from ts_transformer.prior.speaker import Permitted, Speaker, go_around_bound
+from ts_transformer.prior.speaker import ABSENT, OBSERVED, SAID, Permitted, Speaker, go_around_bound
 
 #: The predicted rows the speaker's cache has room for at first (it grows as the flights need, `model.Past.grown`; the
 #: loop's time limit is not the speaker's to read, vocabulary D90).
@@ -95,20 +105,23 @@ class SpeakingLoop:
         self.flights = [flights[i] for i in self.order]
         self.geometries = [geometries[f["airport"]] for f in self.flights]
         self.finals = [finals[g.code] for g in self.geometries]
-        self.speaker = Speaker(model, words, self.finals, capacity=self.start + FIRST_ROWS, temperature=temperature,
-                               masks=masks)
+        #: each flight's join tick (module docstring): the start's
+        self.join_ticks = loop.join_ticks.copy()
+        self.speaker = Speaker(model, words, self.finals, capacity=int(self.join_ticks.max()) + self.start + FIRST_ROWS,
+                               temperature=temperature, masks=masks)
         # the inputs of a row: the prior's one function of a loop's row (D96 item 4), each flight's own landings (D105)
         self.rows_of = LoopRows(self.geometries, landings, [own_flight_key(f) for f in self.flights],
                                 np.array([utc_s(f["entry_time_utc"]) for f in self.flights]),
                                 np.array([r.first_row for r in rows]), self.start, variant=variant,
-                                interval_s=interval_s, step_s=words.spec.step_s, device=device)
+                                interval_s=interval_s, step_s=words.spec.step_s, device=device,
+                                join_ticks=self.join_ticks)
         shape = (self.start * self.every, len(STATE_COLUMNS))
         wrong = [i for i in self.order if np.shape(observed[i]) != shape]
         if wrong:
             raise ValueError(f"flights {wrong[:5]}: observed rows of shape {np.shape(observed[wrong[0]])}, not the {shape} "
                              f"before the first predicted step (the start's, `start_moved`)")
         self.observed = np.stack([observed[i] for i in self.order])                 # [B, start·every, 6]
-        #: the Δ row the next `observe` or `step` reads
+        #: the tick the next `observe` or `step` reads (the Δ row of a flight of join tick 0)
         self.t = 0
         #: the flights still flown: not done by the executor, not ended by the caller
         self.alive = np.ones(count, dtype=bool)
@@ -127,8 +140,18 @@ class SpeakingLoop:
 
     @property
     def observing(self) -> bool:
-        """Whether an observed row is still to be encoded (`observe`) before the first predicted step."""
-        return self.t < self.start
+        """Whether an observed row is still to be encoded (`observe`) before the first predicted step: the phase of a
+        loop whose join ticks are all 0 (module docstring)."""
+        return self.t < self.start and not self.join_ticks.any()
+
+    def roles(self) -> np.ndarray:
+        """``[B]`` each flight's role at the next tick (`speaker.ABSENT`, `OBSERVED` or `SAID`, by its own clock)."""
+        own = self.t - self.join_ticks
+        return np.where(own < 0, ABSENT, np.where(own < self.start, OBSERVED, SAID))
+
+    def own_row(self) -> np.ndarray:
+        """``[B]`` each flight's own Δ row at the next tick (negative: it has not joined)."""
+        return self.t - self.join_ticks
 
     def observe(self, extra: Any = None) -> RowTensors:
         """Encode the next observed row (its states, the 2 s row before it; row 0 has no motion, D60), with the caller's
@@ -147,31 +170,75 @@ class SpeakingLoop:
                 self._flown[b].append(self.current[b])
         return tensors
 
+    def _at(self, current: np.ndarray, previous: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Each flight's state at the next tick, the 2 s row before and whether that row is its own (module docstring):
+        a said flight's flown (``current``, ``previous``), an observed one's observed (row 0 has no motion, D60), an
+        absent one's its observed row 0 (finite: its row is not present)."""
+        own = self.own_row()
+        r = np.clip(own, 0, self.start - 1) * self.every
+        index = np.arange(len(self.order))
+        at, before = self.observed[index, r].copy(), self.observed[index, np.maximum(r - 1, 0)].copy()
+        known = (own >= 0) & (r > 0)
+        said = own >= self.start
+        if said.any():
+            at[said], before[said], known[said] = current[said], previous[said], True
+        return at, before, known
+
     def step(self, numbers: np.ndarray, caller: Mapping[int, np.ndarray] | None = None, extra: Any = None
              ) -> np.ndarray:
         """Say one row of every flight and fly it (module docstring): ``numbers`` ``[B, 5]`` the caller's uniform
         numbers (`Speaker.speak`), ``caller`` its masks by column (the runway column's joined with the bound of D68),
         ``extra`` its input of the added modules. ``[B, 5]`` the words said (an ended flight's too, which are not its
-        sentence's). A row the executor refuses (`start.RowRefused`, `start.GoAroundBeyondMost`) is refused whole: the
-        loop is as it was."""
+        sentence's; `UNCHANGED` for a flight absent or observed at the tick). A row the executor refuses
+        (`start.RowRefused`, `start.GoAroundBeyondMost`) is refused whole: the loop is as it was. With join ticks, a
+        tick advances every flight by its own clock (module docstring)."""
         if self.observing:
             raise ValueError(f"{self.start - self.t} observed rows are still to be encoded (`observe`)")
         if not self.alive.any():
             raise ValueError("every flight of the loop has ended")
-        tensors, at = self.rows_of(self.t, self.current, self.before, True, self.speaker.heard)
+        roles = self.roles()
+        said_now = roles == SAID
+        current, previous = self.current, self.before
+        beginning = np.zeros(len(self.order), dtype=bool)
+        if self.join_ticks.any():
+            # the flights at their first predicted step, each from the state its executor holds it in: on copies, kept
+            # once the row is (a row refused leaves the loop as it was)
+            beginning = self.own_row() == self.start
+            rows_now = self.loop.rows()
+            if current is None:                              # the first tick of a loop with join ticks
+                current, previous = rows_now, self.observed[:, self.start * self.every - 1].copy()
+            else:
+                current, previous = current.copy(), previous.copy()
+            current[beginning] = rows_now[beginning]
+            previous[beginning] = self.observed[beginning, self.start * self.every - 1]
+            at_now, before_now, known = self._at(current, previous)
+        else:
+            at_now, before_now, known = current, previous, True
+        tensors, at = self.rows_of(self.t, at_now, before_now, known, self.speaker.heard)
         masks = dict(caller or {})
         bound = go_around_bound(self.speaker.go_arounds, self.words, int(self.speaker.n_candidates.max()),
                                 self.loop.most_go_arounds)
         masks[RUNWAY] = bound & masks[RUNWAY] if RUNWAY in masks else bound
         before = self.speaker.in_force            # the runway in force under which the row's runway word is drawn
         flown: list[tuple[np.ndarray, np.ndarray]] = []
+        flying = self.t >= self.start                        # the executor's clock: its step 0 is tick s
+        if flying and self.loop.steps != self.t - self.start:
+            raise ValueError(f"the loop's executor is at its step {self.loop.steps}, not tick {self.t}'s")
         # the executor flies the row before the speaker keeps it: a row it refuses (vocabulary D80) leaves the speaker,
         # the records and the loop's row as they were
-        words_row = self.speaker.speak(tensors, at, numbers, masks, extra,
-                                       accept=lambda said: flown.append(self.loop.step(said)))
-        (rows, done), = flown
+        accept = lambda said: flown.append(self.loop.step(said)) if flying else None      # noqa: E731
+        words_row = (self.speaker.speak(tensors, at, numbers, masks, extra, accept=accept) if said_now.all()
+                     else self.speaker.say(tensors, at, roles, numbers, masks, extra, accept=accept))
         self._inputs.append(_on_cpu(tensors))
-        for b in np.flatnonzero(self.alive):
+        self.current, self.before = current, previous
+        for b in np.flatnonzero(beginning):
+            self._flown[b].append(self.current[b])
+        if not flying:
+            self.t += 1
+            return words_row
+        (rows, done), = flown
+        speaking = self.alive & said_now
+        for b in np.flatnonzero(speaking):
             final = self.finals[b][before[b].runway] if before[b] is not None else None
             self._said[b].append(words_row[b])
             self._flown[b] += list(rows[b])
@@ -180,10 +247,16 @@ class SpeakingLoop:
             self._on_final[b].append(final is not None and bool(final.inside(np.array(at.e_m[b]), np.array(at.n_m[b]))))
             self._blocked[b].append({c: mask[b] for c, mask in self.speaker.procedure_blocked[-1].items()})
         self._halt(done)
-        self.before = np.where(self.alive[:, None], rows[:, -2] if self.every > 1 else self.current, self.before)
-        self.current = np.where(self.alive[:, None], rows[:, -1], self.current)
+        moved = (self.alive & said_now)[:, None]
+        self.before = np.where(moved, rows[:, -2] if self.every > 1 else self.current, self.before)
+        self.current = np.where(moved, rows[:, -1], self.current)
         self.t += 1
         return words_row
+
+    def add_landing(self, flights: Sequence[int], landing: Landing) -> None:
+        """``landing`` added to the landings of the flights ``flights`` (places in ``order``; module docstring): the rows
+        after its time count it (`LoopRows.add_landing`)."""
+        self.rows_of.add_landing(flights, landing)
 
     def end(self, flights: np.ndarray) -> None:
         """The caller ends the flights ``flights`` (``[B]`` bool) after the row said last (a loss of separation,
@@ -211,7 +284,8 @@ class SpeakingLoop:
         out = []
         for b, flight in enumerate(self.flights):
             said = len(self._said[b])
-            rows = self._inputs[: self.start + said]
+            join = int(self.join_ticks[b])                    # its own rows: from its join tick
+            rows = self._inputs[join: join + self.start + said]
             slots = len(self.geometries[b].candidates)
             targets = np.full((len(rows), len(COLUMNS)), UNCHANGED, dtype=np.int64)
             targets[self.start:] = np.array(self._said[b], dtype=np.int64).reshape(said, len(COLUMNS))
@@ -237,6 +311,7 @@ class SpeakingLoop:
         out.loop, out.speaker, out.rows_of = self.loop.copy(index), self.speaker.copy(index), self.rows_of.select(index)
         out.order, out.words, out.every, out.start, out.t = [self.order[i] for i in index], self.words, self.every, \
             self.start, self.t
+        out.join_ticks = self.join_ticks[index].copy()
         out.flights, out.geometries = [self.flights[i] for i in index], [self.geometries[i] for i in index]
         out.finals = [self.finals[i] for i in index]
         out.observed, out.alive, out.ended = self.observed[index].copy(), self.alive[index].copy(), self.ended[index].copy()

@@ -241,6 +241,15 @@ class ProcedureMasks:
         out.gathered = None if self.gathered is None else self.gathered.take(np.asarray(indices, dtype=np.int64))
         return out
 
+    def keep(self, earlier: ProcedureMasks, aircraft: np.ndarray) -> None:
+        """The state of the aircraft ``aircraft`` (``[B]`` bool) set back to ``earlier``'s (a copy of these masks, the
+        same aircraft): a row that is not one of theirs takes nothing on (an aircraft that has not joined its loop,
+        multi-aircraft control D150)."""
+        for name in ("joined", "dipped", "cleared"):
+            value = getattr(self, name).copy()
+            value[aircraft] = getattr(earlier, name)[aircraft]
+            setattr(self, name, value)
+
     def track(self, e: np.ndarray, n: np.ndarray, height_m: np.ndarray, go_around: np.ndarray) -> None:
         """Each aircraft's joined and dipped taken on to its newest row at ``(e, n)``, ``height_m`` above E, with G
         ``go_around`` in force before the row (while G, nothing is kept: the stretch starts again after it)."""

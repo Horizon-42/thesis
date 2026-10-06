@@ -68,6 +68,13 @@ class LandingIndex:
         payload = json.dumps({"landings": rows, "sealed": self.sealed}, separators=(",", ":"))
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
+    def with_landing(self, landing: Landing) -> LandingIndex:
+        """These landings and ``landing`` (a landing that a loop adds, multi-aircraft control D150, §6.3 item 5), in time
+        order; the index's checks hold: a landing on a sealed test day or on a day outside the split, a runway that is no
+        candidate and a second landing of one flight are refused."""
+        kept = sorted((*self.landings, landing), key=lambda item: (item.time_s, item.flight_key))
+        return LandingIndex(self.runways, tuple(kept), self.sealed, self.days)
+
     def counts_before(self, time_s: np.ndarray, *, without: str) -> np.ndarray:
         """``[T, len(runways)]``: the landings on each candidate in ``[t − 30 min, t)`` at each UTC time ``time_s``, less
         the landing of the flight ``without`` (its own, which must be in the index)."""

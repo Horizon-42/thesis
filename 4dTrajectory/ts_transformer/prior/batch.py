@@ -215,19 +215,21 @@ def collate(sentences: Sequence[SentenceRows], device: torch.device) -> RowTenso
 
 def row_tensors(time_s: np.ndarray, own: np.ndarray, candidates: Sequence[np.ndarray], runway_in_force: np.ndarray,
                 go_around: np.ndarray, heading_in_force: np.ndarray, words_in_force: np.ndarray, since: np.ndarray,
-                first: np.ndarray, asked: np.ndarray, device: torch.device) -> RowTensors:
+                first: np.ndarray, asked: np.ndarray, device: torch.device, present: np.ndarray | None = None
+                ) -> RowTensors:
     """One Δ row of a batch of aircraft (``[B, 1]``), as a loop gives a speaker the row it is about to say (§7 item 2):
     each aircraft's row inputs (`inputs.state_inputs`, `inputs.Heard.inputs`), its candidates ``[K_b, F]`` padded to the
-    most; ``first`` which aircraft are at their first predicted step, ``asked`` which are at or after it. The row is
-    present; it has no targets (the speaker chooses them), so they are 0. `collate` gives a sentence's rows the same
-    tensors (tested)."""
+    most; ``first`` which aircraft are at their first predicted step, ``asked`` which are at or after it; ``present``
+    which aircraft's row it is (an aircraft that has not joined its loop yet has none, multi-aircraft control D150;
+    every aircraft's when not given). It has no targets (the speaker chooses them), so they are 0. `collate` gives a
+    sentence's rows the same tensors (tested)."""
     count = len(time_s)
     slots, width = max(len(c) for c in candidates), candidates[0].shape[1]
     padded = np.zeros((count, 1, slots, width), dtype=np.float32)
     valid = np.zeros((count, slots), dtype=bool)
     for b, vectors in enumerate(candidates):
         padded[b, 0, : len(vectors)], valid[b, : len(vectors)] = vectors, True
-    one = np.ones((count, 1), dtype=bool)
+    one = np.ones((count, 1), dtype=bool) if present is None else np.asarray(present, dtype=bool).reshape(count, 1)
     arrays = (np.asarray(time_s, dtype=np.float32)[:, None], np.asarray(own, dtype=np.float32)[:, None], padded, valid,
               np.asarray(runway_in_force, dtype=np.int64)[:, None], np.asarray(go_around, dtype=bool)[:, None],
               np.asarray(heading_in_force, dtype=np.float32)[:, None], np.asarray(words_in_force, dtype=np.int64)[:, None],

@@ -132,6 +132,7 @@ class Straight:
         self.ends = 3 + 2 * np.arange(len(starts))
         self.steps = 0
         self.halted = np.zeros(len(starts), dtype=bool)
+        self.join_ticks = np.zeros(len(starts), dtype=np.int64)        # every flight from the first tick (D150)
         self.executor = type("Done", (), {"done_cycle": torch.as_tensor(2 * every * self.ends - 1)})()
 
     def rows(self) -> np.ndarray:
