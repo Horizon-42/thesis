@@ -44,7 +44,8 @@ information and never compared (prior D108). A formal campaign needs its intent 
 under the campaign's name (its directory's) before it starts (L27). RESUMABLE: a round is done when its checkpoint is
 there (the last file it writes); a rerun with the same inputs and settings continues from the last checkpoint, a round
 left half done is moved aside as ``round_<r>.aborted-<UTC>`` (outline E8) and run again; other inputs are refused. A
-rerun may raise the rounds and change nothing else (D157): the campaign goes on to the new count. The recorded paths
+rerun may raise the rounds and change nothing else (D157): the campaign goes on to the new count, unless its val read
+is claimed (P47: the round would then be chosen after the val days were read). The recorded paths
 are compared as this checkout reads them (`inputs_here`: a campaign recorded in a worktree resumes from another
 checkout). Every random number of a round comes from the seed and the round (the draw, the speaking's, the data term's
 sentences and its dropout, `pass_seed`), so a resumed campaign is the campaign run through, a raised one the campaign
@@ -99,7 +100,7 @@ from ts_transformer.post.scene import (
 from ts_transformer.post.traffic import opens_inside_loss
 from ts_transformer.post.traffic_attention import TrafficConfig, add_traffic_attention, parameter_groups
 from ts_transformer.prior.batch import RowTensors, collate
-from ts_transformer.prior.checkpoint import OpenedPrior, open_prior
+from ts_transformer.prior.checkpoint import OpenedPrior, open_prior, validation_claim
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.procedure import PROCEDURE_MASKS, airport_finals
 from ts_transformer.prior.source import ArtefactSource
@@ -113,6 +114,9 @@ KINDS = (REAL, INSERTED, LEADER_MOVED, MOVED_START)
 INTENTS = REPO_ROOT / "4dTrajectory" / "ts_transformer" / "docs" / "experiments" / "intents.json"
 #: The paths among a campaign's inputs (``campaign.json``), read as this checkout reads them (`inputs_here`, D157).
 INPUT_PATHS = ("prior", "instructions", "executor", "windows", "procedure_root")
+#: The reader's name in the claim of a campaign's val read (prior D119; `post_validation`'s, named here so that a raise
+#: of the rounds is refused once the claim is made, P47).
+CLAIM_READER = "post_validation"
 
 
 @dataclass(frozen=True)
@@ -809,7 +813,8 @@ def _but_rounds(inputs: Mapping[str, Any]) -> dict[str, Any]:
 def open_campaign(out: Path, inputs: dict[str, Any], git: dict[str, Any], checks: Any) -> dict[str, Any]:
     """``campaign.json``: a new campaign's, or a resume's. A resume is refused unless its inputs are the record's — the
     recorded paths as this checkout reads them (`inputs_here`), the rounds left out — and its rounds at least the
-    record's; more rounds raise the record's count (D157), its paths kept as recorded. Each resume adds its entry: the
+    record's; more rounds raise the record's count (D157), its paths kept as recorded, and are refused once the
+    campaign's val read is claimed (`post_validation`, P47), spent or not. Each resume adds its entry: the
     time, the commit, the checks, the paths it read and the rounds before and after it. A round left half done (its
     directory without its checkpoint) is moved aside as ``round_<r>.aborted-<UTC>``."""
     path = out / "campaign.json"
@@ -824,6 +829,9 @@ def open_campaign(out: Path, inputs: dict[str, Any], git: dict[str, Any], checks
         if after < before:
             raise SystemExit(f"{out}: a campaign of {before} rounds; a resume may raise the rounds, not lower them to "
                              f"{after}")
+        if after > before and validation_claim(out, CLAIM_READER) is not None:
+            raise SystemExit(f"{out}: its val read is claimed ({validation_claim(out, CLAIM_READER)}); its rounds are not "
+                             f"raised after it (P47)")
         left = out / f"round_{done_rounds(out)}"
         if left.exists():
             aborted = left.with_name(f"{left.name}.aborted-{utc_now().replace(':', '')}")

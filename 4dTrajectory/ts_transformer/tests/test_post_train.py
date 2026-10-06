@@ -22,6 +22,7 @@ from ts_transformer.experiments.post_train import (
 from ts_transformer.autopilot.start import Start, start_moved
 from ts_transformer.instructions.artefact import closed_loop_sentences
 from ts_transformer.post.scene import INSERTED, LEADER_MOVED, MOVED_START, NO_START_MOVE, REAL
+from ts_transformer.prior.checkpoint import claim_validation_read
 from ts_transformer.prior.source import ArtefactSource
 from ts_transformer.tests.test_post_branches import _ahead, _round
 from ts_transformer.tests.test_post_window_loop import CPU, DELTA, setup  # noqa: F401
@@ -569,7 +570,8 @@ def test_a_campaign_raised_to_more_rounds_is_the_campaign_of_that_count_from_its
 
 def test_a_resume_may_raise_the_rounds_and_change_nothing_else(tmp_path):
     """D157: fewer rounds, or more rounds with another setting or input changed, are refused by name, and the record is
-    left as it was."""
+    left as it was; P47: once the val read is claimed (spent or not), the rounds are not raised, a resume of the same
+    count still opens."""
     settings, git = _settings(rounds=3), {"head": "x", "dirty": False}
     out = tmp_path / "campaign"
     open_campaign(out, _inputs(settings, tmp_path), git, {})
@@ -583,6 +585,11 @@ def test_a_resume_may_raise_the_rounds_and_change_nothing_else(tmp_path):
         with pytest.raises(SystemExit, match="other inputs or settings"):
             open_campaign(out, changed, git, {})
     assert (out / "campaign.json").read_text() == written
+    claim_validation_read(out, post_train.CLAIM_READER, tmp_path / "validation", {"round": 0, "device": "cpu"})
+    with pytest.raises(SystemExit, match=r"val read is claimed .*not raised after it \(P47\)"):
+        open_campaign(out, _inputs(replace(settings, rounds=4), tmp_path), git, {})
+    assert (out / "campaign.json").read_text() == written
+    assert open_campaign(out, _inputs(settings, tmp_path), git, {})["resumed"][0]["rounds"] == {"before": 3, "after": 3}
 
 
 def test_a_campaign_recorded_in_a_worktree_resumes_from_another_checkout(tmp_path, monkeypatch):

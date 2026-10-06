@@ -91,6 +91,11 @@ def test_the_chosen_round_reads_the_val_days_once(campaign, tmp_path):
     with pytest.raises(ValueError, match="claimed by"):
         validation.main(_argv(out, tmp_path / "again"))
     assert not (tmp_path / "again").exists() and [a for a in asked if a[0] == "split"] == [("split", "val", True)]
+    # P47: the campaign's rounds are not raised after its val read
+    record = json.loads((out / "campaign.json").read_text())
+    raised = {**record["inputs"], "settings": {**record["inputs"]["settings"], "rounds": 2}}
+    with pytest.raises(SystemExit, match="P47"):
+        open_campaign(out, raised, {"head": "x", "dirty": False}, {})
 
 
 def test_a_read_that_stopped_runs_again_only_as_the_same_read(campaign, tmp_path, monkeypatch):

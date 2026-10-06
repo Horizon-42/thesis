@@ -40,7 +40,7 @@ import torch
 
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
 from ts_transformer.experiments.post_train import (
-    CAMPAIGN_SCHEMA, done_rounds, inputs_here, open_context, readout_pool, round_model, selection_readout,
+    CAMPAIGN_SCHEMA, CLAIM_READER, done_rounds, inputs_here, open_context, readout_pool, round_model, selection_readout,
     selection_windows, settings_of, split_data, window_record,
 )
 from ts_transformer.experiments.post_window_loop import checked_edges
@@ -52,8 +52,6 @@ from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 #: The format of the readout's files (``config.json``, ``readout.json``).
 VALIDATION_SCHEMA = "ts-post-validation-v1"
-#: The reader's name in the claim of the val read (prior D119).
-CLAIM_READER = "post_validation"
 
 
 def main(argv: list[str] | None = None) -> int:
