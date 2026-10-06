@@ -13,10 +13,11 @@ they start with `4dTrajectory/` or `.claude/`.
 | MC0 · stage A (vocabulary §6 item 5) | dev-multi-control | Built, reviewed, committed (9c98a8d6) |
 | MC0 · stage B (prior §7 items 2, 3, 7) | dev-multi-control | Built, reviewed, committed (d7bf55f5) |
 | MC0 · the silent aircraft (multi-aircraft control §6.2 item 4) | dev-multi-control | Checked by a test (in d7bf55f5): it holds |
-| MC0 · stage C (post-training §9) | dev-multi-control | The reference written (3a9b7153); the generalisations next |
-| MC1 · `multi/`, `experiments/multi_windows.py` | dev-multi-control | Not started |
-| Stage B's steps after C10 (notes/stage_d.md "二") | dev-two-tier-v4 | Wait for C10's end |
-| MC0's checks and MC1's census on real data ("三") | dev-multi-control | Wait for C10's end and "二" |
+| MC0 · stage C (post-training §9 items 1–3, 7–9, 11, 12) | dev-multi-control | Built, reviewed, committed (3a9b7153, 80fe774c, 648b6591, 5e456406, a1ea664f) |
+| MC1 · `multi/`, `experiments/multi_windows.py` | dev-multi-control | Built, reviewed, committed (e6f0e564); not run on real data |
+| The full ts suite on dev-multi-control (a1ea664f) | dev-multi-control | 1,918 passed, 1 skipped (8 workers, 10.6 min, 2026-10-06 after C10) |
+| Stage B's steps after C10 (notes/stage_d.md 一 1–5) | dev-two-tier-v4 | Items 1–4 done 2026-10-07 (§6); item 5, the browser check, next |
+| MC0's checks and MC1's census on real data | dev-multi-control | After C14's rounds (outline §4 item 7) |
 
 ## 1 The branches (2026-10-06)
 
@@ -81,8 +82,54 @@ predicted step the grammar permits "unchanged" in every column (rule 3 acts only
 said; the procedure masks always permit "unchanged", D64). Under a mask of "unchanged" only, the flight says
 "unchanged" with probability 1 and its rows' log-probability under the records is 0 (the test).
 
-## 4 MC0 · stage C (in progress)
+## 4 MC0 · stage C: post-training §9 items 1–3, 7–9, 11, 12
 
-The reference of D149 (3a9b7153, `tests/test_post_generalised.py`): stage C's window loop on a real window, window A
-and window B with their samples, two branch rounds and the samples of a group, as digests written by c7a0b6b0's code
-(the CPU, one thread). It passes on MC0 A and B: stages A's and B's changes leave stage C's outputs as they were.
+Each generalisation keeps stage C's behaviour bit for bit (D149): `tests/test_post_generalised.py` holds digests written
+by c7a0b6b0's code (stage C before any change; the CPU, one thread) — the traffic module's state (names, shapes, first
+values: C10's checkpoints load), the window loop of a real window, of window A and of window B with their samples, a
+stage C batch whose first window ends while the other flies on, two branch rounds and a group's samples, and two
+campaigns of two rounds (stage C's own draw; a pass that updates) — and passes after every commit.
+
+| Commit | Items | Review (opus reviewer, D131's standard) |
+|---|---|---|
+| 3a9b7153 | the reference | — |
+| 80fe774c | 1 (`Joined`, `Window.joined`), 2 (`commanded_landings`), 3 (`step_losses`, `answered_loss`, `scene_aircraft`), 7 (a caller's token part: `TokenPart`, `add_token_part`, `Traffic.part`) | S2 fixed: the module's state pinned against the old code |
+| 648b6591 | 8: the window loop of several commanded aircraft (join steps, each row's others, a caller's rule of who answers, silent aircraft, a landed aircraft's landing to its window's others, the window's end) | S2 fixed: the silent mask on rows still flown only (a stage C row ended with its window is said on as before); tests of a compressed window and of token values. To the designer: the wake minimum behind a commanded leader (requests item 7) |
+| 5e456406 | 9: branch training (`Rules`, `stage_c_rules`; a continuation copies the window, the varied aircraft draws new numbers, the others go on from their streams; `Sentence.until`, `Group.varied`) | S1 fixed: an aircraft ended before the window's last branch point made every such window differ; S2 fixed: a crash at a point that is an aircraft's first predicted step, a test that could not catch a wrong stream |
+| a1ea664f | 11 (`Stage`, `STAGE_C`: the round's skeleton), 12 (`open_round`, a formal start refusing a smoke campaign) | S2 fixed: a reference against the old campaign, the smoke refusal, the window's record as a part of the stage |
+
+The review's depth: after the user's word of 2026-10-06 ("注意review的深度"), every review order names review_guide §3
+step 6 and §6 and the stage's checklist (§5), and only S1 and cheap S2 are acted on.
+
+## 5 MC1 · the census (e6f0e564)
+
+`multi/windows.py` (the windows of D146: `Anchors`, `window_of`, `compressed`, `Drawn`, `left_out`), `multi/census.py`
+(the losses of a window's steps by pair — `commanded_commanded`, `commanded_answers`, `records_kept`, `recorded_only`
+— on the records and on the closed-loop states, the baseline of §5 item 4), `experiments/multi_windows.py` (train and
+select, each span and kind, records and baseline, a scratch directory, each split written as it is done); the import
+rules of §10 in `tests/test_architecture.py`. Review: S1 fixed (the baseline's split of D145), S2 fixed (the baseline
+judged to its own end; one rule of a commanded leader's threshold; tests that can fail). The reviewer's estimate of the
+formal size: about 16–45 h in one process (requests item 18). Not run on real data.
+
+## 6 Stage B's steps after C10 (notes/stage_d.md 一; outline §4 item 6)
+
+Done on `dev-two-tier-v4` in `.claude/worktrees/two-tier-v4` with no other job on the host or the GPU; the details in
+stage B's log, §6.
+
+1. **B14's real-data check** (2026-10-06): B5's fold `C_full_s1337/KRDU` spoken again on the select days with the batch
+   masks, its readout's options (200 flights, 2 samples, seed 1337, chunk 400, CUDA), into a scratch directory: all 400
+   sentences word for word its readout's, and every other field of `sentences.npz` (states, probabilities, procedure
+   blocks) equal.
+2. **C13's check on the GPU** (2026-10-06; reading: one smoke round at C10's settings with 32 windows of each kind and 20
+   select windows an airport, one process against two speaking workers): the draw, the windows, the speaking record,
+   the groups' bytes, the selection readout, the pass's numbers and the identity identical; the weights within 2.0e-7
+   (float rounding of the pass after workers, as `post_train`'s docstring says).
+3. **The base's speed** (2026-10-06): `4dTrajectory/outputs/POOLED/speed/prior_base_20261006/speed.json` (`model_speed`,
+   CPU one thread and CUDA, batch 1 and 400).
+4. **The re-export** (2026-10-07): `sha256sum -c` of `prior_base_20261006` before and after: both OK. A's
+   `closed_loop_v12_20261005` and B's six sets of `prior_sets_20261006` exported in the new formats with the same ids,
+   B's naming the speed readout. The old sets moved aside first (the user's choice of 2026-10-07: the same id is the
+   same directory, which an export never overwrites): `<set-id>.v10-old` (A) and `<set-id>.v3-old` (B), the old
+   indexes left as they were.
+
+**Items 2–4 are done (2026-10-07): C14 may start.**
