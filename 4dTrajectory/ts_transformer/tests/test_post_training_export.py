@@ -15,6 +15,7 @@ import torch
 from ts_transformer.experiments import post_train
 from ts_transformer.experiments import post_training_export as export
 from ts_transformer.experiments.post_train import KINDS, done_rounds, open_campaign, round_model, run_campaign
+from ts_transformer.instructions import training_files as stage_a_files
 from ts_transformer.post import training_files as files
 from ts_transformer.post.scene import INSERTED, INSERTED_SUFFIX, REAL
 from ts_transformer.tests import test_start
@@ -167,7 +168,7 @@ def test_the_runner_writes_a_set_beside_the_other_indexes_and_refuses_what_it_ca
     assert export.main([*argv, "--smoke"]) == 0
     code = s["geometry"].code
     training = root / code / "training"
-    entry, sample = files.listed_set(training, code, "one")
+    entry, sample = files.FILES.listed_set(training, code, "one")
     assert sample["schema"] == files.SAMPLE_SCHEMA and entry["windows"] == 1 and entry["flights"] == 1
     assert sample["model"]["rounds"] == [export.START] and sample["windows"][0]["traffic"][0]["role"] == "inserted"
     assert json.loads((training / files.INDEX_FILE).read_text())["schema"] == files.INDEX_SCHEMA
@@ -210,11 +211,11 @@ def stage_c_fixture(tmp_path, monkeypatch, *, texts=False):
         patch.setattr(export, "candidate_hae_minus_msl_m", lambda ends, geometry: _hae(s))
         patch.setattr(export, "repo_relative", lambda path: f"fixture/{path.name}")
         patch.setattr(export, "git_state", lambda: {"head": "fixture", "dirty": False})
-        patch.setattr(files, "utc_now", lambda: "fixture")
+        patch.setattr(stage_a_files, "utc_now", lambda: "fixture")   # the one writer's
         assert export.main(["--campaign", str(campaign), "--rounds", "start", "--split", "train", "--set-id",
                             FIXTURE_SET, "--root", str(root), "--per-airport", "1", "--smoke"]) == 0
     training = root / s["geometry"].code / "training"
-    entry, sample = files.listed_set(training, s["geometry"].code, FIXTURE_SET)
+    entry, sample = files.FILES.listed_set(training, s["geometry"].code, FIXTURE_SET)
     index = json.loads((training / files.INDEX_FILE).read_text(encoding="utf-8"))
     # the batches fly the windows by flight: put the states back in the set's order (each window its own batch here)
     out = {"setup": s, "root": root, "index": index, "sample": sample, "states": states}
@@ -226,7 +227,7 @@ def stage_c_fixture(tmp_path, monkeypatch, *, texts=False):
 
 def test_the_frontend_fixtures_are_what_the_export_writes(tmp_path, monkeypatch):
     """The fixture the frontend's readers are tested on is the export's own output today, the files its writers write (the
-    sample by the export, the index by `training_files.write_set`); a change of the export moves it, and this test says so
+    sample by the export, the index by `TrainingFiles.write_set`); a change of the export moves it, and this test says so
     until it is written again (``AEROVIZ_WRITE_FIXTURES=1``)."""
     texts = stage_c_fixture(tmp_path, monkeypatch, texts=True)["texts"]
     if os.environ.get("AEROVIZ_WRITE_FIXTURES") == "1":

@@ -435,7 +435,8 @@ def main(argv: list[str] | None = None) -> int:
     signals_record = json.loads((instructions / "signals.json").read_text(encoding="utf-8"))
     airports = args.airports or sorted({source["airport"] for source in signals_record["sources"]})
     started = time.perf_counter()
-    existing = {airport: files.read_index(args.root / airport / "training", airport, args.set_id) for airport in airports}
+    existing = {airport: files.FILES.read_index(args.root / airport / "training", airport, args.set_id)
+                for airport in airports}
     built = {}
     for airport in airports:
         payload, count = build_airport(airport, instructions, params, words, per_stratum=args.per_stratum,
@@ -454,9 +455,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{airport}: {count} flights, {len(built[airport][1]) / 1e6:.1f} MB, {time.perf_counter() - started:.0f}s",
               flush=True)
     for airport, (entry, _) in built.items():          # every airport writable before any is written
-        files.require_writable(args.root / airport / "training", airport, entry, existing[airport])
+        files.FILES.require_writable(args.root / airport / "training", airport, entry, existing[airport])
     for airport, (entry, text) in built.items():
-        out = files.write_set(args.root / airport / "training", airport, entry, text, existing[airport])
+        out = files.FILES.write_set(args.root / airport / "training", airport, entry, text, existing[airport])
         print(f"→ {out}")
     return 0
 

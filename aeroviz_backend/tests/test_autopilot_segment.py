@@ -143,7 +143,7 @@ def set_up_set(root: Path, split: str | None = None) -> dict:
         sample["flights"] = [{**item, "split": split} for item in sample["flights"]]
     training = root / sample["airport"] / "training"
     training.mkdir(parents=True)
-    training_files.write_set(training, sample["airport"], index["sets"][0], training_files.serialise(sample), [])
+    training_files.FILES.write_set(training, sample["airport"], index["sets"][0], training_files.serialise(sample), [])
     return sample
 
 
@@ -157,7 +157,7 @@ def set_up_sets(root: Path, airports: tuple[str, ...]) -> dict[str, dict]:
         samples[airport] = {**sample, "airport": airport, "flights": flights}
         training = root / airport / "training"
         training.mkdir(parents=True)
-        training_files.write_set(training, airport, {**index["sets"][0]}, training_files.serialise(samples[airport]), [])
+        training_files.FILES.write_set(training, airport, {**index["sets"][0]}, training_files.serialise(samples[airport]), [])
     return samples
 
 

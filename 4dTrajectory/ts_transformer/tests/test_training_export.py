@@ -133,7 +133,7 @@ def _entry(set_id):
 
 
 def _sample(set_id, airport):
-    return {"schema": files.SAMPLE_SCHEMA, "setId": set_id, "airport": airport, "vocabulary": {"readingRule": READING_RULE}}
+    return {"schema": files.SAMPLE_SCHEMA, "setId": set_id, "airport": airport, "readingRule": READING_RULE}
 
 
 def test_a_set_goes_beside_the_old_index_and_is_never_overwritten(tmp_path):
@@ -144,24 +144,24 @@ def test_a_set_goes_beside_the_old_index_and_is_never_overwritten(tmp_path):
     old = training / "index.json"
     old.write_text('{"schema": "aeroviz-training-index-v1", "sets": []}', encoding="utf-8")
     before = old.read_bytes()
-    existing = files.read_index(training, "KAAA", "set_a")
+    existing = files.FILES.read_index(training, "KAAA", "set_a")
     assert existing == []
-    files.write_set(training, "KAAA", _entry("set_a"), files.serialise(_sample("set_a", "KAAA")), existing)
+    files.FILES.write_set(training, "KAAA", _entry("set_a"), files.serialise(_sample("set_a", "KAAA")), existing)
     assert old.read_bytes() == before
     index = json.loads((training / files.INDEX_FILE).read_text(encoding="utf-8"))
     assert index["schema"] == files.INDEX_SCHEMA and [s["id"] for s in index["sets"]] == ["set_a"]
-    entry, sample = files.listed_set(training, "KAAA", "set_a")
+    entry, sample = files.FILES.listed_set(training, "KAAA", "set_a")
     assert entry["id"] == sample["setId"] == "set_a"
     with pytest.raises(ValueError, match="already lists set set_a"):
-        files.read_index(training, "KAAA", "set_a")
-    stale = files.read_index(training, "KAAA", "set_b")
-    files.write_set(training, "KAAA", _entry("set_c"), files.serialise(_sample("set_c", "KAAA")), stale)
+        files.FILES.read_index(training, "KAAA", "set_a")
+    stale = files.FILES.read_index(training, "KAAA", "set_b")
+    files.FILES.write_set(training, "KAAA", _entry("set_c"), files.serialise(_sample("set_c", "KAAA")), stale)
     with pytest.raises(ValueError, match="changed since this run read it"):
-        files.write_set(training, "KAAA", _entry("set_b"), files.serialise(_sample("set_b", "KAAA")), stale)
+        files.FILES.write_set(training, "KAAA", _entry("set_b"), files.serialise(_sample("set_b", "KAAA")), stale)
     with pytest.raises(files.NotListed):
-        files.listed_set(training, "KAAA", "set_b")
+        files.FILES.listed_set(training, "KAAA", "set_b")
     with pytest.raises(ValueError, match="not KBBB's"):
-        files.read_index(training, "KBBB", "set_d")
+        files.FILES.read_index(training, "KBBB", "set_d")
     with pytest.raises(ValueError, match="refusing NaN|Out of range float"):
         files.serialise({"x": float("nan")})
 
@@ -169,10 +169,17 @@ def test_a_set_goes_beside_the_old_index_and_is_never_overwritten(tmp_path):
 def test_a_listed_set_of_another_format_is_refused_by_name(tmp_path):
     training = tmp_path / "training"
     training.mkdir()
-    files.write_set(training, "KAAA", _entry("set_a"), files.serialise({**_sample("set_a", "KAAA"),
-                                                                        "schema": "aeroviz-training-sample-v8"}), [])
+    files.FILES.write_set(training, "KAAA", _entry("set_a"),
+                          files.serialise({**_sample("set_a", "KAAA"), "schema": "aeroviz-training-sample-v8"}), [])
     with pytest.raises(ValueError, match="aeroviz-training-sample-v8 file, not a closed-loop-readback set"):
-        files.listed_set(training, "KAAA", "set_a")
+        files.FILES.listed_set(training, "KAAA", "set_a")
+    # the reading is the sample's own (top level, every stage): another one is refused, whatever its vocabulary says
+    other = tmp_path / "other"
+    other.mkdir()
+    files.FILES.write_set(other, "KAAA", _entry("set_a"),
+                          files.serialise({**_sample("set_a", "KAAA"), "readingRule": "instruction-v5"}), [])
+    with pytest.raises(ValueError, match="holds set set_a at KAAA"):
+        files.FILES.listed_set(other, "KAAA", "set_a")
 
 
 def test_each_candidates_height_offset_comes_from_the_published_runway_data(tmp_path, monkeypatch):
@@ -348,7 +355,7 @@ def test_a_set_whose_directory_exists_is_refused_before_any_airport_is_written(t
     training = tmp_path / "training"
     (training / "set_a").mkdir(parents=True)                    # a leftover directory, not listed
     with pytest.raises(ValueError, match="exists; an export is never overwritten"):
-        files.require_writable(training, "KAAA", _entry("set_a"), [])
+        files.FILES.require_writable(training, "KAAA", _entry("set_a"), [])
     assert not (training / files.INDEX_FILE).exists()
 
 

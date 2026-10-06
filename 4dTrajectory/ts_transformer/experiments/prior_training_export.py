@@ -371,7 +371,8 @@ def main(argv: list[str] | None = None) -> int:
                  "readout": repo_relative(readout_dir)}
     signals_record = json.loads((instructions / "signals.json").read_text(encoding="utf-8"))
     started = time.perf_counter()
-    existing = {airport: files.read_index(args.root / airport / "training", airport, args.set_id) for airport in airports}
+    existing = {airport: files.FILES.read_index(args.root / airport / "training", airport, args.set_id)
+                for airport in airports}
     model = model_block(readout, repo_relative(prior_dir))
     source = source_block(repo_relative(readout_dir), readout, words, opened, git, smoke=args.smoke, device=args.device,
                           claim=claim)
@@ -385,13 +386,13 @@ def main(argv: list[str] | None = None) -> int:
         sample = sample_of(args.set_id, geometry, hae, source, model, cohort, words, params.cycle_s,
                            airport_finals(geometries[airport]), flights)
         entry = index_entry(args.set_id, sample)
-        built[airport] = (entry, files.serialise(sample))
+        built[airport] = (entry, stage_a_files.serialise(sample))
         print(f"{airport}: {len(flights)} flights, {entry['sentences']} sentences, "
               f"{len(built[airport][1]) / 1e6:.1f} MB, {time.perf_counter() - started:.0f}s", flush=True)
     for airport, (entry, _) in built.items():          # every airport writable before any is written
-        files.require_writable(args.root / airport / "training", airport, entry, existing[airport])
+        files.FILES.require_writable(args.root / airport / "training", airport, entry, existing[airport])
     for airport, (entry, text) in built.items():
-        out = files.write_set(args.root / airport / "training", airport, entry, text, existing[airport])
+        out = files.FILES.write_set(args.root / airport / "training", airport, entry, text, existing[airport])
         print(f"→ {out}")
     return 0
 

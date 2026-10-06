@@ -85,8 +85,8 @@ def world(tmp_path_factory):
     root = tmp / "airports"
     training = root / sample["airport"] / "training"
     training.mkdir(parents=True)
-    prior_files.write_set(training, sample["airport"], index["sets"][0], prior_files.serialise(sample), [])
-    prior_files.write_set(training, sample["airport"], index["sets"][1], prior_files.serialise(val_sample),
+    prior_files.FILES.write_set(training, sample["airport"], index["sets"][0], training_files.serialise(sample), [])
+    prior_files.FILES.write_set(training, sample["airport"], index["sets"][1], training_files.serialise(val_sample),
                           [index["sets"][0]])
     readouts = []
     for seed in (0, 1):
@@ -203,7 +203,7 @@ def write_extra_set(world, name, sample):
     training.mkdir(parents=True)
     entry = {**world["entry"], "id": name, "file": f"{name}/sample.json",
              "cohort": sample["cohort"], "source": sample["source"]}
-    prior_files.write_set(training, sample["airport"], entry, prior_files.serialise({**sample, "setId": name}), [])
+    prior_files.FILES.write_set(training, sample["airport"], entry, training_files.serialise({**sample, "setId": name}), [])
     return root
 
 
@@ -288,8 +288,8 @@ def test_a_request_the_view_cannot_make_is_refused_and_a_set_flight_or_sentence_
     training = world["root"].parent / "late_airports" / late["airport"] / "training"
     if not training.exists():
         training.mkdir(parents=True)
-        prior_files.write_set(training, late["airport"], {**world["entry"], "id": "late", "file": "late/sample.json"},
-                              prior_files.serialise(late), [])
+        prior_files.FILES.write_set(training, late["airport"], {**world["entry"], "id": "late", "file": "late/sample.json"},
+                              training_files.serialise(late), [])
     behind = SyntheticBackend(world["root"].parent / "late_airports", world["flown"])
     after = next(e for e in said["events"] if e["row"] * 4 > 40 and e["column"] == HEADING)
     with pytest.raises(RequestRefused, match="after the flight's outcome at cycle 40"):

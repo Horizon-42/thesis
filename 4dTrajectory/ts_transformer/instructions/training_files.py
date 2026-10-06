@@ -8,14 +8,18 @@ never `SystemExit` — a server thread would let that escape its handler and dro
 **Beside the old sets (outline §6 item 3).** A stage-A set is ``<airport>/training/<set-id>/sample.json``
 (`SAMPLE_SCHEMA`), listed in ``<airport>/training/index_v4.json`` (`INDEX_FILE`, `INDEX_SCHEMA`) — a NEW index beside the
 instruction-v3 view's ``training/index.json``, which this code never reads or writes, so the main checkout's Training
-view keeps its sets until the user merges. A set or the index entry of one is never overwritten, and the index is
-rewritten only while it is still what the run read at its start (`require_index_unchanged`).
+view keeps its sets until the user merges.
+
+**One writer for the three stages (outline §6.2 item 7).** `TrainingFiles` reads and writes the index and the sets of
+every stage, given the stage's constants: stage A's are `FILES`, stage B's and C's are in `prior.training_files` and
+`post.training_files`.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -46,7 +50,7 @@ SPLITS = READ_SPLITS
 
 
 class NotListed(ValueError):
-    """The set asked for is not in its airport's index (a server answers this as "not found")."""
+    """The set asked for is not in its airport's index (a server answers this as "not found"); every stage's."""
 
 
 def rounded(values: Any, digits: int) -> list[float]:
@@ -91,51 +95,6 @@ def speed_payload(check: dict[str, Any], target_mps: float, tolerance_mps: float
             "contained": bool(check["contained"])}
 
 
-# ---- the index and its sets
-def index_sets(payload: dict[str, Any], path: Path, airport: str) -> list[dict[str, Any]]:
-    """The sets an airport's index lists; refused when it is another schema's or another airport's."""
-    if payload["schema"] != INDEX_SCHEMA:
-        raise ValueError(f"{path} is a {payload['schema']} file, not {INDEX_SCHEMA}")
-    if payload["airport"] != airport:
-        raise ValueError(f"{path} is {payload['airport']}'s index, not {airport}'s")
-    return payload["sets"]
-
-
-def listed_set(training: Path, airport: str, set_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Set ``set_id``'s index entry and its sample, refused unless the sample is this schema's, this kind's and this
-    reading's, and is the set and airport it is listed as (`NotListed` when the index does not list it)."""
-    path = training / INDEX_FILE
-    if not path.exists():
-        raise NotListed(f"{path} does not exist")
-    listed = [item for item in index_sets(json.loads(path.read_text(encoding="utf-8")), path, airport)
-              if item["id"] == set_id]
-    if not listed:
-        raise NotListed(f"{path} lists no set {set_id}")
-    if len(listed) > 1:
-        raise ValueError(f"{path} lists set {set_id} {len(listed)} times")
-    entry = listed[0]
-    file = training / entry["file"]
-    sample = json.loads(file.read_text(encoding="utf-8"))
-    if sample["schema"] != SAMPLE_SCHEMA or (entry["kind"], entry["readingRule"]) != (SET_KIND, READING_RULE):
-        raise ValueError(f"set {set_id} at {airport} is a {entry['kind']} set of {entry['readingRule']} in a "
-                         f"{sample['schema']} file, not a {SET_KIND} set of {READING_RULE} in a {SAMPLE_SCHEMA} file")
-    if (sample["setId"], sample["airport"], sample["vocabulary"]["readingRule"]) != (set_id, airport, READING_RULE):
-        raise ValueError(f"{file} holds set {sample['setId']} at {sample['airport']}, not {set_id} at {airport}")
-    return entry, sample
-
-
-def read_index(training: Path, airport: str, set_id: str) -> list[dict[str, Any]]:
-    """The airport's stage-A sets as they stand (no index yet: none), for a run that will add ``set_id``; refused when
-    the index already lists it — an export is never overwritten."""
-    path = training / INDEX_FILE
-    if not path.exists():
-        return []
-    sets = index_sets(json.loads(path.read_text(encoding="utf-8")), path, airport)
-    if any(item["id"] == set_id for item in sets):
-        raise ValueError(f"{path} already lists set {set_id}; an export is never overwritten")
-    return sets
-
-
 def candidates_sha256(geometry: AirportGeometry) -> str:
     """The identity of an airport's candidates and runway ends (the runway word points into them): written beside a
     set, information for its reader."""
@@ -143,7 +102,7 @@ def candidates_sha256(geometry: AirportGeometry) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-# ---- writing
+# ---- the index and its sets: one definition for the three stages (outline §6.2 item 7)
 def serialise(payload: dict[str, Any]) -> str:
     """A Training file as it is written: without indentation and refusing NaN."""
     return json.dumps(payload, separators=(",", ":"), allow_nan=False)
@@ -155,29 +114,91 @@ def _write_text_atomic(path: Path, text: str) -> None:
     temporary.replace(path)
 
 
-def require_index_unchanged(training: Path, airport: str, set_id: str, existing: list[dict[str, Any]]) -> None:
-    """The index is still what ``existing`` read at the start of the run: another export that wrote it meanwhile would
-    lose its set."""
-    if read_index(training, airport, set_id) != existing:
-        raise ValueError(f"{training / INDEX_FILE} changed since this run read it; run the export again")
+@dataclass(frozen=True)
+class TrainingFiles:
+    """One stage's Training files — its index ``<airport>/training/<index_file>`` (``index_schema``) and its sets
+    ``<airport>/training/<set-id>/sample.json`` (``sample_schema``, of ``set_kind``) — read and written by the one
+    definition the three stages share (outline §6.2 item 7); each stage gives only its constants (stage A: `FILES`;
+    `prior.training_files.FILES`; `post.training_files.FILES`). A set or its index entry is never overwritten, and the
+    index is rewritten only while it is still what the run read at its start (`require_index_unchanged`)."""
+
+    index_schema: str
+    index_file: str
+    sample_schema: str
+    set_kind: str
+
+    def index_sets(self, payload: dict[str, Any], path: Path, airport: str) -> list[dict[str, Any]]:
+        """The sets an airport's index lists; refused when it is another schema's or another airport's."""
+        if payload["schema"] != self.index_schema:
+            raise ValueError(f"{path} is a {payload['schema']} file, not {self.index_schema}")
+        if payload["airport"] != airport:
+            raise ValueError(f"{path} is {payload['airport']}'s index, not {airport}'s")
+        return payload["sets"]
+
+    def listed_set(self, training: Path, airport: str, set_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Set ``set_id``'s index entry and its sample, refused unless the sample is this schema's, this kind's and this
+        reading's, and is the set and airport it is listed as (`NotListed` when the index does not list it)."""
+        path = training / self.index_file
+        if not path.exists():
+            raise NotListed(f"{path} does not exist")
+        listed = [item for item in self.index_sets(json.loads(path.read_text(encoding="utf-8")), path, airport)
+                  if item["id"] == set_id]
+        if not listed:
+            raise NotListed(f"{path} lists no set {set_id}")
+        if len(listed) > 1:
+            raise ValueError(f"{path} lists set {set_id} {len(listed)} times")
+        entry = listed[0]
+        file = training / entry["file"]
+        sample = json.loads(file.read_text(encoding="utf-8"))
+        if sample["schema"] != self.sample_schema or (entry["kind"], entry["readingRule"]) != (self.set_kind,
+                                                                                              READING_RULE):
+            raise ValueError(f"set {set_id} at {airport} is a {entry['kind']} set of {entry['readingRule']} in a "
+                             f"{sample['schema']} file, not a {self.set_kind} set of {READING_RULE} in a "
+                             f"{self.sample_schema} file")
+        if (sample["setId"], sample["airport"], sample["readingRule"]) != (set_id, airport, READING_RULE):
+            raise ValueError(f"{file} holds set {sample['setId']} at {sample['airport']}, not {set_id} at {airport}")
+        return entry, sample
+
+    def read_index(self, training: Path, airport: str, set_id: str) -> list[dict[str, Any]]:
+        """The airport's sets of this stage as they stand (no index yet: none), for a run that will add ``set_id``;
+        refused when the index already lists it — an export is never overwritten."""
+        path = training / self.index_file
+        if not path.exists():
+            return []
+        sets = self.index_sets(json.loads(path.read_text(encoding="utf-8")), path, airport)
+        if any(item["id"] == set_id for item in sets):
+            raise ValueError(f"{path} already lists set {set_id}; an export is never overwritten")
+        return sets
+
+    def require_index_unchanged(self, training: Path, airport: str, set_id: str, existing: list[dict[str, Any]]
+                                ) -> None:
+        """The index is still what ``existing`` read at the start of the run: another export that wrote it meanwhile
+        would lose its set."""
+        if self.read_index(training, airport, set_id) != existing:
+            raise ValueError(f"{training / self.index_file} changed since this run read it; run the export again")
+
+    def require_writable(self, training: Path, airport: str, entry: dict[str, Any], existing: list[dict[str, Any]]
+                         ) -> None:
+        """The set can be written: the index is still what the run read (`require_index_unchanged`) and the set's
+        directory does not exist. A run asks it of every airport before it writes any, so a refusal leaves no airport
+        written."""
+        self.require_index_unchanged(training, airport, entry["id"], existing)
+        directory = (training / entry["file"]).parent
+        if directory.exists():
+            raise ValueError(f"{directory} exists; an export is never overwritten")
+
+    def write_set(self, training: Path, airport: str, entry: dict[str, Any], text: str, existing: list[dict[str, Any]]
+                  ) -> Path:
+        """A set's sample (``text``, `serialise`'s) in a directory of its own, then the index with it added — refused
+        unless `require_writable`."""
+        self.require_writable(training, airport, entry, existing)
+        out = training / entry["file"]
+        out.parent.mkdir(parents=True)
+        _write_text_atomic(out, text)
+        _write_text_atomic(training / self.index_file, serialise({"schema": self.index_schema, "writtenUtc": utc_now(),
+                                                                  "airport": airport, "sets": [*existing, entry]}))
+        return out
 
 
-def require_writable(training: Path, airport: str, entry: dict[str, Any], existing: list[dict[str, Any]]) -> None:
-    """The set can be written: the index is still what the run read (`require_index_unchanged`) and the set's directory
-    does not exist. A run asks it of every airport before it writes any, so a refusal leaves no airport written."""
-    require_index_unchanged(training, airport, entry["id"], existing)
-    directory = (training / entry["file"]).parent
-    if directory.exists():
-        raise ValueError(f"{directory} exists; an export is never overwritten")
-
-
-def write_set(training: Path, airport: str, entry: dict[str, Any], text: str, existing: list[dict[str, Any]]) -> Path:
-    """A set's sample (``text``, `serialise`'s) in a directory of its own, then the index with it added — refused
-    unless `require_writable`."""
-    require_writable(training, airport, entry, existing)
-    out = training / entry["file"]
-    out.parent.mkdir(parents=True)
-    _write_text_atomic(out, text)
-    _write_text_atomic(training / INDEX_FILE, serialise({"schema": INDEX_SCHEMA, "writtenUtc": utc_now(),
-                                                        "airport": airport, "sets": [*existing, entry]}))
-    return out
+#: Stage A's Training files.
+FILES = TrainingFiles(index_schema=INDEX_SCHEMA, index_file=INDEX_FILE, sample_schema=SAMPLE_SCHEMA, set_kind=SET_KIND)

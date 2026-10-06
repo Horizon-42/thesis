@@ -4,7 +4,7 @@ a request of a higher number supersedes the page's lower ones (`Superseded`) —
 stops before its next cycle, one that arrives after it is refused at once. The page's own numbers decide, not the order
 requests happen to arrive in.
 
-Which flight: the request names a Training set of stage A (``airport``, ``setId``: `training_files.listed_set`, the
+Which flight: the request names a Training set of stage A (``airport``, ``setId``: `training_files.FILES.listed_set`, the
 airport's ``training/index_v4.json``) and a flight of it (``flightKey``); the set's sample names the instruction artefact
 and the executor spec it was exported from, and the flight's split. Which sentence: the flight's closed-loop sentence at
 ``rowIntervalS`` (one of the set's Δ). Which word: Δ row ``row`` of ``column`` (`fly.segment_of`). The set's executor
@@ -132,11 +132,11 @@ class AutopilotSegmentBackend:
         self.window = WindowSegments(self)
 
     def training_set(self, airport: str, set_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
-        """The set's index entry and sample (`training_files.listed_set`)."""
+        """The set's index entry and sample (`training_files.FILES.listed_set`)."""
         if not AIRPORT_CODE.fullmatch(airport):
             raise RequestRefused(f"airport {airport!r} is not an airport code")
         try:
-            return training_files.listed_set(self.airports_root / airport / "training", airport, set_id)
+            return training_files.FILES.listed_set(self.airports_root / airport / "training", airport, set_id)
         except training_files.NotListed as error:
             raise NotListed(str(error)) from None
 
@@ -193,7 +193,7 @@ class AutopilotSegmentBackend:
         for index in sorted(self.airports_root.glob(f"*/training/{training_files.INDEX_FILE}")):
             airport = index.parent.parent.name
             try:
-                sets = training_files.index_sets(json.loads(index.read_text(encoding="utf-8")), index, airport)
+                sets = training_files.FILES.index_sets(json.loads(index.read_text(encoding="utf-8")), index, airport)
             except Exception as error:       # noqa: BLE001 — a prefetch: logged; a request gets it whole
                 log(f"autopilot warm-up: {airport} skipped — {index}: {type(error).__name__}: {error}")
                 continue

@@ -315,7 +315,8 @@ def main(argv: list[str] | None = None) -> int:
                            Path(inputs["procedure_root"]), formal=False, data=False)
     airports = args.airports or sorted(context.geometries)
     signals_record = json.loads((instructions / "signals.json").read_text(encoding="utf-8"))
-    existing = {airport: files.read_index(args.root / airport / "training", airport, args.set_id) for airport in airports}
+    existing = {airport: files.FILES.read_index(args.root / airport / "training", airport, args.set_id)
+                for airport in airports}
     model = {"campaign": repo_relative(campaign), "rounds": rounds, "rowIntervalS": context.interval_s,
              "mostGoArounds": MOST_GO_AROUNDS, "procedureMasks": PROCEDURE_MASKS, "settings": inputs["settings"]}
     source = {"campaign": repo_relative(campaign), "campaignGit": record["git"], "campaignSmoke": inputs["smoke"],
@@ -334,13 +335,13 @@ def main(argv: list[str] | None = None) -> int:
                   "drawnFrom": "a seeded draw of the airport's real windows that do not open inside a loss (D113)"}
         sample = sample_of(args.set_id, context, airport, hae, source, model, cohort, params.cycle_s, flights, windows)
         entry = index_entry(args.set_id, sample)
-        built[airport] = (entry, files.serialise(sample))
+        built[airport] = (entry, stage_a_files.serialise(sample))
         print(f"{airport}: {len(windows)} windows, {len(flights)} flights, {len(built[airport][1]) / 1e6:.1f} MB, "
               f"{time.perf_counter() - started:.0f}s", flush=True)
     for airport, (entry, _) in built.items():          # every airport writable before any is written
-        files.require_writable(args.root / airport / "training", airport, entry, existing[airport])
+        files.FILES.require_writable(args.root / airport / "training", airport, entry, existing[airport])
     for airport, (entry, text) in built.items():
-        print(f"→ {files.write_set(args.root / airport / 'training', airport, entry, text, existing[airport])}")
+        print(f"→ {files.FILES.write_set(args.root / airport / 'training', airport, entry, text, existing[airport])}")
     return 0
 
 

@@ -18,6 +18,7 @@ from ts_transformer.experiments import prior_training_export as export
 from ts_transformer.experiments.prior_free_generation import Stored
 from ts_transformer.instructions.grammar import column_words
 from ts_transformer.instructions.words import ALTITUDE, ANGLE, Words
+from ts_transformer.instructions import training_files as stage_a_files
 from ts_transformer.prior import training_files as files
 from ts_transformer.prior.procedure import GLIDEPATH_BELOW_M, Final
 from ts_transformer.tests.support import instruction_spec, parallel_airport
@@ -130,7 +131,7 @@ FIXTURE_VAL_SET = "fixture_val"
 
 def stage_b_fixture(tmp_path, monkeypatch, *, texts=False):
     """A set of one synthetic flight (A26's artefact: `test_start._artefact`) written by the export itself (`main`, its
-    set into a tmp root by `training_files.write_set`, the index by its own writer): two sentences of an untrained prior
+    set into a tmp root by `TrainingFiles.write_set`, the index by its own writer): two sentences of an untrained prior
     (seeds 0 and 1), each flown again, and the flight's head — its observed track, open-loop sentence and closed-loop
     sentence at Δ = 4 s flown again — as stage A's export gives it (`split_flights`; here built by stage A's functions:
     a synthetic flight has no harvest series, and its observed attitude is the no-airframe one). The live roots are
@@ -193,7 +194,7 @@ def stage_b_fixture(tmp_path, monkeypatch, *, texts=False):
                       lambda runway_ends_from, geometry_: {c.ident: -33.0 for c in geometry_.candidates})
         patch.setattr(export, "repo_relative", lambda path: names[path])
         patch.setattr(export, "git_state", lambda: {"head": "fixture", "dirty": False})
-        patch.setattr(files, "utc_now", lambda: "fixture")
+        patch.setattr(stage_a_files, "utc_now", lambda: "fixture")   # the one writer's
         build, built = export.build_airport, []
         patch.setattr(export, "build_airport", lambda *a, **k: built.append(build(*a, **k)) or built[-1])
         assert export.main(["--readout", str(readout_dir), "--set-id", FIXTURE_SET, "--root", str(root),
@@ -210,8 +211,8 @@ def stage_b_fixture(tmp_path, monkeypatch, *, texts=False):
         assert export.main(["--readout", str(val_dir), "--set-id", FIXTURE_VAL_SET, "--root", str(root),
                             "--per-airport", "1", "--smoke"]) == 0
     training = root / geometry.code / "training"
-    entry, sample = files.listed_set(training, geometry.code, FIXTURE_SET)
-    val_entry, _ = files.listed_set(training, geometry.code, FIXTURE_VAL_SET)
+    entry, sample = files.FILES.listed_set(training, geometry.code, FIXTURE_SET)
+    val_entry, _ = files.FILES.listed_set(training, geometry.code, FIXTURE_VAL_SET)
     index = json.loads((training / files.INDEX_FILE).read_text(encoding="utf-8"))
     assert index["sets"] == [entry, val_entry]
     assert sample["source"]["validationClaim"] is None
@@ -246,22 +247,22 @@ def test_a_set_is_written_beside_the_other_indexes_and_read_again(tmp_path, monk
     training.mkdir(parents=True)
     (training / "index_v4.json").write_text("{\"stage A\": true}")                     # never read or written here
     entry = export.index_entry("one", {**sample, "setId": "one"})
-    files.write_set(training, airport, entry, files.serialise({**sample, "setId": "one"}), [])
-    listed, read = files.listed_set(training, airport, "one")
+    files.FILES.write_set(training, airport, entry, stage_a_files.serialise({**sample, "setId": "one"}), [])
+    listed, read = files.FILES.listed_set(training, airport, "one")
     assert listed == entry and read["flights"][0]["prior"][1]["sample"] == 1
     assert (training / "index_v4.json").read_text() == "{\"stage A\": true}"
     with pytest.raises(ValueError, match="never overwritten"):
-        files.read_index(training, airport, "one")
-    with pytest.raises(files.NotListed):
-        files.listed_set(training, airport, "two")
+        files.FILES.read_index(training, airport, "one")
+    with pytest.raises(stage_a_files.NotListed):
+        files.FILES.listed_set(training, airport, "two")
     (training / "one" / files.SAMPLE_FILE).write_text(json.dumps({**read, "schema": "aeroviz-training-sample-v9"}))
     with pytest.raises(ValueError, match=files.SAMPLE_SCHEMA):                        # another format, by name
-        files.listed_set(training, airport, "one")
+        files.FILES.listed_set(training, airport, "one")
 
 
 def test_the_frontend_fixtures_are_what_the_export_writes(tmp_path, monkeypatch):
     """The fixture the frontend's readers are tested on is the export's own output today, the files its writers write
-    (the sample by the export, the index by `training_files.write_set`); a change of the export moves it, and this test
+    (the sample by the export, the index by `TrainingFiles.write_set`); a change of the export moves it, and this test
     says so until it is written again (``AEROVIZ_WRITE_FIXTURES=1``)."""
     index, sample, texts = stage_b_fixture(tmp_path, monkeypatch, texts=True)
     if os.environ.get("AEROVIZ_WRITE_FIXTURES") == "1":
@@ -367,7 +368,7 @@ def test_the_runner_writes_a_set_and_refuses_what_it_cannot_trust(tmp_path, monk
     monkeypatch.setattr(export, "build_airport", lambda *a, **k: built.append(build(*a, **k)) or built[-1])
     assert export.main(argv) == 0
     training = root / geometry.code / "training"
-    entry, sample = files.listed_set(training, geometry.code, "one")
+    entry, sample = files.FILES.listed_set(training, geometry.code, "one")
     assert entry["sentences"] == 2 and [s["sample"] for s in sample["flights"][0]["prior"]] == [0, 1]
     assert sample["source"]["checks"] == {"stub": True} and sample["cohort"]["seed"] == 1337
     before = sorted(p.relative_to(root) for p in root.rglob("*"))
