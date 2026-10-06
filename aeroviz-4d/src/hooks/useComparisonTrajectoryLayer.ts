@@ -66,7 +66,7 @@ import { makeStableVelocityOrientation } from "../utils/velocityOrientation";
 type ComparisonStatus = ComparisonGroup["status"];
 
 /** How much wider than the controlled aircraft's paths the camera frames a job's scene (the left dock covers part of it). */
-const JOB_FRAME_MARGIN = 1.4;
+const JOB_FRAME_MARGIN = 1.2;
 
 const COMPARISON_KIND_PREFIXES: ReadonlyArray<readonly [string, ComparisonKind]> = [
   ["opt-", "optimizer"],

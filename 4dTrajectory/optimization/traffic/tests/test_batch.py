@@ -42,7 +42,11 @@ def _worker(payload):
         {"final_time_s": 112.5, "losses": [], "background_losses": 0}],
         "ifr_losses": {"baseline": [[1.0, "X", "in_trail", 5556.0, 4000.0, 0.0, True, False]], "final": []},
         "starts_in_loss": {}, "uncategorised_types": ["ZZZZ"], "runways_without_faf": ["32"],
-        "frame_east_error_max": 0.003}
+        "frame_east_error_max": 0.003,
+        "solves": [{"kind": "baseline", "iaf": "IAF", "ok": False, "wallS": 4.0, "cpuS": 3.5},
+                   {"kind": "baseline", "iaf": "IAF2", "ok": True, "wallS": 2.0, "cpuS": 1.5},
+                   {"kind": "resolve", "iaf": "IAF2", "ok": True, "wallS": 1.0, "cpuS": 0.5, "round": 0}],
+        "windowWallS": 8.0, "windowCpuS": 6.0, "kept_round": 1}
     evaluation = dict(result.evaluation)
     evaluation["states"] = []
     return (index, scenario.source["id"], record, evaluation, None)
@@ -80,6 +84,11 @@ def test_the_sweep_removes_an_orphan_sidecar_and_the_readout_counts_the_roster(t
     assert found["uncategorised_types"] == ["ZZZZ"] and found["background_losses_at_baseline"] == 2
     assert found["windows_with_an_answered_ifr_loss"] == {"baseline": 2, "final": 0}
     assert found["runways_without_a_coded_final"] == ["32"]
+    timing = found["timing"]                                   # every scenario's timed solves (design §8.5)
+    assert timing["scenarios"] == 2 and timing["solves_per_scenario"] == {3: 2} and timing["failed_solve_attempts"] == 2
+    assert timing["solve_wall_s"]["mean"] == 7.0 and timing["solve_cpu_s"]["median"] == 5.5
+    assert timing["by_kind"]["baseline"] == {"solves": 4, "failed": 2, "wallS": 12.0, "cpuS": 10.0}
+    assert timing["solved_window_wall_s"]["max"] == 8.0 and timing["unsolved_scenarios_solve_wall_s"] == {"n": 0}
 
 
 def test_the_m2_readout_counts_blocks(tmp_path):
@@ -87,7 +96,7 @@ def test_the_m2_readout_counts_blocks(tmp_path):
     from traffic.readout import blocks_readout
     from traffic import M2_MODE
     none = {"answered": 0, "not_answered": 0, "background": 0}
-    (tmp_path / "summary.json").write_text(json.dumps({"mode": M2_MODE, "blocks": [{
+    (tmp_path / "summary.json").write_text(json.dumps({"mode": M2_MODE, "results": [], "blocks": [{
         "label": "block_00", "aircraft": 4, "scheduled": 3, "skipped_no_dynamics": 2,
         "slots": [{"flight_key": "A", "delay_s": 0.0}, {"flight_key": "B", "delay_s": 80.0},
                   {"flight_key": "D", "delay_s": 0.0}],
@@ -142,7 +151,9 @@ def test_an_m2_run_writes_one_roster_with_every_block_and_a_failed_block(monkeyp
     def outputs(label, scenarios):
         if label == "block_01":                       # the block that raised: every aircraft a failed record
             block_01_done.set()
-            return label, [(s, None, None, "block failed: RuntimeError: x") for s in scenarios], {
+            from traffic.loop import failed_sidecar
+            return label, [(s, {"sidecar": failed_sidecar(s.source["flight_key"], "block failed: RuntimeError: x", None)},
+                            None, "block failed: RuntimeError: x") for s in scenarios], {
                 "aircraft": 2, "scheduled": 0, "eta_failed": 0, "slot_failed": 0, "error": "RuntimeError: x"}
         assert block_01_done.wait(10.0)              # block_00 finishes last: the roster is sorted, not arrival order
         _i, _key, record, evaluation, _e = _worker((0, scenarios[0], {}))
@@ -157,7 +168,8 @@ def test_an_m2_run_writes_one_roster_with_every_block_and_a_failed_block(monkeyp
     assert summary["blocks"][1]["error"] == "RuntimeError: x" and summary["blocks"][0]["skipped_no_dynamics"] == 1
     assert not (tmp_path / "OLD_05L_ad7f04_20260618T213736Z_eval.json").exists()      # swept
     files = {p.name for p in tmp_path.iterdir()}
-    assert {r["eval_file"] for r in summary["results"]} <= files and len(list(tmp_path.glob("*" + SUFFIX))) == 1
+    assert {r["eval_file"] for r in summary["results"]} <= files
+    assert len(list(tmp_path.glob("*" + SUFFIX))) == 3              # a sidecar for every scenario, the failed ones too
 
 
 def test_a_failing_block_gives_each_aircraft_a_failed_record(monkeypatch):
@@ -169,6 +181,7 @@ def test_a_failing_block_gives_each_aircraft_a_failed_record(monkeypatch):
     label, flown, summary = to._fly_one_block(("block_03", [_scenario("AAA1"), _scenario("BBB2")], None, {
         "procedure_root": "r", "settings": {}, "max_duration": 1.0, "rollout_dt_s": 0.5, "solve_options": {}}))
     assert [f[3] for f in flown] == ["block failed: RuntimeError: casadi"] * 2 and summary["error"] == "RuntimeError: casadi"
+    assert all(f[1]["sidecar"]["solves"] is None for f in flown)     # its solve times are lost: untimed, not 0 s
     # the shape of fly_block's summary, so every reader of `blocks` reads a failed block too
     from traffic import block
     _flown, ok = block.fly_block([], to.Traffic("KRDU", (), {}), procedure_root="r", settings=block.LoopSettings(),
@@ -194,3 +207,27 @@ def test_the_readout_refuses_a_summary_of_another_mode(tmp_path):
     (tmp_path / "summary.json").write_text(json.dumps({"mode": M1_MODE}))
     with pytest.raises(ValueError, match="not an M2 run"):
         blocks_readout(tmp_path)
+
+
+def test_the_readout_times_failed_scenarios_from_their_failed_sidecars_and_counts_untimed_ones_apart(tmp_path):
+    from traffic.loop import failed_sidecar
+    from traffic.readout import readout
+
+    def worker(payload):
+        index, scenario, _params = payload
+        key = scenario.source["flight_key"]
+        if scenario.source["id"] == "FAIL1":
+            solves = [{"kind": "baseline", "iaf": "IAF", "ok": False, "wallS": 30.0, "cpuS": 29.0}]
+            return (index, key, {"sidecar": failed_sidecar(key, "BaselineFailed: x", solves)}, None, "BaselineFailed: x")
+        if scenario.source["id"] == "LOST1":
+            return (index, key, {"sidecar": failed_sidecar(key, "RuntimeError: y", None)}, None, "RuntimeError: y")
+        return _worker(payload)
+
+    run_batch([_scenario("OK1"), _scenario("FAIL1"), _scenario("LOST1")], output_dir=tmp_path, worker=worker,
+              params={}, optimization_config={"m": 1}, mode=M1_MODE, progress="", jobs=1, scenarios_label=None,
+              references_dir=None, resume=False, sidecar_suffix=SUFFIX)
+    assert len(list(tmp_path.glob("*" + SUFFIX))) == 3
+    timing = readout(tmp_path)["timing"]
+    assert timing["scenarios"] == 3 and timing["untimed_scenarios"] == ["LOST1_05L_ad7f04_20260618T213736Z"]
+    assert timing["unsolved_scenarios_solve_wall_s"] == {"n": 1, "mean": 30.0, "median": 30.0, "p95": 30.0, "max": 30.0}
+    assert timing["solve_wall_s"]["n"] == 2                       # the solved one and the timed failure, not the lost one

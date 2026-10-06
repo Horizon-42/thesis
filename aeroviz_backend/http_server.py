@@ -28,7 +28,16 @@ from aeroviz_backend.isolated_backend import (
 from aeroviz_backend.optimization_backend import OptimizationBackend
 from aeroviz_backend.observed_trajectories import ObservedTrajectoryBackend
 from aeroviz_backend.simulation_backend import SimulationBackend, aircraft_catalog
-from aeroviz_backend.traffic_jobs import BadJobRequest, JobBusy, JobNotFound, TrafficJobs, traffic_jobs_root
+from aeroviz_backend.traffic_jobs import (
+    BadJobRequest,
+    CatalogUnreadable,
+    JobBusy,
+    JobNotFound,
+    JobStateInvalid,
+    TrafficJobs,
+    traffic_jobs_root,
+)
+from traffic_job_files import OUTPUTS_ROOT
 
 _JOB_ROUTE = re.compile(r"^/traffic/jobs/(?P<job>[^/]+)(?P<rest>/files/[^/]+|/cancel)?$")
 
@@ -175,6 +184,16 @@ class AeroVizBackendApp:
                 return 404, {"ok": False, "error": str(exc)}
             except ValueError as exc:
                 return 400, {"ok": False, "error": str(exc)}
+        if parsed.path == "/traffic/scenarios":      # the airport's scenario list (design §10.6), read from disk
+            try:
+                query = parse_qs(parsed.query, keep_blank_values=True)
+                return 200, self.traffic_jobs.scenarios(_query_value(query, "airport", required=True))
+            except FileNotFoundError as exc:
+                return 404, {"ok": False, "error": str(exc)}
+            except ValueError as exc:
+                return 400, {"ok": False, "error": str(exc)}
+            except CatalogUnreadable as exc:
+                return 500, {"ok": False, "error": str(exc)}
         route = _JOB_ROUTE.match(parsed.path)
         if route is not None and route["rest"] != "/cancel":            # /traffic/jobs/<id> and .../files/<name>
             job, rest = route["job"], route["rest"]
@@ -184,6 +203,8 @@ class AeroVizBackendApp:
                 return 200, ServedFile(self.traffic_jobs.file(job, unquote(rest.removeprefix("/files/"))))
             except JobNotFound as exc:
                 return 404, {"ok": False, "error": str(exc)}
+            except JobStateInvalid as exc:
+                return 500, {"ok": False, "error": str(exc)}
         return 404, {"ok": False, "error": "not found"}
 
     def _autopilot(self, fly: Any) -> tuple[int, dict[str, Any], str | None]:
@@ -248,6 +269,8 @@ class AeroVizBackendApp:
                 return 200, self.traffic_jobs.cancel(route["job"]), None
             except JobNotFound as exc:
                 return 404, {"ok": False, "error": str(exc)}, None
+            except JobStateInvalid as exc:
+                return 500, {"ok": False, "error": str(exc)}, None
         return 404, {"ok": False, "error": "not found"}, None
 
 
@@ -549,9 +572,13 @@ def main() -> None:
     parser.add_argument("--traffic-jobs-root", type=Path, default=None,
                         help="where the Optimize task's multi-aircraft jobs write (the newest 5 job directories "
                              "are kept; default ~/.cache/aeroviz/traffic_jobs/<port>, so two backends never share one)")
+    parser.add_argument("--traffic-outputs-root", type=Path, default=OUTPUTS_ROOT,
+                        help="where the scenario catalogs are read from (<root>/<ICAO>/traffic_scenarios/catalog.json; "
+                             "default 4dTrajectory/outputs)")
     args = parser.parse_args()
 
-    traffic_jobs = TrafficJobs(args.traffic_jobs_root or traffic_jobs_root(args.port))
+    traffic_jobs = TrafficJobs(args.traffic_jobs_root or traffic_jobs_root(args.port),
+                               outputs_root=args.traffic_outputs_root)
     if args.training_airports_root is None:
         app = AeroVizBackendApp(traffic_jobs=traffic_jobs)
     else:

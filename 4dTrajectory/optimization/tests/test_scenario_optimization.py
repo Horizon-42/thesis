@@ -861,3 +861,64 @@ def test_optimization_config_records_the_iteration_cap():
     )
     assert build_optimization_config(**base)["max_iterations"] == so.DEFAULT_MAX_ITERATIONS
     assert build_optimization_config(**base, max_iterations=500) != build_optimization_config(**base)
+
+
+def _path(ident, length_m):
+    from types import SimpleNamespace
+    return SimpleNamespace(waypoints=[SimpleNamespace(ident=ident)], length_m=length_m)
+
+
+def test_shortest_iaf_solve_times_every_attempt_and_falls_through_any_exception(monkeypatch):
+    """The timing experiment (multi-aircraft design §8.5): every solve_iaf call is timed, the failed IAFs first;
+    any exception of one IAF falls through to the next (as before the timing); all failing keeps the attempts."""
+    from types import SimpleNamespace
+    calls = []
+
+    def fake_solve(pc, *_a, **_k):
+        calls.append(pc.waypoints[0].ident)
+        if pc.waypoints[0].ident == "SHORT":
+            raise RuntimeError("casadi error")
+        if pc.waypoints[0].ident == "MID":
+            raise ValueError("Infeasible_Problem_Detected")
+        return SimpleNamespace(final_time=300.0, pc=pc)
+
+    monkeypatch.setattr(so, "path_length_m", lambda pc: pc.length_m)
+    monkeypatch.setattr(so, "solve_iaf", lambda pc, *a, **k: so.IafSolve(fake_solve(pc).final_time, pc, *([None] * 6)))
+    paths = [_path("LONG", 3.0), _path("SHORT", 1.0), _path("MID", 2.0)]
+    best = so.shortest_iaf_solve(SimpleNamespace(source={"id": "X"}), None, paths, None, 60.0, kind="eta")
+    assert calls == ["SHORT", "MID", "LONG"] and best.pc.waypoints[0].ident == "LONG"
+    assert [(a.kind, a.iaf, a.ok) for a in best.attempts] == [("eta", "SHORT", False), ("eta", "MID", False),
+                                                              ("eta", "LONG", True)]
+    assert all(a.wall_s >= 0.0 and a.cpu_s >= 0.0 for a in best.attempts)
+    with pytest.raises(so.IafSearchFailed, match="all 2 IAF") as failed:
+        so.shortest_iaf_solve(SimpleNamespace(source={"id": "X"}), None, paths[1:], None, 60.0, kind="baseline")
+    assert [(a.iaf, a.ok) for a in failed.value.attempts] == [("SHORT", False), ("MID", False)]
+
+
+def test_a_failed_timed_solve_is_freed_at_once():
+    """``timing`` holds no exception: a failed solve's objects (its NLP in a real solve) are freed when the
+    exception is dropped, without the cycle collector (the box swaps; a reference cycle kept every failed NLP)."""
+    import gc
+    import weakref
+
+    class Nlp:
+        pass
+
+    refs = []
+
+    def failing_solve():
+        nlp = Nlp()
+        refs.append(weakref.ref(nlp))
+        raise ValueError("Maximum_Iterations_Exceeded")
+
+    sink = []
+    gc.disable()
+    try:
+        try:
+            with so.timing("resolve", "IAF", sink):
+                failing_solve()
+        except ValueError:
+            pass
+        assert refs[0]() is None and sink[0].ok is False
+    finally:
+        gc.enable()

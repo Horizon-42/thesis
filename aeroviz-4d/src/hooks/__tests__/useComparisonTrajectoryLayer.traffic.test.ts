@@ -793,10 +793,10 @@ describe("useComparisonTrajectoryLayer fed from a traffic job", () => {
     renderHook(() => useComparisonTrajectoryLayer());
     await waitFor(() => expect(viewer.camera.flyToBoundingSphere).toHaveBeenCalledTimes(1));
     const [sphere] = viewer.camera.flyToBoundingSphere.mock.calls[0] as [Cesium.BoundingSphere];
-    // the sim- path runs from (-78, 35, 1000 m) to (-77, 35, 900 m): its sphere is some 45 km across, 1.4 times wider framed
+    // the sim- path runs from (-78, 35, 1000 m) to (-77, 35, 900 m): its sphere is some 45 km across, 1.2 times wider framed (a tight view of the scene, not 29 km away)
     const from = Cesium.Cartesian3.fromDegrees(-78, 35, 1000);
     const to = Cesium.Cartesian3.fromDegrees(-77, 35, 900);
-    expect(sphere.radius).toBeCloseTo(1.4 * Cesium.Cartesian3.distance(from, to) / 2, -2);
+    expect(sphere.radius).toBeCloseTo(1.2 * Cesium.Cartesian3.distance(from, to) / 2, -2);
     expect(Cesium.Cartesian3.distance(sphere.center, Cesium.Cartesian3.midpoint(from, to, new Cesium.Cartesian3())))
       .toBeLessThan(500);
   });

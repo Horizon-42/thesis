@@ -11,6 +11,7 @@
 
 import * as Cesium from "cesium";
 import { fetchTrafficArrivals } from "../data/trafficJobs";
+import { isCesiumViewerUsable } from "./isCesiumViewerUsable";
 
 /** What the display epoch is in real time. */
 export interface SceneTime {
@@ -29,6 +30,53 @@ export function sceneRealTimeMs(scene: SceneTime, clock: Cesium.JulianDate): num
 /** `2026-05-21 17:47:18` (whole seconds, UTC). */
 export function formatSceneTime(realMs: number): string {
   return new Date(Math.floor(realMs / 1000) * 1000).toISOString().slice(0, 19).replace("T", " ");
+}
+
+/** `2026-05-21` (UTC). */
+function formatSceneDate(realMs: number): string {
+  return new Date(realMs).toISOString().slice(0, 10);
+}
+
+/** `17:47:18 UTC` (whole seconds). */
+function formatSceneClock(realMs: number): string {
+  return `${formatSceneTime(realMs).slice(11)} UTC`;
+}
+
+/**
+ * The parts of Cesium's Timeline widget this file reaches into (none is in its typings): `makeLabel`, which writes every tick
+ * label; `zoomTo`, which draws the ticks again; `_startJulian` / `_endJulian`, the range it now shows. `resize()` would not do:
+ * it returns at once while the widget's size is unchanged, so the labels would stay what they were until the user zoomed.
+ */
+interface LabelledTimeline {
+  makeLabel: (time: Cesium.JulianDate) => string;
+  zoomTo: (start: Cesium.JulianDate, stop: Cesium.JulianDate) => void;
+  _startJulian: Cesium.JulianDate;
+  _endJulian: Cesium.JulianDate;
+}
+
+/**
+ * Make the viewer's animation widget (its date and time) and timeline (its tick labels) show the scene's REAL UTC time instead
+ * of the display epoch's: real = scene start + (clock − display epoch). Returns the function that puts the widgets' own
+ * formatters back — unless the viewer has been destroyed by then (the app's teardown destroys it before its components
+ * unmount: its widgets are gone, there is nothing to put back, and touching them throws). The timeline is drawn again over the
+ * range it shows, so its tick labels change at once.
+ */
+export function showSceneTimeOnClockWidgets(viewer: Cesium.Viewer, scene: SceneTime): () => void {
+  const animation = viewer.animation.viewModel;
+  const timeline = viewer.timeline as unknown as LabelledTimeline;
+  const original = { date: animation.dateFormatter, time: animation.timeFormatter, label: timeline.makeLabel };
+  const redraw = () => timeline.zoomTo(timeline._startJulian, timeline._endJulian);
+  animation.dateFormatter = (date) => formatSceneDate(sceneRealTimeMs(scene, date));
+  animation.timeFormatter = (date) => formatSceneClock(sceneRealTimeMs(scene, date));
+  timeline.makeLabel = (time) => `${formatSceneTime(sceneRealTimeMs(scene, time))} UTC`;
+  redraw();
+  return () => {
+    if (!isCesiumViewerUsable(viewer)) return;
+    animation.dateFormatter = original.date;
+    animation.timeFormatter = original.time;
+    timeline.makeLabel = original.label;
+    redraw();
+  };
 }
 
 const LANDING_DAY = /_(\d{4})(\d{2})(\d{2})T\d{6}Z$/;

@@ -1390,20 +1390,28 @@ def test_a_batch_without_traffic_entry_times_has_no_traffic_block(tmp_path):
     assert "traffic" not in index[0]
 
 
+def test_the_failed_sidecar_beside_an_unsolved_m1_row_is_never_read(tmp_path):
+    results = _write_traffic_window(tmp_path)
+    results.append({"id": "UPS22", "runway": "05R", "status": "failed", "states_file": None, "eval_file": f"{LATER}_eval.json"})
+    (tmp_path / f"{LATER}_traffic.json").write_text("{not json", encoding="utf-8")            # the failed sidecar beside it
+    index = _traffic_index(tmp_path, results)
+    assert {record["group"]: record["status"] for record in index}[COMMANDED] == "solved"      # the unsolved row is a failed group
+
+
 def test_a_missing_traffic_sidecar_is_refused_by_name(tmp_path):
     results = _write_traffic_window(tmp_path, write_sidecar=False)
     with pytest.raises(ValueError, match=f"{COMMANDED}: traffic sidecar {COMMANDED}_traffic.json is missing"):
         _traffic_index(tmp_path, results)
 
 
-@pytest.mark.parametrize("schema", ["optimization-traffic-v1", "optimization-traffic-block-v2", None])
+@pytest.mark.parametrize("schema", ["optimization-traffic-v2", comparison_builder.BLOCK_SCHEMA, None])   # v2: the last schema
 def test_a_traffic_sidecar_of_another_schema_is_refused_by_name(tmp_path, schema):
     sidecar = {"flight_key": COMMANDED, "outcome": "separated", "recorded": []}
     if schema is not None:
         sidecar["schema"] = schema
     results = _write_traffic_window(tmp_path, sidecar=sidecar)
     with pytest.raises(ValueError, match=f"{COMMANDED}_traffic.json has schema {schema!r}, this builder reads "
-                                         f"'optimization-traffic-v2' only"):
+                                         f"{comparison_builder.TRAFFIC_SCHEMA!r} only"):
         _traffic_index(tmp_path, results)
 
 
@@ -1651,15 +1659,28 @@ def test_a_scene_category_is_listed_with_the_entry_fields_existing_categories_us
                            "groups": 3, "constrained": False}]
 
 
+def test_the_failed_sidecar_beside_an_unsolved_row_is_never_required_and_never_read(monkeypatch, tmp_path):
+    # A scenario without a record has a failed sidecar beside its failed eval record (`loop.TRAFFIC_FAILED_SCHEMA`: the
+    # reason and the solves it timed, for the timing experiment). The builder takes an unsolved group from its row and its
+    # eval record: it never requires the sidecar (every scene test above has none beside G3) and does not read it.
+    summary = _write_scene(tmp_path)
+    (tmp_path / f"{G3}_traffic.json").write_text("{this is not even json", encoding="utf-8")
+    out = _publish_scene(monkeypatch, tmp_path, summary)
+    index = json.loads((out / "comparison_index.json").read_text(encoding="utf-8"))
+    groups = {group["group"]: group for group in index["groups"]}
+    assert set(groups) == {G1, G2, G3} and groups[G3]["status"] == "failed"
+    assert groups[G3]["scene"]["outcome"] == "BaselineFailed: slot solve (delay 180.5 s)"        # from the row's reason
+
+
 def test_a_solved_scene_row_without_its_sidecar_is_refused_by_name(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match=f"{G1}: traffic sidecar {G1}_traffic.json is missing"):
         _scene_index(monkeypatch, tmp_path, write_sidecars=False)
 
 
-@pytest.mark.parametrize("schema", [comparison_builder.TRAFFIC_SCHEMA, "optimization-traffic-block-v1", None])
+@pytest.mark.parametrize("schema", [comparison_builder.TRAFFIC_SCHEMA, "optimization-traffic-block-v2", None])   # v2: the last schema
 def test_a_scene_sidecar_of_another_schema_is_refused_by_name(monkeypatch, tmp_path, schema):
     with pytest.raises(ValueError, match=f"{G1}: traffic sidecar {G1}_traffic.json has schema {schema!r}, "
-                                         f"this builder reads 'optimization-traffic-block-v2' only"):
+                                         f"this builder reads {comparison_builder.BLOCK_SCHEMA!r} only"):
         _scene_index(monkeypatch, tmp_path, sidecar_schema=schema)
 
 
@@ -1694,8 +1715,8 @@ def test_a_scene_summary_is_not_read_as_an_m1_run(monkeypatch, tmp_path):
     # the mode decides which sidecar schema is read: M1 refuses the block sidecars of a scene
     summary = _write_scene(tmp_path)
     summary["mode"] = comparison_builder.M1_MODE
-    with pytest.raises(ValueError, match=f"has schema 'optimization-traffic-block-v2', this builder reads "
-                                         f"'optimization-traffic-v2' only"):
+    with pytest.raises(ValueError, match=f"has schema {comparison_builder.BLOCK_SCHEMA!r}, this builder reads "
+                                         f"{comparison_builder.TRAFFIC_SCHEMA!r} only"):
         _publish_scene(monkeypatch, tmp_path, summary)
 
 

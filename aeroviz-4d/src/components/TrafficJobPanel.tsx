@@ -1,76 +1,64 @@
 /**
  * TrafficJobPanel.tsx
  * -------------------
- * The Optimize task's multi-aircraft panel (design §10.1). The user picks a UTC day; the panel lists the airport's
- * arrivals of that day (the backend's roster). M1: pick one arrival, which is optimized in its recorded traffic. M2: set a
- * block (a 24-hour UTC start — an hour and a quarter hour — and a length of 15, 30 or 60 minutes, with the count of arrivals
- * landing in it), and every arrival of the block is scheduled and optimized. Start runs the job on the backend
- * (`useTrafficJob`); the panel shows its progress every 2 s, and when it is done the comparison layer draws its scene and the
- * panel lists one row per controlled aircraft with a summary line that names the inputs the job was started with. A click on
- * a row selects that flight.
+ * The Optimize task's multi-aircraft panel (design §10.1, §10.6). The scenario is chosen from the airport's catalog, computed in
+ * advance (`GET /traffic/scenarios`, `TrafficScenarioList`), never from a date. M1: pick one arrival that has a loss it answers
+ * for in its record; it is optimized in its recorded traffic. M2: set a block length (15, 30 or 60 minutes) and pick one block;
+ * every arrival of the block is scheduled and optimized. Start runs the job on the backend (`useTrafficJob`); the panel shows
+ * its progress every 2 s, and when it is done the comparison layer draws its scene and the panel lists one row per controlled
+ * aircraft with a summary line that names the inputs the job was started with. A click on a row selects that flight.
+ *
+ * While a job runs its progress (phase, how many aircraft are settled, the elapsed time) sits right under the header, above the
+ * list: the same for M1 and M2, and in view whatever the list's length. The type codes of the lists and of the result carry their
+ * plain names as titles where the app has them (`useAircraftTypeNames`).
  *
  * Start is disabled while a job starts, runs or is being cancelled: the user cancels first. The panel is mounted while the
  * task is Optimize and its mode is a multi-aircraft one: leaving either cancels a running job and removes the scene
  * (`useTrafficJob`).
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useApp } from "../context/AppContext";
 import {
   DEFAULT_TRAFFIC_BLOCK_S,
-  TRAFFIC_BLOCK_LENGTHS_S,
-  TRAFFIC_JOB_SETTINGS,
-  arrivalCallsign,
-  fetchTrafficArrivals,
-  type TrafficArrival,
+  fetchTrafficScenarios,
   type TrafficBlockLengthS,
   type TrafficJobMode,
+  type TrafficScenarioCatalog,
 } from "../data/trafficJobs";
+import { useAircraftTypeNames } from "../hooks/useAircraftTypeNames";
 import { useTrafficJob } from "../hooks/useTrafficJob";
+import { typeNameOf } from "../utils/aircraftTypeNames";
 import { buildComparisonLegend } from "../utils/comparisonLegend";
 import { trackEntityById } from "../utils/trackEntity";
 import {
-  BLOCK_START_HOURS,
-  BLOCK_START_MINUTES,
-  arrivalsInBlock,
+  SOLVER_SENTENCE,
+  STAYED_RECORD_REASON,
   blockJobLabel,
-  blockStartOf,
-  defaultBlockHour,
+  blockLossShares,
+  blockLossesText,
   flightJobLabel,
+  formatElapsed,
+  recordLosses,
+  resultLine1,
+  resultLine2,
+  solverTitle,
+  stayedRecordLines,
   summarizeTrafficResult,
+  timingText,
   trafficResultRows,
   trafficSummaryText,
 } from "../utils/trafficJobResult";
+import { CONTROLLABLE_TITLE, NO_COMMANDABLE_REASON, catalogBlocks, lossSecondsTitle, selectionText } from "../utils/trafficScenarios";
 import ComparisonLegendList from "./ComparisonLegendList";
+import TrafficCard from "./TrafficCard";
+import TrafficScenarioList from "./TrafficScenarioList";
+import TypeCode from "./TypeCode";
 
-const DATE_STORAGE_KEY = "aeroviz.trafficJob.date";
-
-/** The last UTC day picked, kept for convenience; the panel works without storage. */
-function rememberedDate(): string {
-  try {
-    return window.localStorage.getItem(DATE_STORAGE_KEY) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-function rememberDate(date: string): void {
-  try {
-    window.localStorage.setItem(DATE_STORAGE_KEY, date);
-  } catch {
-    // a per-viewer convenience only
-  }
-}
-
-/** `HH:MM:SS` of a UTC stamp such as `2026-05-21T17:47:18Z`. */
-function clockOf(utc: string): string {
-  return utc.slice(11, 19);
-}
-
-type ArrivalsView =
-  | { status: "idle" }
+type CatalogView =
   | { status: "loading" }
-  | { status: "ready"; arrivals: TrafficArrival[] }
+  | { status: "ready"; catalog: TrafficScenarioCatalog }
+  /** `error`: the backend's own message (a missing catalog names the command that makes it). */
   | { status: "error"; error: string };
 
 const STATUS_LABELS = {
@@ -83,72 +71,71 @@ const STATUS_LABELS = {
   cancelled: "Cancelled",
 } as const;
 
+/** Whole seconds since `active` became true (a job's wall time, while it runs). */
+function useElapsedSeconds(active: boolean): number {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!active) return undefined;
+    const started = Date.now();
+    setElapsed(0);
+    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [active]);
+  return elapsed;
+}
+
 export default function TrafficJobPanel({ kind }: { kind: TrafficJobMode }) {
   const { activeAirportCode, viewer, selectedFlightId, setSelectedFlightId } = useApp();
   const job = useTrafficJob(activeAirportCode);
-  const [date, setDate] = useState<string>(rememberedDate);
-  const [arrivalsView, setArrivalsView] = useState<ArrivalsView>({ status: "idle" });
-  const [pickedKey, setPickedKey] = useState<string | null>(null);
-  const [hour, setHour] = useState<string>("00");
-  const [minute, setMinute] = useState<string>("00");
-  // the block start follows the day's first landing until the user sets it
-  const [startSet, setStartSet] = useState(false);
+  const typeNames = useAircraftTypeNames();
+  const [catalogView, setCatalogView] = useState<CatalogView>({ status: "loading" });
+  // M1: the flight key of the arrival picked; M2: the start (UTC) of the block picked, of the length `blockS`
+  const [picked, setPicked] = useState<string | null>(null);
   const [blockS, setBlockS] = useState<TrafficBlockLengthS>(DEFAULT_TRAFFIC_BLOCK_S);
+  // the block the M2 job in flight (or the last) was started for: its result reconciles the block's recorded losses
+  const [startedBlock, setStartedBlock] = useState<{ startUtc: string; blockS: TrafficBlockLengthS } | null>(null);
 
   useEffect(() => {
-    if (!activeAirportCode || !date) {
-      setArrivalsView({ status: "idle" });
-      return undefined;
-    }
     let cancelled = false;
-    setArrivalsView({ status: "loading" });
-    fetchTrafficArrivals(activeAirportCode, date)
-      .then((found) => {
-        if (cancelled) return;
-        setArrivalsView({ status: "ready", arrivals: found.arrivals });
-        setPickedKey((current) => (found.arrivals.some((a) => a.flightKey === current) ? current : null));
+    setCatalogView({ status: "loading" });
+    fetchTrafficScenarios(activeAirportCode)
+      .then((catalog) => {
+        if (!cancelled) setCatalogView({ status: "ready", catalog });
       })
       .catch((error: unknown) => {
-        if (!cancelled) setArrivalsView({ status: "error", error: error instanceof Error ? error.message : String(error) });
+        if (!cancelled) setCatalogView({ status: "error", error: error instanceof Error ? error.message : String(error) });
       });
     return () => {
       cancelled = true;
     };
-  }, [activeAirportCode, date]);
+  }, [activeAirportCode]);
 
-  const arrivals = useMemo(() => (arrivalsView.status === "ready" ? arrivalsView.arrivals : []), [arrivalsView]);
+  // a block of another length is another scenario: the pick goes with it
+  const chooseBlockLength = useCallback((length: TrafficBlockLengthS) => {
+    setBlockS(length);
+    setPicked(null);
+  }, []);
 
-  // the default start: the hour of the day's first landing, rounded down — until the user sets one
-  useEffect(() => {
-    if (startSet || arrivalsView.status !== "ready") return;
-    setHour(defaultBlockHour(arrivals));
-    setMinute("00");
-  }, [startSet, arrivalsView.status, arrivals]);
-
-  const blockStart = date ? blockStartOf(date, hour, minute) : "";
-  const inBlock = useMemo(
-    () => (kind === "m2" && blockStart ? arrivalsInBlock(arrivals, blockStart, blockS) : []),
-    [arrivals, kind, blockStart, blockS],
-  );
-  const inBlockKeys = useMemo(() => new Set(inBlock.map((a) => a.flightKey)), [inBlock]);
-  const crossesMidnight = kind === "m2" && blockStart !== "" &&
-    Date.parse(blockStart) + blockS * 1000 > Date.parse(`${date}T00:00:00Z`) + 86_400_000;
+  const catalog = catalogView.status === "ready" ? catalogView.catalog : null;
+  const pickedArrival = kind === "m1" ? catalog?.m1.find((a) => a.flightKey === picked) : undefined;
+  const pickedBlock = kind === "m2" && catalog ? catalogBlocks(catalog, blockS).find((b) => b.startUtc === picked) : undefined;
 
   const phase = job.view.phase;
   const running = phase === "starting" || phase === "running";
   const busy = running || phase === "cancelling";
-  const startDisabled = busy || (kind === "m1" ? pickedKey === null : inBlock.length === 0);
-  const picked = arrivals.find((a) => a.flightKey === pickedKey);
+  const elapsedS = useElapsedSeconds(running);
+  // the job controls the arrivals that have an aircraft dynamics model: a block with none cannot be started (the reason is shown)
+  const blockWithoutDynamics = pickedBlock !== undefined && pickedBlock.commandable === 0;
+  const startDisabled = busy || (kind === "m1" ? pickedArrival === undefined : pickedBlock === undefined || blockWithoutDynamics);
 
   function startJob(): void {
-    if (kind === "m1") {
-      if (picked) {
-        void job.start({ mode: "m1", airport: activeAirportCode, flightKey: picked.flightKey }, flightJobLabel(picked));
-      }
-    } else {
+    if (pickedArrival) {
+      void job.start({ mode: "m1", airport: activeAirportCode, flightKey: pickedArrival.flightKey }, flightJobLabel(pickedArrival));
+    } else if (pickedBlock) {
+      setStartedBlock({ startUtc: pickedBlock.startUtc, blockS });
       void job.start(
-        { mode: "m2", airport: activeAirportCode, blockStartUtc: blockStart, blockS },
-        blockJobLabel(blockStart, blockS),
+        { mode: "m2", airport: activeAirportCode, blockStartUtc: pickedBlock.startUtc, blockS },
+        blockJobLabel(pickedBlock.startUtc, blockS),
       );
     }
   }
@@ -159,26 +146,37 @@ export default function TrafficJobPanel({ kind }: { kind: TrafficJobMode }) {
   }
 
   const result = useMemo(() => {
-    if (job.view.phase !== "done") return null;
-    const rows = trafficResultRows(job.view.index);
+    if (job.view.phase !== "done" || catalog === null) return null;   // a job is started from a loaded list
+    const rows = trafficResultRows(job.view.index, job.view.perAircraft, job.view.offTargetRows);
     const isScene = job.view.index.scene !== undefined;
     return {
       label: job.view.label,
-      rows,
+      // per aircraft, two lines: who it is and how it was flown, then what changed (its record's loss instants come from the
+      // list the job was started from)
+      rows: rows.map((row) => ({
+        ...row,
+        typeName: typeNameOf(typeNames, row.change.type),
+        line1: resultLine1(row),
+        line2: resultLine2(row, recordLosses(catalog, row.flightKey), catalog.config.stepS, isScene),
+      })),
       isScene,
-      summary: trafficSummaryText(summarizeTrafficResult(rows, job.view.status.summary, isScene)),
+      summary: trafficSummaryText(summarizeTrafficResult(rows, job.view.status.summary, isScene, job.view.stayedRecords)),
+      // M2: the arrivals of the block that could not be controlled (no aircraft dynamics model), each named
+      stayed: stayedRecordLines(job.view.stayedRecords),
+      timing: timingText(job.view.timing),
+      // M2: which aircraft carry the block's recorded losses (flown or not), so its seconds in loss add up to the lines below
+      blockLosses: isScene && startedBlock !== null
+        ? {
+          text: blockLossesText(blockLossShares(catalog, startedBlock.startUtc, startedBlock.blockS, job.view.perAircraft)),
+          title: lossSecondsTitle(catalog.config.stepS),
+        }
+        : null,
       legend: buildComparisonLegend(job.view.index, null),
-      aircraft: job.view.status.summary?.aircraft,
-      records: job.view.status.summary?.skipped_no_dynamics,
     };
-  }, [job.view]);
+  }, [job.view, catalog, startedBlock, typeNames]);
 
   const progress = job.view.phase === "running" ? job.view.status.progress : null;
   const connectionLost = job.view.phase === "running" ? job.view.connection : null;
-  // the count of arrivals in the block; once a job of THIS block is done, how many it controlled and how many stayed records
-  const blockCount = `${inBlock.length} arrival${inBlock.length === 1 ? " lands" : "s land"} in this block`;
-  const sameBlockDone = result !== null && result.isScene && result.label === blockJobLabel(blockStart, blockS) &&
-    result.aircraft !== undefined && result.records !== undefined;
 
   return (
     <div className="pilot-panel traffic-job-panel">
@@ -193,133 +191,17 @@ export default function TrafficJobPanel({ kind }: { kind: TrafficJobMode }) {
         </div>
       </header>
 
-      <section className="traffic-job-when" aria-label="Day and block">
-        <label className="traffic-job-date">
-          <span>UTC day</span>
-          <input
-            type="date"
-            className="pilot-select-input"
-            value={date}
-            onChange={(event) => {
-              setDate(event.target.value);
-              setStartSet(false);
-              rememberDate(event.target.value);
-            }}
-          />
-        </label>
-        {kind === "m2" ? (
-          <div className="traffic-job-block pilot-optimization-row">
-            <label>
-              <span>Start hour (UTC)</span>
-              <select
-                className="pilot-select-input"
-                value={hour}
-                onChange={(event) => { setHour(event.target.value); setStartSet(true); }}
-              >
-                {BLOCK_START_HOURS.map((h) => <option key={h} value={h}>{h}</option>)}
-              </select>
-            </label>
-            <label>
-              <span>Minute</span>
-              <select
-                className="pilot-select-input"
-                value={minute}
-                onChange={(event) => { setMinute(event.target.value); setStartSet(true); }}
-              >
-                {BLOCK_START_MINUTES.map((m) => <option key={m} value={m}>{m}</option>)}
-              </select>
-            </label>
-            <label>
-              <span>Length</span>
-              <select
-                className="pilot-select-input"
-                value={blockS}
-                onChange={(event) => setBlockS(Number(event.target.value) as TrafficBlockLengthS)}
-              >
-                {TRAFFIC_BLOCK_LENGTHS_S.map((length) => (
-                  <option key={length} value={length}>{length / 60} min</option>
-                ))}
-              </select>
-            </label>
-          </div>
-        ) : null}
-      </section>
-
-      {kind === "m2" ? (
-        <p className="traffic-job-note" role="status" aria-label="Arrivals in the block">
-          {sameBlockDone
-            ? `${result.aircraft! + result.records!} arrivals landed in this block: ${result.aircraft} controlled, ` +
-              `${result.records} stayed records (no aircraft dynamics model)`
-            : blockCount}
-          {crossesMidnight ? " (the block runs past midnight: the next day's landings are flown but not counted here)" : ""}
-        </p>
-      ) : (
-        <p className="traffic-job-note">
-          {picked ? `Selected: ${arrivalCallsign(picked)}` : "Pick the arrival to optimize in its recorded traffic."}
-        </p>
-      )}
-
-      <div className="traffic-job-arrivals traffic-job-table-scroll" aria-label="Arrivals of the day">
-        {arrivalsView.status === "loading" ? <p className="traffic-job-note">Loading arrivals…</p> : null}
-        {arrivalsView.status === "error" ? <p className="pilot-error" role="alert">{arrivalsView.error}</p> : null}
-        {arrivalsView.status === "idle" ? <p className="traffic-job-note">Pick a UTC day to list the arrivals.</p> : null}
-        {arrivalsView.status === "ready" && arrivals.length === 0 ? (
-          <p className="traffic-job-note">No arrival of {activeAirportCode} lands on {date}.</p>
-        ) : null}
-        {arrivals.length > 0 ? (
-          <table>
-            <thead>
-              <tr><th>Landing</th><th>Flight</th><th>Rwy</th><th>Type</th></tr>
-            </thead>
-            <tbody>
-              {arrivals.map((arrival) => (
-                <tr
-                  key={arrival.flightKey}
-                  className={
-                    kind === "m1"
-                      ? arrival.flightKey === pickedKey ? "selected" : ""
-                      : inBlockKeys.has(arrival.flightKey) ? "in-block" : ""
-                  }
-                  title={arrival.flightKey}
-                  onClick={kind === "m1" ? () => setPickedKey(arrival.flightKey) : undefined}
-                  style={kind === "m1" ? { cursor: "pointer" } : undefined}
-                >
-                  <td>{clockOf(arrival.landingUtc)}</td>
-                  <td>{arrivalCallsign(arrival)}</td>
-                  <td>{arrival.runway}</td>
-                  <td>{arrival.type ?? "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : null}
-      </div>
-
-      <details className="traffic-job-settings">
-        <summary>Solver settings (the batch's)</summary>
-        <p>
-          max duration {TRAFFIC_JOB_SETTINGS.maxDurationS} s · rollout step {TRAFFIC_JOB_SETTINGS.rolloutDtS} s · IPOPT
-          cap {TRAFFIC_JOB_SETTINGS.maxIterations} · check step {TRAFFIC_JOB_SETTINGS.stepS} s · row window{" "}
-          {TRAFFIC_JOB_SETTINGS.rowWindowS} s · margin {TRAFFIC_JOB_SETTINGS.margin * 100} % · re-solve rounds{" "}
-          {TRAFFIC_JOB_SETTINGS.maxRounds}
-        </p>
-      </details>
-
-      <div className="traffic-job-actions">
-        <button type="button" onClick={startJob} disabled={startDisabled}>Start</button>
-        <button type="button" onClick={job.cancel} disabled={!running}>Cancel</button>
-      </div>
-
       {phase === "starting" ? <p className="traffic-job-note">Starting the job…</p> : null}
       {progress ? (
         <div className="traffic-job-progress" role="status" aria-label="Progress">
           <progress max={progress.total ?? undefined} value={progress.total === null ? undefined : progress.done} />
-          <span>
-            {progress.total === null
-              ? "Reading the traffic…"
-              : `${progress.done} of ${progress.total} aircraft done`}
-            {progress.current ? ` · last: ${progress.current.split("_")[0]}` : ""}
-          </span>
+          <span aria-label="Phase">{progress.phase} · {formatElapsed(elapsedS)}</span>
+          {progress.total === null ? null : (
+            <span>
+              {`${progress.done} of ${progress.total} aircraft done`}
+              {progress.current ? ` · last: ${progress.current.split("_")[0]}` : ""}
+            </span>
+          )}
         </div>
       ) : null}
       {connectionLost !== null ? (
@@ -327,6 +209,42 @@ export default function TrafficJobPanel({ kind }: { kind: TrafficJobMode }) {
           Connection lost, retrying… the job is still on the backend ({connectionLost})
         </p>
       ) : null}
+      {catalogView.status === "loading" ? <p className="traffic-job-note">Loading the scenario list…</p> : null}
+      {catalogView.status === "error" ? <p className="pilot-error" role="alert">{catalogView.error}</p> : null}
+      {catalog ? (
+        <TrafficScenarioList
+          kind={kind}
+          catalog={catalog}
+          blockS={blockS}
+          onBlockS={chooseBlockLength}
+          picked={picked}
+          onPick={setPicked}
+          typeNames={typeNames}
+        />
+      ) : null}
+      {catalog ? (
+        <p
+          className="traffic-job-note"
+          role="status"
+          aria-label="Selection"
+          title={pickedBlock ? `${CONTROLLABLE_TITLE}. ${lossSecondsTitle(catalog.config.stepS)}` : undefined}
+        >
+          {selectionText(kind, pickedArrival, pickedBlock, blockS, catalog.config.stepS, typeNames)}
+        </p>
+      ) : null}
+      {blockWithoutDynamics ? (
+        <p className="traffic-job-note traffic-job-blocked" role="status" aria-label="Start disabled">
+          Start is disabled: {NO_COMMANDABLE_REASON}.
+        </p>
+      ) : null}
+
+      <p className="traffic-job-note traffic-job-settings" title={solverTitle()}>{SOLVER_SENTENCE}</p>
+
+      <div className="traffic-job-actions">
+        <button type="button" onClick={startJob} disabled={startDisabled}>Start</button>
+        <button type="button" onClick={job.cancel} disabled={!running}>Cancel</button>
+      </div>
+
       {phase === "failed" && job.view.phase === "failed" ? <p className="pilot-error" role="alert">{job.view.error}</p> : null}
       {phase === "cancelling" ? <p className="traffic-job-note">Cancelling the job…</p> : null}
       {phase === "cancelled" ? <p className="traffic-job-note">The job was cancelled.</p> : null}
@@ -336,32 +254,35 @@ export default function TrafficJobPanel({ kind }: { kind: TrafficJobMode }) {
           <p className="traffic-job-summary" role="status">
             <strong>{result.label}</strong> — {result.summary}
           </p>
-          <div className="traffic-job-table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Flight</th><th>Rwy</th><th>Outcome</th>
-                  {result.isScene ? <th title="Delay of the aircraft's slot, in seconds">Delay (s)</th> : null}
-                </tr>
-              </thead>
-              <tbody>
-                {result.rows.map((row) => (
-                  <tr
-                    key={row.flightKey}
-                    className={row.flightKey === selectedFlightId ? "selected" : ""}
-                    title={row.title}
-                    onClick={() => selectFlight(row.flightKey)}
-                    style={{ cursor: "pointer" }}
-                  >
-                    <td>{row.callsign}</td>
-                    <td>{row.runway}</td>
-                    <td className="traffic-job-outcome">{row.outcomeName}</td>
-                    {result.isScene ? <td>{row.delayS === null ? "—" : Math.round(row.delayS)}</td> : null}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <p className="traffic-job-note traffic-job-timing" aria-label="Timing">{result.timing}</p>
+          {result.blockLosses === null ? null : (
+            <p className="traffic-job-note traffic-job-block-losses" aria-label="Block losses" title={result.blockLosses.title}>
+              {result.blockLosses.text}
+            </p>
+          )}
+          <ul className="traffic-job-cards traffic-job-results" role="listbox" aria-label="Controlled aircraft">
+            {result.rows.map((row) => (
+              <TrafficCard
+                key={row.flightKey}
+                lines={[row.line1, row.line2]}
+                title={row.title}
+                selected={row.flightKey === selectedFlightId}
+                pick={() => selectFlight(row.flightKey)}
+                detailClass="traffic-job-detail"
+                typeCode={row.change.type ?? undefined}
+                typeName={row.typeName}
+              />
+            ))}
+          </ul>
+          {result.stayed.length === 0 ? null : (
+            <ul className="traffic-job-stayed" aria-label="Not controllable">
+              {result.stayed.map((stayed) => (
+                <li key={stayed.flightKey} className="traffic-job-note" title={stayed.flightKey}>
+                  {stayed.callsign} · <TypeCode code={stayed.type} name={typeNameOf(typeNames, stayed.type)} />: {STAYED_RECORD_REASON}
+                </li>
+              ))}
+            </ul>
+          )}
           <ComparisonLegendList legend={result.legend} />
         </section>
       ) : null}
