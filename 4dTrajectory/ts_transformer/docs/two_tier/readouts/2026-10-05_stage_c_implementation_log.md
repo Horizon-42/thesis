@@ -794,3 +794,20 @@ session's job took the host's memory (0 GB available, swap full) had written not
 Not measured: the time with other jobs on the CPU (the 256 run met a load of about 2–3 of 28 cores); larger batches;
 other traffic shapes. The first pass loses separation in 21 % of `profile_256`'s windows (the record does not split
 the ends by kind).
+
+## 26 C10: the formal post-training launched (2026-10-06)
+
+The user's choice of O13 (2026-10-06): every setting as proposed in §25 (1,000 windows of each kind, 10 rounds, update
+groups 4, 64 data sentences, batch windows 64, K 8, rates 1e-5 / 1e-4, weight decay 0.01, 200 select windows an airport,
+traffic 64 / 4); the criterion that chooses the round (D7) later, before the validation readout.
+
+| Step | Commit | What |
+|---|---|---|
+| The intent | `d5a2d322` | `post_train_20261006` in `docs/experiments/intents.json` (title, intent, design, one line per round), checked by the publisher's loader |
+| The full ts suite | — | On the merged `dev-two-tier`: 1,845 passed, 1 skipped, 8 min 36 s on 6 workers |
+| The launch | — | `outputs/POOLED/post/post_train_20261006`, from the main tree at `e5f54dd4` on a clean tree (2026-10-06 12:20 local), every path repository-relative. A first launch from the worktree with absolute paths stopped at the executor's check before writing anything (its reference names its inputs by repository-relative path) |
+
+The worktree's `aeroviz-4d/public/data/airports` points at the scratch tree of the stage C test stack (log §19); the
+formal census and the profiles read the CIFP procedures through it. Every live airport file is there as a link to
+the live file (checked file by file), and the base's procedure-mask check (prior D106) passed at every open: their
+results stand. The campaign reads the main tree's live airports.
