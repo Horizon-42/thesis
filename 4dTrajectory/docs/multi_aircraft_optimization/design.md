@@ -408,6 +408,7 @@ branch and worktree, with a review before each commit.
 | T10 | M2 in the viewer (the user, 2026-10-06): (a) one directory and one `summary.json` per M2 run; (b) the builder and the frontend show a run as one scene (§9); (c) one KRDU run published | Builder and frontend tests; the publication validator; checked in the browser | T7, T8 | Done (§8.4): (a) `4e6c3ad0`; (b) `87f5f2f2`; (c) published. The legend and M1's one window: in work with T11 |
 | T11 | The Optimize task's multi-aircraft mode (§10; the user, 2026-10-06) | Backend and frontend tests; one M1 job and one 15-min M2 job on a test stack, checked in the browser | T10 | Built (§10; this commit); reviewed; real jobs on a test stack matched the batch; checked in the browser |
 | T12 | The scenario list (§10.6; the user, 2026-10-06): the census runner, its catalog per airport, `GET /traffic/scenarios`, the panel's list instead of the date | Tests; the KRDU catalog; checked in the browser by someone who is NOT told a date or a flight | T11 | Design written (§10.6) |
+| T13 | The timing experiment (§8.5; the user, 2026-10-06: the data for their report) | Batch timing in the sidecars reviewed; the five airports run; the data read-only with checksums and a README | T12 | Planned (§8.5) |
 
 ### 8.1 T5 readout (KRDU, seed 11, 50 windows; the reviewed M1 code with the retry of MD13, scratch output)
 
@@ -456,6 +457,25 @@ branch and worktree, with a review before each commit.
   sample count do not reload it.
 - The user's review (2026-10-06): no legend for the traffic colours, and M1 drew all its windows at once
   (§9 viewer contracts, fixed with T11).
+
+### 8.5 T13 plan: the timing experiment
+
+The user, 2026-10-06: measure how long the multi-aircraft optimization takes and keep the data for a report. Every
+fixed parameter below is a decision; a change is written here before the run.
+
+| Parameter | Value |
+|---|---|
+| Code | The commit that adds the batch timing (stated in each README) |
+| Airports | KMSY, KRDU, KSJC, KSMF, KSTL (the live harvest root; KAUS is held out) |
+| M1 | 100 windows per airport, seed 11 (`traffic_optimization.py m1 --sample 100 --seed 11`), category `runway_cons` |
+| M2 | Per airport the 5 one-hour blocks with the most arrivals (the airport's catalog, `m2["3600"]`, by arrivals, then the earliest) |
+| Solver | The batch defaults: `LoopSettings` (1 s checks, W 60 s, κ 1 %, 5 rounds, the retry of MD13), `max_duration` 2000 s, rollout 0.5 s, IPOPT cap 3000 |
+| Machine use | 3 worker processes, `nice -n 19`, one solver thread each; the machine load sampled every 60 s beside the run |
+| Measured | Per solve and per window / aircraft: wall time and process CPU time; the solve count; the outcome |
+| Output | `4dTrajectory/outputs/<ICAO>/traffic_timing_m1/` and `…/traffic_timing_m2/`: records, sidecars, summary, logs, the load samples, machine information, `SHA256SUMS`, read-only |
+| Readout | A runner over the outputs: per airport and mode, the time distribution (mean, median, p95, max) in wall and CPU time, the solves, the outcomes; JSON and a Markdown table |
+
+The scenes of this experiment are the present ones, not aligned with the two-tier window (§11 item 5); the README says so.
 
 ## 9. Outputs and records
 
