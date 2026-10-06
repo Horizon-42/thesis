@@ -1644,3 +1644,25 @@ written after the frontend's dev server started is served as HTML until the serv
 `tests/test_prior_training_export.py`, `aeroviz_backend/tests/test_prior_segment.py`.
 
     python run_ts.py prior_training_export --readout <prior_free_generation dir> --set-id <id> [--per-airport 10]
+
+### R63 · `run_ts.py model_speed` — how fast the model speaks: the prior's step of a row and the executor's steps of it, apart (outline §6.2 item 10; D136)
+
+2026-10-06. On fixed inputs of the select days (never val or test): stage B (`--prior`, with `--instructions`,
+`--executor`) speaks `--per-airport` select flights of each airport (seed 1337, `prior_free_generation.draw`) through
+the shared step of a closed loop (`SpeakingLoop`); stage C (`--campaign`, `--round`; after C10, run by stage C) speaks
+its campaign's selection windows in the window loop (`WindowLoop`: the traffic attention and the separation masks with
+the prior's step), after the campaign's schema and the closed loop's checks. A proxy around the closed loop
+(`TimedLoop`) times the executor's `step` and `halt` of each row; the prior's step is the rest of the row (the inputs,
+the model with its cache, the masks, the draw, the loop's records); every moment from the end of the observed rows is
+in one or the other; the GPU is synchronised around each. A warm-up of 20 rows is spoken and thrown away before each
+setting. Settings: `--devices` (the CPU with one thread, the GPU) × `--batches` (1; 400 — stage B's 100 flights
+repeated in turn, copy k its sample k; a smaller batch speaks every flight in loops of it). Writes `<out>/speed.json`
+(`ts-model-speed-v1`): for each setting the loop sizes, rows timed, p50/p95/largest of a row's prior step, executor
+steps and whole (ms), a sentence (s; its observed rows' encoding not included), flight rows a second, the share of Δ;
+the host's load and the GPU's free memory as information. Into a new directory
+`4dTrajectory/outputs/POOLED/speed/<model run>_<date>/`, never the model's; a clean tree unless `--smoke`; run with no
+other job on the host or the GPU. Stage B's Training export names the readout (`prior_training_export --speed`,
+`source.speed`). Tests: `tests/test_model_speed.py`.
+
+    python run_ts.py model_speed --prior <a prior_train run> --instructions <artefact> --executor <spec> --out <new dir>
+
