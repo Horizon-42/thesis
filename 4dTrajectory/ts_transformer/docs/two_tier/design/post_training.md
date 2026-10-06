@@ -82,7 +82,8 @@ commits, the tests and the readings are in the implementation log.
 
 ### 0.4 Plan
 
-1. O13 and the user's criteria (D7); then C10 and the validation readout of its chosen round.
+1. O13 and the user's criteria (D7); then C10 and the validation readout of its chosen round; then the speed of the
+   chosen round (outline §6.2 item 10, `model_speed`), with no other job on the host or the GPU.
 2. C12.
 3. The window view (C11) and the window export change with the one layout of the three stages' Training views (outline
    §6.2, D133–D135: the results page, the rounds' envelopes, one block of a flown sentence), built by stage B's
