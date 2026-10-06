@@ -588,6 +588,8 @@ def run_campaign(out: Path, settings: Settings, context: Context, speakers: Spea
         directory = out / f"round_{round_}"
         directory.mkdir()
         windows, drawn = draw_round(context, settings.per_kind, np.random.default_rng([settings.seed, round_]))
+        if speakers is not None and context.device.type == "cuda":
+            torch.cuda.empty_cache()     # the speakers share the GPU: the memory this process cached in the last pass
         spoken = speak_round(model, context, windows, settings, round_, directory, speakers)
         torch.manual_seed(pass_seed(settings.seed, round_))                    # the data term's dropout
         passed = train_pass(model, context, optimizer, directory, settings,
