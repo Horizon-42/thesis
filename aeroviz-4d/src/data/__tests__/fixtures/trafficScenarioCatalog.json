@@ -1,0 +1,227 @@
+{
+ "schema": "traffic-scenario-catalog-v2",
+ "airport": "KRDU",
+ "writtenUtc": "2026-10-06T09:11:42Z",
+ "config": {
+  "reading": "visual",
+  "stepS": 1.0,
+  "minHorizonS": 2000.0,
+  "horizonCoversRecord": true,
+  "manifest": "/data/harvest/KRDU/arrivals/manifest.json",
+  "rosterSchema": "harvest-arrivals-v7-measured-crossing-in-slice",
+  "limit": null
+ },
+ "counts": {
+  "arrivals": 6,
+  "judged": 6,
+  "withLoss": 5
+ },
+ "m1": [
+  {
+   "flightKey": "N2412P_05L_ac4ffb_20260501T123000Z",
+   "callsign": "N2412P",
+   "runway": "05L",
+   "type": "C172",
+   "entryUtc": "2026-05-01T12:30:00.000Z",
+   "landingUtc": "2026-05-01T12:30:00Z",
+   "category": "I",
+   "lossInstants": 40,
+   "kinds": [
+    "radar_or_vertical"
+   ],
+   "tightest": 0.5123,
+   "recordedAircraft": 5
+  },
+  {
+   "flightKey": "SWA3131_05L_ac4ffb_20260501T000659Z",
+   "callsign": "SWA3131",
+   "runway": "05L",
+   "type": "B38M",
+   "entryUtc": "2026-05-01T00:06:59.000Z",
+   "landingUtc": "2026-05-01T00:06:59Z",
+   "category": "D",
+   "lossInstants": 28,
+   "kinds": [
+    "radar_or_vertical"
+   ],
+   "tightest": 0.648716318740827,
+   "recordedAircraft": 12
+  },
+  {
+   "flightKey": "N123AB_05R_a1b2c3_20260501T002130Z",
+   "callsign": null,
+   "runway": "05R",
+   "type": null,
+   "entryUtc": "2026-05-01T00:21:30.000Z",
+   "landingUtc": "2026-05-01T00:21:30Z",
+   "category": null,
+   "lossInstants": 6,
+   "kinds": [
+    "in_trail",
+    "radar_or_vertical"
+   ],
+   "tightest": 0.8641778119367941,
+   "recordedAircraft": 9
+  },
+  {
+   "flightKey": "DAL88_32_ac4ffb_20260501T144954Z",
+   "callsign": "DAL88",
+   "runway": "32",
+   "type": "A321",
+   "entryUtc": "2026-05-01T14:49:54.000Z",
+   "landingUtc": "2026-05-01T14:49:54Z",
+   "category": "D",
+   "lossInstants": 6,
+   "kinds": [
+    "at_threshold"
+   ],
+   "tightest": 0.9,
+   "recordedAircraft": 7
+  },
+  {
+   "flightKey": "AAL2634_05L_ac4ffb_20260501T145510Z",
+   "callsign": "AAL2634",
+   "runway": "05L",
+   "type": "A321",
+   "entryUtc": "2026-05-01T14:55:10.000Z",
+   "landingUtc": "2026-05-01T14:55:10Z",
+   "category": "D",
+   "lossInstants": 3,
+   "kinds": [
+    "diagonal"
+   ],
+   "tightest": 0.95,
+   "recordedAircraft": 7
+  }
+ ],
+ "m2": {
+  "900": [
+   {
+    "startUtc": "2026-05-01T12:30:00Z",
+    "arrivals": 1,
+    "commandable": 1,
+    "lossInstants": 40,
+    "runways": [
+     "05L"
+    ]
+   },
+   {
+    "startUtc": "2026-05-01T00:00:00Z",
+    "arrivals": 1,
+    "commandable": 1,
+    "lossInstants": 28,
+    "runways": [
+     "05L"
+    ]
+   },
+   {
+    "startUtc": "2026-05-01T14:45:00Z",
+    "arrivals": 2,
+    "commandable": 2,
+    "lossInstants": 9,
+    "runways": [
+     "05L",
+     "32"
+    ]
+   },
+   {
+    "startUtc": "2026-05-01T00:15:00Z",
+    "arrivals": 1,
+    "commandable": 1,
+    "lossInstants": 6,
+    "runways": [
+     "05R"
+    ]
+   },
+   {
+    "startUtc": "2026-05-02T09:00:00Z",
+    "arrivals": 1,
+    "commandable": 1,
+    "lossInstants": 0,
+    "runways": [
+     "05R"
+    ]
+   }
+  ],
+  "1800": [
+   {
+    "startUtc": "2026-05-01T12:30:00Z",
+    "arrivals": 1,
+    "commandable": 1,
+    "lossInstants": 40,
+    "runways": [
+     "05L"
+    ]
+   },
+   {
+    "startUtc": "2026-05-01T00:00:00Z",
+    "arrivals": 2,
+    "commandable": 2,
+    "lossInstants": 34,
+    "runways": [
+     "05L",
+     "05R"
+    ]
+   },
+   {
+    "startUtc": "2026-05-01T14:30:00Z",
+    "arrivals": 2,
+    "commandable": 2,
+    "lossInstants": 9,
+    "runways": [
+     "05L",
+     "32"
+    ]
+   },
+   {
+    "startUtc": "2026-05-02T09:00:00Z",
+    "arrivals": 1,
+    "commandable": 1,
+    "lossInstants": 0,
+    "runways": [
+     "05R"
+    ]
+   }
+  ],
+  "3600": [
+   {
+    "startUtc": "2026-05-01T12:00:00Z",
+    "arrivals": 1,
+    "commandable": 1,
+    "lossInstants": 40,
+    "runways": [
+     "05L"
+    ]
+   },
+   {
+    "startUtc": "2026-05-01T00:00:00Z",
+    "arrivals": 2,
+    "commandable": 2,
+    "lossInstants": 34,
+    "runways": [
+     "05L",
+     "05R"
+    ]
+   },
+   {
+    "startUtc": "2026-05-01T14:00:00Z",
+    "arrivals": 2,
+    "commandable": 2,
+    "lossInstants": 9,
+    "runways": [
+     "05L",
+     "32"
+    ]
+   },
+   {
+    "startUtc": "2026-05-02T09:00:00Z",
+    "arrivals": 1,
+    "commandable": 1,
+    "lossInstants": 0,
+    "runways": [
+     "05R"
+    ]
+   }
+  ]
+ }
+}

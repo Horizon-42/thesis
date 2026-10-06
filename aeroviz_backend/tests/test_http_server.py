@@ -1,11 +1,13 @@
 import contextlib
 import io
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
 from aeroviz_backend.http_server import AeroVizBackendApp, AeroVizRequestHandler, ServedFile
-from aeroviz_backend.traffic_jobs import BadJobRequest, JobBusy, JobNotFound
+from aeroviz_backend.traffic_jobs import BadJobRequest, CatalogUnreadable, JobBusy, JobNotFound, JobStateInvalid, TrafficJobs
+from traffic_job_files import CATALOG_SCHEMA
 
 
 class TestAeroVizBackendApp(unittest.TestCase):
@@ -305,6 +307,16 @@ class FakeTrafficJobs:
             raise ValueError("date must be YYYY-MM-DD, got 'bad'")
         return {"airport": airport, "date": day, "arrivals": []}
 
+    def scenarios(self, airport):
+        self.calls.append(("scenarios", airport))
+        if airport == "KSEA":
+            raise FileNotFoundError("no scenario catalog for KSEA; make it with `python ... --airport KSEA`")
+        if airport == "KBAD":
+            raise CatalogUnreadable("catalog.json has schema 'old', not 'new'")
+        if airport == "K R":
+            raise ValueError("airport must be a 3-4 character ICAO-style code")
+        return {"schema": CATALOG_SCHEMA, "airport": airport, "m1": [], "m2": {}}
+
     def start(self, request):
         self.calls.append(("start", request))
         if self.busy:
@@ -317,12 +329,16 @@ class FakeTrafficJobs:
         self.calls.append(("status", job_id))
         if job_id == "missing":
             raise JobNotFound("no traffic job 'missing'")
+        if job_id == "invalid":
+            raise JobStateInvalid("job invalid: its state.json says done and has no timing")
         return {"state": "running", "progress": {"done": 1, "total": 3, "current": "K"}, "error": None}
 
     def cancel(self, job_id):
         self.calls.append(("cancel", job_id))
         if job_id == "missing":
             raise JobNotFound("no traffic job 'missing'")
+        if job_id == "invalid":
+            raise JobStateInvalid("job invalid: its state.json says done and has no timing")
         return {"state": "cancelled", "progress": {"done": 1, "total": 3, "current": "K"}, "error": None}
 
     def file(self, job_id, name):
@@ -348,6 +364,27 @@ class TestTrafficJobRoutes(unittest.TestCase):
         self.assertEqual(self.app.handle_get("/traffic/arrivals?airport=KRDU&date=bad")[0], 400)
         self.assertEqual(self.app.handle_get("/traffic/arrivals?airport=KRDU")[0], 400)           # date is required
         self.assertEqual(self.app.handle_get("/traffic/arrivals?date=2026-05-21")[0], 400)        # so is the airport
+
+    def test_a_done_state_without_what_it_holds_is_a_500_that_names_it(self):
+        status, payload = self.app.handle_get("/traffic/jobs/invalid")
+        self.assertEqual(status, 500)
+        self.assertIn("has no timing", payload["error"])
+        status, payload, _log = self.app.handle_post("/traffic/jobs/invalid/cancel", {})
+        self.assertEqual(status, 500)
+        self.assertIn("has no timing", payload["error"])
+
+    def test_scenarios_route_parses_the_query_and_maps_errors(self):
+        status, payload = self.app.handle_get("/traffic/scenarios?airport=KRDU")
+        self.assertEqual((status, payload["airport"], payload["schema"]), (200, "KRDU", CATALOG_SCHEMA))
+        status, payload = self.app.handle_get("/traffic/scenarios?airport=KSEA")
+        self.assertEqual(status, 404)                                          # a missing catalog; its message names the command
+        self.assertIn("--airport KSEA", payload["error"])
+        status, payload = self.app.handle_get("/traffic/scenarios?airport=KBAD")
+        self.assertEqual(status, 500)                                          # another schema
+        self.assertIn("schema 'old'", payload["error"])
+        self.assertEqual(self.app.handle_get("/traffic/scenarios?airport=K%20R")[0], 400)
+        self.assertEqual(self.app.handle_get("/traffic/scenarios")[0], 400)    # the airport is required
+        self.assertEqual(self.app.handle_get("/traffic/scenarios?airport=KRDU&airport=KSEA")[0], 400)
 
     def test_start_route_returns_the_job_id_and_refuses_a_second_job_and_a_bad_request(self):
         request = {"mode": "m1", "airport": "KRDU", "flightKey": "K"}
@@ -429,11 +466,82 @@ class TestServedFileGone(unittest.TestCase):
         self.assertIn("status=404", log.getvalue())
 
 
+class TestScenariosRouteOnDisk(unittest.TestCase):
+    """The route over the real job manager, reading a catalog under a tmp outputs root (never the live one)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.outputs = Path(self.tmp.name) / "outputs"
+        self.app = AeroVizBackendApp(
+            simulation_backend=FakeSimulationBackend(),
+            optimization_backend=FakeOptimizationBackend(),
+            traffic_jobs=TrafficJobs(Path(self.tmp.name) / "jobs", harvest_root=Path(self.tmp.name) / "harvest",
+                                     outputs_root=self.outputs),
+        )
+
+    def write(self, airport, text):
+        path = self.outputs / airport / "traffic_scenarios" / "catalog.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(text)
+
+    def test_the_catalog_is_served_as_written(self):
+        catalog = {"schema": CATALOG_SCHEMA, "airport": "KRDU", "counts": {"withLoss": 1},
+                   "m1": [{"flightKey": "A_05L_x_1"}], "m2": {"900": [], "1800": [], "3600": []}}
+        self.write("KRDU", json.dumps(catalog))
+        self.assertEqual(self.app.handle_get("/traffic/scenarios?airport=KRDU"), (200, catalog))
+
+    def test_a_missing_catalog_is_a_404_that_names_the_command_that_makes_it(self):
+        status, payload = self.app.handle_get("/traffic/scenarios?airport=KRDU")
+        self.assertEqual(status, 404)
+        self.assertFalse(payload["ok"])
+        self.assertIn("`python 4dTrajectory/optimization/traffic_scenarios.py --airport KRDU`", payload["error"])
+
+    def test_a_catalog_that_is_not_utf8_is_a_500_not_a_400(self):
+        self.write("KRDU", "{}")
+        (self.outputs / "KRDU" / "traffic_scenarios" / "catalog.json").write_bytes(b'{"schema": "\xff"}')
+        status, payload = self.app.handle_get("/traffic/scenarios?airport=KRDU")
+        self.assertEqual(status, 500)
+        self.assertIn("UnicodeDecodeError", payload["error"])
+
+    def test_a_catalog_of_another_schema_is_a_500_that_names_the_schema_it_found(self):
+        self.write("KRDU", json.dumps({"schema": "traffic-scenario-catalog-v1"}))
+        status, payload = self.app.handle_get("/traffic/scenarios?airport=KRDU")
+        self.assertEqual(status, 500)
+        self.assertIn("'traffic-scenario-catalog-v1'", payload["error"])
+
+
 class TestJobsRoot(unittest.TestCase):
     def test_each_backend_port_has_its_own_jobs_root(self):
         from aeroviz_backend.traffic_jobs import DEFAULT_JOBS_ROOT, traffic_jobs_root
         self.assertEqual(traffic_jobs_root(8765), DEFAULT_JOBS_ROOT / "8765")
         self.assertNotEqual(traffic_jobs_root(8765), traffic_jobs_root(8766))
+
+
+class TestMainArguments(unittest.TestCase):
+    """`main` hands the scenario catalogs' root to the job manager: the repository's outputs by default."""
+
+    def run_main(self, *argv):
+        from unittest import mock
+
+        from aeroviz_backend import http_server
+        serving = mock.MagicMock()
+        serving.serve_forever.side_effect = KeyboardInterrupt
+        jobs = mock.MagicMock()
+        with mock.patch.multiple(http_server, TrafficJobs=jobs, AeroVizBackendApp=mock.MagicMock(),
+                                 make_request_handler=mock.MagicMock(), ThreadingHTTPServer=mock.MagicMock(return_value=serving)), \
+                mock.patch.object(http_server.signal, "signal"), mock.patch.object(http_server.threading, "Thread"), \
+                mock.patch.object(http_server.sys, "argv", ["http_server.py", *argv]), \
+                contextlib.redirect_stdout(io.StringIO()):
+            http_server.main()
+        return jobs.call_args
+
+    def test_the_catalog_root_is_an_argument_and_defaults_to_the_repositorys_outputs(self):
+        from traffic_job_files import OUTPUTS_ROOT
+        self.assertEqual(self.run_main().kwargs["outputs_root"], OUTPUTS_ROOT)
+        self.assertEqual(OUTPUTS_ROOT.parts[-2:], ("4dTrajectory", "outputs"))
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(self.run_main("--traffic-outputs-root", tmp).kwargs["outputs_root"], Path(tmp))
 
 
 class SupersedingApp:

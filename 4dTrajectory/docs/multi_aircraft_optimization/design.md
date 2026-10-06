@@ -35,6 +35,7 @@ project rule. A decided row says "Decided" with the option, the person and the d
 | MD10 | A window that starts in a loss (the record already has the loss at the first check step) | (a) No rows for that pair until its first step without loss; count the window. (b) Refuse the window | (a), built; the readout counts these windows |
 | MD11 | Recorded aircraft with a faulty observed point (two-tier vocabulary D111) | (a) Count only: the summary reports the losses whose recorded aircraft has a jump at the loss step. (b) Mark with the D111 function | (a) is NOT built yet: no jump count. The D111 function reads the two-tier artefact (`instructions/faults.py:25`), not a track. (b) needs that function moved to a neutral module |
 | MD13 | A re-solve that fails (T5: 4 of 50 windows, IPOPT `Maximum_Iterations_Exceeded`) | (a) Soft rows: a slack per row and a penalty in the objective (needs an objective hook in the optimizer). (b) Solve once more with the other branch. (c) Accept and report | **Decided: (b)** (user, 2026-10-05), built (§5.4 item 4) |
+| MD14 | Which solve is the window's record when the loop ends with a loss | (a) The last solve that succeeded. (b) The solve with the fewest counted loss instants (the earliest on a tie) | **Decided: (b)** (user, 2026-10-06), built (§5.4 item 4): a re-solve can make it worse (a KRDU job: 225 → 407 loss seconds) |
 | MD12 | The runway in force of a recorded aircraft | (a) Its record's runway for the whole window. (b) As the two-tier design: only from its own first predicted step (vocabulary D23) | (a), built. The optimizer has no predicted steps. State the difference in every comparison |
 
 ## 1. Purpose and scope
@@ -262,7 +263,9 @@ For one window:
    separation counts). A new vertical branch takes the side of this round's tightest loss with that
    aircraft. An aircraft whose rows already hold keeps its branch (Claude's reading of MD13). Keep the new
    branches after a good solve. If this solve also fails, the outcome is `solve_failed`. Keep both IPOPT
-   messages, the rows and the time of each attempt, and keep the last good solve as the window's record.
+   messages, the rows and the time of each attempt. When the loop ends with a loss (`solve_failed`,
+   `unresolved`), the window's record is the solve with the fewest counted loss instants, the earliest on a
+   tie (MD14); the sidecar names it (`kept_round`).
 5. Replay and judge (L2). If no loss has the commanded aircraft responsible, the outcome is `separated`.
 6. `i = i + 1`. If `i = K_max` (MD8), the outcome is `unresolved`. Else go to step 2.
 
@@ -407,7 +410,8 @@ branch and worktree, with a review before each commit.
 | T9 | M3 design (§5.7) | Only if T8 leaves losses that the order cannot remove | T8 | Not started |
 | T10 | M2 in the viewer (the user, 2026-10-06): (a) one directory and one `summary.json` per M2 run; (b) the builder and the frontend show a run as one scene (§9); (c) one KRDU run published | Builder and frontend tests; the publication validator; checked in the browser | T7, T8 | Done (§8.4): (a) `4e6c3ad0`; (b) `87f5f2f2`; (c) published. The legend and M1's one window: in work with T11 |
 | T11 | The Optimize task's multi-aircraft mode (§10; the user, 2026-10-06) | Backend and frontend tests; one M1 job and one 15-min M2 job on a test stack, checked in the browser | T10 | Built (§10; this commit); reviewed; real jobs on a test stack matched the batch; checked in the browser |
-| T12 | The scenario list (§10.6; the user, 2026-10-06): the census runner, its catalog per airport, `GET /traffic/scenarios`, the panel's list instead of the date | Tests; the KRDU catalog; checked in the browser by someone who is NOT told a date or a flight | T11 | Design written (§10.6) |
+| T12 | The scenario list (§10.6; the user, 2026-10-06): the census runner, its catalog per airport, `GET /traffic/scenarios`, the panel's list instead of the date | Tests; the KRDU catalog; checked in the browser by someone who is NOT told a date or a flight | T11 | Built on `dev-traffic-scenarios` (census `ddde7684`; endpoint, panel list, MD14 and the timing: this commit); catalogs of the five airports in `4dTrajectory/outputs/<ICAO>/traffic_scenarios/` (read-only, `SHA256SUMS`); four browser rounds by a first-time user. Not merged (the user looks first). The published M1/M2 categories hold v2 sidecars: the builder of this commit refuses them, a re-publication needs a new run |
+| T13 | The timing experiment (§8.5; the user, 2026-10-06: the data for their report) | Batch timing in the sidecars reviewed; the five airports run; the data read-only with checksums and a README | T12 | The batch timing is built (this commit). The run: not now (the user, 2026-10-06) |
 
 ### 8.1 T5 readout (KRDU, seed 11, 50 windows; the reviewed M1 code with the retry of MD13, scratch output)
 
@@ -457,6 +461,25 @@ branch and worktree, with a review before each commit.
 - The user's review (2026-10-06): no legend for the traffic colours, and M1 drew all its windows at once
   (§9 viewer contracts, fixed with T11).
 
+### 8.5 T13 plan: the timing experiment
+
+The user, 2026-10-06: measure how long the multi-aircraft optimization takes and keep the data for a report. Every
+fixed parameter below is a decision; a change is written here before the run.
+
+| Parameter | Value |
+|---|---|
+| Code | The commit that adds the batch timing (stated in each README) |
+| Airports | KMSY, KRDU, KSJC, KSMF, KSTL (the live harvest root; KAUS is held out) |
+| M1 | 100 windows per airport, seed 11 (`traffic_optimization.py m1 --sample 100 --seed 11`), category `runway_cons` |
+| M2 | Per airport the 5 one-hour blocks with the most arrivals (the airport's catalog, `m2["3600"]`, by arrivals, then the earliest) |
+| Solver | The batch defaults: `LoopSettings` (1 s checks, W 60 s, κ 1 %, 5 rounds, the retry of MD13), `max_duration` 2000 s, rollout 0.5 s, IPOPT cap 3000 |
+| Machine use | 3 worker processes, `nice -n 19`, one solver thread each; the machine load sampled every 60 s beside the run |
+| Measured | Per solve and per window / aircraft: wall time and process CPU time; the solve count; the outcome |
+| Output | `4dTrajectory/outputs/<ICAO>/traffic_timing_m1/` and `…/traffic_timing_m2/`: records, sidecars, summary, logs, the load samples, machine information, `SHA256SUMS`, read-only |
+| Readout | A runner over the outputs: per airport and mode, the time distribution (mean, median, p95, max) in wall and CPU time, the solves, the outcomes; JSON and a Markdown table |
+
+The scenes of this experiment are the present ones, not aligned with the two-tier window (§11 item 5); the README says so.
+
 ## 9. Outputs and records
 
 - **Runner.** `4dTrajectory/optimization/traffic_optimization.py m1 --airport <ICAO> --sample N --seed S
@@ -466,15 +489,16 @@ branch and worktree, with a review before each commit.
   schedule, outcomes and final check). The `mode` values are `traffic.M1_MODE` and `traffic.M2_MODE`. The
   readout is `python -m traffic.readout <dir>` from `4dTrajectory/optimization` (it reads either mode).
 - **M2 sidecar.** The M1 sidecar plus `slot` (ETA, CTA, delay) and `block_final` (the final check), schema
-  `optimization-traffic-block-v2`.
+  `optimization-traffic-block-v3`; its `solves` start with the aircraft's ETA solves.
 - **Directory.** `4dTrajectory/outputs/<ICAO>/traffic_m1_<category>/` (M1) and
   `4dTrajectory/outputs/<ICAO>/traffic_m2_<category>/` (M2). The existing directories
   `runway`, `fitted_adsb`, `runway_cons` stay unchanged.
 - **Commanded record.** `*_states.json` and `*_eval.json` in the existing evaluation contract
   (`evaluation_export.py`), so `evaluation` grades them unchanged. The filename stem is `flight_key`.
 - **Traffic sidecar.** One `*_traffic.json` per window: the outcome, the flags, the iterations, the rows and solve time of each attempt (a retry of MD13 included),
-  the losses per iteration and reading, the recorded aircraft (by `flight_key`), the flight times. Its schema
-  name is `optimization-traffic-v2`. Settle every field before step T6 starts. A later change gets a new
+  the losses per iteration and reading, the recorded aircraft (by `flight_key`), the flight times. It also holds `kept_round` (MD14), `solves` (every solve, timed in wall and CPU time, §8.5) and the
+  window's wall and CPU time. Its schema name is `optimization-traffic-v3`. A scenario without a record has a failed
+  sidecar (schema `optimization-traffic-failed-v1`: the reason and the solves it timed; `null` when they were lost). Settle every field before step T6 starts. A later change gets a new
   schema name; no reader accepts two versions (root `CLAUDE.md`, the compatibility rule).
 - **Viewer, M1** (AV46 in `aeroviz-4d/docs/35-viewer-reference.md`): one window at a time — the selected
   flight's group (the first by default), with its controlled aircraft, its record and only its own neighbours.
@@ -623,6 +647,25 @@ hint which days hold data and which flights meet traffic).
    It is not in this design.
 4. **Losses that the commanded aircraft does not answer for** (§5.2 item 4). The optimizer could also avoid
    them. This design does not, to match two-tier D93. The counts show if this choice matters.
+
+5. **The scene is not aligned with the two-tier multi-aircraft window** (the user, 2026-10-06: a serious problem, to
+   be solved later, not now). Results of this design and of the two-tier post-training cannot be compared until it is.
+   The differences, from `ts_transformer/docs/two_tier/design/post_training.md` D29, D93 and §6.1 (the two-tier
+   definitions are quoted; the "this design" column is the built code):
+
+   | Item | This design (M1, M2, the census) | Two-tier window (D93) |
+   |---|---|---|
+   | Start | The commanded record's 25 km ring entry (the arrival slice, `entry_time_utc`) | The commanded aircraft's row 0 (the instruction artefact, vocabulary §6) |
+   | End | The optimizer's flight to the threshold; traffic gathered over 2000 s (`max_duration`) | When the commanded aircraft is done (its outcome, the time limit included) or has a loss it answers for; no fixed length; go-arounds (D91) |
+   | Other aircraft | Every arrival of the airport in the air in the span (arrivals manifest, all days), judged within 30 km | Every other flight of the airport AND of the same split in the air, replayed along its record (the artefact's stored signals) |
+   | Time grid | 1 s checks on UTC multiples (MD6) | Rows of Δ = 4 s on even UTC seconds |
+   | Commanded flights | A seeded sample of all arrivals with a dynamics model (M1); every arrival landing in a block (M2); the census: all | The windows of the train and select days, the augmented starts (A, B, D), less the D113 exclusions |
+   | Data | `load_model_arrivals` (MSL) | The instruction-language artefact (v12) |
+   | All aircraft controlled | M2 | None (one aircraft commanded) |
+
+   To do (not started): define the optimizer's scenes from the two-tier windows (the same commanded flights, start, end,
+   other aircraft and grid), read through a neutral interface (§6: no new `ts_transformer` import outside
+   `traffic/rules.py` without the user's decision), then re-measure.
 
 ## 12. Key code index
 

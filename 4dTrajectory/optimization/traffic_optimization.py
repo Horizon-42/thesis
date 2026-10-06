@@ -55,8 +55,8 @@ from scenario_optimization import (  # noqa: E402
     shipped_evaluation,
 )
 from traffic import M1_MODE, M2_MODE  # noqa: E402
-from traffic.block import BLOCK_RECORD_SCHEMA, fly_block, no_progress  # noqa: E402
-from traffic.loop import TRAFFIC_RECORD_SCHEMA, LoopSettings, fly_in_traffic  # noqa: E402
+from traffic.block import BLOCK_RECORD_SCHEMA, fly_block, no_phase, no_progress  # noqa: E402
+from traffic.loop import TRAFFIC_RECORD_SCHEMA, BaselineFailed, LoopSettings, failed_sidecar, fly_in_traffic  # noqa: E402
 from trajectory_data_process.harvest.utc import parse_iso_utc_s  # noqa: E402
 from traffic.scene import Traffic, traffic_from_arrivals  # noqa: E402
 
@@ -141,8 +141,12 @@ def _fly_one_window(payload: tuple[int, WindowScenario, dict[str, Any]]):
             scenario, scenario.traffic, procedure_root=params["procedure_root"],
             settings=LoopSettings(**params["settings"]), max_duration=params["max_duration"],
             rollout_dt_s=params["rollout_dt_s"], solve_options=params["solve_options"])
-    except Exception as exc:  # noqa: BLE001 — batch tool: skip + log per-scenario failures
-        return (index, flight_id, None, None, f"{type(exc).__name__}: {str(exc).partition(chr(10))[0][:90]}")
+    except BaselineFailed as exc:              # no record: its failed sidecar keeps the solves it timed
+        error = f"{type(exc).__name__}: {str(exc).partition(chr(10))[0][:90]}"
+        return (index, flight_id, {"sidecar": failed_sidecar(flight_id, error, exc.solves)}, None, error)
+    except Exception as exc:  # noqa: BLE001 — batch tool: skip + log per-scenario failures (its solve times lost)
+        error = f"{type(exc).__name__}: {str(exc).partition(chr(10))[0][:90]}"
+        return (index, flight_id, {"sidecar": failed_sidecar(flight_id, error, None)}, None, error)
     record = result.to_dict()
     record["sidecar"] = sidecar
     return (index, flight_id, record, shipped_evaluation(result), None)
@@ -167,28 +171,30 @@ def block_scenarios(flights: list[dict], traffic: Traffic, airport: str, start_u
 
 
 def _fly_one_block(payload: tuple[str, list[FlightScenario], Traffic, dict[str, Any]],
-                   on_progress: Callable[[int, int, str], None] = no_progress):
+                   on_progress: Callable[[int, int, str], None] = no_progress,
+                   on_phase: Callable[[str], None] = no_phase):
     """Process-pool worker: one block (``traffic.block.fly_block``); results as picklable dicts. A block
     that raises is returned as its error, with a failed record for each of its aircraft, so one block never
-    ends the run and never leaves the roster. ``on_progress`` is ``fly_block``'s (the interactive job passes one;
-    a pool cannot carry a callable, the batch does not)."""
+    ends the run and never leaves the roster. ``on_progress`` and ``on_phase`` are ``fly_block``'s (the interactive
+    job passes them; a pool cannot carry a callable, the batch does not)."""
     label, scenarios, traffic, params = payload
     try:
         flown, summary = fly_block(scenarios, traffic, procedure_root=params["procedure_root"],
                                    settings=LoopSettings(**params["settings"]), max_duration=params["max_duration"],
                                    rollout_dt_s=params["rollout_dt_s"], solve_options=params["solve_options"],
-                                   on_progress=on_progress)
+                                   on_progress=on_progress, on_phase=on_phase)
     except Exception as exc:  # noqa: BLE001 — batch tool: one failed block is recorded, the others go on
         error = f"{type(exc).__name__}: {str(exc).partition(chr(10))[0][:200]}"
         failed = f"block failed: {error}"
-        return label, [(s, None, None, failed) for s in scenarios], {   # the shape of fly_block's summary
+        return label, [(s, {"sidecar": failed_sidecar(s.source["flight_key"], failed, None)}, None, failed)
+                       for s in scenarios], {   # the shape of fly_block's summary
             "aircraft": len(scenarios), "scheduled": 0, "eta_failed": 0, "slot_failed": 0,
             "schedule_speed_mps": None, "slots": [], "outcomes": {s.source["flight_key"]: failed for s in scenarios},
             "final_losses": {}, "error": error}
     out = []
     for f in flown:
         if f.result is None:
-            out.append((f.scenario, None, None, f.error))
+            out.append((f.scenario, {"sidecar": f.sidecar}, None, f.error))
             continue
         record = f.result.to_dict()
         record["sidecar"] = f.sidecar
@@ -201,8 +207,8 @@ def write_block(out: Path, flown: list, config: dict[str, Any]) -> list[dict[str
     rows = []
     for index, (scenario, record, evaluation, error) in enumerate(flown):
         if error is not None:
-            rows.append(write_failed_record(out, scenario, index, error, optimization_config=config,
-                                            references_dir=None))
+            rows.append(write_failed_record(out, scenario, index, error, record, optimization_config=config,
+                                            references_dir=None, sidecar_suffix=TRAFFIC_SUFFIX))
             continue
         rows.append(write_solved_record(out, scenario, index, record, evaluation, optimization_config=config,
                                         references_dir=None, sidecar_suffix=TRAFFIC_SUFFIX)[1])

@@ -56,11 +56,12 @@ the measurements behind it are in §6 or in the readout named.
 | D117 | The implementer's readings of C1–C7, accepted as built (each is a rule of this design): (P1) a recorded aircraft's first predicted step is its first row on the Δ grid + 16 s, and its R is in force at the steps after it; (P2) the motion of every aircraft, the commanded one too, is the 2 s displacement before the row, and an aircraft at its row 0 has no motion and is not established; (P4) a recorded aircraft is over its threshold at its last step in the air; (P5) a recorded leader's speed target is its present speed along its course, and the speed-word mask never blocks "unchanged" or "unspecified"; (P6) a token's own motion is the other aircraft's ground speed, vertical rate and direction of motion less the commanded aircraft's (0 without a motion or a frame), the required distance takes the aircraft ahead on the approach clock as the leader (a tie: the other aircraft), and the scales are 5,556 m (3 NM, asinh) for horizontal distances, 1,000 m for heights, 100 m/s for speeds, 10 m/s for vertical rates and 120 s for the closest-approach time; (P8) the census's leader in the air is the aircraft next ahead on the approach clock at the first predicted step, on the commanded flight's recorded runway or one separated as one, and a window is near a day cut when the day beside its flight's own day is not of its split and either its recorded landing is less than the scene's longest record before the end of its day or its row 0 is before the start of its day; (P11) the ratio and the pull are word by word, each word clipped on its own; (P12) the ratio's denominator is a frozen copy of the model at the start of the pass, scored through `masked_log_probability`; (P14) the pull reads the counted words only, and a first sentence in several branch groups counts once in each; (P15) no traffic gives the module no input and a zero output; (P21) a lost window's go-arounds are counted from its own words; (P22) a done flight's tokens are computed and never used, and its speed mask permits every word; (P24, P25) the census counts each real window's steps from the commanded aircraft's row 0 to the end of its record, and its losses on the records are each window's first loss that the commanded aircraft answers for after its first predicted step, and a step with no other aircraft within 8 NM plus 2,500 ft (the largest minimum, widened by the offset of a pair separated as one) is not judged | Decided | User, 2026-10-05, on Claude's review of the readings |
 | D123 | Window B's move (§2 item 4): a turn about the airport reference within ±15°, a change of height within ±300 m and a scale of the speed within 1 ± 0.1, each drawn uniformly. Counts on A34's artefact: §6.1 | Decided | User, 2026-10-05, on the implementer's proposal P28 |
 | D124 | The windows of a round share their flights: the round takes the train's real windows in one permutation (the seed and the round); the first ones make its real windows, and each kind A, D and B is built from the real windows in the same order until its count is reached (D admits only about 40 % of them, so it reads further down the permutation). A batch commands each flight once (a loop holds each flight once), so a real window and its A, B or D go to different batches. D113 is checked at the draw. The loss reads a round's branch groups branch point by branch point, never the whole round at once (a group is several MB; a round tens of GB) | Decided | User, 2026-10-05 (P32); the rest on the implementer's readings P27, P31 |
-| D125 | The implementer's readings of C6–C11, accepted as built: (P33) a kind with fewer windows than its count does not stop the round, and the round's record shows the shortfall; (P34) the number of rounds is a setting of the campaign, which cannot be extended after it ends; (P35, P36) C8 measures the bytes of the branch groups and the memory of the data term (every train sentence of the base's selection in memory) before the formal run; (P37) a window set carries no per-row speaker records (the probability of "go-around", the blocked words), and the window view does not show them; (P38) the window set's `procedure` block is stage B's (prior §7 item 8); (P39) the loop draws at temperature 1 (prior D121) | Decided | User, 2026-10-05, on Claude's review of the readings |
+| D125 | The implementer's readings of C6–C11, accepted as built: (P33) a kind with fewer windows than its count does not stop the round, and the round's record shows the shortfall; (P34) the number of rounds is a setting of the campaign; a resume may raise it and change nothing else (D157); (P35, P36) C8 measures the bytes of the branch groups and the memory of the data term (every train sentence of the base's selection in memory) before the formal run; (P37) a window set carries no per-row speaker records (the probability of "go-around", the blocked words), and the window view does not show them; (P38) the window set's `procedure` block is stage B's (prior §7 item 8); (P39) the loop draws at temperature 1 (prior D121) | Decided | User, 2026-10-05, on Claude's review of the readings |
 | D129 | The window view (C11): the list names a window's runway as its recorded runway, since the round's sentence may say another; the shift of window A is shown in days or hours; the cursor starts at the window's row 0, so that the other aircraft show from the start | Decided | User, 2026-10-06, on the implementer's proposals P42–P44 |
 | D130 | The updates of a round's pass take the branch groups of each groups file in an order shuffled by the round's random numbers (the seed and the round), then `update_groups` at a time; so an update mixes branch points and windows, and a resumed campaign is the same. Why: in the order spoken, an update's groups came mostly from one branch time of one batch | Decided | User, 2026-10-06, on Claude's check of stage C |
 | D132 | The validation readout of a chosen round (C10, `post_validation`): it reads, for each airport, at most the campaign's select windows of each airport (`select_per_airport`) among the val days' real windows that do not open inside a loss, drawn as the selection readout draws the select days', with the same random numbers, and states each airport's coverage (real windows, left out, read). The one read of the val days (outline D85) is held for each campaign: its claim is in the campaign's directory. A formal campaign (`post_train`) and its validation readout refuse a base that is not stage B's formal base (a smoke prior or a fold): the formal start checks the base's run | Decided | User, 2026-10-06, on the implementer's readings P46, P47 and Claude's check (P48) |
-| D137 | The settings of the formal campaign (C10; was O13), chosen by the user as proposed from C8's profile: 1,000 windows of each kind (real, A, D, B) a round; 10 rounds; 4 branch groups an update; 64 sentences of the data term an update; batches of 64 windows; K = 8; learning rates 1e-5 (the prior) and 1e-4 (the traffic modules); weight decay 0.01; 200 select windows an airport for the selection readout; the traffic attention 64 wide with 4 heads. The criterion that chooses the round (D7) is the user's, before the validation readout. Why: C8 measured the time and the memory at the formal size (log §25) | Decided | User, 2026-10-06 |
+| D137 | The settings of the formal campaign (C10; was O13), chosen by the user as proposed from C8's profile: 1,000 windows of each kind (real, A, D, B) a round; 10 rounds, raised to 14 after the tenth (D157); 4 branch groups an update; 64 sentences of the data term an update; batches of 64 windows; K = 8; learning rates 1e-5 (the prior) and 1e-4 (the traffic modules); weight decay 0.01; 200 select windows an airport for the selection readout; the traffic attention 64 wide with 4 heads. The criterion that chooses the round (D7) is the user's, before the validation readout. Why: C8 measured the time and the memory at the formal size (log §25) | Decided | User, 2026-10-06 |
+| D157 | **C10 continues to 14 rounds as the same campaign** (C14). The campaign `post_train_20261006` keeps its inputs and every setting except the number of rounds: 10 becomes 14. A resume may raise the rounds of a campaign and change nothing else (`open_campaign`: the inputs equal with the rounds left out, the new count larger than the old); `campaign.json` keeps each change of the count, with its time, its commit and the checks of that resume. A resume and the validation readout read each recorded input path as this checkout reads it (`this_checkout`, the rule of the Training exports, outline §5 rule 1): C10 recorded its inputs by the paths of the worktree `.claude/worktrees/two-tier-v4-post`, and every input is in a linked data tree, so the same data have this checkout's path. Rounds 10–13 continue from round 9's checkpoint, which holds the model and the optimizer; each round draws its windows and numbers from the seed and its own number only (D94, D124), so the campaign is the one that 14 rounds from its start give, and the selection readouts of the 14 rounds read the same select windows with the same numbers. Rounds 10–13 run on the merged code (vocabulary A44, prior B14, C13, the update in pieces of §2 item 5), from the main checkout after the user's merge (outline §5 rule 1), after C13's check on the GPU (outline D138: a faster form is used only after its check). They write into the same directory: it is made writable for the run, read-only after it, and `SHA256SUMS` gets the new files; rounds 0–9 are not changed. After round 13, the user's criterion (D7: the earliest round within the selection readout's noise of the best) is applied to the 14 rounds, and the validation readout (D132) reads the round that it chooses. Why: the user (2026-10-06) wants more rounds after C10; in the same campaign every round's selection readout stays comparable with the others; the user wants the new rounds on C13's code | Decided | User, 2026-10-06 (the same campaign, 14 rounds, on C13's code, the paths read again); the form: Claude |
 
 ### 0.2 Open items
 
@@ -77,29 +78,31 @@ commits, the tests and the readings are in the implementation log.
 |---|---|
 | C0–C7, C9, C11 | Built and reviewed on synthetic artefacts; C1, C2 and C9 also on A34's artefact (log §2–§21) |
 | C8 | Done on B5's base (log §24, §25): the formal census `outputs/POOLED/post/windows_20261006` (D104, `44fb8af8`), the base's go-around on the select days, the profiles at 32 and 256 windows (`483b81d7`, `c396f9be`); Claude's proposal of O13 in log §25, for the user |
-| C10 | Done 2026-10-06 22:46: `outputs/POOLED/post/post_train_20261006`, ten rounds, read-only (log §26: the rounds' selection readouts, the GPU's memory and the pass in pieces `832555a5`). Next: the user's criterion (D7), then the validation readout of the chosen round |
-| C13 (D138) | Built and reviewed by stage B's implementer: `65a21c57` on `dev-two-tier-v4`, O15's measure corrected (D139) `8cac5191`; its check on the GPU (one round, one process against N workers) after C10 ends. C10 gets none of it. Not merged: the user merges |
+| C10 | Done 2026-10-06 22:46: `outputs/POOLED/post/post_train_20261006`, ten rounds, read-only (log §26: the rounds' selection readouts, the GPU's memory and the pass in pieces `832555a5`). Continued to 14 rounds as the same campaign (D157, C14); then the user's criterion (D7) over the 14 rounds, then the validation readout of the chosen round |
+| C13 (D138) | Built and reviewed by stage B's implementer: `65a21c57`, O15's measure corrected (D139) `8cac5191`; merged into `dev-two-tier`. Its check on the GPU (one round, one process against N workers), by stage D's implementer, before C14 uses it |
+| C14 (D157) | Not started: its code, then rounds 10–13 from the main checkout |
 | The validation readout of the chosen round | Built and reviewed on synthetic artefacts (`post_validation`, `0c95a821`, log §23; D132 `483b81d7`) |
 | C12 | After C10 |
 
 ### 0.4 Plan
 
-1. C10 runs (D137; from `.claude/worktrees/two-tier-v4-post`, untouched until it ends); the user's criterion for the
-   round (D7); the validation readout of the chosen round; then its speed (outline §6.2 item 10, `model_speed`), with no
-   other job on the host or the GPU.
-2. C13 (outline D138), built by stage B's implementer; its check on the GPU after C10, by stage D's implementer
-   (outline §5 rule 1); C10 gets none of it.
-3. C12.
-4. The window view (C11) and the window export change with the one layout of the three stages' Training views (outline
+1. C10 is done (ten rounds, 2026-10-06 22:46). C13 (outline D138, built by stage B's implementer): its check on the
+   GPU, by stage D's implementer (outline §5 rule 1), before any run uses it.
+2. C14 (D157), by stage C's implementer: the code first, on `dev-two-tier-v4-post`; after the user's merge of it, rounds 10–13 of
+   `post_train_20261006`, with no other job on the host or the GPU (outline §5 rule 13).
+3. The user's criterion for the round (D7) over the 14 rounds; the validation readout of the chosen round; then its
+   speed (frontend §3 item 10, `model_speed`), with no other job on the host or the GPU.
+4. C12.
+5. The window view (C11) and the window export change with the one layout of the three stages' Training views (outline
    §6.2, D133–D135: the results page, the rounds' envelopes, one block of a flown sentence), built by stage B's
    implementer.
-5. The generalisations of §9 marked "to be built" (multi-aircraft control D149, its MC0), by stage D's implementer
+6. The generalisations of §9 marked "to be built" (multi-aircraft control D149, its MC0), by stage D's implementer
    on `dev-multi-control` (outline §5 rule 1), each checked against stage C's code before the change, bit for bit;
    nothing of them goes into C10's worktree.
 
 Every other milestone from now on is built by stage D's implementer (it takes over stage B's) on `dev-two-tier-v4`, in the worktree
-`.claude/worktrees/two-tier-v4` (outline §5 rule 1). `dev-two-tier-v4-post` is merged into `dev-two-tier`; it and its
-worktree are deleted after C10 ends.
+`.claude/worktrees/two-tier-v4` (outline §5 rule 1); C14 by stage C's implementer on `dev-two-tier-v4-post` (worktree
+`.claude/worktrees/two-tier-v4-post`), first brought level with `dev-two-tier`.
 
 ---
 
@@ -115,7 +118,7 @@ worktree are deleted after C10 ends.
   words and a copy of chosen aircraft), the teacher-forced loss with the sentences under a selection and the
   log-probability of given words under a record, the place for an added module, the region of a final, the step of a
   speaker's closed loop and the Training export's procedure block (items 1–8).
-- **It gives** the post-trained checkpoints and the window readouts, and their Training view (outline §6); to the
+- **It gives** the post-trained checkpoints and the window readouts, and their Training view (`frontend.md`); to the
   multi-aircraft control, its public interface (§9).
 
 ---
@@ -458,7 +461,7 @@ campaign), `ts-post-checkpoint-v1`, `post-windows-census-v1`, `aeroviz-training-
 
 C0–C7, C9 and C11 are done; their specifications are in the implementation log (§22). The rules of outline §5 apply:
 from 2026-10-06 one implementer builds every milestone of every stage (outline §5 rule 1: stage D's, which takes over
-stage B's remaining steps); stage C's implementer runs C10 to its end.
+stage B's remaining steps); stage C's implementer builds and runs C14.
 
 **C8. Profile and the go-around probability** (§2 item 6). After B5's base and Claude's check of stage B.
 
@@ -498,6 +501,31 @@ run after C10 open, by stage D's implementer), built by stage B's implementer on
   started through `Start` equals one started through `start_moved` (the words, the rewards, the states).
 - Size: about 80 lines of `post_train.py`, 30 of the window loop's start, 80 of tests. After it, `post_profile` at C10's
   settings measures a batch and a round again.
+
+**C14. C10 to 14 rounds** (D157). By stage C's implementer (the user, 2026-10-06), on `dev-two-tier-v4-post` in
+`.claude/worktrees/two-tier-v4-post`, first brought level with `dev-two-tier` (outline §5 rule 1).
+
+- The code: `open_campaign` takes a resume whose inputs equal the record's with
+  the rounds left out and whose rounds are more than the record's; it writes the new count into the record's settings
+  and adds the change (the time, the old and the new count, the commit, the checks) to the record. Any other difference
+  is refused as now. The recorded input paths are compared, and read by `post_validation`, as `this_checkout`
+  (`experiments/training_export.py`, one definition, as `model_speed` reads it) maps them; the record keeps the paths it
+  has, and each resume's entry gives the paths that it read. `post_validation` and the export read the count from the
+  record as now. Tests: a resume with more rounds runs the new rounds only, and a synthetic campaign of 2 rounds
+  raised to 3 gives the same round 2 (checkpoint, `round.json`, selection readout) as a campaign of 3 rounds from its
+  start; a resume with fewer rounds, or with another setting changed together with the rounds, is refused by name; a
+  campaign recorded under a worktree's linked data tree resumes from another checkout, and one whose mapped input
+  differs is refused.
+- Before the worktree `.claude/worktrees/two-tier-v4-post` is removed (outline §5 rule 1): every reader of a
+  campaign's recorded inputs (`command grep -rn '"inputs"'` in `experiments/`) reads them through `this_checkout`.
+- The run, after the user's merge of `dev-two-tier-v4-post`, C13's check on the GPU and the GPU and timing steps of
+  outline §4 item 6 (stage D's implementer; rule 13), from the main checkout on a clean tree (outline §5 rule
+  1): the C10 directory made writable; the campaign command with `--rounds 14` and every other argument as C10's last
+  resume, its paths the main checkout's; the workers by C13's memory rule (O15); the intent of the new rounds in
+  `docs/experiments/intents.json` before the launch. No code is merged into `dev-two-tier` while the rounds run (the
+  main checkout runs them). After round 13: `SHA256SUMS` with the
+  new files, the directory read-only, the rounds' selection readouts in stage C's log.
+- Size: about 30 lines of `post_train.py` and `post_validation.py`, and 80 of tests.
 
 **C12. Close of stage C.** The full ts suite passes. The implementation log and `docs/reference/runners.md` are
 updated; the report gives the code index for §7 (outline §5 rule 10). Report to the user: the commits, the rounds and

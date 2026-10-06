@@ -19,16 +19,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
 import { isComparisonIndex, type ComparisonIndex } from "../data/airportData";
+import { isEvaluationReport, type EvaluationRow } from "../data/evaluationReport";
 import {
   TRAFFIC_JOB_POLL_MS,
   TRAFFIC_JOB_RETRY_MAX_MS,
+  TRAFFIC_PHASE_STARTING,
   beaconCancelTrafficJob,
   cancelTrafficJob,
   fetchTrafficJob,
   startTrafficJob,
   trafficJobFilesUrl,
+  type TrafficAircraftChange,
+  type TrafficJobDoneStatus,
   type TrafficJobRequest,
   type TrafficJobStatus,
+  type TrafficJobTiming,
+  type TrafficStayedRecord,
 } from "../data/trafficJobs";
 import { JOB_INDEX_FILE } from "../utils/comparisonSource";
 import { fetchJson } from "../utils/fetchJson";
@@ -40,14 +46,42 @@ export type TrafficJobView =
   | { phase: "running"; jobId: string; status: TrafficJobStatus; connection: string | null }
   | { phase: "cancelling" }
   /** `label`: the inputs the job was started with (`start`'s), so a panel that has since been edited still names them. */
-  | { phase: "done"; jobId: string; status: TrafficJobStatus; index: ComparisonIndex; label: string }
+  | {
+    phase: "done"; jobId: string; status: TrafficJobStatus; index: ComparisonIndex; label: string;
+    /** What changed for each aircraft the job controlled (every group of `index` has an entry). */
+    perAircraft: Record<string, TrafficAircraftChange>;
+    /** How long the job took, in total and by stage. */
+    timing: TrafficJobTiming;
+    /** The arrivals of an M2 block the job could not control (no aircraft dynamics model), by flight key: they flew their records. */
+    stayedRecords: Record<string, TrafficStayedRecord>;
+    /** The evaluation report's row of each aircraft whose index group is `offTarget` (a yellow path), by flight key: the gates it failed. */
+    offTargetRows: Record<string, EvaluationRow>;
+  }
   | { phase: "failed"; error: string }
   | { phase: "cancelled" };
 
-const JUST_STARTED: TrafficJobStatus = { state: "running", progress: { done: 0, total: null, current: null }, error: null };
+const JUST_STARTED: TrafficJobStatus = { state: "running", progress: { done: 0, total: null, current: null, phase: TRAFFIC_PHASE_STARTING }, error: null };
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * The evaluation report's row of every aircraft the index draws off the landing gates (`offTarget`: a yellow path), by flight key.
+ * The report is read only when there is one such aircraft; one that cannot be read, or that lacks a row of one, is refused by name.
+ */
+async function offTargetReportRows(jobId: string, baseUrl: string, index: ComparisonIndex): Promise<Record<string, EvaluationRow>> {
+  const offTarget = index.groups.filter((group) => group.status === "offTarget");
+  if (offTarget.length === 0) return {};
+  const report = await fetchJson<unknown>(`${baseUrl}${index.evaluationReport}`);
+  if (!isEvaluationReport(report)) throw new Error(`job ${jobId} wrote an evaluation report the viewer cannot read`);
+  return Object.fromEntries(offTarget.map((group) => {
+    const row = report.trajectories.find((candidate) => candidate.flight_key === group.group);
+    if (row === undefined) {
+      throw new Error(`job ${jobId}: its evaluation report has no row of ${group.group}, which its index draws off the landing gates`);
+    }
+    return [group.group, row];
+  }));
 }
 
 /** The wait before poll number `failures + 1` after `failures` failures in a row: 2 s, 4 s, 8 s, … up to the cap. */
@@ -120,7 +154,12 @@ export function useTrafficJob(airportCode: string): TrafficJob {
       const index = await fetchJson<unknown>(`${baseUrl}${JOB_INDEX_FILE}`);
       if (epoch !== epochRef.current) return;
       if (!isComparisonIndex(index)) throw new Error(`job ${jobId} wrote a comparison index the viewer cannot read`);
-      settle({ phase: "done", jobId, status, index, label: labelRef.current });
+      const { perAircraft, timing, stayedRecords } = status as TrafficJobDoneStatus;          // `isTrafficJobStatus` refused a done one without them
+      const unsaid = index.groups.find((group) => !(group.group in perAircraft));
+      if (unsaid !== undefined) throw new Error(`job ${jobId} lists ${unsaid.group} in its index and says nothing of what changed for it`);
+      const offTargetRows = await offTargetReportRows(jobId, baseUrl, index);       // what the yellow paths failed
+      if (epoch !== epochRef.current) return;
+      settle({ phase: "done", jobId, status, index, perAircraft, timing, stayedRecords, offTargetRows, label: labelRef.current });
       setTrafficScene({ airportCode, jobId, baseUrl });
     } catch (error) {
       if (epoch === epochRef.current) settle({ phase: "failed", error: message(error) });

@@ -85,6 +85,16 @@ class FlownTrack:
         return cls(*(np.array([getattr(s, name) for s in samples]) for name in ("t", "lat", "lon", "alt")),
                    track_deg=(90.0 - np.degrees([s.psi for s in samples])) % 360.0)
 
+    @classmethod
+    def from_record(cls, window: "Window", flight: RecordedFlight, step_s: float) -> "FlownTrack":
+        """A recorded flight judged as the flown track (the scenario census, design §10.6), sampled on the check
+        instants ``check`` will use, each state measured exactly as a recorded aircraft's (:func:`_record_state`):
+        the flight judged as flown and the same flight judged as a neighbour see the same states."""
+        times = check_times(window, flight.end_utc_s - window.t0_utc_s, step_s)
+        lat, lon, alt = flight.at(window.t0_utc_s + times)
+        track = [_record_state(window.frame, flight, window.t0_utc_s + t)[3] for t in times]
+        return cls(times, lat, lon, alt, np.array(track))
+
     def at(self, t_s: float) -> tuple[float, float, float, float]:
         """``(lat, lon, alt)`` interpolated, and the track of the next sample."""
         track = float(self.track_deg[min(np.searchsorted(self.t_s, t_s), len(self.t_s) - 1)])
@@ -125,11 +135,14 @@ def check_times(window: Window, end_s: float, step_s: float) -> np.ndarray:
 
 def _recorded_state(window: Window, k: int, t_s: float) -> tuple[float, float, float, float]:
     """``(n, e, alt, track_deg)`` of recorded aircraft ``k`` at ``t_s``."""
-    flight = window.recorded[k]
-    t = window.t0_utc_s + t_s
+    return _record_state(window.frame, window.recorded[k], window.t0_utc_s + t_s)
+
+
+def _record_state(frame: TargetFrame, flight: RecordedFlight, t: float) -> tuple[float, float, float, float]:
+    """``(n, e, alt, track_deg)`` of a recorded flight at UTC ``t``: the track over ±:data:`_TRACK_STEP_S`."""
     lat, lon, alt = flight.at(np.array([t, max(t - _TRACK_STEP_S, flight.start_utc_s),
                                         min(t + _TRACK_STEP_S, flight.end_utc_s)]))
-    n, e = window.frame.to_ne(lat, lon)
+    n, e = frame.to_ne(lat, lon)
     return float(n[0]), float(e[0]), float(alt[0]), math.degrees(math.atan2(e[2] - e[1], n[2] - n[1])) % 360.0
 
 

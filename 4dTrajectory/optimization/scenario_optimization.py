@@ -20,7 +20,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import dataclass
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -282,6 +285,50 @@ def optimize_scenarios(
 DEFAULT_PROCEDURE_ROOT = _PROCEDURE_ROOT  # flight_scenarios.procedure_final owns the path
 
 
+@dataclass(frozen=True)
+class SolveTime:
+    """One timed ``solve_iaf`` call (the NLP built and solved) — what the timing experiment counts (multi-aircraft
+    design §8.5): its kind (``baseline``, ``eta``, ``slot``, ``resolve``, ``retry``), its IAF, whether it solved, and
+    its wall and process CPU time (one solver thread per process)."""
+
+    kind: str
+    iaf: str
+    ok: bool
+    wall_s: float
+    cpu_s: float
+
+    def to_json(self) -> dict[str, Any]:
+        return {"kind": self.kind, "iaf": self.iaf, "ok": self.ok, "wallS": round(self.wall_s, 3),
+                "cpuS": round(self.cpu_s, 3)}
+
+
+class IafSearchFailed(ValueError):
+    """Every IAF path of :func:`shortest_iaf_solve` failed; ``attempts`` are their timed solves."""
+
+    def __init__(self, message: str, attempts: tuple[SolveTime, ...]) -> None:
+        super().__init__(message)
+        self.attempts = attempts
+
+
+def iaf_name(pc: Any) -> str:
+    """The IAF a procedure path starts from (a ``SolveTime``'s ``iaf``)."""
+    return pc.waypoints[0].ident
+
+
+@contextmanager
+def timing(kind: str, iaf: str, sink: list[SolveTime]) -> Iterator[None]:
+    """Time the ``solve_iaf`` call in the block in wall and process CPU time and append its :class:`SolveTime` to
+    ``sink``, solved or not; an exception propagates unchanged (nothing here holds it: a failed solve's NLP is freed
+    as before)."""
+    wall, cpu = time.perf_counter(), time.process_time()
+    ok = False
+    try:
+        yield
+        ok = True
+    finally:
+        sink.append(SolveTime(kind, iaf, ok, time.perf_counter() - wall, time.process_time() - cpu))
+
+
 @dataclass
 class IafSolve:
     """One feasible IAF candidate's solve, kept while searching for the fastest."""
@@ -293,6 +340,7 @@ class IafSolve:
     dense_times: Any        # the dense states' OWN times (non-uniform across phases)
     segment_durations: Any  # per-control-segment durations (multiphase non-uniform)
     decision_vector: Any    # the raw NLP solution: the warm start of a re-solve of the same IAF
+    attempts: tuple[SolveTime, ...] = ()   # the timed solves that found it (shortest_iaf_solve: the failed IAFs first)
 
 
 def _resolve_procedure_path(procedure_root: str | Path, airport: str, runway: str) -> Path:
@@ -496,20 +544,24 @@ def optimize_scenario_min_time_iaf(
 
 def shortest_iaf_solve(
     scenario: FlightScenario, target: GeodeticState, paths: list, aircraft: Any, min_speed_ms: float,
-    **solve_options: Any,
+    *, kind: str, **solve_options: Any,
 ) -> IafSolve:
-    """The solve of the shortest feasible IAF path (shortest horizontal polyline first; an
-    infeasible one falls through to the next). Raises when every IAF fails."""
-    attempts: list[tuple[str, str]] = []
+    """The solve of the shortest feasible IAF path (shortest horizontal polyline first; an infeasible one falls
+    through to the next), with every attempt timed as ``kind`` (``IafSolve.attempts``). Raises
+    :class:`IafSearchFailed` (with the attempts) when every IAF fails."""
+    attempts: list[SolveTime] = []
+    failures: list[tuple[str, str]] = []
     for pc in sorted(paths, key=path_length_m):    # shortest path first
         try:
-            return solve_iaf(pc, scenario, target, aircraft, min_speed_ms, **solve_options)
+            with timing(kind, iaf_name(pc), attempts):
+                solved = solve_iaf(pc, scenario, target, aircraft, min_speed_ms, **solve_options)
         except Exception as exc:  # noqa: BLE001 — fall through to the next-shortest IAF
-            attempts.append((pc.waypoints[0].ident, type(exc).__name__))
-    raise ValueError(
-        f"all {len(paths)} IAF(s) infeasible (shortest-first) for "
-        f"{scenario.source.get('id')}: {attempts[:4]}"
-    )
+            failures.append((iaf_name(pc), type(exc).__name__))
+            continue
+        return replace(solved, attempts=tuple(attempts))
+    raise IafSearchFailed(
+        f"all {len(paths)} IAF(s) infeasible (shortest-first) for {scenario.source.get('id')}: {failures[:4]}",
+        tuple(attempts))
 
 
 def optimize_scenario_shortest_iaf(
@@ -534,7 +586,7 @@ def optimize_scenario_shortest_iaf(
     """
     target, paths, aircraft, min_speed_ms = iaf_setup(scenario, procedure_root)
     best = shortest_iaf_solve(
-        scenario, target, paths, aircraft, min_speed_ms,
+        scenario, target, paths, aircraft, min_speed_ms, kind="baseline",
         max_duration=max_duration, verbose=verbose,
         fitting=fitting, state_substeps=state_substeps,
         n_seg_per_phase=n_seg_per_phase, max_iterations=max_iterations,

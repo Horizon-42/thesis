@@ -5,8 +5,9 @@ describe("trafficOutcomeName", () => {
   it.each([
     ["separated_at_baseline", "separated at the first solve (no re-solve)"],
     ["separated", "separated after re-solve"],
-    ["unresolved", "loss left (round limit)"],
-    ["solve_failed", "loss left (re-solve failed; last good solve shown)"],
+    // MD14: the loop keeps the solve with the fewest counted losses, so both say the record is the best of its solves
+    ["unresolved", "loss left — the best of its solves is shown (fewest losses)"],
+    ["solve_failed", "loss left — the best of its solves is shown (fewest losses)"],
     ["wake_at_fixed_time", "wake loss left (landing time fixed)"],
   ])("names the loop's outcome %s", (raw, name) => {
     expect(trafficOutcomeName(raw)).toBe(name);
@@ -35,7 +36,7 @@ describe("trafficOutcomeName", () => {
 
 describe("trafficOutcomeTitle", () => {
   it("keeps the raw string after the plain name", () => {
-    expect(trafficOutcomeTitle("unresolved")).toBe("loss left (round limit) (unresolved)");
+    expect(trafficOutcomeTitle("unresolved")).toBe("loss left — the best of its solves is shown (fewest losses) (unresolved)");
     expect(trafficOutcomeTitle("BaselineFailed: ETA solve: x")).toBe("not optimized: no ETA (BaselineFailed: ETA solve: x)");
   });
 

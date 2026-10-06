@@ -869,7 +869,7 @@ indeterminate on another runway.
 `build_scenario_comparison_czml.py` publishes the windows of `4dTrajectory/optimization/traffic_optimization.py m1` with no
 extra argument: **a `--summary` whose `mode` is `traffic:m1`** (a MIRROR of what `traffic_optimization.py` stamps) requires
 every SOLVED group's `<flight_key>_traffic.json` (the path is the group's states file name without `_states.json` plus
-`_traffic.json`, as `scenario_batch.sidecar_filename` builds it; schema exactly `optimization-traffic-v2`, a MIRROR of
+`_traffic.json`, as `scenario_batch.sidecar_filename` builds it; schema exactly `optimization-traffic-v3`, a MIRROR of
 `traffic/loop.py` `TRAFFIC_RECORD_SCHEMA`) and reads the arrivals roster the summary names
 (`optimization_config.traffic.selection.manifest`). Refused by name: a missing sidecar, another schema, another flight's
 sidecar, a roster whose `schema_version` is not the current `harvest-arrivals-v7-measured-crossing-in-slice` (a MIRROR of
@@ -949,7 +949,7 @@ roster is `optimization_config.traffic.selection.manifest` (current arrivals sch
 cross-checked against its record (a solved group's states file, an unsolved group's eval file; a different entry means the
 roster is not the one the run flew; a group the roster lacks is refused by name). Each group (solved or not) gets
 `scene: {startOffsetS, outcome, delayS}`: `startOffsetS` its entry minus `S` (to the millisecond); a **solved** group takes the
-`outcome` and `slot.delay_s` of its block sidecar (schema exactly `optimization-traffic-block-v2`, a MIRROR of `traffic/block.py`
+`outcome` and `slot.delay_s` of its block sidecar (schema exactly `optimization-traffic-block-v3`, a MIRROR of `traffic/block.py`
 `BLOCK_RECORD_SCHEMA`; a missing or other-schema sidecar is refused by name); an **unsolved** group takes the row's `reason`
 as its outcome (a row without one is refused) and its delay from `summary.blocks[].slots` by `flight_key` (`null`: it has no
 slot). **Its optimizer and simulator paths are written on the scene clock** (their times plus `startOffsetS`; the record's own
@@ -980,7 +980,7 @@ Measured on the 12-group KRDU example (one 30-minute block): 12 groups (1 unsolv
 `2026-05-21T17:47:18.959Z`, group entries 0 .. 2076 s after it, groups' spans 0 .. 2501 s (the last result path ends at
 2368 s); `check-publication` reports 0 errors.
 
-### AV48 · the Optimize task's multi-aircraft mode: a backend job, its files fed to the comparison layer (2026-10-06)
+### AV48 · the Optimize task's multi-aircraft mode: a backend job, its files fed to the comparison layer (2026-10-06; the scenario list instead of a date, T12)
 
 Contract: `4dTrajectory/docs/multi_aircraft_optimization/design.md` §10 (step T11). Backend: `aeroviz_backend/CLAUDE.md`
 ("Traffic jobs"). **Optimize has a mode selector** (`OptimizeKindSelect`, in `WorkbenchLeftDock`): *Single aircraft* (the
@@ -992,31 +992,123 @@ no optimizer worker session, closed on hiding and opened again on showing Optimi
 switch like Fly ↔ Optimize), so Fly ↔ Optimize and single ↔ multi never
 lose what was set up in it.
 
-- **Panel** (`components/TrafficJobPanel.tsx`): a UTC day (remembered in `localStorage`, per viewer; its field has a row of its
-  own, a native date input is clipped in a grid column) → the airport's arrivals of that day from `GET /traffic/arrivals`
-  (landing, callsign, runway, type; roster only). M1: click an arrival. M2: the block start as **24-hour UTC selects — an hour
-  00–23 and a minute of 00, 15, 30 or 45**, never a locale time field; the default is the hour of the day's first landing,
-  rounded down, until the user sets one (a new day defaults again) — and a length of 15, 30 (default) or 60 min
-  (`TRAFFIC_BLOCK_LENGTHS_S`, a MIRROR of `traffic_job_files.BLOCK_LENGTHS_S`). The count line says how many arrivals land in the
-  block (the next day's landings of a block past midnight are flown but not counted, said) and, once a job of THIS block is done,
-  how many were controlled and how many stayed records for want of an aircraft dynamics model (the readout's `aircraft` and
-  `skipped_no_dynamics`, the latter summed over the summary's `blocks[]`). The solver settings are shown read-only
-  (`TRAFFIC_JOB_SETTINGS`, a MIRROR of the batch defaults — IM2). Progress ("N of M aircraft done · last: callsign", "Reading
-  the traffic…" until the job knows its total); `current` is the aircraft LAST FINISHED, not the one in work (`fly_block` reports
-  after each aircraft; an M2 job is silent during its ETA solves, which come first).
+- **Panel** (`components/TrafficJobPanel.tsx`; the list is `components/TrafficScenarioList.tsx`, the card `components/TrafficCard.tsx`,
+  the pure parts `utils/trafficScenarios.ts`): **no date.** The scenario is chosen from the airport's catalog, computed in advance
+  by `4dTrajectory/optimization/traffic_scenarios.py` and served by `GET /traffic/scenarios?airport=` (design §10.6; the user,
+  2026-10-06: a date gave no hint which days hold data and which flights meet traffic). The panel fetches it when it mounts
+  (once per mode and airport; a running job's polls do not refetch, re-sort or re-render it — the list is a `memo`; **starting a job
+  leaves the list as the user set it — sort, runway, light switch, page, pick — pinned through the real `AppProvider`, dock and panel
+  by `TrafficJobPanel.startKeepsList.test.tsx`**). **Header, by mode** (where **"loss of separation" is spelled out — once per panel, every
+  later place says "loss"**): M1 "<withLoss> of <judged> arrivals have a loss of separation they answer for in their record (the
+  records were checked every <stepS> s, <writtenUtc>)"; M2 "<N> blocks of <L> min with an arrival; sorted by the seconds their
+  arrivals spend in loss of separation (the records were checked every <stepS> s)"; **"seconds in loss" is the plain word for the loss
+  instants** (`lossSecondsTitle`, the title of every place it is said: check instants, <s> s apart, at which the aircraft is closer
+  than its separation minimum and answers for it; the number is the instants × the census step); the light switch's title says
+  "CWT category I"; both then the one line of what a loss means — a loss between recorded aircraft as flown, a mark of dense
+  traffic, not a promise that the optimized flight has one (§10.6 "Interpretation"); a catalog whose `config.limit` is set (a
+  timing smoke) says "Partial census: only the first N arrivals by landing time were judged". **The dock is 242 px wide: a row is a
+  two-line CARD, not a table row** (`role=option` of a `listbox`; the text wraps at spaces, never mid-word, nothing is clipped;
+  Enter and Space pick like a click; the card's title and, once it is picked, the "Selected: …" line hold the rest). **M1 card**
+  (catalog schema v2 has `category`, the CWT wake category): `AAL1286 · B738 · 23L` over `2026-09-21 03:32 UTC · 124 seconds in loss`
+  (callsign — the flight key's first field when null —, type, runway; landing, seconds in loss); a checkbox **"Hide light aircraft"
+  (title: CWT category I), on by default** (C172/SR22 practice traffic tops the ranking otherwise; the count line says how many light aircraft it hides
+  **from the list as filtered by the runway**; hiding one that is picked clears the pick). **M2 card**: `2026-05-15 17:30–17:45 UTC`
+  over `6 arrivals · 5 controllable · 198 seconds in loss · 23L, 23R, 32` (the arrivals that land in the block, those that are
+  CONTROLLABLE — have an aircraft dynamics model, so a job can fly them —, seconds in loss, runways joined with commas and kept on
+  one line: `traffic-job-keep`, `white-space: nowrap`); the block length select (15, 30 (default), 60 min;
+  `TRAFFIC_BLOCK_LENGTHS_S`, a MIRROR of `traffic_job_files.BLOCK_LENGTHS_S`). **Start is disabled for a block with no commandable
+  arrival and the panel says why** ("no arrival in this block is controllable (has an aircraft dynamics model)"); **"controllable" is
+  the one word**, on the card and in the Selected line, its definition in a title (`CONTROLLABLE_TITLE`). A **"Sort by" select** above the list
+  ("Most losses" — the default, the catalog's own order, ties keep it —, "Fewest losses", "Earliest", "Latest") and the **runway**
+  select, **labelled "Show runway"** (the top bar's runway control is another thing; M2: a block that holds it); **the selects sit two to a row at full width and their labels are at most 13 characters, so a
+  select never clips its text** (half a 242 px dock); **100 cards at a time** ("Showing 1–100 of N · Show 100 more" under the list: no row is dropped;
+  any change of view — length, filter, sort, the light switch — starts at one page again, so a change of block length draws one
+  page, never 6,448 cards); the line above says "N of M arrivals with a loss" / "N of M blocks"; the list scrolls in ONE fixed-height
+  area (34vh, vertical only). **What clears a pick and what does not**: a FILTER that hides the picked row (the runway, the light
+  switch) clears it — Start waits for a visible row; a change of block length clears it (a 15-minute block is not a 60-minute one); a
+  pick the view merely no longer SHOWS (a sort moved it, it is on a page not drawn) stays picked and named in the "Selected" line.
+  Start runs the M1 job for its `flightKey` or the M2 job for `blockStartUtc` = its start and `blockS` = the length. **A missing
+  catalog** is the backend's message shown as it is (a 404 naming `python 4dTrajectory/optimization/traffic_scenarios.py --airport
+  <ICAO>`; a catalog of another schema a 500 naming the schema found), `fetchTrafficScenarios` rejects with it, and nothing can
+  start. **Loss kinds** by plain name (`TRAFFIC_LOSS_KINDS`, a MIRROR of `separation.py` `IN_TRAIL … AT_THRESHOLD`; an unknown kind
+  is shown raw): `in_trail` "too close in trail on one final", `diagonal` "too close between dependent parallel finals",
+  `radar_or_vertical` "under the radar minimum and not vertically separated", `at_threshold` "wake gap behind the aircraft over the
+  threshold". **The catalog fields the viewer reads** (`isTrafficScenarioCatalog`; `TRAFFIC_CATALOG_SCHEMA` a MIRROR of
+  `CATALOG_SCHEMA`, now `traffic-scenario-catalog-v2`; `LIGHT_AIRCRAFT_CATEGORY` a MIRROR of the last of `CWT_CATEGORIES`) are pinned
+  by `data/__tests__/fixtures/trafficScenarioCatalog.json` (a MIRROR of the census writer's output, named so) — in Vitest the guard
+  refuses the catalog lacking any one field, in `traffic/tests/test_scenario_catalog_mirror.py` the fixture's fields AND JSON types
+  equal what `main` writes (null only for `callsign`, `type`, `category`, `limit`). The UTC day field, the block-start hour and
+  minute selects, the day's arrivals list, the columns and their sortable headers are gone (GET `/traffic/arrivals` stays: the Scene
+  time readout asks it for a flight's entry). **The solver settings are ONE plain sentence** ("Same settings as the batch
+  experiments", `SOLVER_SENTENCE`) with the whole list in its title (`solverTitle`; `TRAFFIC_JOB_SETTINGS`, a MIRROR of the
+  batch defaults — IM2). **An ICAO type code carries the plain name of the type as its title where the app has one** — the backend's
+  aircraft catalog (`GET /simulation/aircraft`, read once by `useAircraftTypeNames`: today A320, B77W, C172) — on the M1 cards, in the
+  Selected line ("type A320 (Airbus A320-200)"), on the result cards and on the stayed-record lines; a type the catalog does not
+  list keeps its code and no title, and a catalog that cannot be read is a console warning, never an error (`TypeCode`,
+  `utils/aircraftTypeNames.ts`). **Progress**: the job writes a `phase` in `progress.json` (`traffic_job_files.PHASE_*`, plain words:
+  "reading traffic", "earliest arrival of each aircraft", "schedule", "optimizing k of n", "evaluation", "building the scene"; before its
+  first write the backend says "starting", `TRAFFIC_PHASE_STARTING`, a MIRROR); **the panel shows it right under the header, above the
+  list — in view however long the list is, the same for M1 and M2** — as it is, with the job's wall time as
+  mm:ss ("optimizing 2 of 5 · 01:05", the clock restarts with each job) and, once the job knows its total, "N of M aircraft done · last:
+  callsign"; `current` is the aircraft LAST FINISHED, not the one in work (`fly_block` reports after each aircraft; an M2 job is
+  silent during its earliest-arrival solves, which come first — the phase says so).
 - **Start is DISABLED while a job starts, runs or is being cancelled** — there is no Restart; the user cancels first, so a start
   never waits for a cancel.
-- **Result**: when the job is done the panel reads its `comparison_index.json` and lists one row per controlled aircraft
-  (callsign, runway, outcome in plain words, M2: "Delay (s)", the slot's delay) and one summary line that **names the job's inputs
-  first** — `Block 2026-05-21 18:00–18:15 UTC` / `FFL1206, 2026-07-16` (`blockJobLabel`, `flightJobLabel`, taken when Start was
-  pressed, so editing the panel afterwards never makes the old result look like a new one) — then the outcome counts by plain
-  name; M2: the arrivals that stayed records, the delay median / largest / over 60 s, and the flown aircraft with a loss of
-  VISUAL separation they answer for / do not, left after the block's final check (the one number the index lacks, taken from the
-  status' `summary`, the job's `traffic.readout`). The tables scroll vertically only: fixed layout, the outcome text wraps. A
-  click on a row selects that flight (`selectedFlightId`, the camera tracks it). Below, the traffic legend (AV46).
+- **Result**: when the job is done the panel reads its `comparison_index.json` and the status' `perAircraft` and `timing` (a done
+  status always has them — `isTrafficJobStatus` refuses one without, the backend refuses a done `state.json` without them by name;
+  **an index that lists an aircraft `perAircraft` says nothing of fails the job's view by name**), and — when the index draws an
+  aircraft **off the landing gates** (`offTarget`: a yellow path) — **the evaluation report the index names**, from the job's files
+  (`offTargetRows`: that aircraft's report row; a report the viewer cannot read, or without the row, fails the view by name; a job
+  with no yellow path never reads it). **One two-line card per controlled aircraft** (the results list takes the panel's own
+  height: no nested scroll box): line 1 `N850DP · H25B · 05R — <plain outcome>`; **line 2, M1**: `losses: record 143 → first solve 9 →
+  final 0 · lands 6 min 40 s earlier than it really did (shortest published route at minimum time; the real flight was vectored) ·
+  optimized in 12.3 s, CPU 11.8 s (3 solves, 1 failed)`; **line 2, M2, two labelled stages and two labelled times, so no number
+  contradicts another**: `when flown: record 143 → first solve 9 → final 0 · after the whole block: 3 (from aircraft flown after
+  it) · lands 4 s earlier than it really did · slot delay 80 s (after its earliest arrival) · optimized in 12.3 s, CPU 11.8 s (3
+  solves, 1 failed, the earliest-arrival solves included)`. The record's loss instants come from the catalog row the job was started
+  from (none there means 0, unless the census judged only part of the roster: "record ?"; **"record N at <s> s steps" when the
+  catalog's check step is not the job's**: the two are counts of different instants); **first solve and final are the SAME kind of
+  count as the record's — the instants the aircraft answers for, MD10 not applied (`answered_loss_instants` of `rounds[0]` and of
+  `rounds[kept_round]`) —, and final is the solve the loop KEPT (MD14: the fewest counted loss instants, the earliest on a tie), not
+  the last**; `after the whole block` is the aircraft's conflicts in the block's final check (a count of conflicts, "(from aircraft
+  flown after it)" only when it is not 0). **"lands … than it really did"** is the record's flight time against the recorded
+  flight's, ONE rounding for every sentence about it (`landingShiftS`, halves away from zero); **the note "(shortest published route
+  at minimum time; the real flight was vectored)" is on the line of an aircraft that lands MORE THAN 60 s earlier, and "(its slot)"
+  on an M2 line that lands later — there is no footnote**. **An aircraft off the landing gates adds `· missed the landing gates
+  (yellow): lateral 41 m too far (341 m, limit 300 m); speed 3.2 m/s too fast (63.4 m/s, window 55.2–60.2 m/s)`** — the gates it
+  failed and by how much, from its report row (`gateMisses`: `violations` `lateral`, `vertical`, `speed` with the row's `lateral_m` /
+  `vertical_m` / `crossing_speed_ms` and `bounds`; **`not_reached` "did not reach the runway threshold (stopped 87 m short)", the
+  amount read from the row's `reason`, and `threshold_not_bracketed` "ended past the runway threshold with no crossing to measure"** —
+  NOT "stopped short": that evaluation event is the opposite, a track that ended beyond the threshold without a bracketing segment;
+  a code none of these is shown as the evaluation names it, and the card's title carries the evaluation's own codes). An aircraft
+  that was NOT FLOWN reads `not flown — the schedule gave it a slot 2458 s after its earliest arrival · tried for 20.0 s, CPU 18.5 s
+  (2 solves, 2 failed, …)` (`not flown — it has no slot (its earliest-arrival solve failed)`; `not flown` in an M1 job); **one
+  whose failed sidecar lost its solves (a failure outside the solve, e.g. a casadi error in a re-solve) says "time not recorded (the
+  failure lost it)" and has null time fields — never 0 s**. `state.json`'s `perAircraft`
+  (`type`, `firstSolveLosses`, `finalLosses`, `landingVsRecordS`, `delayS`, `blockCheckLosses`, `optimizeS`, `optimizeCpuS`,
+  `solves`, `failedSolves`) and `timing` (`totalS`, `phases` by stage) are written by `traffic_job.py` (`per_aircraft`, `Progress`),
+  documented in `traffic_job_files.py`; **the time and the solves are the SOLVER's** (`scenario_optimization.SolveTime`, one per
+  `solve_iaf` call, kept in each traffic sidecar's `solves` — or, for a scenario without a record, in its failed sidecar
+  `optimization-traffic-failed-v1` — summed per aircraft, so EVERY aircraft has them); the job's phases give only the stage times.
+  `blockCheckLosses` is M2's losses in the block's final check under the job's reading; **the summary's count of the aircraft with a loss left is the number of cards whose `blockCheckLosses` is above 0 — the same numbers, never the readout's own count**. One
+  summary line **names the job's inputs first** — `Block 2026-05-21 18:00–18:15 UTC` / `FFL1206, 2026-07-16` (`blockJobLabel`,
+  `flightJobLabel`, taken when Start was pressed, so editing the panel afterwards never makes the old result look like a new one) —
+  then the outcome counts by plain name; **the aircraft that missed the landing gates, counted and named — a yellow path is always
+  explained**; M2: how many arrivals of the block stayed their records, **named in a list under the cards** ("N777 · C172: not controllable (no
+  aircraft dynamics model), flew its record" — from `state.json` `stayedRecords`, `{flight_key: {callsign, type}}`, `{}` for M1), the slot delay median /
+  largest / over 60 s (**of the flown aircraft only, from `perAircraft.delayS` — the one source the cards read too**), and after the
+  block's final check **the aircraft that still have a loss they answer for, by callsign** ("1 aircraft still has a loss … (DAL88)",
+  or "no aircraft has …") and **"<n> aircraft with a loss others caused"** (the readout's `not_answered`). Under it **"Total
+  12:21 — reading traffic 0:45 · earliest arrivals 3:10 · schedule 0:01 · optimizing 8:02 · evaluation 0:20 · building the scene 0:03"**
+  (`timingText`: the job's wall time by stage, in the order they happened); for M2 **"The block's 252 seconds in loss in the
+  records: SWA3131 124 · DAL88 100 (not flown) · N123AB 28"** (`blockLossShares`: the catalog rows of the block's arrivals, flown or
+  not, so the block card's number adds up to the lines below; the block the job was STARTED for, not the one picked since); under
+  the cards, M2's stayed records, one muted line each. A click on a card selects
+  that flight (`selectedFlightId`, the camera tracks it). Below, the traffic legend (AV46).
 - **Plain outcome names — ONE mapping** (`utils/trafficOutcome.ts`, the Flights table tooltip and the result table both):
-  `separated_at_baseline` "separated at the first solve (no re-solve)", `separated` "separated after re-solve", `unresolved` "loss left
-  (round limit)", `solve_failed` "loss left (re-solve failed; last good solve shown)", `wake_at_fixed_time` "wake loss left
+  `separated_at_baseline` "separated at the first solve (no re-solve)", `separated` "separated after re-solve", `unresolved` and
+  `solve_failed` both "loss left — the best of its solves is shown (fewest losses)" (MD14: the loop keeps the solve with the fewest
+  counted loss instants, so the record is the best of its solves in both), `wake_at_fixed_time` "wake loss left
   (landing time fixed)"; by prefix of a failed record's reason: `BaselineFailed: slot solve` "not optimized: its slot could
   not be flown", `BaselineFailed: ETA solve` "not optimized: no ETA", `block failed:` "not optimized: block failed", any
   other `BaselineFailed` "not optimized". The raw string follows the plain name in the row's title text; **an unknown
@@ -1037,9 +1129,18 @@ lose what was set up in it.
   backend's arrival window. The layer then needs no Trajectories switch (an Evaluate option) and draws the job's scene like a
   published one: one window (M1, AV46) or one scene (M2, AV47). **A job source ignores the top bar's runway and the sample count**
   (no filter, no reload: they are Evaluate's) and the panel never changes the runway selector. **When a job's scene has loaded the
-  camera flies to it** (`frameTrajectoryCamera` over the controlled aircraft's `sim-` paths, margin 1.4 for the dock). `App.tsx`
+  camera flies to it** (`frameTrajectoryCamera` over the controlled aircraft's `sim-` paths, margin 1.2 — a tight view of the scene, the dock covers part of the canvas). `App.tsx`
   reads the comparison layer's error in Optimize.
 - **Legend**: the optimized-path entry also explains the off-target colour — "yellow: the optimized path ended off the
   runway-threshold target (failed the gates)" — when the scene has such groups (`statuses` has `offTargetResult`); for a traffic
   category it is said there, under that entry, and not listed again under "Outcome colours".
+- **While a traffic scene is shown, Cesium's animation widget and timeline say the scene's REAL UTC time** (`SceneClockLabels`, the
+  same condition as the "Scene time (UTC)" readout; `showSceneTimeOnClockWidgets` in `utils/sceneTime.ts`): the animation view
+  model's `dateFormatter` / `timeFormatter` and the timeline's `makeLabel` (a method of the widget, not in Cesium's typings; it
+  writes every TICK label) are replaced by formatters that give real = scene start + (clock − display epoch) — date `2026-05-21`, time
+  `17:47:18 UTC`, tick label `2026-05-21 17:47:18 UTC` — and **the timeline is drawn again with `zoomTo(_startJulian, _endJulian)`**:
+  `resize()` returns at once while the widget's size is unchanged, so the tick labels stayed the display epoch's until the user zoomed
+  (the real `Cesium.Timeline` is exercised in the test). The widgets' own formatters are put back when the scene goes, the panel
+  unmounts or the scene is not drawn — **unless the viewer is already destroyed** (the app's teardown destroys it before its
+  components unmount; its widgets are gone and touching them threw into a white screen).
 - Not here: a job result is never a category; nothing is written to `public/data` or `categories.json`.

@@ -36,13 +36,15 @@ frontend reads. Solver internals and defaults live in `4dTrajectory/CLAUDE.md`.
 
 ## Traffic jobs — the Optimize task's multi-aircraft mode (`traffic_jobs.py`, T11)
 
-`GET /traffic/arrivals?airport=&date=YYYY-MM-DD` lists the arrivals that LAND on that UTC day from the arrivals roster alone
+`GET /traffic/scenarios?airport=<ICAO>` serves the airport's scenario catalog (design §10.6) as `traffic_scenarios.py` wrote it (`traffic_job_files.catalog_path(<outputs root>, ICAO)`, schema `CATALOG_SCHEMA`; read only, stdlib only, `TrafficJobs.scenarios`): **404 names the command that makes it** (`python 4dTrajectory/optimization/traffic_scenarios.py --airport <ICAO>`), **500 names the schema found** (or that the file is not JSON), 400 a bad airport code. The root is `--traffic-outputs-root` (default `4dTrajectory/outputs`, `traffic_job_files.OUTPUTS_ROOT`; tests pass a tmp root). The panel's list reads this, not the date route below.
+
+`GET /traffic/arrivals?airport=&date=YYYY-MM-DD` (the Scene time readout asks it for a flight's entry; the panel no longer picks a day) lists the arrivals that LAND on that UTC day from the arrivals roster alone
 (`flightKey, callsign, runway, type, entryUtc, landingUtc`; `type` by the identity resolver of `icao24`, null when untyped; no
 track is opened). `POST /traffic/jobs` with `{mode: "m1", airport, flightKey}` or `{mode: "m2", airport, blockStartUtc, blockS}`
 (`blockS` an integer, 900, 1800 or 3600) answers `{jobId}`; **409 while a job runs** (one per backend), **400** for a flight key the
 roster lacks, a bad block, an empty block, any other field, or a field of the wrong type. `GET /traffic/jobs/<id>` is `{state:
-running | done | failed | cancelled, progress: {done, total, current}, error}` and, once done, `summary` (the job's
-`traffic.readout`); `total` is null until the job has chosen its aircraft, `current` is the aircraft last FINISHED. `POST
+running | done | failed | cancelled, progress: {done, total, current, phase}, error}` (`phase`: what the job is doing, `traffic_job_files.PHASE_*`; "starting" before its first write) and, once done, `summary` (the job's
+`traffic.readout`), `perAircraft` (`state.json`'s, per flight key: type, the loss instants of the first solve and of the solve the loop KEPT (MD14) as the census counts them (`answered_loss_instants` of `rounds[0]` and `rounds[kept_round]`), the landing against the record, the slot's delay, the block's final-check losses, and the SOLVER's wall and CPU time, solves and failed solves — summed from each aircraft's sidecar `solves`, or its failed sidecar's when it has no record, and all four null when that sidecar lost them (`solves: null`); written by `traffic_job.per_aircraft`), `timing` (`{totalS, phases}` by stage — "reading traffic", "earliest arrivals", "schedule", "optimizing", "evaluation", "building the scene" —, written by `traffic_job.Progress`) and `stayedRecords` (`{flight_key: {callsign, type}}`: the arrivals of an M2 block with no aircraft dynamics model, which flew their records; `{}` for M1), documented in `traffic_job_files.py` — **a `done` `state.json` without any of the four is a 500 naming what it lacks** (`JobStateInvalid`; also from the cancel route); `total` is null until the job has chosen its aircraft, `current` is the aircraft last FINISHED. `POST
 /traffic/jobs/<id>/cancel` stops the job's process group (SIGTERM, SIGKILL after 5 s) and marks it cancelled; a job with a
 `state.json` (`done` included) is left as it is, a `state.json` that appears while it stops is never overwritten.
 `GET /traffic/jobs/<id>/files/<name>` serves a file **only if the job's `comparison/comparison_index.json` lists it** (the index,

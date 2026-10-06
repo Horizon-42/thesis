@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from scenario_optimization import IafSearchFailed, SolveTime, timing
 from traffic import loop, rules
 from traffic.check import Check, Conflict
 
@@ -17,18 +18,25 @@ def _check(*conflicts):
 
 
 def _run(monkeypatch, visual_checks, *, fail_solve_at=None, max_rounds=5, baseline_error=None, fixed=None,
-         recorded=("OTHER",)):
+         recorded=("OTHER",), crash_at=None, solve_s=0.0):
     """Run the loop with ``visual_checks`` as the judge's successive VISUAL answers (IFR: no loss)."""
     solves, solves_fixed = [], []
 
-    def shortest(*_a, **_k):
+    def shortest(*_a, kind, **_k):
         if baseline_error:
-            raise ValueError(baseline_error)
-        return SimpleNamespace(pc="IAF", dense_times=[1.0, 2.0], decision_vector="x0", final_time=100.0)
+            raise IafSearchFailed(baseline_error, (SolveTime(kind, "IAF", False, 2.0, 1.5),))
+        return SimpleNamespace(pc="IAF", dense_times=[1.0, 2.0], decision_vector="x0", final_time=100.0,
+                               attempts=(SolveTime(kind, "IAF", True, 1.0, 0.5),))
+
+
 
     def solve(pc, *_a, initial_guess, fixed_duration_s, extra_rows=None, **_k):
+        import time
+        time.sleep(solve_s)
         solves.append(initial_guess)
         solves_fixed.append(fixed_duration_s)
+        if len(solves) == crash_at:
+            raise RuntimeError("casadi native error")
         if len(solves) in (fail_solve_at if isinstance(fail_solve_at, set) else {fail_solve_at}):
             raise ValueError("collocation free-time optimization failed: Infeasible_Problem_Detected")
         return SimpleNamespace(pc=pc, dense_times=[1.0, 2.0], decision_vector=f"x{len(solves)}",
@@ -36,7 +44,8 @@ def _run(monkeypatch, visual_checks, *, fail_solve_at=None, max_rounds=5, baseli
 
     fake_so = SimpleNamespace(
         iaf_setup=lambda scenario, root: ("target", ["IAF"], "aircraft", 60.0),
-        shortest_iaf_solve=shortest, solve_iaf=solve,
+        shortest_iaf_solve=shortest, solve_iaf=solve, timing=timing, iaf_name=lambda pc: pc,
+        IafSearchFailed=IafSearchFailed,
         iaf_result=lambda solve, *a, **k: SimpleNamespace(final_time_s=solve.final_time, simulator_states=[]),
     )
     window = SimpleNamespace(recorded=[SimpleNamespace(flight_key=key, lat_deg=np.array([35.0]), runway="09",
@@ -87,7 +96,10 @@ def test_a_failed_re_solve_is_retried_once_with_the_other_branch(monkeypatch):
     assert first["retried_branches"] == {"OTHER": {"family": "vertical", "sign": 1.0}}
     assert [r["family"] for r in first["rows_next"]] == ["horizontal"]          # the failed attempt
     assert [r["family"] for r in first["rows_retry"]] == ["vertical"]
-    assert "Infeasible" in first["next_solve_error"] and len(first["next_solve_s"]) == 2
+    assert "Infeasible" in first["next_solve_error"]
+    assert [(t["kind"], t["ok"]) for t in side["solves"]] == [("baseline", True), ("resolve", False), ("retry", True)]
+    assert [t.get("round") for t in side["solves"]] == [None, 0, 0]
+
     assert side["branches"] == {"OTHER": {"family": "vertical", "sign": 1.0}}       # kept after the retry
 
 
@@ -95,7 +107,8 @@ def test_a_failed_retry_keeps_the_last_good_record_and_branch(monkeypatch):
     result, side, _solves = _run(monkeypatch, [_check(Conflict(5.0, 0, **LOSS))], fail_solve_at={1, 2})
     first = side["rounds"][0]
     assert side["outcome"] == loop.SOLVE_FAILED and result.final_time_s == 100.0
-    assert "Infeasible" in first["retry_error"] and len(first["next_solve_s"]) == 2
+    assert "Infeasible" in first["retry_error"]
+    assert [(t["kind"], t["ok"]) for t in side["solves"]] == [("baseline", True), ("resolve", False), ("retry", False)]
     assert first["retried_branches"] == {"OTHER": {"family": "vertical", "sign": 1.0}}
     assert side["branches"] == {"OTHER": {"family": "horizontal", "sign": 1.0}}     # no solve held the flip
 
@@ -148,8 +161,9 @@ def test_an_in_trail_loss_has_no_other_branch_to_retry(monkeypatch):
 
 
 def test_a_failed_baseline_is_its_own_error(monkeypatch):
-    with pytest.raises(loop.BaselineFailed, match="all 2 IAF"):
+    with pytest.raises(loop.BaselineFailed, match="all 2 IAF") as failed:
         _run(monkeypatch, [], baseline_error="all 2 IAF(s) infeasible")
+    assert failed.value.solves == [SolveTime("baseline", "IAF", False, 2.0, 1.5).to_json()]   # its time is kept
 
 
 def test_an_aircraft_in_loss_at_the_start_gets_rows_only_after_its_first_free_instant(monkeypatch):
@@ -201,3 +215,45 @@ def test_at_a_fixed_time_the_baseline_is_warm_and_a_wake_loss_gets_no_row(monkey
     assert side["outcome"] == loop.WAKE_AT_FIXED_TIME
     rowed = {loss[2]: loss[7] for loss in side["rounds"][0]["losses"]}
     assert rowed == {rules.IN_TRAIL: True, rules.AT_THRESHOLD: False}
+
+
+def test_the_window_time_holds_its_re_solves(monkeypatch):
+    _result, side, _solves = _run(monkeypatch, [_check(Conflict(5.0, 0, **LOSS)), _check()], solve_s=0.05)
+    resolve = [t for t in side["solves"] if t["kind"] == "resolve"]
+    assert len(resolve) == 1 and resolve[0]["wallS"] >= 0.05 and side["windowWallS"] >= resolve[0]["wallS"]
+
+
+def test_a_non_value_error_of_a_re_solve_propagates(monkeypatch):
+    with pytest.raises(RuntimeError, match="casadi"):
+        _run(monkeypatch, [_check(Conflict(5.0, 0, **LOSS)), _check()], crash_at=1)
+
+
+def test_a_non_value_error_of_the_warm_slot_solve_propagates(monkeypatch):
+    with pytest.raises(RuntimeError, match="casadi"):
+        _run(monkeypatch, [_check()], fixed=300.0, crash_at=1)
+
+
+def test_the_window_keeps_the_solve_with_the_fewest_counted_losses(monkeypatch):
+    """MD14 (the user, 2026-10-06): a re-solve that makes it worse, then a failed re-solve — the record is the
+    baseline (1 loss instant), not the last good solve (3)."""
+    worse = [Conflict(float(t), 0, **LOSS) for t in (6.0, 7.0, 8.0)]
+    result, side, _solves = _run(monkeypatch, [_check(Conflict(5.0, 0, **LOSS)), _check(*worse)], fail_solve_at={2, 3})
+    assert side["outcome"] == loop.SOLVE_FAILED
+    assert [r["counted_loss_instants"] for r in side["rounds"]] == [1, 3]
+    assert [r["answered_loss_instants"] for r in side["rounds"]] == [1, 3]       # no MD10 exclusion here: equal
+    assert side["kept_round"] == 0 and result.final_time_s == 100.0          # the baseline's record
+
+
+def test_a_tie_keeps_the_earlier_solve(monkeypatch):
+    same = Conflict(6.0, 0, **LOSS)
+    result, side, _solves = _run(monkeypatch, [_check(Conflict(5.0, 0, **LOSS)), _check(same)], fail_solve_at={2, 3})
+    assert side["kept_round"] == 0 and result.final_time_s == 100.0
+
+
+def test_the_display_count_keeps_the_losses_md10_leaves_out_of_the_loop(monkeypatch):
+    """A recorded aircraft in loss at the start (MD10): the loop does not count those instants, the census-like
+    display count does — so "record N → first solve" compares like with like."""
+    at_start = [Conflict(t, 0, **LOSS) for t in (0.0, 1.0)]
+    _r, side, _s = _run(monkeypatch, [_check(*at_start), _check()])
+    first = side["rounds"][0]
+    assert first["answered_loss_instants"] == 2 and first["counted_loss_instants"] < 2

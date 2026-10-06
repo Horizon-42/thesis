@@ -614,13 +614,13 @@ there, not what will happen here.
   (`experiments/`). `post/` never imports `multi/`.
 - The runners of stage D (`experiments/multi_*.py`): `multi_windows` (the census, MC1), `multi_train` (the campaign,
   through the post-training's campaign steps, item 8 of §6.1), `multi_validation`, `multi_profile`,
-  `multi_training_export`. They import from `autopilot/` only the names of vocabulary §6, from `prior/` only those of
+  `multi_training_export` (written by fronter, frontend F4). They import from `autopilot/` only the names of vocabulary §6, from `prior/` only those of
   prior §7, from `post/` and stage C's runners only those of §6.1, and `multi/`.
 - The window loop stays one class (`experiments/post_window_loop.py`), generalised (§6.1 item 5): no second loop.
 
 **Formats** (new names, principle 8): `multi-windows-census-v1`, the token part `multi-commanded-tokens-v1` (D152),
 `ts-multi-train-v1`, `ts-multi-checkpoint-v1` (version 1), version 2's module `multi-joint-attention-v1`,
-`ts-multi-train-v2`, `ts-multi-checkpoint-v2` (D153), the Training sets' index and sample formats (named in MC7).
+`ts-multi-train-v2`, `ts-multi-checkpoint-v2` (D153), the Training sets' index and sample formats (frontend §7).
 
 **Size, estimated.** `multi/` about 300 lines; the generalisations of stage C about 300 lines changed; the interfaces
 of §6.2 about 200 lines in `autopilot/start.py`, `prior/loop.py`, `prior/landings.py` and
@@ -678,11 +678,10 @@ Claude proposes the campaign's settings; the user decides them and the criterion
 **MC6. The formal campaign** from the main checkout after the user's merge (outline §5 rule 1), its intent in
 `docs/experiments/intents.json` before the launch; the validation readout of the chosen round.
 
-**MC7. The Training view of stage D** (outline §6): the window view of stage C with several commanded aircraft — the
-list of windows, the tabs Labelled · Start · r1 …, each commanded aircraft with its own sentence, the silent aircraft
-marked from its loss on, the losses by pair, the envelopes of each flown sentence (outline D135); the results page's
-sections Rounds, Speed, The checks, The window (outline D134). A word of a commanded aircraft flies its segment live
-in the window.
+**MC7. The Training view of stage D** (frontend §5, D156): stage C's window view with several commanded aircraft,
+built by fronter (frontend F2–F4), not by stage D's implementer. Stage D gives it what the export reads: the windows
+of a campaign with each commanded aircraft's sentence of each round, its reward, its silence and the losses by pair,
+in the files of MC4 and MC6, named in this document (§7, §10). A change of those files is written here first.
 
 **MC8. Version 2's code** (§6.4, D153), after MC6. First Claude writes its interface changes into prior §7 items 4
 and 7 and post-training §9 items 9 and 10. Then: the sentences of a loop on its ticks (stage B), stage C's samples of
