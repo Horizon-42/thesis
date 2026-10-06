@@ -40,6 +40,27 @@ class ServedFile:
     path: Path
 
 
+#: The experiments' intents, their one source (outline §6.2 item 4): read at each `GET /experiments/intent` request.
+EXPERIMENT_INTENTS = Path(__file__).resolve().parents[1] / "4dTrajectory" / "ts_transformer" / "docs" / "experiments" / "intents.json"
+
+
+def experiment_intent(intents: Path, run: str) -> tuple[int, dict[str, Any]]:
+    """The intent of the run (a Training set's id) ``run``: the one campaign of ``intents`` whose ``runs`` hold it — its id,
+    title, intent and design, and the run's own line. No campaign (404) or more than one (409: a run key is not unique in
+    the registry) is an error naming the run and the campaigns found. Reads the file at each call; writes nothing."""
+    campaigns = json.loads(intents.read_text(encoding="utf-8"))["campaigns"]
+    # a campaign without runs (a question with no run of its own) lists none
+    found = sorted(name for name, campaign in campaigns.items() if "runs" in campaign and run in campaign["runs"])
+    if len(found) != 1:
+        where = "no campaign" if not found else f"{len(found)} campaigns ({', '.join(found)})"
+        return (404 if not found else 409), {
+            "ok": False, "run": run, "campaigns": found,
+            "error": f"{run} is a run of {where} in {intents.name}: a set's intent is the one campaign that lists it"}
+    campaign = campaigns[found[0]]
+    return 200, {"ok": True, "run": run, "campaign": found[0], "title": campaign["title"], "intent": campaign["intent"],
+                 "design": campaign["design"], "line": campaign["runs"][run]}
+
+
 class AeroVizBackendApp:
     def __init__(
         self,
@@ -48,7 +69,9 @@ class AeroVizBackendApp:
         dynamics_comparison_backend: DynamicsComparisonBackend | None = None,
         observed_trajectory_backend: ObservedTrajectoryBackend | None = None,
         autopilot_segment_backend: Any = None,
+        experiment_intents: Path = EXPERIMENT_INTENTS,
         traffic_jobs: TrafficJobs | None = None,
+        training_results: Any = None,
     ) -> None:
         # The simulation endpoints run in-process (they are high-frequency and use
         # only casadi function evaluation, not the crash-prone NLP construction).
@@ -72,6 +95,10 @@ class AeroVizBackendApp:
         # (`warm_autopilot`); tests inject their own.
         self._autopilot_segment_backend = autopilot_segment_backend
         self._autopilot_segment_lock = threading.Lock()
+        self.experiment_intents = experiment_intents
+        # the Training sets' results (`training_results.TrainingResults`), opened on first use like the live executor
+        self._training_results = training_results
+        self._training_results_lock = threading.Lock()
         # The Optimize task's multi-aircraft jobs: one subprocess at a time (aeroviz_backend/traffic_jobs.py).
         self.traffic_jobs = traffic_jobs or TrafficJobs()
 
@@ -83,10 +110,32 @@ class AeroVizBackendApp:
                 self._autopilot_segment_backend = stage_a_service()
             return self._autopilot_segment_backend
 
+    def training_results(self) -> Any:
+        with self._training_results_lock:
+            if self._training_results is None:
+                from aeroviz_backend.training_results import TrainingResults
+                from ts_transformer.repo_layout import COMPARISON_AIRPORTS_ROOT
+
+                self._training_results = TrainingResults(COMPARISON_AIRPORTS_ROOT)
+            return self._training_results
+
     def handle_get(self, path: str) -> tuple[int, Any]:
         parsed = urlsplit(path)
         if parsed.path == "/health":
             return 200, {"ok": True, "service": "aeroviz-backend"}
+        if parsed.path == "/experiments/intent":         # a Training set's intent (outline §6.2 item 4)
+            try:
+                run = _query_value(parse_qs(parsed.query, keep_blank_values=True), "run", required=True)
+            except ValueError as exc:
+                return 400, {"ok": False, "error": str(exc)}
+            return experiment_intent(self.experiment_intents, run)
+        if parsed.path == "/training/results":           # a Training set's results (outline §6.2 items 3, 4; D134)
+            query = parse_qs(parsed.query, keep_blank_values=True)
+            try:
+                stage, airport, set_id = (_query_value(query, name, required=True) for name in ("stage", "airport", "set"))
+            except ValueError as exc:
+                return 400, {"ok": False, "error": str(exc)}
+            return self.training_results().answer(stage, airport, set_id)
         if parsed.path == "/simulation/aircraft":
             return 200, aircraft_catalog()
         if parsed.path == "/dynamics-comparison/history":
@@ -508,8 +557,10 @@ def main() -> None:
     else:
         from aeroviz_backend.autopilot_segment.backend import stage_a_service
 
+        from aeroviz_backend.training_results import TrainingResults
+
         app = AeroVizBackendApp(autopilot_segment_backend=stage_a_service(args.training_airports_root),
-                                traffic_jobs=traffic_jobs)
+                                traffic_jobs=traffic_jobs, training_results=TrainingResults(args.training_airports_root))
     http_server = ThreadingHTTPServer(
         (args.host, args.port),
         make_request_handler(app),

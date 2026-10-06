@@ -133,35 +133,35 @@ def _entry(set_id):
 
 
 def _sample(set_id, airport):
-    return {"schema": files.SAMPLE_SCHEMA, "setId": set_id, "airport": airport, "vocabulary": {"readingRule": READING_RULE}}
+    return {"schema": files.SAMPLE_SCHEMA, "setId": set_id, "airport": airport, "readingRule": READING_RULE}
 
 
 def test_a_set_goes_beside_the_old_index_and_is_never_overwritten(tmp_path):
-    """Outline §6 item 3: the set and its entry go into `index_v4.json`; the instruction-v3 view's `index.json` is never
+    """Outline §6 item 3: the set and its entry go into `index_v5.json`; the instruction-v3 view's `index.json` is never
     read or written; a set already listed, or an index another run changed, is refused."""
     training = tmp_path / "KAAA" / "training"
     training.mkdir(parents=True)
     old = training / "index.json"
     old.write_text('{"schema": "aeroviz-training-index-v1", "sets": []}', encoding="utf-8")
     before = old.read_bytes()
-    existing = files.read_index(training, "KAAA", "set_a")
+    existing = files.FILES.read_index(training, "KAAA", "set_a")
     assert existing == []
-    files.write_set(training, "KAAA", _entry("set_a"), files.serialise(_sample("set_a", "KAAA")), existing)
+    files.FILES.write_set(training, "KAAA", _entry("set_a"), files.serialise(_sample("set_a", "KAAA")), existing)
     assert old.read_bytes() == before
     index = json.loads((training / files.INDEX_FILE).read_text(encoding="utf-8"))
     assert index["schema"] == files.INDEX_SCHEMA and [s["id"] for s in index["sets"]] == ["set_a"]
-    entry, sample = files.listed_set(training, "KAAA", "set_a")
+    entry, sample = files.FILES.listed_set(training, "KAAA", "set_a")
     assert entry["id"] == sample["setId"] == "set_a"
     with pytest.raises(ValueError, match="already lists set set_a"):
-        files.read_index(training, "KAAA", "set_a")
-    stale = files.read_index(training, "KAAA", "set_b")
-    files.write_set(training, "KAAA", _entry("set_c"), files.serialise(_sample("set_c", "KAAA")), stale)
+        files.FILES.read_index(training, "KAAA", "set_a")
+    stale = files.FILES.read_index(training, "KAAA", "set_b")
+    files.FILES.write_set(training, "KAAA", _entry("set_c"), files.serialise(_sample("set_c", "KAAA")), stale)
     with pytest.raises(ValueError, match="changed since this run read it"):
-        files.write_set(training, "KAAA", _entry("set_b"), files.serialise(_sample("set_b", "KAAA")), stale)
+        files.FILES.write_set(training, "KAAA", _entry("set_b"), files.serialise(_sample("set_b", "KAAA")), stale)
     with pytest.raises(files.NotListed):
-        files.listed_set(training, "KAAA", "set_b")
+        files.FILES.listed_set(training, "KAAA", "set_b")
     with pytest.raises(ValueError, match="not KBBB's"):
-        files.read_index(training, "KBBB", "set_d")
+        files.FILES.read_index(training, "KBBB", "set_d")
     with pytest.raises(ValueError, match="refusing NaN|Out of range float"):
         files.serialise({"x": float("nan")})
 
@@ -169,10 +169,17 @@ def test_a_set_goes_beside_the_old_index_and_is_never_overwritten(tmp_path):
 def test_a_listed_set_of_another_format_is_refused_by_name(tmp_path):
     training = tmp_path / "training"
     training.mkdir()
-    files.write_set(training, "KAAA", _entry("set_a"), files.serialise({**_sample("set_a", "KAAA"),
-                                                                        "schema": "aeroviz-training-sample-v8"}), [])
+    files.FILES.write_set(training, "KAAA", _entry("set_a"),
+                          files.serialise({**_sample("set_a", "KAAA"), "schema": "aeroviz-training-sample-v8"}), [])
     with pytest.raises(ValueError, match="aeroviz-training-sample-v8 file, not a closed-loop-readback set"):
-        files.listed_set(training, "KAAA", "set_a")
+        files.FILES.listed_set(training, "KAAA", "set_a")
+    # the reading is the sample's own (top level, every stage): another one is refused, whatever its vocabulary says
+    other = tmp_path / "other"
+    other.mkdir()
+    files.FILES.write_set(other, "KAAA", _entry("set_a"),
+                          files.serialise({**_sample("set_a", "KAAA"), "readingRule": "instruction-v5"}), [])
+    with pytest.raises(ValueError, match="holds set set_a at KAAA"):
+        files.FILES.listed_set(other, "KAAA", "set_a")
 
 
 def test_each_candidates_height_offset_comes_from_the_published_runway_data(tmp_path, monkeypatch):
@@ -344,11 +351,39 @@ def test_a_flight_flown_again_is_refused_unless_it_gives_its_stored_states_and_i
         export.replay_payload(flown, 0, verdict, one.batch, judged, aero, one.words.spec, one.words)
 
 
+def test_an_envelope_past_the_flown_track_is_refused(monkeypatch):
+    """Outline §6.2 item 8 (D135): `flown_sentence` refuses envelopes that end past the flight's flown track — the
+    judge's envelopes replaced by ones whose altitude tube ends one row past the track's rows; one ending at the track's
+    end is kept."""
+    import torch
+
+    from ts_transformer.autopilot import replay
+    from ts_transformer.tests.support import closed_loop_flight
+
+    one = closed_loop_flight(4.0)
+    flown, (verdict,) = replay.fly_batch(one.batch, one.params, one.words, device=torch.device("cpu"))
+    aero = one.inputs.aero_params[0].numpy()
+    block = export.replay_payload(flown, 0, verdict, one.batch, one.sentence, aero, one.words.spec, one.words)
+    rows = block["track"]["rows"]
+    real = export.envelopes
+
+    def past(*args, **kwargs):
+        judged = real(*args, **kwargs)
+        return {**judged, "altitude": [{**tube, "endRow": rows + 1} for tube in judged["altitude"]] or
+                [{"endRow": rows + 1}]}
+
+    monkeypatch.setattr(export, "envelopes", past)
+    with pytest.raises(ValueError, match=f"an envelope ends at row {rows + 1}, past the flown track's {rows} rows"):
+        export.replay_payload(flown, 0, verdict, one.batch, one.sentence, aero, one.words.spec, one.words)
+    rows -= 1                                                    # an end at the track's own end (exclusive): kept
+    assert export.replay_payload(flown, 0, verdict, one.batch, one.sentence, aero, one.words.spec, one.words)
+
+
 def test_a_set_whose_directory_exists_is_refused_before_any_airport_is_written(tmp_path):
     training = tmp_path / "training"
     (training / "set_a").mkdir(parents=True)                    # a leftover directory, not listed
     with pytest.raises(ValueError, match="exists; an export is never overwritten"):
-        files.require_writable(training, "KAAA", _entry("set_a"), [])
+        files.FILES.require_writable(training, "KAAA", _entry("set_a"), [])
     assert not (training / files.INDEX_FILE).exists()
 
 
@@ -411,3 +446,77 @@ def test_a_flight_is_drawn_to_its_outcome_s_state_but_a_dynamics_failure_s_state
 
     assert [last_state_cycle(outcome, 300) for outcome in OUTCOMES] == [
         299 if outcome == "dynamics_failure" else 300 for outcome in OUTCOMES]
+
+
+#: The blocks of the flown sentences in the three stages' fixtures before D135 (outline §6.2 item 8), by the sha256 of
+#: their canonical JSON (`_digest`), the envelopes apart: stage A's as written then (its track rounded), B's and C's
+#: (their tracks unrounded, D127), and stage A's envelopes. Written from the fixtures of 65314499 before they were
+#: written again.
+EARLIER_BLOCKS = {
+    "A": {"2": "d3087166338e03edccfbdc2a93055f0330a0e55b396d2865f00c19578a18294c",
+          "4": "9635a26b7071eccc0d275f92f0f0fd575fa3e60aaec77441b64d1d3b8469d454",
+          "8": "6027c3b98b1189e7183a4c0f90423a1fdff9482c40655e788a2d4864dcc377ac"},
+    "A envelopes": {"2": "d84f98d6382bc916c477b5872c7e532c469056fadcbc3758ca25f203fabf6011",
+                    "4": "51a58e8dbf25305aadbbf4c0a38f37276c10f682c424baad0a7c2a7d62b5aca8",
+                    "8": "f84eb5558825b1fb33c4119f6aba096e1de2ca257b34a0cfc40af92ca6d0f777"},
+    "B": ["55455e7bdbafab588ca2481bc04a57e5f401e76a76e8bbb23f080fb58b101a9e",
+          "607a9c3b2b5006efa28b981ee5d9b30a5b6a83527c1cc8cea54547b7a05bb618"],
+    "C": ["ed2dffb65df1eb4b2cba44fda92087bb9f171b8992e92821003ad5f503c4a2a4",
+          "527b569e4c8b6e8dbca057bc4a40dfc1ad078009172fbb1ede07fea518d7760e",
+          "f400c0a43aca8a05fc1727d838142e82660195dbf26eee435919b55981962e7e"],
+}
+#: The digits stage A's track was written to before D135 (`files.rounded`).
+EARLIER_TRACK_DIGITS = {"eM": 1, "nM": 1, "latDeg": 7, "lonDeg": 7, "heightMslM": 1, "trackDeg": 2, "groundSpeedMps": 2,
+                        "verticalRateMps": 2}
+_BLOCK = ("outcome", "endCycle", "crossing", "track", "attitude")
+
+
+def _digest(block) -> str:
+    import hashlib
+
+    return hashlib.sha256(json.dumps(block, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+
+
+def test_the_flown_block_of_every_stage_is_its_earlier_one_with_the_envelopes():
+    """Outline §6.2 item 8 (D135): `flown_sentence` gives stage A's earlier block within its earlier rounding (its
+    envelopes unchanged), and B's and C's earlier blocks exactly, apart from the envelopes it adds — read from the
+    frontend's fixtures, which the export writes (each stage's fixture test)."""
+    fixtures = FIXTURES.parent
+    a = json.loads((fixtures / "stage_a" / FIXTURE_SET / files.SAMPLE_FILE).read_text(encoding="utf-8"))
+    for interval, sentence in a["flights"][0]["closedLoop"].items():
+        replayed = sentence["replay"]
+        block = {key: replayed[key] for key in (*_BLOCK, "flewTheSentence", "notReached")}
+        block["track"] = {key: [round(v, EARLIER_TRACK_DIGITS[key]) for v in value] if key in EARLIER_TRACK_DIGITS
+                          else value for key, value in block["track"].items()}
+        assert _digest(block) == EARLIER_BLOCKS["A"][interval], interval
+        assert _digest(replayed["envelopes"]) == EARLIER_BLOCKS["A envelopes"][interval], interval
+    b = json.loads((fixtures / "stage_b" / "fixture_set" / "sample.json").read_text(encoding="utf-8"))
+    c = json.loads((fixtures / "stage_c" / "fixture-windows" / "sample.json").read_text(encoding="utf-8"))
+    for stage, sentences in (("B", [s for f in b["flights"] for s in f["prior"]]),
+                             ("C", [r for w in c["windows"] for r in w["rounds"]])):
+        assert [_digest({key: s[key] for key in (*_BLOCK, "timedOut", "goArounds")}) for s in sentences] \
+            == EARLIER_BLOCKS[stage], stage
+        assert all(s["envelopes"] is not None and s["envelopes"]["heading"] for s in sentences), stage
+
+
+def test_a_path_recorded_in_another_checkout_is_read_through_the_live_data_link(tmp_path):
+    """Outline §5 rule 1: each checkout's linked data trees are links to the live ones; a path recorded under one of them
+    — in the main checkout or in any worktree, which lie under the main one, even one deleted since — is the same path
+    under this checkout's tree; a relative path is the repository's; others as recorded."""
+    main = tmp_path / "thesis"
+    live = main / "4dTrajectory" / "outputs"
+    (live / "POOLED").mkdir(parents=True)
+    (main / "aeroviz-4d" / "public" / "data" / "airports").mkdir(parents=True)
+    worktree = main / ".claude" / "worktrees" / "v4"
+    for tree in export.LINKED_TREES:
+        (worktree / tree).parent.mkdir(parents=True, exist_ok=True)
+        (worktree / tree).symlink_to(main / tree)
+    other = main / ".claude" / "worktrees" / "v4-post"            # recorded there, deleted since: never resolved
+    for here in (worktree, main):
+        assert export.this_checkout(live / "POOLED" / "x", here) == here / "4dTrajectory/outputs/POOLED/x"
+        assert export.this_checkout(other / "4dTrajectory/outputs/POOLED/x", here) == here / "4dTrajectory/outputs/POOLED/x"
+        assert export.this_checkout(other / "aeroviz-4d/public/data/airports", here) == here / "aeroviz-4d/public/data/airports"
+        assert export.this_checkout("4dTrajectory/outputs/POOLED/x", here) == here / "4dTrajectory/outputs/POOLED/x"
+        assert export.this_checkout(main / "aeroviz-4d" / "src", here) == main / "aeroviz-4d" / "src"   # not a linked tree
+        assert export.this_checkout(tmp_path / "elsewhere", here) == tmp_path / "elsewhere"
+        assert export.this_checkout(f"{live}/../../x", here) == main / "x"                  # normalised, not rewritten

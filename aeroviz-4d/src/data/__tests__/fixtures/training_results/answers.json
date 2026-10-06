@@ -1,0 +1,583 @@
+{
+ "A": {
+  "airport": "KXXX",
+  "ok": true,
+  "provenance": "fixture/outputs/instruction_language/v",
+  "sections": {
+   "closedLoop": {
+    "ok": true,
+    "replays": {
+     "select 2": {
+      "flights": 4,
+      "groups": {
+       "own dynamics": {
+        "KXXX": {
+         "flights": 4,
+         "landed": 0.75,
+         "outcomes": {
+          "landed": 3,
+          "timeout": 1
+         }
+        },
+        "all": {
+         "flights": 4,
+         "landed": 0.75,
+         "outcomes": {
+          "landed": 3,
+          "timeout": 1
+         }
+        }
+       }
+      },
+      "intervalS": 2.0,
+      "split": "select"
+     },
+     "select 4": {
+      "flights": 4,
+      "groups": {
+       "own dynamics": {
+        "KXXX": {
+         "flights": 4,
+         "landed": 0.75,
+         "outcomes": {
+          "landed": 3,
+          "timeout": 1
+         }
+        },
+        "all": {
+         "flights": 4,
+         "landed": 0.75,
+         "outcomes": {
+          "landed": 3,
+          "timeout": 1
+         }
+        }
+       }
+      },
+      "intervalS": 4.0,
+      "split": "select"
+     },
+     "select 8": {
+      "flights": 4,
+      "groups": {
+       "own dynamics": {
+        "KXXX": {
+         "flights": 4,
+         "landed": 0.75,
+         "outcomes": {
+          "landed": 3,
+          "timeout": 1
+         }
+        },
+        "all": {
+         "flights": 4,
+         "landed": 0.75,
+         "outcomes": {
+          "landed": 3,
+          "timeout": 1
+         }
+        }
+       }
+      },
+      "intervalS": 8.0,
+      "split": "select"
+     },
+     "train 2": {
+      "flights": 4,
+      "groups": {
+       "own dynamics": {
+        "KXXX": {
+         "flights": 4,
+         "landed": 0.75,
+         "outcomes": {
+          "landed": 3,
+          "timeout": 1
+         }
+        },
+        "all": {
+         "flights": 4,
+         "landed": 0.75,
+         "outcomes": {
+          "landed": 3,
+          "timeout": 1
+         }
+        }
+       }
+      },
+      "intervalS": 2.0,
+      "split": "train"
+     },
+     "train 4": {
+      "flights": 4,
+      "groups": {
+       "own dynamics": {
+        "KXXX": {
+         "flights": 4,
+         "landed": 0.75,
+         "outcomes": {
+          "landed": 3,
+          "timeout": 1
+         }
+        },
+        "all": {
+         "flights": 4,
+         "landed": 0.75,
+         "outcomes": {
+          "landed": 3,
+          "timeout": 1
+         }
+        }
+       }
+      },
+      "intervalS": 4.0,
+      "split": "train"
+     },
+     "train 8": {
+      "flights": 4,
+      "groups": {
+       "own dynamics": {
+        "KXXX": {
+         "flights": 4,
+         "landed": 0.75,
+         "outcomes": {
+          "landed": 3,
+          "timeout": 1
+         }
+        },
+        "all": {
+         "flights": 4,
+         "landed": 0.75,
+         "outcomes": {
+          "landed": 3,
+          "timeout": 1
+         }
+        }
+       }
+      },
+      "intervalS": 8.0,
+      "split": "train"
+     }
+    }
+   },
+   "labelling": {
+    "ok": true,
+    "splits": {
+     "select": {
+      "labelled": 10,
+      "labelledByAirport": {
+       "KXXX": 10
+      },
+      "refusalReasons": {
+       "impossible ground speed": 2
+      },
+      "refused": 2,
+      "refusedByAirport": {
+       "KXXX": {
+        "impossible ground speed": 2
+       }
+      }
+     },
+     "train": {
+      "labelled": 10,
+      "labelledByAirport": {
+       "KXXX": 10
+      },
+      "refusalReasons": {
+       "impossible ground speed": 2
+      },
+      "refused": 2,
+      "refusedByAirport": {
+       "KXXX": {
+        "impossible ground speed": 2
+       }
+      }
+     }
+    }
+   }
+  },
+  "set": "fixture_set",
+  "stage": "A"
+ },
+ "B": {
+  "airport": "KXXX",
+  "ok": true,
+  "provenance": "fixture/outputs/prior/campaign/base/free_generation_select",
+  "sections": {
+   "choice": {
+    "configuration": {
+     "arms": {
+      "C_full": {
+       "folds": {
+        "KXXX": 1.3
+       },
+       "score": 1.36
+      }
+     },
+     "bestScore": 1.36,
+     "chosen": "C",
+     "seedScale": 0.002,
+     "within": [
+      "C"
+     ]
+    },
+    "ok": true,
+    "variant": {
+     "arms": {
+      "C_full": {
+       "folds": {
+        "KXXX": 1.3
+       },
+       "score": 1.36
+      }
+     },
+     "chosen": "full",
+     "scores": {
+      "constants": 1.37,
+      "full": 1.36
+     },
+     "seedScale": 0.002
+    }
+   },
+   "freeGeneration": {
+    "ok": true,
+    "selection": "landed",
+    "sides": {
+     "inside": {
+      "KXXX": {
+       "vectored": {
+        "atTheBound": 0,
+        "goArounds": 1,
+        "labelledWordsPerSentence": {
+         "heading": 8.0
+        },
+        "outcomes": {
+         "landed": 3
+        },
+        "sentences": 3,
+        "timedOut": 0,
+        "wordsPerSentence": {
+         "heading": 9.0
+        }
+       }
+      }
+     },
+     "outside_fault": {},
+     "outside_outcome": {}
+    },
+    "split": "select"
+   },
+   "speed": {
+    "model": "fixture/outputs/prior/campaign/base/run",
+    "ok": true,
+    "settings": [
+     {
+      "batch": 1,
+      "device": "cpu",
+      "executorStepsMs": {
+       "max": 1.0,
+       "p50": 1.0,
+       "p95": 1.0
+      },
+      "flightRowsPerS": 142.85714285714286,
+      "host": {
+       "device": "cpu",
+       "threads": 1,
+       "torch": "2"
+      },
+      "loopSizes": [
+       1
+      ],
+      "loops": 1,
+      "priorStepMs": {
+       "max": 7.0,
+       "p50": 6.0,
+       "p95": 6.9
+      },
+      "rowMs": {
+       "max": 8.0,
+       "p50": 7.0,
+       "p95": 7.9
+      },
+      "rowsTimed": 2,
+      "sentenceS": {
+       "max": 0.014,
+       "p50": 0.014,
+       "p95": 0.014
+      },
+      "sentences": 1,
+      "shareOfInterval": {
+       "executor": {
+        "p50": 0.00025,
+        "p95": 0.00025
+       },
+       "intervalS": 4.0,
+       "prior": {
+        "p50": 0.0015,
+        "p95": 0.0017250000000000002
+       },
+       "row": {
+        "p50": 0.00175,
+        "p95": 0.001975
+       }
+      }
+     }
+    ],
+    "smoke": false,
+    "split": "select",
+    "warmupRows": 20
+   },
+   "training": {
+    "bestEpoch": 2,
+    "epochs": [
+     {
+      "epoch": 1,
+      "selectLossPerStep": 1.5,
+      "trainLossPerStep": 2.0
+     }
+    ],
+    "ok": true
+   },
+   "validation": {
+    "ok": false,
+    "problem": "shown only for the set exported from the base's claimed validation readout (D109)"
+   }
+  },
+  "set": "fixture_set",
+  "stage": "B"
+ },
+ "Bval": {
+  "airport": "KXXX",
+  "ok": true,
+  "provenance": "fixture/outputs/prior/campaign/base/free_generation",
+  "sections": {
+   "choice": {
+    "configuration": {
+     "arms": {
+      "C_full": {
+       "folds": {
+        "KXXX": 1.3
+       },
+       "score": 1.36
+      }
+     },
+     "bestScore": 1.36,
+     "chosen": "C",
+     "seedScale": 0.002,
+     "within": [
+      "C"
+     ]
+    },
+    "ok": true,
+    "variant": {
+     "arms": {
+      "C_full": {
+       "folds": {
+        "KXXX": 1.3
+       },
+       "score": 1.36
+      }
+     },
+     "chosen": "full",
+     "scores": {
+      "constants": 1.37,
+      "full": 1.36
+     },
+     "seedScale": 0.002
+    }
+   },
+   "freeGeneration": {
+    "ok": true,
+    "selection": "landed",
+    "sides": {
+     "inside": {
+      "KXXX": {
+       "vectored": {
+        "atTheBound": 0,
+        "goArounds": 1,
+        "labelledWordsPerSentence": {
+         "heading": 8.0
+        },
+        "outcomes": {
+         "landed": 3
+        },
+        "sentences": 3,
+        "timedOut": 0,
+        "wordsPerSentence": {
+         "heading": 9.0
+        }
+       }
+      }
+     },
+     "outside_fault": {},
+     "outside_outcome": {}
+    },
+    "split": "val"
+   },
+   "speed": {
+    "model": "fixture/outputs/prior/campaign/base/run",
+    "ok": true,
+    "settings": [
+     {
+      "batch": 1,
+      "device": "cpu",
+      "executorStepsMs": {
+       "max": 1.0,
+       "p50": 1.0,
+       "p95": 1.0
+      },
+      "flightRowsPerS": 142.85714285714286,
+      "host": {
+       "device": "cpu",
+       "threads": 1,
+       "torch": "2"
+      },
+      "loopSizes": [
+       1
+      ],
+      "loops": 1,
+      "priorStepMs": {
+       "max": 7.0,
+       "p50": 6.0,
+       "p95": 6.9
+      },
+      "rowMs": {
+       "max": 8.0,
+       "p50": 7.0,
+       "p95": 7.9
+      },
+      "rowsTimed": 2,
+      "sentenceS": {
+       "max": 0.014,
+       "p50": 0.014,
+       "p95": 0.014
+      },
+      "sentences": 1,
+      "shareOfInterval": {
+       "executor": {
+        "p50": 0.00025,
+        "p95": 0.00025
+       },
+       "intervalS": 4.0,
+       "prior": {
+        "p50": 0.0015,
+        "p95": 0.0017250000000000002
+       },
+       "row": {
+        "p50": 0.00175,
+        "p95": 0.001975
+       }
+      }
+     }
+    ],
+    "smoke": false,
+    "split": "select",
+    "warmupRows": 20
+   },
+   "training": {
+    "bestEpoch": 2,
+    "epochs": [
+     {
+      "epoch": 1,
+      "selectLossPerStep": 1.5,
+      "trainLossPerStep": 2.0
+     }
+    ],
+    "ok": true
+   },
+   "validation": {
+    "masksOnLabelledWords": {
+     "inside": {
+      "KXXX": {
+       "angle": 0.2
+      }
+     }
+    },
+    "ok": true,
+    "teacherForced": {
+     "lossPerStep": 1.08,
+     "perColumn": {
+      "heading": 0.4
+     }
+    }
+   }
+  },
+  "set": "fixture_val",
+  "stage": "B"
+ },
+ "C": {
+  "airport": "KXXX",
+  "ok": true,
+  "provenance": "fixture/outputs/post/campaign",
+  "sections": {
+   "checks": {
+    "checks": {
+     "labeller": {
+      "flights": 3
+     }
+    },
+    "ok": true
+   },
+   "rounds": {
+    "ok": true,
+    "rounds": [
+     {
+      "round": 0,
+      "selection": {
+       "KXXX": {
+        "outcomes": {
+         "landed": 1
+        },
+        "rewardMean": 1.0,
+        "windows": 1
+       }
+      },
+      "speaking": {
+       "outcomes": {
+        "landed": 4,
+        "lost_separation": 1
+       },
+       "rewardSum": 4.0,
+       "windows": 5
+      }
+     }
+    ],
+    "started": "2026-10-06T00:00:00Z"
+   },
+   "speed": {
+    "model": "fixture/outputs/post/campaign round 0",
+    "ok": true,
+    "settings": [],
+    "smoke": false,
+    "split": "select",
+    "warmupRows": 20
+   }
+  },
+  "set": "fixture-windows",
+  "stage": "C"
+ },
+ "Cmissing": {
+  "airport": "KXXX",
+  "ok": true,
+  "provenance": "fixture/outputs/post/campaign",
+  "sections": {
+   "checks": {
+    "ok": false,
+    "problem": "fixture/outputs/post/campaign/campaign.json does not exist"
+   },
+   "rounds": {
+    "ok": false,
+    "problem": "fixture/outputs/post/campaign/campaign.json does not exist"
+   },
+   "speed": {
+    "model": "fixture/outputs/post/campaign round 0",
+    "ok": true,
+    "settings": [],
+    "smoke": false,
+    "split": "select",
+    "warmupRows": 20
+   }
+  },
+  "set": "fixture-windows",
+  "stage": "C"
+ }
+}

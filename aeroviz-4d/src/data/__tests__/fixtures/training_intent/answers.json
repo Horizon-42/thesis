@@ -1,0 +1,35 @@
+{
+ "one": {
+  "status": 200,
+  "body": {
+   "ok": true,
+   "run": "set_a",
+   "campaign": "one",
+   "title": "T",
+   "intent": "I",
+   "design": "D",
+   "line": "line a"
+  }
+ },
+ "none": {
+  "status": 404,
+  "body": {
+   "ok": false,
+   "run": "nowhere",
+   "campaigns": [],
+   "error": "nowhere is a run of no campaign in intents.json: a set's intent is the one campaign that lists it"
+  }
+ },
+ "several": {
+  "status": 409,
+  "body": {
+   "ok": false,
+   "run": "shared",
+   "campaigns": [
+    "one",
+    "two"
+   ],
+   "error": "shared is a run of 2 campaigns (one, two) in intents.json: a set's intent is the one campaign that lists it"
+  }
+ }
+}

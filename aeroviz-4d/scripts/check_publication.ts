@@ -18,7 +18,7 @@
  *      which this layer reports as "restart the dev server". A Training sample the server
  *      answers is also read through the panel's own parser: HTTP 200 is not "it loads".
  *
- * Training sets: the stage-A index `training/index_v4.json` (the instruction-v3 view's `index.json` is never read);
+ * Training sets: the stage-A index `training/index_v5.json` (the instruction-v3 view's `index.json` is never read);
  * every set it lists must have its file, which is parsed by the panel's own reader and compared with its index entry.
  * An index or sample of another schema is an error naming the schema found and the one expected.
  *

@@ -34,7 +34,7 @@ from ts_transformer.prior.source import require_selection_of
 from ts_transformer.prior.training_files import CLAIM_READER
 from ts_transformer.prior.landings import LandingIndex
 from ts_transformer.prior.model import Prior
-from ts_transformer.prior.procedure import PROCEDURE_MASKS, Final, ProcedureMasks, airport_finals
+from ts_transformer.prior.procedure import BATCH, PROCEDURE_MASKS, Final, ProcedureMasks, airport_finals
 from ts_transformer.prior.selection import SIDES, side
 from ts_transformer.prior.speaker import MOST_GO_AROUNDS
 from ts_transformer.repo_layout import REPO_ROOT, git_state
@@ -111,7 +111,8 @@ def speak_and_fly(model: Prior, loop: Loop, order: Sequence[int], sentences: Map
                          f"{MOST_GO_AROUNDS} (D68)")
     speaking = SpeakingLoop(model, loop, order, sentences, observed, flights, geometries,
                             [landings[flights[i]["airport"]] for i in order], finals, words,
-                            interval_s=interval_s, variant=variant, device=device, temperature=temperature)
+                            interval_s=interval_s, variant=variant, device=device, temperature=temperature,
+                            masks=BATCH)
     while speaking.observing:
         speaking.observe()
     while speaking.alive.any():

@@ -101,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
         claim_validation_read(campaign, CLAIM_READER, out, {"round": args.round, "device": str(device)})
         require_selection_of(instructions, context.interval_s, context.base_identity, split)
     context = replace(context, splits={split: split_data(instructions, split, context.words, context.interval_s,
-                                                         context.geometries)})
+                                                         context.geometries, executor)})
     windows = selection_windows(context, settings, split)
     readout = selection_readout(model, context, windows, settings, split)
     real = Counter(w.scene.geometry.code for w in context.splits[split]["windows"])

@@ -2,8 +2,8 @@
 flown live by the same single-flight executor as stage A's (`backend.AutopilotSegmentBackend`, whose request lock, page
 numbering, executor spec and flown-set caches this shares).
 
-WHICH SENTENCE. The request names a prior set (``airport``, ``setId``: `prior.training_files.listed_set`, the airport's
-``training/index_prior_v2.json``), a flight of it (``flightKey``) and ``sentence``: a sample number of the flight's
+WHICH SENTENCE. The request names a prior set (``airport``, ``setId``: `prior.training_files.FILES.listed_set`, the airport's
+``training/index_prior_v3.json``), a flight of it (``flightKey``) and ``sentence``: a sample number of the flight's
 ``prior`` list (the prior's own sentence) or ``"closedLoop"`` (the flight's closed-loop sentence at the prior's Δ, which
 is stage A's). The sentence's Δ is the set's ``model.rowIntervalS``.
 
@@ -31,6 +31,7 @@ import numpy as np
 
 from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.judge import flown_track
+from ts_transformer.instructions import training_files
 from ts_transformer.instructions.artefact import SEALED_READINGS
 from ts_transformer.instructions.words import COLUMNS
 from ts_transformer.io_utils import utc_now
@@ -147,14 +148,14 @@ class PriorSegments:
         return self.val_service()
 
     def listed(self, airport: str, set_id: str) -> dict[str, Any]:
-        """The prior set's sample (`prior.training_files.listed_set`)."""
+        """The prior set's sample (`prior.training_files.FILES.listed_set`)."""
         from aeroviz_backend.autopilot_segment.backend import AIRPORT_CODE
 
         if not AIRPORT_CODE.fullmatch(airport):
             raise RequestRefused(f"airport {airport!r} is not an airport code")
         try:
-            return prior_files.listed_set(self.backend.airports_root / airport / "training", airport, set_id)[1]
-        except prior_files.NotListed as error:
+            return prior_files.FILES.listed_set(self.backend.airports_root / airport / "training", airport, set_id)[1]
+        except training_files.NotListed as error:
             raise NotListed(str(error)) from None
 
     def warm_up(self, log: Callable[[str], None] = print) -> None:
@@ -165,7 +166,7 @@ class PriorSegments:
         for index in sorted(self.backend.airports_root.glob(f"*/training/{prior_files.INDEX_FILE}")):
             airport = index.parent.parent.name
             try:
-                sets = prior_files.index_sets(json.loads(index.read_text(encoding="utf-8")), index, airport)
+                sets = prior_files.FILES.index_sets(json.loads(index.read_text(encoding="utf-8")), index, airport)
             except Exception as error:       # noqa: BLE001 — a prefetch: logged; a request gets it whole
                 log(f"prior warm-up: {airport} skipped — {index}: {type(error).__name__}: {error}")
                 continue

@@ -21,10 +21,11 @@ A23's payload, built and flown again by A23's code (`training_export.split_fligh
 from `autopilot/` only what D69 lists): checked against its stored states and outcome, on any split (vocabulary D86).
 
 WRITES a set ``<root>/<airport>/training/<set-id>/sample.json`` and its entry in
-``<root>/<airport>/training/index_prior_v2.json`` (`prior.training_files`); refused when the set exists. Every airport is
+``<root>/<airport>/training/index_prior_v3.json`` (`prior.training_files`); refused when the set exists. Every airport is
 built before any is written. From a clean tree (the set records the commit) unless ``--smoke``.
 
-    python run_ts.py prior_training_export --readout <a prior_free_generation directory> --set-id <id> --per-airport 10
+    python run_ts.py prior_training_export --readout <a prior_free_generation directory> --set-id <id> --per-airport 10 \\
+        --speed <a model_speed directory>
 """
 
 from __future__ import annotations
@@ -41,19 +42,21 @@ import torch
 
 from flight_scenarios.fas_geometry import course_halfwidth_m
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
-from ts_transformer.autopilot.judge import ALT, LAT, LON, TIMEOUT, flown_track
+from ts_transformer.autopilot.judge import TIMEOUT
 from ts_transformer.autopilot.start import start
 from ts_transformer.experiments import training_flights
+from ts_transformer.experiments.model_speed import speed_source
 from ts_transformer.experiments.prior_free_generation import FREE_GENERATION_SCHEMA, Stored, read_sentences
-from ts_transformer.experiments.training_attitude import attitude_payload, executor_attitude
 from ts_transformer.experiments.training_export import (
-    FORMATS, candidate_hae_minus_msl_m, candidates_block, events, split_flights, vocabulary_block,
+    FORMATS, candidate_hae_minus_msl_m, candidates_block, events, flown_sentence, split_flights, this_checkout,
+    vocabulary_block,
 )
 from ts_transformer.instructions import training_files as stage_a_files
 from ts_transformer.instructions.airport import AirportGeometry, RunwayCandidate
-from ts_transformer.instructions.artefact import STATE_COLUMNS, ClosedLoopSentence
+from ts_transformer.instructions.artefact import STATE_COLUMNS, ClosedLoopSentence, load_signals
 from ts_transformer.instructions.grammar import column_words
 from ts_transformer.instructions.labeller.interval import interval_rows
+from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import READING_RULE
 from ts_transformer.instructions.words import COLUMNS, UNCHANGED, Words
 from ts_transformer.io_utils import file_sha256
@@ -168,11 +171,12 @@ def apart(states: np.ndarray, stored: np.ndarray) -> float:
 
 
 def fly_again(instructions: Path, executor: Path, split: str, interval_s: float,
-              sentences: Mapping[int, ClosedLoopSentence], stored: Sequence[Stored], words: Words, *,
-              device: torch.device) -> list[dict[str, Any]]:
+              sentences: Mapping[int, ClosedLoopSentence], stored: Sequence[Stored], signals: Sequence[FlightSignals],
+              words: Words, *, device: torch.device) -> list[dict[str, Any]]:
     """One sample's sentences (``stored``, each of its own flight) flown again through the start with their own words,
     each refused unless it gives its stored states, outcome, timeout and go-arounds (module docstring); their flown
-    payloads, in the order of ``stored``."""
+    payloads, in the order of ``stored``: the block of a flown sentence (`training_export.flown_sentence`, with the
+    envelopes of its words) and stage B's own fields. ``signals``: the split's observed flights (each one's identity)."""
     loop, order = start(instructions, split, interval_s, {s.index: sentences[s.index] for s in stored}, executor,
                         most_go_arounds=MOST_GO_AROUNDS, device=device)
     by_index = {s.index: s for s in stored}
@@ -197,37 +201,22 @@ def fly_again(instructions: Path, executor: Path, split: str, interval_s: float,
             raise ValueError(f"{item.row['dataset_id']} sample {item.sample}: flown again to {outcome.outcome} "
                              f"(timeout {timed_out}, {int(loop.go_arounds[b])} go-arounds), the readout's "
                              f"{item.row['outcome']} ({item.row['timed_out']}, {item.row['go_arounds']})")
-        # the flight to its outcome on the 2 s rows from the first predicted step, as A23 draws a replay
-        last = training_flights.last_state_cycle(outcome.outcome, outcome.end_row)
-        cycles = np.arange(0, last + 1, loop.row_cycles)
-        whole = flown_track(executed.states[b, : last + 1].cpu().numpy(), geometry)
-        at = executed.states[b, cycles].cpu().numpy()
+        # the flight to its outcome on the 2 s rows from the first predicted step, as A23 draws a replay; its track
+        # unrounded (D127): the live segment is checked against it within the executor's bound
+        block = flown_sentence(executed, b, geometry, signals[index], item.words, interval_s, aero[b], words,
+                               outcome=outcome.outcome, end_cycle=outcome.end_row,
+                               last_cycle=training_flights.last_state_cycle(outcome.outcome, outcome.end_row),
+                               crossing=training_flights.crossing_payload(outcome, executed, b, geometry))
         out[index] = {
             "sample": item.sample, "rows": len(item.words), "words": item.words.astype(int).tolist(),
             "events": events(item.words, None, geometry, words), "firstRow": sentence.rows.first_row, "startRow": first,
             # the row of the readout's states the executor flew from (the first predicted step)
-            "flownFromRow": first * every,
-            "outcome": outcome.outcome, "endCycle": int(outcome.end_row), "timedOut": timed_out,
-            "goArounds": int(loop.go_arounds[b]),
-            "crossing": training_flights.crossing_payload(outcome, executed, b, geometry),
-            # unrounded (D127): the live segment is checked against it within the executor's bound
-            "track": {"rows": len(cycles), "lastCycle": int(last), "eM": unrounded(whole["e"][cycles]),
-                      "nM": unrounded(whole["n"][cycles]), "latDeg": unrounded(at[:, LAT]),
-                      "lonDeg": unrounded(at[:, LON]), "heightMslM": unrounded(at[:, ALT]),
-                      "trackDeg": unrounded(np.mod(whole["track"][cycles], 360.0)),
-                      "groundSpeedMps": unrounded(whole["ground_speed"][cycles]),
-                      "verticalRateMps": unrounded(whole["vertical_rate"][cycles])},
-            "attitude": attitude_payload(executor_attitude(executed, b, cycles, aero[b])),
+            "flownFromRow": first * every, **block, "timedOut": timed_out, "goArounds": int(loop.go_arounds[b]),
             "goAroundProbability": stage_a_files.rounded(item.go_around_probability, 4),
             "goAroundPermitted": [int(v) for v in item.go_around_permitted],
             "onFinal": [int(v) for v in item.on_final],
             "blocked": blocked_payload(item.blocked, len(geometry.candidates), words)}
     return [out[s.index] for s in stored]
-
-
-def unrounded(values: np.ndarray) -> list[float]:
-    """Values as they are (D127: a value that a later step computes from is not rounded for display)."""
-    return [float(v) for v in np.asarray(values, dtype=np.float64)]
 
 
 # ---- one airport
@@ -250,13 +239,14 @@ def build_airport(airport: str, readout: dict[str, Any], stored: Sequence[Stored
     mine = [s for s in stored if s.index in indices]
     ids = [next(s.row["dataset_id"] for s in mine if s.index == i) for i in indices]
     heads, geometry = split_flights(instructions, split, ids, (interval,), params, words, device=device)
+    signals = load_signals(instructions, split)                 # each flight's identity, for the judge's reading
     stored_loop = training_flights.stored_closed_loop(instructions, split, interval, words)
     sentences = {i: training_flights.owned_sentence(stored_loop[i]) for i in indices}
     del stored_loop
     said: dict[int, list[dict[str, Any]]] = {i: [] for i in indices}
     for sample in sorted({s.sample for s in mine}):
         one = [s for s in mine if s.sample == sample]
-        for s, payload in zip(one, fly_again(instructions, executor, split, interval, sentences, one, words,
+        for s, payload in zip(one, fly_again(instructions, executor, split, interval, sentences, one, signals, words,
                                              device=device)):
             said[s.index].append(payload)
     for head, index in zip(heads, indices):
@@ -274,17 +264,17 @@ def model_block(readout: dict[str, Any], prior_dir: str) -> dict[str, Any]:
 
 
 def source_block(readout_dir: str, readout: dict[str, Any], words: Words, opened: dict[str, Any], git: dict[str, Any],
-                 *, smoke: bool, device: str, claim: dict[str, str] | None) -> dict[str, Any]:
+                 *, smoke: bool, device: str, claim: dict[str, str] | None, speed: dict[str, str]) -> dict[str, Any]:
     """What the set was exported from, and the checks the export ran (D73). The artefact and the executor spec are named
     relative to the repository (`repo_relative`): the live executor opens them from its own checkout, never from the
     worktree a readout happened to run in. ``claim``: the claim of the val read the set was exported under (outline
-    D109: its flights are of val), None for every other set."""
+    D109: its flights are of val), None for every other set. ``speed``: the model's speed readout (`model_speed.speed_source`)."""
     return {"readout": readout_dir, "readoutGit": readout["git"], "readoutSmoke": readout["smoke"],
             "validationClaim": claim,
             "instructions": repo_relative(Path(readout["instructions"])),
             "executor": repo_relative(Path(readout["executor"])), "specSha256": words.spec.sha256,
             "executorSpecSha256": opened["sha256"], "checks": opened["checks"], "git": git, "smoke": smoke,
-            "device": device}
+            "device": device, "speed": speed}
 
 
 def cohort_block(readout: dict[str, Any], flights: int, per_airport: int, seed: int, readout_flights: int
@@ -333,6 +323,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--per-airport", type=int, default=10)
     parser.add_argument("--seed", type=int, default=1337, help="the draw of each airport's flights from the readout")
     parser.add_argument("--device", default="cpu", help="the executor's device when the sentences are flown again")
+    parser.add_argument("--speed", type=Path, required=True,
+                        help="the model's speed readout (a model_speed directory of stage B, D136)")
     parser.add_argument("--smoke", action="store_true", help="SMOKE: allowed from a tree with changes; recorded")
     args = parser.parse_args(argv)
     git = git_state()
@@ -343,6 +335,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"{readout_dir} holds no {CLAIM_SPENT_BY}: a readout that stopped before it was written; only a "
                      f"written readout is exported")
     readout, stored = read_sentences(readout_dir)
+    # the readout's paths as this checkout reads them (a readout run in the main checkout, exported from a worktree)
+    readout = {**readout, **{key: str(this_checkout(readout[key])) for key in ("instructions", "executor", "prior")}}
     if readout["smoke"] and not args.smoke:
         parser.error(f"{readout_dir} is a smoke readout: only a --smoke set is made from it")
     readout_airports = sorted({s.row["airport"] for s in stored})
@@ -371,10 +365,14 @@ def main(argv: list[str] | None = None) -> int:
                  "readout": repo_relative(readout_dir)}
     signals_record = json.loads((instructions / "signals.json").read_text(encoding="utf-8"))
     started = time.perf_counter()
-    existing = {airport: files.read_index(args.root / airport / "training", airport, args.set_id) for airport in airports}
+    existing = {airport: files.FILES.read_index(args.root / airport / "training", airport, args.set_id)
+                for airport in airports}
     model = model_block(readout, repo_relative(prior_dir))
+    speed = speed_source(args.speed if args.speed.is_absolute() else REPO_ROOT / args.speed, "B")
+    if speed["smoke"] and not args.smoke:
+        parser.error(f"{args.speed} is a smoke speed readout: only a --smoke set names it")
     source = source_block(repo_relative(readout_dir), readout, words, opened, git, smoke=args.smoke, device=args.device,
-                          claim=claim)
+                          claim=claim, speed=speed)
     built = {}
     for airport in airports:
         flights, geometry = build_airport(airport, readout, stored, params, words, per_airport=args.per_airport,
@@ -385,13 +383,13 @@ def main(argv: list[str] | None = None) -> int:
         sample = sample_of(args.set_id, geometry, hae, source, model, cohort, words, params.cycle_s,
                            airport_finals(geometries[airport]), flights)
         entry = index_entry(args.set_id, sample)
-        built[airport] = (entry, files.serialise(sample))
+        built[airport] = (entry, stage_a_files.serialise(sample))
         print(f"{airport}: {len(flights)} flights, {entry['sentences']} sentences, "
               f"{len(built[airport][1]) / 1e6:.1f} MB, {time.perf_counter() - started:.0f}s", flush=True)
     for airport, (entry, _) in built.items():          # every airport writable before any is written
-        files.require_writable(args.root / airport / "training", airport, entry, existing[airport])
+        files.FILES.require_writable(args.root / airport / "training", airport, entry, existing[airport])
     for airport, (entry, text) in built.items():
-        out = files.write_set(args.root / airport / "training", airport, entry, text, existing[airport])
+        out = files.FILES.write_set(args.root / airport / "training", airport, entry, text, existing[airport])
         print(f"→ {out}")
     return 0
 

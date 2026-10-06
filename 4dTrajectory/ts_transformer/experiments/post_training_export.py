@@ -27,12 +27,12 @@ CHECKS: the closed loop's (`require_conforming_closed_loop`, D69, with the label
 features' reference of the campaign's census (D104), here first.
 
 WRITES a set ``<root>/<airport>/training/<set-id>/sample.json`` and its entry in
-``<root>/<airport>/training/index_post_v1.json`` (`post.training_files`); refused when the set exists. Every airport is
+``<root>/<airport>/training/index_post_v2.json`` (`post.training_files`); refused when the set exists. Every airport is
 built before any is written. From a clean tree (the set records the commit) unless ``--smoke``; a smoke campaign gives
 only a smoke set.
 
     python run_ts.py post_training_export --campaign <a post_train directory> --rounds start 0 4 --split select \\
-        --per-airport 10 --set-id <id>
+        --per-airport 10 --set-id <id> --speed <a model_speed directory of stage C>
 """
 
 from __future__ import annotations
@@ -49,17 +49,18 @@ import numpy as np
 import torch
 
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
-from ts_transformer.autopilot.judge import ALT, LAT, LON, TIMEOUT, flown_track
+from ts_transformer.autopilot.judge import TIMEOUT
 from ts_transformer.experiments.training_flights import crossing_payload, last_state_cycle
 from ts_transformer.experiments.post_train import (
     CAMPAIGN_SCHEMA, KINDS, POST_CHECKPOINT_SCHEMA, Context, batches, candidate, open_context, readout_numbers,
     round_model, settings_of,
 )
+from ts_transformer.experiments.model_speed import speed_source
 from ts_transformer.experiments.post_window_loop import WindowLoop, WindowResult, checked_edges, moved_commanded
-from ts_transformer.experiments.prior_training_export import procedure_block, unrounded
-from ts_transformer.experiments.training_attitude import attitude_payload, executor_attitude
+from ts_transformer.experiments.prior_training_export import procedure_block
 from ts_transformer.experiments.training_export import (
-    FORMATS, candidate_hae_minus_msl_m, candidates_block, events, split_flights, vocabulary_block,
+    FORMATS, candidate_hae_minus_msl_m, candidates_block, events, flown_sentence, split_flights, this_checkout,
+    vocabulary_block,
 )
 from ts_transformer.instructions import training_files as stage_a_files
 from ts_transformer.instructions.spec import READING_RULE
@@ -108,10 +109,11 @@ def chosen_windows(context: Context, split: str, airport: str, per_airport: int,
 
 # ---- flying a round's model
 def sentence_payload(loop: WindowLoop, b: int, result: WindowResult, window: Window, first_row: int,
-                     executed: Any, aero: np.ndarray, words: Words) -> dict[str, Any]:
-    """Window ``b``'s sentence as the Training view draws it (module docstring): its words and their events, the
-    executor's record on the 2 s rows from the first predicted step, its attitude, outcome and crossing, and the
-    window's end."""
+                     executed: Any, aero: np.ndarray, reference: Any, words: Words) -> dict[str, Any]:
+    """Window ``b``'s sentence as the Training view draws it (module docstring): its words and their events, the block
+    of a flown sentence (`training_export.flown_sentence`: the executor's record on the 2 s rows from the first predicted
+    step, its attitude, outcome, crossing and the envelopes of its words) and the window's end. ``reference``: the
+    commanded flight's observed signals (its identity)."""
     closed = loop.speaking.loop
     geometry = closed.geometries[b]
     first = loop.speaking.start
@@ -123,9 +125,9 @@ def sentence_payload(loop: WindowLoop, b: int, result: WindowResult, window: Win
     else:                                                       # ended at the loss: to the end of its row
         last = (len(result.states) - first * loop.every - 1) * closed.row_cycles
         crossing, end_cycle = None, last
-    cycles = np.arange(0, last + 1, closed.row_cycles)
-    whole = flown_track(executed.states[b, : last + 1].cpu().numpy(), geometry)
-    at = executed.states[b, cycles].cpu().numpy()
+    # unrounded (prior D127, followed for windows): the live segment is checked against it within the executor's bound
+    block = flown_sentence(executed, b, geometry, reference, result.words, closed.interval_s, aero[b], words,
+                           outcome=result.outcome, end_cycle=end_cycle, last_cycle=last, crossing=crossing)
     loss = None if result.loss is None else {
         "step": int(result.loss_step), "timeS": round(window.step_s(result.loss_step) - window.row0_s, 3),
         "other": result.other, "kind": result.loss.kind, "relation": result.loss.relation,
@@ -134,15 +136,8 @@ def sentence_payload(loop: WindowLoop, b: int, result: WindowResult, window: Win
     return {
         "rows": len(result.words), "words": result.words.astype(int).tolist(),
         "events": events(result.words, None, geometry, words), "firstRow": first_row, "startRow": first,
-        "flownFromRow": first * loop.every, "outcome": result.outcome, "endCycle": end_cycle,
-        "timedOut": result.outcome == TIMEOUT, "goArounds": int(result.go_arounds), "crossing": crossing,
-        # unrounded (prior D127, followed for windows): the live segment is checked against it within the executor's bound
-        "track": {"rows": len(cycles), "lastCycle": int(last), "eM": unrounded(whole["e"][cycles]),
-                  "nM": unrounded(whole["n"][cycles]), "latDeg": unrounded(at[:, LAT]), "lonDeg": unrounded(at[:, LON]),
-                  "heightMslM": unrounded(at[:, ALT]), "trackDeg": unrounded(np.mod(whole["track"][cycles], 360.0)),
-                  "groundSpeedMps": unrounded(whole["ground_speed"][cycles]),
-                  "verticalRateMps": unrounded(whole["vertical_rate"][cycles])},
-        "attitude": attitude_payload(executor_attitude(executed, b, cycles, aero[b])),
+        "flownFromRow": first * loop.every, **block, "timedOut": result.outcome == TIMEOUT,
+        "goArounds": int(result.go_arounds),
         "end": {"reward": float(result.reward), "loss": loss, "speedMaskRows": int(result.speed_mask_rows),
                 "faultySteps": int(result.faulty_steps), "lossReadsFault": bool(result.loss_reads_fault)}}
 
@@ -167,7 +162,7 @@ def fly_round(model: Prior, context: Context, split: str, windows: Sequence[Wind
         aero = loop.executor.inputs.aero_params.cpu().numpy()
         for b, (place, window, result) in enumerate(zip(places, batch, results)):
             out[place] = sentence_payload(flown, b, result, window, data["sentences"][window.signal_index].rows.first_row,
-                                          executed, aero, context.words)
+                                          executed, aero, data["signals"][window.commanded.key], context.words)
             starts[place] = observed[window.signal_index]
     return [out[p] for p in range(len(windows))], [starts[p] for p in range(len(windows))]
 
@@ -293,6 +288,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--kinds", nargs="+", choices=KINDS, default=[REAL])
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--device", default="cpu")
+    parser.add_argument("--speed", type=Path, required=True,
+                        help="the model's speed readout (a model_speed directory of stage C, D136)")
     parser.add_argument("--smoke", action="store_true", help="SMOKE: allowed from a tree with changes; recorded")
     args = parser.parse_args(argv)
     git = git_state()
@@ -304,8 +301,13 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"{campaign} is a {record['schema']} campaign, not {CAMPAIGN_SCHEMA}")
     if record["inputs"]["smoke"] and not args.smoke:
         parser.error(f"{campaign} is a smoke campaign: only a --smoke set is made from it")
+    speed = speed_source(args.speed if args.speed.is_absolute() else REPO_ROOT / args.speed, "C")
+    if speed["smoke"] and not args.smoke:
+        parser.error(f"{args.speed} is a smoke speed readout: only a --smoke set names it")
     rounds = [r if r == START else int(r) for r in args.rounds]
-    inputs = record["inputs"]
+    # the campaign's paths as this checkout reads them (a campaign run in the main checkout, exported from a worktree)
+    inputs = {**record["inputs"], **{key: str(this_checkout(record["inputs"][key]))
+                                     for key in ("instructions", "executor", "prior", "windows", "procedure_root")}}
     instructions, executor = Path(inputs["instructions"]), Path(inputs["executor"])
     params, opened, words = require_conforming_closed_loop(instructions, executor)   # D69: the checks run here (D73)
     edges_reference = Path(inputs["windows"]) / "conformance" / "edges.npz"
@@ -315,13 +317,14 @@ def main(argv: list[str] | None = None) -> int:
                            Path(inputs["procedure_root"]), formal=False, data=False)
     airports = args.airports or sorted(context.geometries)
     signals_record = json.loads((instructions / "signals.json").read_text(encoding="utf-8"))
-    existing = {airport: files.read_index(args.root / airport / "training", airport, args.set_id) for airport in airports}
+    existing = {airport: files.FILES.read_index(args.root / airport / "training", airport, args.set_id)
+                for airport in airports}
     model = {"campaign": repo_relative(campaign), "rounds": rounds, "rowIntervalS": context.interval_s,
              "mostGoArounds": MOST_GO_AROUNDS, "procedureMasks": PROCEDURE_MASKS, "settings": inputs["settings"]}
     source = {"campaign": repo_relative(campaign), "campaignGit": record["git"], "campaignSmoke": inputs["smoke"],
               "instructions": repo_relative(instructions), "executor": repo_relative(executor),
               "specSha256": words.spec.sha256, "executorSpecSha256": opened["sha256"], "checks": opened["checks"],
-              "git": git, "smoke": args.smoke, "device": args.device}
+              "git": git, "smoke": args.smoke, "device": args.device, "speed": speed}
     started = time.perf_counter()
     built = {}
     for airport in airports:
@@ -334,13 +337,13 @@ def main(argv: list[str] | None = None) -> int:
                   "drawnFrom": "a seeded draw of the airport's real windows that do not open inside a loss (D113)"}
         sample = sample_of(args.set_id, context, airport, hae, source, model, cohort, params.cycle_s, flights, windows)
         entry = index_entry(args.set_id, sample)
-        built[airport] = (entry, files.serialise(sample))
+        built[airport] = (entry, stage_a_files.serialise(sample))
         print(f"{airport}: {len(windows)} windows, {len(flights)} flights, {len(built[airport][1]) / 1e6:.1f} MB, "
               f"{time.perf_counter() - started:.0f}s", flush=True)
     for airport, (entry, _) in built.items():          # every airport writable before any is written
-        files.require_writable(args.root / airport / "training", airport, entry, existing[airport])
+        files.FILES.require_writable(args.root / airport / "training", airport, entry, existing[airport])
     for airport, (entry, text) in built.items():
-        print(f"→ {files.write_set(args.root / airport / 'training', airport, entry, text, existing[airport])}")
+        print(f"→ {files.FILES.write_set(args.root / airport / 'training', airport, entry, text, existing[airport])}")
     return 0
 
 

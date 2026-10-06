@@ -2,8 +2,8 @@
 of stage C (post-training §8 C11), flown live by the same single-flight executor as stage A's
 (`backend.AutopilotSegmentBackend`, whose request lock, page numbering, executor spec and flown-set caches this shares).
 
-WHICH SENTENCE. The request names a window set (``airport``, ``setId``: `post.training_files.listed_set`, the airport's
-``training/index_post_v1.json``), a window of it (``window``: its place in the set's ``windows``) and ``round``: a round
+WHICH SENTENCE. The request names a window set (``airport``, ``setId``: `post.training_files.FILES.listed_set`, the airport's
+``training/index_post_v2.json``), a window of it (``window``: its place in the set's ``windows``) and ``round``: a round
 of the set's ``model.rounds`` (``"start"`` or a round's number). The commanded flight is the set's flight of the window's
 ``datasetId``; the sentence's Δ is the set's ``model.rowIntervalS``.
 
@@ -36,6 +36,7 @@ import numpy as np
 from ts_transformer.autopilot import replay
 from ts_transformer.experiments import training_flights
 from ts_transformer.autopilot.start import Move, moved_signals
+from ts_transformer.instructions import training_files
 from ts_transformer.instructions.words import COLUMNS
 from ts_transformer.io_utils import utc_now
 from ts_transformer.post import training_files as post_files
@@ -108,14 +109,14 @@ class WindowSegments:
         self.backend = backend
 
     def listed(self, airport: str, set_id: str) -> dict[str, Any]:
-        """The window set's sample (`post.training_files.listed_set`)."""
+        """The window set's sample (`post.training_files.FILES.listed_set`)."""
         from aeroviz_backend.autopilot_segment.backend import AIRPORT_CODE
 
         if not AIRPORT_CODE.fullmatch(airport):
             raise RequestRefused(f"airport {airport!r} is not an airport code")
         try:
-            return post_files.listed_set(self.backend.airports_root / airport / "training", airport, set_id)[1]
-        except post_files.NotListed as error:
+            return post_files.FILES.listed_set(self.backend.airports_root / airport / "training", airport, set_id)[1]
+        except training_files.NotListed as error:
             raise NotListed(str(error)) from None
 
     def warm_up(self, log: Callable[[str], None] = print) -> None:
@@ -126,7 +127,7 @@ class WindowSegments:
         for index in sorted(self.backend.airports_root.glob(f"*/training/{post_files.INDEX_FILE}")):
             airport = index.parent.parent.name
             try:
-                sets = post_files.index_sets(json.loads(index.read_text(encoding="utf-8")), index, airport)
+                sets = post_files.FILES.index_sets(json.loads(index.read_text(encoding="utf-8")), index, airport)
             except Exception as error:       # noqa: BLE001 — a prefetch: logged; a request gets it whole
                 log(f"window warm-up: {airport} skipped — {index}: {type(error).__name__}: {error}")
                 continue

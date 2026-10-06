@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 import torch
 
-from flight_scenarios.fas_geometry import fas_course_geometry
+from flight_scenarios.fas_geometry import course_halfwidth_m, fas_course_geometry
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.grammar import InForce, Ungrammatical, apply, column_words
 from ts_transformer.instructions.words import ALTITUDE, ANGLE, COLUMNS, HEADING, RUNWAY, SPEED, UNCHANGED, Words
@@ -796,3 +796,111 @@ def test_a_change_of_runway_outside_a_go_around_keeps_each_candidate_s_join_and_
     assert masks.joined[0, 1] and not masks.joined[0, 0]             # joined under runway 0 in force: kept for 1
     masks.track(*far, low, np.array([True]))                        # a go-around starts both again
     assert not masks.joined.any() and not masks.dipped.any()
+
+
+def _mixed_finals():
+    """A 2-candidate and a 1-candidate airport's finals (the batch mode pads the second)."""
+    import dataclasses
+
+    one = dataclasses.replace(parallel_airport(), candidates=parallel_airport().candidates[:1])
+    return finals(), (Final(one, 0, FAF_M, fas_course_geometry(3000.0)),)
+
+
+def test_the_procedure_masks_two_modes_are_equal_on_random_rows(words):
+    """B14: the batch mode keeps the same joined, dipped and cleared and permits the same words as the per-aircraft mode
+    (the reference) on random rows of 400 aircraft of two airports (one with fewer candidates) — inside, outside and at
+    the edge of each final's region (positions drawn about the FAF and the cone's edge), heights about the edge, the DA
+    and the entry height, under G held, ended and none, every runway word — over 12 rows, each row's masks asked
+    before its `after_row`; and a copy (`select`) keeps both modes equal."""
+    from ts_transformer.prior.procedure import BATCH, PER_AIRCRAFT, _unchecked
+
+    two, one = _mixed_finals()
+    count = 400
+    airports = [two if b % 3 else one for b in range(count)]
+    both = [_unchecked(airports, words, mode) for mode in (PER_AIRCRAFT, BATCH)]
+    rng = np.random.default_rng(14)
+    final = two[0]
+    for row in range(12):
+        d = np.where(rng.random(count) < 0.7, rng.uniform(-500.0, FAF_M + 2_000.0, count),
+                     FAF_M + rng.normal(0.0, 5.0, count))
+        half = course_halfwidth_m(np.maximum(d, 0.0), final.cone)
+        off = half * rng.choice([0.0, 0.5, 0.999, 1.0, 1.001, 2.0], count) * rng.choice([-1.0, 1.0], count)
+        e, n = -d, off                     # the test airport's courses are 090° from thresholds at e = 0: d before it
+        base = rng.choice([final.entry_m, final.decision_m, 200.0, 600.0], count)
+        h = base + rng.normal(0.0, 30.0, count)
+        before = rng.random(count) < 0.2
+        after = before & (rng.random(count) < 0.5)
+        for m in both:
+            m.track(e, n, h, before)
+        runway = np.array([rng.integers(len(a)) for a in airports])
+        for go_around in (after, before):
+            for column in ProcedureMasks.columns:
+                a, b = (m.permitted(column, runway, go_around, e, n, h) for m in both)
+                assert np.array_equal(a, b), (row, column)
+        for m in both:
+            m.after_row(e, n, h, after)
+        for attribute in ("joined", "dipped", "cleared"):
+            assert np.array_equal(getattr(both[0], attribute), getattr(both[1], attribute)), (row, attribute)
+    assert both[0].joined.any() and both[0].dipped.any() and not both[0].joined.all()   # the rows reach every case
+    copies = [m.select([3, 3, 0]) for m in both]
+    assert copies[1].mode == BATCH
+    for column in ProcedureMasks.columns:
+        a, b = (m.permitted(column, np.zeros(3, dtype=np.int64), np.zeros(3, dtype=bool), e[:3], n[:3], h[:3])
+                for m in copies)
+        assert np.array_equal(a, b)
+
+
+def test_the_batch_mode_is_checked_once_a_process_and_a_difference_is_refused_by_name(words, monkeypatch):
+    """B14 (as vocabulary D73): the batch mode's masks are checked against the per-aircraft mode on the fixed rows the
+    first time it is used in a process for an airport's finals; a batch mode that differs (its edge 0.5 m up here) is
+    refused by name (a shift far below the levels' spacing, up or down: the sweep down the final finds it; a G that
+    clears nothing); a mode that is neither, or positions not in float64, are refused."""
+    from ts_transformer.prior import procedure
+    from ts_transformer.prior.procedure import BATCH, _Gathered
+
+    monkeypatch.setattr(procedure, "CHECKED", set())
+    two, one = _mixed_finals()
+    checked = []
+    rows = procedure.check_rows
+    monkeypatch.setattr(procedure, "check_rows", lambda f, w: (checked.append(len(f)), rows(f, w))[1])
+    ProcedureMasks([two, one, two], words, BATCH)
+    assert checked == [2, 1]                                   # each set of finals checked once (two and one)
+    ProcedureMasks([two, one], words, BATCH)
+    assert checked == [2, 1] and len(procedure.CHECKED) == 2   # and not again in the process
+    edge = _Gathered.edge_m
+    for shift in (0.5, -0.2):                                  # the edge up or down: the sweep down the final finds it
+        monkeypatch.setattr(procedure, "CHECKED", set())
+        monkeypatch.setattr(_Gathered, "edge_m", lambda self, e, n, shift=shift: edge(self, e, n) + shift)
+        with pytest.raises(ValueError, match="batch mode permits other altitude words than the per-aircraft mode"):
+            ProcedureMasks([two], words, BATCH)
+    monkeypatch.setattr(_Gathered, "edge_m", edge)
+    monkeypatch.setattr(procedure, "CHECKED", set())
+    take = ProcedureMasks._take_all
+    monkeypatch.setattr(ProcedureMasks, "_take_all",                # G that clears nothing in the batch mode
+                        lambda self, clear, take_, e, n, h: take(self, np.zeros_like(clear), take_, e, n, h))
+    with pytest.raises(ValueError, match="batch mode keeps another joined"):
+        ProcedureMasks([two], words, BATCH)
+    with pytest.raises(ValueError, match="mode 'fast' is none of"):
+        ProcedureMasks([two], words, "fast")
+    with pytest.raises(TypeError, match="float64 positions"):
+        masks(words).track(np.array([0.0], dtype=np.float32), np.array([0.0]), np.array([500.0]), np.array([False]))
+
+
+def test_a_speaker_in_the_batch_mode_says_what_the_per_aircraft_mode_says(words):
+    """B14: the speaker with the batch masks says the same words, with the same probabilities and the same blocked
+    words, as with the per-aircraft masks — 6 aircraft at their own places (their masks differ)."""
+    from ts_transformer.prior.procedure import BATCH, PER_AIRCRAFT
+
+    model, rows = setup(words, seed=3, count=6)
+    out = []
+    for mode in (PER_AIRCRAFT, BATCH):
+        speaker = Speaker(model, words, [finals()] * 6, capacity=8, masks=mode)
+        speaker.observe(rows.between(0, 8), [spread(6, r) for r in range(8)])
+        drawn = numbers(5, 6, 20)
+        said = [speaker.speak(rows.between(r, r + 1), spread(6, r), drawn[r - 8]) for r in range(8, 28)]
+        out.append((np.stack(said), np.stack(speaker.drawn_probability),
+                    [{c: v for c, v in blocked.items()} for blocked in speaker.procedure_blocked]))
+    (said_a, p_a, blocked_a), (said_b, p_b, blocked_b) = out
+    assert np.array_equal(said_a, said_b) and np.array_equal(p_a, p_b)
+    assert all(np.array_equal(x[c], y[c]) for x, y in zip(blocked_a, blocked_b, strict=True) for c in x)
+    assert any(x[c].any() for x in blocked_a for c in x)                    # the masks blocked words on these rows

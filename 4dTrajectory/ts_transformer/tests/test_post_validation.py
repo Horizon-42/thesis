@@ -15,12 +15,12 @@ from ts_transformer.experiments import post_validation as validation
 from ts_transformer.experiments.post_train import KINDS, done_rounds, open_campaign, run_campaign
 from ts_transformer.post.scene import REAL
 from ts_transformer.tests.test_post_branches import _ahead, _round
-from ts_transformer.tests.test_post_train import _context, _settings, select_is_train  # noqa: F401
+from ts_transformer.tests.test_post_train import _context, _settings  # noqa: F401
 from ts_transformer.tests.test_post_window_loop import setup  # noqa: F401
 
 
 @pytest.fixture
-def campaign(setup, tmp_path, monkeypatch, select_is_train):  # noqa: F811
+def campaign(setup, tmp_path, monkeypatch):  # noqa: F811
     """A campaign of one round (its speaking replaced, as the export's test; its selection readout run, on the train
     split standing in for the select days) and the runner's world: the checks stubbed, the context opened without
     splits, and each split asked for read as the fixture's train split, with every split asked for and the claim file at
@@ -52,8 +52,12 @@ def campaign(setup, tmp_path, monkeypatch, select_is_train):  # noqa: F811
         asked.append(("context", k["splits"], k["data"], k["formal"], claim.exists())),
         replace(context, splits={}))[1])
     monkeypatch.setattr(validation, "require_selection_of", lambda *a: asked.append(("recount", a[-1], claim.exists())))
-    monkeypatch.setattr(validation, "split_data", lambda instructions, split, *a: (
-        asked.append(("split", split, claim.exists())), train)[1])
+    def split_data(instructions, split, words, interval_s, geometries, executor):
+        assert executor == tmp_path / "executor"           # the campaign's executor opens the val days' start
+        asked.append(("split", split, claim.exists()))
+        return train
+
+    monkeypatch.setattr(validation, "split_data", split_data)
     return out, asked, claim
 
 

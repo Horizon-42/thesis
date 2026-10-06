@@ -56,7 +56,7 @@ from ts_transformer.post.traffic import traffic as separation_traffic
 from ts_transformer.post.traffic_attention import traffic_of
 from ts_transformer.prior.landings import LandingIndex
 from ts_transformer.prior.model import Prior
-from ts_transformer.prior.procedure import Final
+from ts_transformer.prior.procedure import BATCH, Final
 from ts_transformer.prior.speaker import MOST_GO_AROUNDS
 
 #: The outcome of a window ended by a loss of separation that its commanded aircraft answers for (D30: reward 0).
@@ -116,7 +116,7 @@ class WindowLoop:
         self.order, self.windows, self.words, self.device = list(order), list(windows), words, device
         self.landings = [window_landings(w, rosters[w.scene.geometry.code]) for w in self.windows]
         self.speaking = SpeakingLoop(model, loop, order, sentences, observed, flights, geometries, self.landings, finals,
-                                     words, interval_s=interval_s, variant=variant, device=device)
+                                     words, interval_s=interval_s, variant=variant, device=device, masks=BATCH)
         self.step_s = words.spec.step_s
         self.every = self.speaking.every
         self.geometries = [w.scene.geometry for w in self.windows]

@@ -44,7 +44,7 @@ from ts_transformer.instructions.words import COLUMNS, HEADING, RUNWAY, RUNWAY_G
 from ts_transformer.prior.batch import RUNWAY_FIXED_CLASSES, RUNWAY_GO_AROUND_CLASS, RowTensors
 from ts_transformer.prior.inputs import Heard
 from ts_transformer.prior.model import Past, Prior, require_eval
-from ts_transformer.prior.procedure import Final, ProcedureMasks
+from ts_transformer.prior.procedure import PER_AIRCRAFT, Final, ProcedureMasks
 
 
 class Position(NamedTuple):
@@ -157,10 +157,11 @@ class Speaker:
     vocabulary D80 for the start)."""
 
     def __init__(self, model: Prior, words: Words, finals: Sequence[Sequence[Final]], *, capacity: int,
-                 temperature: float = 1.0) -> None:
+                 temperature: float = 1.0, masks: str = PER_AIRCRAFT) -> None:
         """``finals``: each aircraft's airport's finals, one for each candidate in the pointer's order (the procedure
         masks it speaks under, §4, kept fresh for this batch: their state is this batch's); ``capacity``: the rows the
-        cache has room for at first (it grows as a sentence needs, `model.Past.grown`)."""
+        cache has room for at first (it grows as a sentence needs, `model.Past.grown`); ``masks``: the procedure masks'
+        mode (`procedure.MASK_MODES`, B14: the same masks; `BATCH` the faster)."""
         if not temperature > 0.0:
             raise ValueError(f"temperature {temperature}: it must be positive")
         require_eval(model, "the speaker")
@@ -169,7 +170,7 @@ class Speaker:
             if [f.index for f in finals_b] != list(range(len(geometry.candidates))):
                 raise ValueError(f"{geometry.code}: the finals are not one for each candidate, in the pointer's order")
         self.model, self.words = model, words
-        self.procedure = ProcedureMasks(finals, words)
+        self.procedure = ProcedureMasks(finals, words, masks)
         self._n_candidates = np.array([len(f) for f in finals], dtype=np.int64)
         self.temperature = temperature
         self.past = model.no_past(len(finals), capacity)

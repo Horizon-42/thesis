@@ -9,11 +9,11 @@ import torch
 
 from ts_transformer.experiments import post_profile
 from ts_transformer.experiments.post_profile import APPROXIMATION, PARTS, memory, part_times, pass_memory, profile
-from ts_transformer.tests.test_post_train import _context, _settings, select_is_train, short_round  # noqa: F401
+from ts_transformer.tests.test_post_train import _context, _settings, short_round  # noqa: F401
 from ts_transformer.tests.test_post_window_loop import CPU, setup  # noqa: F401
 
 
-def test_a_profile_times_each_part_of_a_batch_and_the_round(setup, tmp_path, monkeypatch, select_is_train):  # noqa: F811
+def test_a_profile_times_each_part_of_a_batch_and_the_round(setup, tmp_path, monkeypatch):  # noqa: F811
     window = short_round(monkeypatch, setup)
     monkeypatch.setattr(post_profile, "draw_round", lambda context, per_kind, rng: ([window], {}))
     saved = []

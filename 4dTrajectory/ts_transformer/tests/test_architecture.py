@@ -836,7 +836,8 @@ PRIOR_INTERFACE = {
                          "validation_claim", "written_claim", "holds_written_claim", "spend_validation_claim",
                          "CLAIM_SPENT_BY", "claim_validation_read", "lock_val_read", "settle_written_claim"},
     "prior.model": {"Prior"},
-    "prior.procedure": {"PROCEDURE_MASKS", "procedure_digests", "airport_finals", "Final"},
+    # BATCH: B14 (outline D138), stage C's window loop speaks under the masks' batch mode (proposed for §7 to the designer)
+    "prior.procedure": {"PROCEDURE_MASKS", "procedure_digests", "airport_finals", "Final", "BATCH"},
     "prior.inputs": {"state_inputs", "sentence_rows", "own_flight_key", "motion"},
     "prior.loop": {"LoopRows"},
     "prior.landings": {"Landing", "LandingIndex"},
@@ -939,9 +940,11 @@ SPEAKING_LOOP_NAMES = {"SpeakingLoop", "Generated", "flight_numbers"}
 TRAINING_EXPORT_NAMES = {
     "experiments.training_flights": {"crossing_payload", "last_state_cycle"},
     "experiments.training_export": {"FORMATS", "candidate_hae_minus_msl_m", "candidates_block", "events",
-                                    "split_flights", "vocabulary_block"},
+                                    "flown_sentence", "split_flights", "this_checkout", "vocabulary_block"},
     "experiments.training_attitude": {"attitude_payload", "executor_attitude"},
-    "experiments.prior_training_export": {"procedure_block", "unrounded"},
+    "experiments.prior_training_export": {"procedure_block"},
+    # the speed readout a set names (outline §6.2 item 10, D136)
+    "experiments.model_speed": {"speed_source"},
 }
 
 

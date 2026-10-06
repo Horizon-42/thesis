@@ -1472,7 +1472,85 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
 /* The sentence read (the bar's tabs) and a model's samples: a segmented control each. */
 .training-source-tabs {
   display: inline-flex;
+  flex-wrap: wrap;            /* many tabs wrap onto a second line: the bar measures its own height (outline §6.2 item 2) */
+  row-gap: 3px;
   align-self: center;
+}
+
+/* a flown sentence's tab: a dot in its outcome's colour */
+.training-source-tab-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+/* the set chooser's intent line (outline §6.2 item 1): one line, opening the details page */
+.training-set-intent {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: -2px 0 6px;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: rgba(224, 230, 240, 0.72);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.training-set-intent:hover {
+  border-color: #3a4a6a;
+  background: rgba(103, 232, 249, 0.06);
+}
+
+.training-set-intent.is-absent {
+  color: #fca5a5;
+}
+
+.training-set-intent-line {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.training-set-smoke {
+  flex: none;
+  padding: 0 4px;
+  border: 1px solid #f59e0b;
+  border-radius: 3px;
+  color: #f59e0b;
+  font-size: 9.5px;
+  font-weight: 600;
+}
+
+/* B's probability strip under "At the cursor": one line high */
+.training-prior-strip-item {
+  list-style: none;
+  padding: 0 6px 4px;
+}
+
+.training-prior-strip-item .training-prior-probability {
+  width: 100%;
+  height: 12px;
+  cursor: pointer;
+}
+
+/* the sentence bar's notes: the set and its intent, linked to the details page */
+.training-details-link-inline {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #67e8f9;
+  cursor: pointer;
+  font-size: inherit;
+  text-decoration: underline;
 }
 
 .training-source-tab {

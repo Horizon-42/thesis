@@ -16,6 +16,10 @@ sentence's observed rows (before its first predicted step) must be its flight's 
 closed-loop file of the split and Δ must have been flown by the spec's parameters. The artefact holds the signals, not the dynamics (§7.2 #4), so the
 start is rebuilt, never stored.
 
+`Start` is the start opened once (A44, outline D138): what every start of an artefact's split at a Δ by a spec reads,
+read when it is opened; each flight rebuilt the first time it is started and kept. `start` and `start_moved` open one and
+call it once — the readable one-call form; a process that starts many batches (a speaker's rounds) opens one `Start`.
+
 `Loop` is the executor so started (the closed-loop reading builds its own from the same pieces, `Loop.__init__`): at each
 Δ row the caller gives every flight's words of the row (`Loop.step`, ``[B, 5]``; the first row every column); the
 executor flies Δ seconds in its 1 s cycles and gives the states of the 2 s rows flown (`instructions.artefact.
@@ -50,6 +54,7 @@ from ts_transformer.autopilot.lateral import Runways
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.sentence import Spoken
 from ts_transformer.autopilot.spec import params_sha256
+from ts_transformer.data.dataset import FlightSeries
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import (
     CLOSED_LOOP_SCHEMA, ClosedLoopSentence, closed_loop_path, load_candidates, load_sentences, load_signals,
@@ -255,13 +260,13 @@ def require_startable(instructions: Path, split: str, interval_s: float, sentenc
     each sentence's observed rows are its flight's stored signals there (``signals``: the split's, by their place in it;
     ``geometries``: the artefact's candidates), by the start rule (D77). The flights of ``sentences`` (keyed by their
     place in the split's signals), in the order of their keys."""
-    if not sentences:
-        raise ValueError("no sentence to start")
-    first = start_row(interval_s)
-    every = interval_rows(interval_s, words.spec.step_s)
-    order = sorted(sentences)
-    if any(sentences[i].rows.start != first for i in order):
-        raise ValueError(f"a sentence does not start at row {first} of {interval_s:g} s")
+    require_flown_by(instructions, split, interval_s, params)
+    return startable_flights(split, interval_s, sentences, signals, geometries, params, words)
+
+
+def require_flown_by(instructions: Path, split: str, interval_s: float, params: ExecutorParams) -> None:
+    """The artefact's closed-loop sentences of ``split`` at Δ ``interval_s`` were flown by the executor parameters
+    ``params`` (`require_startable`)."""
     path = closed_loop_path(instructions, split, interval_s)
     with np.load(path) as data:
         schema, flown_by = str(data["schema"]), str(data["executor_params_sha256"])
@@ -270,6 +275,21 @@ def require_startable(instructions: Path, split: str, interval_s: float, sentenc
     if flown_by != params_sha256(params):
         raise ValueError(f"the {split} closed-loop sentences at {interval_s:g} s were flown by executor parameters "
                          f"{flown_by[:12]}, not {params_sha256(params)[:12]}")
+
+
+def startable_flights(split: str, interval_s: float, sentences: Mapping[int, ClosedLoopSentence],
+                      signals: Mapping[int, FlightSignals], geometries: Mapping[str, AirportGeometry],
+                      params: ExecutorParams, words: Words) -> list[FlightSignals]:
+    """`require_startable`'s refusals of the sentences themselves (the file's are `require_flown_by`): every sentence
+    starts at Δ's first predicted step and its observed rows are its flight's stored signals there. The flights of
+    ``sentences``, in the order of their keys; reads no file."""
+    if not sentences:
+        raise ValueError("no sentence to start")
+    first = start_row(interval_s)
+    every = interval_rows(interval_s, words.spec.step_s)
+    order = sorted(sentences)
+    if any(sentences[i].rows.start != first for i in order):
+        raise ValueError(f"a sentence does not start at row {first} of {interval_s:g} s")
     flights = [signals[i] for i in order]
     for i, flight in zip(order, flights):
         rows = sentences[i].rows.first_row + np.arange(first * every)
@@ -277,6 +297,69 @@ def require_startable(instructions: Path, split: str, interval_s: float, sentenc
         if not np.array_equal(sentences[i].rows.states[: first * every], observed):
             raise ValueError(f"the sentence of {split} flight {i} is not {flight.dataset_id}'s: its observed rows differ")
     return flights
+
+
+class Start:
+    """The start opened once (vocabulary §12.1 A44, outline D138): for the artefact ``instructions``, its split ``split``,
+    the row interval Δ ``interval_s`` and the executor spec in the directory ``executor``, everything every start of
+    those reads, read here once — the opened spec (`replay.open_executor`: its checks run once a process, D73), the
+    refusal of a closed-loop file not flown by it (`require_flown_by`), the candidates, the split's signals by their
+    place in it, and the labelled sentences' lengths. `moved` starts flights with only their own work: each flight is
+    rebuilt from the harvest the first time it is started (`flights.rebuild_series`, the arrival records read then) and
+    its series kept until `release` (about 34 KB a flight pickled on the artefact v12, so the train split's 44,703
+    flights at most about 1.5 GB; a caller bounds them by releasing them, post-training C13: a round's), so a flight
+    started again — the second pass of a window — reads no file. A
+    flight's first start still reads its airport's arrival and tracks manifests (`rebuild_series`: about 1.7 s for 64
+    flights of five airports on v12, against about 170 s for a speaking batch of 64 windows).
+    Opened before a process forks, it serves the forked processes. `start_moved` and `start` open one and call it once:
+    the readable form, and the reference `moved` is checked against bit for bit."""
+
+    def __init__(self, instructions: Path, split: str, interval_s: float, executor: Path) -> None:
+        self.instructions, self.split, self.interval_s = instructions, split, interval_s
+        self.params, _, self.words = replay.open_executor(executor, instructions)
+        require_flown_by(instructions, split, interval_s, self.params)
+        self.geometries = load_candidates(instructions)
+        self.signals = load_signals(instructions, split)
+        labelled = load_sentences(instructions, split, self.words.spec, ("signal_index", "offsets"))
+        self.lengths = dict(zip(labelled["signal_index"].tolist(), np.diff(labelled["offsets"]).tolist()))
+        self.series: dict[int, FlightSeries] = {}     # each flight's rebuilt series, by its place in the split
+
+    def release(self) -> None:
+        """Forget the series kept: a flight started after it is rebuilt again (the same series)."""
+        self.series.clear()
+
+    def moved(self, sentences: Mapping[int, ClosedLoopSentence], moves: Mapping[int, Move], *, most_go_arounds: int,
+              device: torch.device) -> tuple[Loop, list[int], dict[int, np.ndarray]]:
+        """`start_moved` of ``sentences`` and ``moves`` (keyed by their place in the split's signals) on what this start
+        holds: the loop, the order, and each flight's moved observed rows before its first predicted step."""
+        if set(moves) != set(sentences):
+            raise ValueError(f"a move for each flight: moves for {sorted(moves)[:5]}, "
+                             f"sentences of {sorted(sentences)[:5]}")
+        params, words, interval_s = self.params, self.words, self.interval_s
+        first = start_row(interval_s)
+        every = interval_rows(interval_s, words.spec.step_s)
+        order = sorted(sentences)
+        flights = startable_flights(self.split, interval_s, sentences, self.signals, self.geometries, params, words)
+        new = [i for i in order if i not in self.series]
+        if new:
+            self.series.update(zip(new, rebuild_series(self.instructions, [self.signals[i] for i in new])))
+        series = [self.series[i] for i in order]
+        groups = [replay.group_of(item) for item in series]
+        unflown = [f.dataset_id for f, g in zip(flights, groups) if g not in (replay.OWN, replay.STAND_IN)]
+        if unflown:
+            raise ValueError(f"{len(unflown)} flight(s) have no aircraft to fly, e.g. {unflown[:3]}")
+        anchors = [sentences[i].rows.first_row + first * every for i in order]
+        airports = [self.geometries[f.airport] for f in flights]
+        moved = [moved_signals(flight, anchor, moves[i]) for i, flight, anchor in zip(order, flights, anchors)]
+        observed = {i: observed_rows(flight, sentences[i].rows.first_row + np.arange(first * every),
+                                     params.start_rule, airport)
+                    for i, flight, airport in zip(order, moved, airports)}
+        loop = Loop(flight_inputs(series, moved, anchors, airports, params.start_rule, device=device), airports,
+                    [replay.flight_approach_ias_mps(s, g) for s, g in zip(series, groups)],
+                    [replay.time_limit_s(int(self.lengths[i]), anchor, params, words.spec.step_s)
+                     for i, anchor in zip(order, anchors)],
+                    params, words, interval_s=interval_s, most_go_arounds=most_go_arounds, device=device)
+        return loop, order, observed
 
 
 def start(instructions: Path, split: str, interval_s: float, sentences: Mapping[int, ClosedLoopSentence],
@@ -298,31 +381,5 @@ def start_moved(instructions: Path, split: str, interval_s: float, sentences: Ma
     first predicted step are moved (`moved_signals`), and the start rule gives its state from them; its time limit is its
     own. Returns the loop, the order, and each flight's moved observed rows before its first predicted step
     (`STATE_COLUMNS`, as a closed-loop sentence stores them: a speaker reads them). `NO_MOVE` is `start` bit for bit."""
-    if set(moves) != set(sentences):
-        raise ValueError(f"a move for each flight: moves for {sorted(moves)[:5]}, sentences of {sorted(sentences)[:5]}")
-    params, _, words = replay.open_executor(executor, instructions)
-    spec = words.spec
-    first = start_row(interval_s)
-    every = interval_rows(interval_s, spec.step_s)
-    order = sorted(sentences)
-    geometries = load_candidates(instructions)
-    flights = require_startable(instructions, split, interval_s, sentences, load_signals(instructions, split), geometries,
-                                params, words)
-    series = rebuild_series(instructions, flights)
-    groups = [replay.group_of(item) for item in series]
-    unflown = [f.dataset_id for f, g in zip(flights, groups) if g not in (replay.OWN, replay.STAND_IN)]
-    if unflown:
-        raise ValueError(f"{len(unflown)} flight(s) have no aircraft to fly, e.g. {unflown[:3]}")
-    labelled = load_sentences(instructions, split, spec, ("signal_index", "offsets"))
-    lengths = dict(zip(labelled["signal_index"].tolist(), np.diff(labelled["offsets"]).tolist()))
-    anchors = [sentences[i].rows.first_row + first * every for i in order]
-    airports = [geometries[f.airport] for f in flights]
-    moved = [moved_signals(flight, anchor, moves[i]) for i, flight, anchor in zip(order, flights, anchors)]
-    observed = {i: observed_rows(flight, sentences[i].rows.first_row + np.arange(first * every), params.start_rule,
-                                 airport)
-                for i, flight, airport in zip(order, moved, airports)}
-    loop = Loop(flight_inputs(series, moved, anchors, airports, params.start_rule, device=device), airports,
-                [replay.flight_approach_ias_mps(s, g) for s, g in zip(series, groups)],
-                [replay.time_limit_s(int(lengths[i]), anchor, params, spec.step_s) for i, anchor in zip(order, anchors)],
-                params, words, interval_s=interval_s, most_go_arounds=most_go_arounds, device=device)
-    return loop, order, observed
+    return Start(instructions, split, interval_s, executor).moved(sentences, moves, most_go_arounds=most_go_arounds,
+                                                                  device=device)

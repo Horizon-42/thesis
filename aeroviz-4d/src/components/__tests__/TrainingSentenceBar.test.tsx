@@ -5,7 +5,7 @@
  * selected at a time, and the live executor's pick made by a click on a closed-loop word.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const { appState, DEFAULT_LAYERS, setTrainingPick, setTrainingIntervalS } = vi.hoisted(() => {
   const DEFAULT_LAYERS = { headingBands: true, vertical: true, candidates: true };
@@ -40,10 +40,23 @@ import { parseTrainingAutopilot } from "../../data/trainingAutopilot";
 import { TRAINING_COLUMNS } from "../../data/trainingSample";
 import { TRAINING_CORRECTION_COLOR } from "../../utils/trainingWordColors";
 import { requestOf, stageAAnswers, stageASelection } from "../../data/__tests__/stageA";
+import { publishTrainingTabs, useTrainingTabs } from "../../data/trainingTabs";
+
+/** The tabs a stage-A session gives the bar (outline §6.2 item 2): Labelled and one per Δ, the outcome of each. */
+function publishStageATabs(chosen: string) {
+  const selection = stageASelection() as any;
+  publishTrainingTabs({ scope: "test", chosen, tabs: [
+    { id: "labelled", label: "Labelled", title: "the labelled sentence", outcome: null },
+    ...selection.vocabulary.rowIntervalsS.map((interval: number) => ({
+      id: `interval-${interval}`, label: `Δ ${interval} s`, title: `Δ ${interval} s`,
+      outcome: selection.flight.closedLoop[String(interval)].replay.outcome })),
+  ] });
+}
 
 function open(intervalS: number | null = 2) {
   appState.trainingSelection = stageASelection();
   appState.trainingIntervalS = intervalS;
+  publishStageATabs(intervalS === null ? "labelled" : `interval-${intervalS}`);
   return render(<TrainingSentenceBar />);
 }
 
@@ -65,6 +78,8 @@ describe("TrainingSentenceBar", () => {
     appState.trainingPick = null;
     setTrainingPick.mockClear();
     setTrainingIntervalS.mockClear();
+    // no backend in the tests: the set's intent is named as absent
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("no backend in the tests"); }));
   });
 
   it("draws only in Training and only with a flight", () => {
@@ -86,19 +101,32 @@ describe("TrainingSentenceBar", () => {
     for (const column of TRAINING_COLUMNS) expect(band(container, column, 0)).toBeTruthy();
   });
 
-  it("has a tab for the labelled sentence and one per Δ, and the pressed one is the interval read", () => {
-    const { rerender } = open(4);
-    const tabs = screen.getAllByRole("button").filter((item) => item.classList.contains("training-source-tab"));
-    expect(tabs.map((tab) => tab.textContent)).toEqual(["Labelled", "Δ 2 s", "Δ 4 s", "Δ 8 s"]);
-    expect(tabs.map((tab) => tab.getAttribute("aria-pressed"))).toEqual(["false", "false", "true", "false"]);
-    fireEvent.click(tabs[3]);
-    expect(setTrainingIntervalS).toHaveBeenLastCalledWith(8);
-    fireEvent.click(tabs[0]);
-    expect(setTrainingIntervalS).toHaveBeenLastCalledWith(null);
-    appState.trainingIntervalS = null;
-    rerender(<TrainingSentenceBar />);
-    expect(screen.getAllByRole("button").filter((item) => item.classList.contains("training-source-tab"))
-      .map((tab) => tab.getAttribute("aria-pressed"))).toEqual(["true", "false", "false", "false"]);
+  it("shows the tabs the session gives, a dot in each flown sentence's outcome colour, and chooses by click and by key", () => {
+    let chosen: string | null = null;
+    function Spy() {
+      chosen = useTrainingTabs()?.chosen ?? null;
+      return null;
+    }
+    open(4);
+    render(<Spy />);
+    const tabsNow = () => screen.getAllByRole("button").filter((item) => item.classList.contains("training-source-tab"));
+    expect(tabsNow().map((tab) => tab.textContent)).toEqual(["Labelled", "Δ 2 s", "Δ 4 s", "Δ 8 s"]);
+    expect(tabsNow().map((tab) => tab.getAttribute("aria-pressed"))).toEqual(["false", "false", "true", "false"]);
+    expect(tabsNow()[0].querySelector(".training-source-tab-dot")).toBeNull();               // not flown: no dot
+    expect(tabsNow()[1].querySelector(".training-source-tab-dot")).not.toBeNull();
+    fireEvent.click(tabsNow()[3]);
+    expect(chosen).toBe("interval-8");
+    const group = screen.getByRole("group", { name: "Which sentence is read" });
+    fireEvent.keyDown(group, { key: "ArrowRight" });                                        // wraps to the first
+    expect(chosen).toBe("labelled");
+    fireEvent.keyDown(group, { key: "End" });
+    expect(chosen).toBe("interval-8");
+    fireEvent.keyDown(group, { key: "Home" });
+    expect(chosen).toBe("labelled");
+    fireEvent.keyDown(group, { key: "ArrowLeft" });
+    expect(chosen).toBe("interval-8");
+    expect(tabsNow().map((tab) => tab.getAttribute("aria-pressed"))).toEqual(["false", "false", "false", "true"]);
+    expect(setTrainingIntervalS).not.toHaveBeenCalled();                                     // the session maps the choice
   });
 
   it("marks a correction word three ways: dashed, orange and with a mark; the labelled sentence has none", () => {
@@ -240,5 +268,77 @@ describe("TrainingLegend", () => {
       autopilotColour="#2563eb" />);
     expect(screen.queryByText("heading word: judged rows")).toBeNull();
     expect(screen.getByText("autopilot segment")).toBeTruthy();
+  });
+});
+
+describe("the bar's chips and notes follow the kind of the sentence on screen (outline §6.2 item 2)", () => {
+  beforeEach(() => {
+    appState.mode = "training";
+    appState.trainingLayers = { ...DEFAULT_LAYERS };
+    appState.trainingAutopilot = null;
+    appState.trainingPick = null;
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("no backend in the tests"); }));
+  });
+
+  const chips = () => [...document.querySelectorAll(".training-sentence-head .training-chip")].map((node) => node.textContent ?? "");
+
+  it("a prior sample: the outcome, the DA check and the go-arounds — no corrections", async () => {
+    const { stageBSelection, stageBSample } = await import("../../data/__tests__/stageB");
+    const sample = stageBSample();
+    appState.trainingSelection = stageBSelection(sample, 0);
+    appState.trainingIntervalS = 4;
+    render(<TrainingSentenceBar />);
+    const said = sample.flights[0].sentences[0];
+    expect(chips().some((text) => text === `${said.goArounds} go-around${said.goArounds === 1 ? "" : "s"}`)).toBe(true);
+    expect(chips().some((text) => /correction/.test(text))).toBe(false);
+  });
+
+  it("stage B's closed loop: the outcome, the DA check and the corrections — no go-arounds", async () => {
+    const { stageBSelection } = await import("../../data/__tests__/stageB");
+    appState.trainingSelection = stageBSelection(undefined, "closedLoop");
+    appState.trainingIntervalS = 4;
+    render(<TrainingSentenceBar />);
+    expect(chips().some((text) => /correction/.test(text))).toBe(true);
+  });
+
+  it("a round: the outcome, the reward and the loss of separation — no DA check, no corrections", async () => {
+    const { stageCSample, stageCSelection } = await import("../../data/__tests__/stageC");
+    const { stageASample } = await import("../../data/__tests__/stageA");
+    const sample = stageCSample();
+    // a round that crossed the threshold with a DA check (the fixture's rounds did not cross): the bar still shows no DA chip
+    const crossing = stageASample().flights[0].closedLoop["2"].replay.crossing!;
+    expect(crossing.decision).not.toBeNull();
+    sample.windows[0].rounds[0].crossing = crossing;
+    appState.trainingSelection = stageCSelection(sample, 0, "start");
+    appState.trainingIntervalS = sample.model.rowIntervalS;
+    render(<TrainingSentenceBar />);
+    const end = sample.windows[0].rounds[0].end;
+    expect(chips()).toContain(`reward ${end.reward.toFixed(2)}`);
+    expect(chips().some((text) => (end.loss === null ? text === "no loss of separation" : text.startsWith("loss of separation")))).toBe(true);
+    expect(chips().some((text) => /correction|DA /.test(text))).toBe(false);
+  });
+
+  it("a labelled sentence: no chip of a flown flight", () => {
+    open(null);
+    expect(chips().some((text) => /correction|go-around|reward|DA /.test(text))).toBe(false);
+  });
+
+  it("the notes start with the set and its intent line, and open the details page on the set and the experiment", async () => {
+    const { useDetailsPage } = await import("../training/PanelParts");
+    let shown: string | null = null;
+    function Page() {
+      shown = useDetailsPage(false).shown?.section ?? null;
+      return null;
+    }
+    open(2);
+    render(<Page />);
+    fireEvent.click(screen.getByRole("button", { name: "How to read the bar" }));
+    const notes = document.querySelector(".training-sentence-legend")!;
+    expect(notes.firstElementChild!.textContent).toContain("Set fixture_set:");
+    await waitFor(() => expect(document.querySelector(".training-sentence-legend")!.firstElementChild!.textContent)
+      .toContain("No intent for fixture_set"));
+    expect(notes.textContent).toContain("added");                                   // a closed-loop sentence's notes
+    fireEvent.click(screen.getByRole("button", { name: "The set and the experiment ›" }));
+    expect(shown).toBe("experiment");
   });
 });

@@ -1,23 +1,26 @@
 /**
  * TrainingWindowSession.tsx
  * -------------------------
- * The Training panel over a window set of stage C (`data/trainingWindowSample.ts`): its windows one at a time, and of the
- * window on screen the rounds of the post-training side by side — each round's sentence for the commanded aircraft, one on
- * screen at a time (the sentence bar, the read-back window and the 3D layers draw it, as for stage A: a round's sentence is
- * published as a closed-loop sentence at the set's Δ, `trainingWindowFlightView`).
+ * The Training panel over a window set of stage C (`data/trainingWindowSample.ts`), in the layout every stage shares
+ * (outline §6.2): the set chooser with the set's intent line, the list of windows, one line per readout and the Draw box.
+ * Of the window on screen the SENTENCE BAR'S TABS choose the sentence — Labelled (the labeller's open-loop reading of the
+ * recorded flight of the commanded aircraft) and each round's sentence for it, Start (base), Round 1 …
+ * (`data/trainingTabs.ts`); the bar, the read-back window and the 3D layers draw it as stage A draws a sentence (a round's
+ * sentence is published as a closed-loop sentence at the set's Δ, `trainingWindowFlightView`). The left panel has no
+ * second chooser.
  *
- * Under the table: the WINDOW — its kind (real; A, an aircraft inserted; D, the aircraft ahead moved; B, the commanded
- * aircraft's start moved), its moves, its other aircraft — and the round's END: the reward, the loss of separation with its
- * other aircraft and the minimum it broke, the rows the speed-word mask acted (D101), the steps where a recorded aircraft
- * read a faulty point (D114). The other aircraft, the loss and the other rounds are drawn in 3D (`useTrainingWindowLayer`;
- * the Draw switches here).
+ * Its readouts, one line each, open the DETAILS PAGE: "This round" and "Rounds" → Rounds; "The window" → The window (its
+ * kind, its moves, its other aircraft, the round's end, the threshold, the rows where the speed-word mask acted, the faulty
+ * points). A window set holds no records of the speaker: no row inspector (post-training D125). The other aircraft, the
+ * loss and the other rounds are drawn in 3D (`useTrainingWindowLayer`; the Draw switches here).
  *
  * A click on a word of the sentence on screen flies its segment live (`useTrainingWindowAutopilot`).
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp, useTrainingCursor } from "../../context/AppContext";
 import useTrainingWindowAutopilot from "../../hooks/useTrainingWindowAutopilot";
+import useTrainingSet from "../../hooks/useTrainingSet";
 import { setTrainingWindowLayer, useTrainingWindowLayers } from "../../data/trainingWindowLayers";
 import {
   fetchTrainingWindowSample,
@@ -31,14 +34,21 @@ import {
   type TrainingWindowSetEntry,
 } from "../../data/trainingWindowSample";
 import { checkMark, crossingText, TRAINING_OUTCOME_TAG, TRAINING_OUTCOME_TEXT } from "../../data/trainingText";
+import { publishTrainingTabs, useTrainingTabs, type TrainingTab } from "../../data/trainingTabs";
+import { useTrainingSetIntent } from "../../data/trainingSetIntent";
+import { useTrainingSetResults } from "../../data/trainingSetResults";
 import { trainingOutcomeColour } from "../../utils/trainingWordColors";
 import { TRAINING_WINDOW_ROLE_COLOR } from "../../hooks/useTrainingWindowLayer";
 import ProblemBox from "./ProblemBox";
+import TrainingDetails, { type TrainingDetailsSection } from "./TrainingDetails";
+import { DetailsLink, DrawBox, EXPERIMENT_SECTION, LayerSwitches, type DetailsPage } from "./PanelParts";
+import { ChecksSection, resultSection, RoundsSection, SpeedSection } from "./ResultSections";
+import { ExperimentSection, ItemList, SetChooser } from "./SetParts";
 
-type SetState =
-  | { status: "loading" }
-  | { status: "invalid"; problem: string }
-  | { status: "ready"; sample: TrainingWindowSample };
+const ROUNDS_SECTION = "rounds";
+const WINDOW_SECTION = "window";
+const LABELLED = "labelled";
+const roundTab = (round: TrainingWindowRound) => (round === "start" ? "start" : `round-${round}`);
 
 /** What a window's kind is, in words. */
 export const TRAINING_WINDOW_KIND_TEXT: Record<TrainingWindow["kind"], string> = {
@@ -51,39 +61,6 @@ export const TRAINING_WINDOW_KIND_TEXT: Record<TrainingWindow["kind"], string> =
 /** A round as its table names it. */
 export function roundLabel(round: TrainingWindowRound): string {
   return round === "start" ? "start (base)" : `round ${round}`;
-}
-
-/** The window's rounds side by side. */
-function RoundTable({ window, round, onSelect }: {
-  window: TrainingWindow; round: TrainingWindowRound; onSelect: (round: TrainingWindowRound) => void;
-}) {
-  const endS = (sentence: TrainingWindowSentence) => sentence.flown.tS[sentence.flown.tS.length - 1] - window.firstStepS;
-  return (
-    <table className="training-flown-table training-prior-table" aria-label="The window's rounds">
-      <thead>
-        <tr><th scope="col">round</th><th scope="col">ended (from the first predicted step)</th><th scope="col">reward</th><th scope="col">go-arounds</th><th scope="col">words</th></tr>
-      </thead>
-      <tbody>
-        {window.rounds.map((sentence) => {
-          const active = sentence.round === round;
-          return (
-            <tr key={String(sentence.round)} className={active ? "training-prior-sentence active" : "training-prior-sentence"}>
-              <th scope="row">
-                <button type="button" aria-pressed={active} title={`the sentence ${roundLabel(sentence.round)}'s model said for the commanded aircraft`}
-                  onClick={() => onSelect(sentence.round)}>{roundLabel(sentence.round)}</button>
-              </th>
-              <td style={{ color: trainingOutcomeColour(sentence.outcome) }} title={TRAINING_OUTCOME_TEXT[sentence.outcome]}>
-                {TRAINING_OUTCOME_TAG[sentence.outcome]} · {endS(sentence).toFixed(0)} s
-              </td>
-              <td>{sentence.end.reward.toFixed(2)}</td>
-              <td>{sentence.goArounds}</td>
-              <td>{sentence.events.length}</td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
-  );
 }
 
 /** The window on screen and its round's end. */
@@ -155,54 +132,113 @@ export function WindowCursorStart({ flightKey, row0S }: { flightKey: string; row
   return null;
 }
 
-/** One line of the window list: the commanded flight, the kind, and each round's end. */
-function windowSummary(window: TrainingWindow): string {
-  return window.rounds.map((sentence) => `${roundLabel(sentence.round)}: ${TRAINING_OUTCOME_TAG[sentence.outcome]}`).join("; ");
+/** A round's ending as the tabs, lines and tables say it: the outcome, its time, the reward, the loss of separation. */
+function ending(window: TrainingWindow, sentence: TrainingWindowSentence): string {
+  const seconds = sentence.flown.tS[sentence.flown.tS.length - 1] - window.firstStepS;
+  const loss = sentence.end.loss;
+  return `${TRAINING_OUTCOME_TAG[sentence.outcome]} at ${seconds.toFixed(0)} s · reward ${sentence.end.reward.toFixed(2)} · ` +
+    (loss === null ? "no loss of separation" : `loss of separation with ${loss.other}`);
 }
 
-export default function TrainingWindowSession({ airport, sets }: { airport: string; sets: TrainingWindowSetEntry[] }) {
+/** A round's tab label (outline §6.2 item 2): short, r1, r2 … (the user, 2026-10-06); its tooltip says what it is. */
+export function roundTabLabel(round: TrainingWindowRound): string {
+  return round === "start" ? "Start (base)" : `r${round}`;
+}
+
+/** The window's tabs. */
+function windowTabs(window: TrainingWindow): TrainingTab[] {
+  return [
+    { id: LABELLED, label: "Labelled", outcome: null,
+      title: "The labeller's open-loop reading of the recorded flight of the commanded aircraft; not flown" +
+        (window.kind === "B" ? ". This window starts from a moved start (window B): the reading is of the flight as recorded" : "") },
+    ...window.rounds.map((sentence) => ({
+      id: roundTab(sentence.round), label: roundTabLabel(sentence.round), outcome: sentence.outcome,
+      title: `The sentence ${roundLabel(sentence.round)}'s model said for the commanded aircraft, flown by the executor among the ` +
+        `window's other aircraft — ${ending(window, sentence)} · ${sentence.goArounds} go-around${sentence.goArounds === 1 ? "" : "s"}`,
+    })),
+  ];
+}
+
+/** Every window's rounds (the details page's Rounds). */
+function RoundsTable({ sample }: { sample: TrainingWindowSample }) {
+  const rounds = sample.model.rounds;
+  return (
+    <>
+      <table className="training-flown-table training-prior-table" aria-label="Every window's rounds">
+        <thead>
+          <tr><th scope="col">window</th>{rounds.map((round) => <th key={String(round)} scope="col">{roundLabel(round)}</th>)}</tr>
+        </thead>
+        <tbody>
+          {sample.windows.map((window) => (
+            <tr key={window.index}>
+              <th scope="row" title={window.head.flightKey}>{window.head.callsign} · {window.kind}</th>
+              {rounds.map((round) => {
+                const sentence = window.rounds.find((item) => item.round === round);
+                return sentence === undefined ? <td key={String(round)}>–</td> : (
+                  <td key={String(round)} style={{ color: trainingOutcomeColour(sentence.outcome) }} title={TRAINING_OUTCOME_TEXT[sentence.outcome]}>
+                    {ending(window, sentence)} · {sentence.goArounds} go-arounds · {sentence.events.length} words
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
+  );
+}
+
+/** The landed of each round over the set's windows. */
+function roundsSummary(sample: TrainingWindowSample): string {
+  return sample.model.rounds.map((round) => {
+    const said = sample.windows.flatMap((window) => window.rounds.filter((item) => item.round === round));
+    return `${roundLabel(round)}: ${said.filter((item) => item.outcome === "landed").length}/${said.length} landed`;
+  }).join(" · ");
+}
+
+export default function TrainingWindowSession({ airport, sets, details }: {
+  airport: string; sets: TrainingWindowSetEntry[]; details: DetailsPage;
+}) {
   const { setTrainingSelection, setTrainingIntervalS } = useApp();
   const layers = useTrainingWindowLayers();
   useTrainingWindowAutopilot();
   const [setId, setSetId] = useState<string | null>(sets[0]?.id ?? null);
-  const [state, setState] = useState<SetState>({ status: "loading" });
   /** The window on screen: its set and its place there (a choice made in another set never selects in this one). */
   const [placed, setPlaced] = useState<{ setId: string; index: number } | null>(null);
-  const [round, setRound] = useState<TrainingWindowRound | null>(null);
   const entry = sets.find((item) => item.id === setId) ?? null;
-
-  useEffect(() => {
-    if (entry === null) return;
-    let live = true;
-    setState({ status: "loading" });
-    fetchTrainingWindowSample(airport, entry.file, entry.id)
-      .then((parsed) => {
-        if (live) setState(parsed.ok ? { status: "ready", sample: parsed.value } : { status: "invalid", problem: parsed.problem });
-      })
-      .catch((error: unknown) => {
-        if (live) setState({ status: "invalid", problem: error instanceof Error ? error.message : String(error) });
-      });
-    return () => {
-      live = false;
-    };
-  }, [airport, entry]);
+  const state = useTrainingSet(entry === null ? null : `${airport}/${entry.id}/${entry.file}`,
+    () => fetchTrainingWindowSample(airport, entry!.file, entry!.id));
+  const intent = useTrainingSetIntent(setId);
 
   const sample = state.status === "ready" ? state.sample : null;
-  const place = sample !== null && placed !== null && placed.setId === sample.setId ? placed.index : null;
+  const place = sample === null ? null : placed !== null && placed.setId === sample.setId ? placed.index : 0;
   const window = sample === null || place === null ? null : sample.windows[place] ?? null;
-  // a set that has just opened may still hold the last set's choice for one render: the round shown is one the set has
-  const shown: TrainingWindowRound | null = sample === null ? null
-    : round !== null && sample.model.rounds.includes(round) ? round : sample.model.rounds[sample.model.rounds.length - 1];
 
-  // a set opens on its first window and its last round, read at the set's Δ
+  // ── the tabs: the session gives them, the bar chooses (outline §6.2 item 2) ──
+  const scope = sample === null || window === null ? null : `C/${airport}/${sample.setId}/window-${window.index}`;
+  const tabList = useMemo(() => (window === null ? [] : windowTabs(window)), [window]);
+  const shared = useTrainingTabs();
+  const last = useRef<string | null>(null);
+  // a window opens on the last tab chosen where it has one, else on its last round
+  const lastRound = tabList.length > 0 ? tabList[tabList.length - 1].id : LABELLED;
+  const chosen = shared !== null && shared.scope === scope && tabList.some((tab) => tab.id === shared.chosen) ? shared.chosen
+    : last.current !== null && tabList.some((tab) => tab.id === last.current) ? last.current : lastRound;
+  // only a choice made among the tabs of an item on screen is remembered (not the fallback while a set loads)
   useEffect(() => {
-    if (sample === null) return;
-    setPlaced(sample.windows.length > 0 ? { setId: sample.setId, index: 0 } : null);
-    setRound(sample.model.rounds[sample.model.rounds.length - 1]);
-    setTrainingIntervalS(sample.model.rowIntervalS);
-  }, [sample, setTrainingIntervalS]);
+    if (scope !== null) last.current = chosen;
+  }, [scope, chosen]);
+  useEffect(() => {
+    if (scope !== null) publishTrainingTabs({ scope, tabs: tabList, chosen });
+  }, [scope, tabList, chosen]);
+  useEffect(() => () => publishTrainingTabs(null), []);
 
-  // publish what the sentence bar, the read-back window and the 3D layers draw
+  // the round on screen (Labelled reads the open-loop sentence of the round last flown on screen: the same head)
+  const shown: TrainingWindowRound | null = window === null ? null
+    : chosen === LABELLED ? window.rounds[window.rounds.length - 1].round
+      : window.rounds.find((item) => roundTab(item.round) === chosen)!.round;
+  useEffect(() => {
+    if (sample !== null) setTrainingIntervalS(chosen === LABELLED ? null : sample.model.rowIntervalS);
+  }, [sample, chosen, setTrainingIntervalS]);
   useEffect(() => {
     if (sample === null || window === null || shown === null) {
       setTrainingSelection(null);
@@ -214,52 +250,64 @@ export default function TrainingWindowSession({ airport, sets }: { airport: stri
 
   const sentence = window === null || shown === null ? null : window.rounds.find((item) => item.round === shown) ?? null;
 
+  // ── the details page: the experiment's results (outline §6.2 item 3, D134) ──
+  const results = useTrainingSetResults("C", airport, setId);
+  const c = results.status === "ready" && results.results.stage === "C" ? results.results : null;
+  const absent = state.status === "invalid" ? `the set cannot be read: ${state.problem}` : "the set is loading";
+  const roles = { recorded: 0, inserted: 0, moved: 0 };
+  for (const aircraft of window?.traffic ?? []) roles[aircraft.role] += 1;
+  const sections: TrainingDetailsSection[] = [
+    // the first section always has a body: the set's intent and provenance come from its index entry, not its sample
+    entry === null ? { id: EXPERIMENT_SECTION, title: "The set and the experiment", body: <p className="training-details-lede">The index lists no set.</p> } : {
+      id: EXPERIMENT_SECTION, title: "The set and the experiment",
+      body: <ExperimentSection setId={entry.id} intent={intent} provenance={entry.model.campaign} /> },
+    resultSection(ROUNDS_SECTION, "Rounds", results, c === null ? null : c.rounds, (value, own) => <RoundsSection {...value} own={own} />,
+      sample === null ? <p className="experiment-details-missing">{absent}</p> : <RoundsTable sample={sample} />),
+    resultSection("speed", "Speed", results, c === null ? null : c.speed, (value) => <SpeedSection {...value} />),
+    resultSection("checks", "The checks", results, c === null ? null : c.checks, (value) => <ChecksSection {...value} />),
+    window === null || sentence === null ? { id: WINDOW_SECTION, title: "The window", body: null, absent }
+      : { id: WINDOW_SECTION, title: "The window", body: <WindowEnd window={window} sentence={sentence} /> },
+  ];
+
+  const choices = sets.map((item) => ({ id: item.id, count: `${item.windows} windows`, title: item.title,
+    smoke: item.source.smoke || item.source.campaignSmoke }));
   return (
     <>
-      {sets.length > 1 ? (
-        <label className="training-field" title={entry?.title}>
-          <span>Set</span>
-          <select value={setId ?? ""} onChange={(event) => setSetId(event.target.value)}>
-            {sets.map((item) => <option key={item.id} value={item.id}>{item.id} · {item.windows} windows</option>)}
-          </select>
-        </label>
+      {details.shown !== null ? (
+        <TrainingDetails context={[airport, setId ?? "no set", sample === null ? "" : `${sample.windows.length} windows`].filter(Boolean).join(" · ")}
+          sections={sections} sectionId={details.shown.section} onSection={details.show} onClose={details.close}
+          opener={details.shown.opener} />
       ) : null}
-      {entry === null ? null : (
-        <p className="training-note" title={entry.title}>
-          {entry.title}{entry.source.smoke || entry.source.campaignSmoke ? " · SMOKE (not a result)" : ""}
-        </p>
-      )}
+      <SetChooser sets={choices} setId={setId} onChange={(id) => setSetId(id)} intent={intent} onOpenExperiment={details.open(EXPERIMENT_SECTION)} />
       {state.status === "loading" ? <p className="training-note" role="status">Loading {entry?.file} …</p> : null}
       {state.status === "invalid" ? <ProblemBox title={`Set ${setId} cannot be read.`} detail={state.problem} /> : null}
 
       {sample === null ? null : (
         <>
-          <ul className="training-flight-list" aria-label="The set's windows">
-            {sample.windows.map((item) => (
-              <li key={item.index}>
-                <button type="button" className={item.index === place ? "active" : undefined} title={`${item.head.flightKey} · ${windowSummary(item)}`}
-                  onClick={() => setPlaced({ setId: sample.setId, index: item.index })}>
-                  <span className="training-flight-callsign">{item.head.callsign}</span>
-                  <span className="training-flight-runway" title="the runway the flight landed on in the record (a round's sentence may say another)">
-                    recorded {item.head.runway}
-                  </span>
-                  <span className="training-flight-stratum">{item.kind}</span>
-                  <span className="training-flight-executor">
-                    {item.rounds.filter((s) => s.outcome === "landed").length}/{item.rounds.length} landed · {item.traffic.length} other
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-          {window === null || shown === null ? null : (
-            <RoundTable window={window} round={shown} onSelect={setRound} />
+          <ItemList label="The set's windows" active={window === null ? null : String(window.index)}
+            onSelect={(key) => setPlaced({ setId: sample.setId, index: Number(key) })}
+            items={sample.windows.map((item) => ({
+              key: String(item.index), callsign: item.head.callsign, runway: `recorded ${item.head.runway}`,
+              runwayTitle: "the runway the flight landed on in the record (a round's sentence may say another)", stratum: item.kind,
+              landed: item.rounds.filter((s) => s.outcome === "landed").length, of: item.rounds.length,
+              more: `${item.traffic.length} other`, title: item.head.flightKey,
+              outcomes: item.rounds.map((s) => `${roundLabel(s.round)}: ${TRAINING_OUTCOME_TAG[s.outcome]}`).join("; "),
+            }))} />
+          {window === null || sentence === null ? null : (
+            <ul className="training-details-links" aria-label="Readouts">
+              <DetailsLink name="This round" onOpen={details.open(ROUNDS_SECTION)}
+                summary={chosen === LABELLED ? "the labelled sentence (not flown)" : `${roundLabel(sentence.round)}: ${ending(window, sentence)}`} />
+              <DetailsLink name="Rounds" onOpen={details.open(ROUNDS_SECTION)} summary={roundsSummary(sample)} />
+              <DetailsLink name="The window" onOpen={details.open(WINDOW_SECTION)} summary={`${TRAINING_WINDOW_KIND_TEXT[window.kind]} · ` +
+                (window.traffic.length === 0 ? "no other aircraft"
+                  : (["recorded", "inserted", "moved"] as const).filter((role) => roles[role] > 0).map((role) => `${roles[role]} ${role}`).join(", "))} />
+            </ul>
           )}
-          {window === null || sentence === null ? null : <WindowEnd window={window} sentence={sentence} />}
           {window === null || shown === null ? null : (
             <WindowCursorStart flightKey={trainingWindowFlightView(sample, window, shown).flightKey} row0S={window.row0S} />
           )}
-          <fieldset className="training-layers">
-            <legend>Draw (window)</legend>
+          <DrawBox legend="Draw (window)">
+            <LayerSwitches />
             <label title="the other aircraft where their records have them at the cursor's time">
               <input type="checkbox" checked={layers.traffic} onChange={(event) => setTrainingWindowLayer("traffic", event.target.checked)} />
               Other aircraft
@@ -276,7 +324,7 @@ export default function TrainingWindowSession({ airport, sets }: { airport: stri
               <input type="checkbox" checked={layers.otherRounds} onChange={(event) => setTrainingWindowLayer("otherRounds", event.target.checked)} />
               Other rounds
             </label>
-          </fieldset>
+          </DrawBox>
         </>
       )}
     </>

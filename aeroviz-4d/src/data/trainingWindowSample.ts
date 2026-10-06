@@ -27,16 +27,13 @@
 import { fetchJson } from "../utils/fetchJson";
 import { attempt, parseManifest, Reader, type Parsed } from "./trainingReader";
 import {
-  lastStateCycle,
-  parseAttitudeOf,
   parseCandidates,
   parseEvents,
   parseFlight,
+  parseFlownBlock,
   parseFormats,
   parseGrid,
   parseVocabulary,
-  readCrossing,
-  unwrapDegrees,
   wordUnreached,
   TRAINING_LOST_SEPARATION,
   TRAINING_OUTCOMES,
@@ -45,6 +42,7 @@ import {
   type TrainingCandidate,
   type TrainingClosedLoop,
   type TrainingCrossing,
+  type TrainingEnvelopes,
   type TrainingEvent,
   type TrainingFlight,
   type TrainingFlownEnd,
@@ -55,11 +53,11 @@ import {
 
 /** MIRROR of the exporter's `INDEX_SCHEMA` (`ts_transformer/post/training_files.py`): the airport's index of window sets.
  *  A name changes with its file's shape, on both sides, in the same change. */
-export const TRAINING_WINDOW_INDEX_SCHEMA = "aeroviz-training-window-index-v1";
+export const TRAINING_WINDOW_INDEX_SCHEMA = "aeroviz-training-window-index-v2";
 /** MIRROR of `training_files.INDEX_FILE`. */
-export const TRAINING_WINDOW_INDEX_FILE = "index_post_v1.json";
+export const TRAINING_WINDOW_INDEX_FILE = "index_post_v2.json";
 /** MIRROR of `training_files.SAMPLE_SCHEMA` (v2: a round's flown track unrounded, prior D127 followed for windows). */
-export const TRAINING_WINDOW_SAMPLE_SCHEMA = "aeroviz-training-window-sample-v2";
+export const TRAINING_WINDOW_SAMPLE_SCHEMA = "aeroviz-training-window-sample-v3";
 /** MIRROR of `training_files.SET_KIND`. */
 export const TRAINING_WINDOW_SET_KIND = "post-training-windows";
 /** MIRROR of `post_training_export.START`: the round that names the model at the start of the campaign. */
@@ -154,12 +152,14 @@ export interface TrainingWindowSentence {
   firstRow: number;
   startRow: number;
   flownFromRow: number;
+  /** The block of the flown sentence (stage A's reader, `parseFlownBlock`). */
   outcome: TrainingFlownEnd;
   endCycle: number;
-  timedOut: boolean;
-  goArounds: number;
   crossing: TrainingCrossing | null;
   flown: TrainingTrack;
+  envelopes: TrainingEnvelopes | null;
+  timedOut: boolean;
+  goArounds: number;
   end: TrainingWindowEnd;
 }
 
@@ -313,40 +313,19 @@ function parseSentence(
   const words = parseGrid(reader, "words");
   if (reader.count("rows", 1) !== words.length) reader.fail(`rows is ${reader.raw("rows")}, but words holds ${words.length}`);
   const events = parseEvents(reader, words, candidates, false);
-  const outcome = reader.oneOf("outcome", [...TRAINING_OUTCOMES, TRAINING_LOST_SEPARATION]);
-  const endCycle = reader.count("endCycle");
-  const track = reader.child("track");
-  const rows = track.count("rows", 1);
-  const lastCycle = track.count("lastCycle");
-  if (lastCycle !== lastStateCycle(outcome, endCycle)) {
-    track.fail(`lastCycle is ${lastCycle}, but a flight that ended at cycle ${endCycle} (${outcome}) has its last state at ${lastStateCycle(outcome, endCycle)}`);
-  }
-  if (rows !== Math.floor((lastCycle * cycleS) / stepS + 1e-9) + 1) {
-    track.fail(`rows is ${rows}, but ${lastCycle} cycles of ${cycleS} s are ${Math.floor((lastCycle * cycleS) / stepS + 1e-9) + 1} rows of ${stepS} s`);
-  }
-  const crossing = reader.nullableChild("crossing");
+  const block = parseFlownBlock(reader, [...TRAINING_OUTCOMES, TRAINING_LOST_SEPARATION], candidates, cycleS, stepS,
+    firstRow + flownFromRow, head.haeMinusMslM, head.observed);
+  const { outcome, crossing } = block;
   const end = reader.child("end");
   const loss = end.nullableChild("loss");
   if ((loss !== null) !== (outcome === TRAINING_LOST_SEPARATION)) {
     end.fail(`the window ended ${outcome} but its loss is ${loss === null ? "absent" : "given"}: a loss of separation and its end go together`);
   }
   if (loss !== null && crossing !== null) reader.fail("a window ended at a loss of separation crossed no threshold");
-  const startIndex = firstRow + flownFromRow;
-  const heightMslM = track.numbers("heightMslM", rows);
-  const trackDeg = track.numbers("trackDeg", rows);
-  const hae = head.haeMinusMslM;
-  const flown: TrainingTrack = {
-    tS: Array.from({ length: rows }, (_, i) => (startIndex + i) * stepS),
-    eM: track.numbers("eM", rows), nM: track.numbers("nM", rows), lat: track.numbers("latDeg", rows),
-    lon: track.numbers("lonDeg", rows), altitudeMslM: heightMslM, altitudeHaeM: heightMslM.map((value) => value + hae), trackDeg,
-    trackPlotDeg: unwrapDegrees(trackDeg, head.observed.trackPlotDeg[Math.min(startIndex, head.observed.tS.length - 1)]),
-    groundSpeedMps: track.numbers("groundSpeedMps", rows), verticalRateMps: track.numbers("verticalRateMps", rows),
-    attitude: parseAttitudeOf(reader, rows),
-  };
   const row0S = firstRow * stepS;
   return {
-    round, words, events, firstRow, startRow, flownFromRow, outcome, endCycle, timedOut: reader.boolean("timedOut"),
-    goArounds: reader.count("goArounds"), crossing: crossing === null ? null : readCrossing(crossing, candidates.length), flown,
+    round, words, events, firstRow, startRow, flownFromRow, outcome, endCycle: block.endCycle, crossing, flown: block.flown,
+    envelopes: block.envelopes, timedOut: reader.boolean("timedOut"), goArounds: reader.count("goArounds"),
     end: {
       reward: end.number("reward"),
       loss: loss === null ? null : parseLoss(loss, row0S),
@@ -507,7 +486,8 @@ export function trainingWindowOriginOf(flight: TrainingFlight): TrainingWindowOr
 }
 
 /** A round's sentence as stage A's closed-loop sentence at Δ, so the sentence bar, the read-back window and the 3D layers
- *  read it unchanged (as stage B's: `trainingPriorSample.ts`). No envelope was judged on it and the reading added no word;
+ *  read it unchanged (as stage B's: `trainingPriorSample.ts`): its envelopes the judge's on its flown track (D135); the
+ *  reading added no word;
  *  `notReached` counts the words said after the window's end (`wordUnreached`). */
 function closedLoopOf(model: TrainingWindowModel, flight: TrainingFlight, sentence: TrainingWindowSentence): TrainingClosedLoop {
   const closed = flight.closedLoop[String(model.rowIntervalS)];
@@ -518,7 +498,7 @@ function closedLoopOf(model: TrainingWindowModel, flight: TrainingFlight, senten
     cycleS: closed.cycleS, flown: sentence.flown,
     replay: {
       outcome: sentence.outcome, endCycle: sentence.endCycle, crossing: sentence.crossing, flewTheSentence: true, notReached: 0,
-      envelopes: null,
+      envelopes: sentence.envelopes,
     },
   };
   const notReached = sentence.events.filter((event) => wordUnreached(result, event.row)).length;

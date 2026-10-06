@@ -26,7 +26,7 @@
  *
  * NO COMPATIBILITY. The index and sample schemas, the set kind and the reading rule are pinned below and a file that
  * carries anything else is refused by name (the schema found and the one expected). This reader never reads
- * `training/index.json`: its index is `index_v4.json`.
+ * `training/index.json` or an older index: its index is `index_v5.json`.
  *
  * SI units only: metres, m/s, degrees, seconds. Heights in the files are MSL; the 3D scene's are ellipsoid heights (the
  * flight's own `haeMinusMslM` added once, here).
@@ -38,12 +38,12 @@ import { readAttitude, type TrainingAttitude } from "./trainingAttitude";
 
 /** MIRROR of the exporter's `INDEX_SCHEMA` (`ts_transformer/instructions/training_files.py`): the airport's index of
  *  stage-A sets. A name changes with its file's shape, on both sides, in the same change. */
-export const TRAINING_INDEX_SCHEMA = "aeroviz-training-index-v2";
+export const TRAINING_INDEX_SCHEMA = "aeroviz-training-index-v3";
 /** MIRROR of `INDEX_FILE`: a NEW index beside the old view's `index.json`, which this view never reads. */
-export const TRAINING_INDEX_FILE = "index_v4.json";
-/** MIRROR of `SAMPLE_SCHEMA`: a set's sample (v10, A32: the same shape from the closed-loop format v8; a v9 set is
- *  refused by name). */
-export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v10";
+export const TRAINING_INDEX_FILE = "index_v5.json";
+/** MIRROR of `SAMPLE_SCHEMA`: a set's sample (v11, D135: a flown sentence is the one block of every stage, its track
+ *  unrounded, `parseFlownBlock`; an older set is refused by name). */
+export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v11";
 /** MIRROR of `SET_KIND`: a stage-A set — flights read back through the closed loop. */
 export const TRAINING_SET_KIND = "closed-loop-readback";
 /** MIRROR of `instructions.spec.READING_RULE`: what a word MEANS, which no field can say. */
@@ -903,12 +903,31 @@ function requireWithin(reader: Reader, envelopes: TrainingEnvelopes, rows: numbe
   if (past) reader.fail(`an envelope's ${past[0]} is ${past[1]}, past the ${rows} rows of ${track}`);
 }
 
-function parseReplay(
-  reader: Reader, candidates: TrainingCandidate[], cycleS: number, stepS: number,
-): { replay: TrainingReplay; track: Reader; rows: number } {
-  const crossing = reader.nullableChild("crossing");
-  const envelopes = reader.nullableChild("envelopes");
-  const outcome = reader.oneOf("outcome", TRAINING_OUTCOMES);
+/** The block of a sentence the executor flew, in every stage (D135, outline §6.2 item 7; the export's `flown_sentence`):
+ *  its outcome and end cycle, the threshold crossing with its DA check, the flight to its outcome on the 2 s rows from the
+ *  first predicted step (unrounded, with its attitude) and the judge's envelopes of its words on it. A stage's reader adds
+ *  its own fields. */
+export interface TrainingFlownBlock {
+  outcome: TrainingFlownEnd;
+  /** The executor's cycles from the first predicted step to the outcome's state row. */
+  endCycle: number;
+  /** null: the flight did not cross the threshold. */
+  crossing: TrainingCrossing | null;
+  /** The flown flight on the 2 s rows from the first predicted step (flight time ``startIndex`` rows on), on the flight's
+   *  clock, its height drawn at MSL plus ``haeMinusMslM``. */
+  flown: TrainingTrack;
+  /** The judge's envelopes on the flown track, rows from the first predicted step; null: fewer than two rows were flown. */
+  envelopes: TrainingEnvelopes | null;
+}
+
+/** The one reader of a flown sentence's block (`TrainingFlownBlock`) for every stage: ``outcomes`` the ends it may have
+ *  (stage C's windows also end at a loss of separation); ``startIndex`` the observed 2 s row of the first predicted step;
+ *  ``observed`` the flight's observed track (the flown track's compass track is plotted on its branch). */
+export function parseFlownBlock(
+  reader: Reader, outcomes: readonly TrainingFlownEnd[], candidates: TrainingCandidate[], cycleS: number, stepS: number,
+  startIndex: number, haeMinusMslM: number, observed: TrainingTrack,
+): TrainingFlownBlock {
+  const outcome = reader.oneOf("outcome", outcomes);
   const endCycle = reader.count("endCycle");
   const track = reader.child("track");
   const rows = track.count("rows", 1);
@@ -919,15 +938,22 @@ function parseReplay(
   if (rows !== Math.floor((lastCycle * cycleS) / stepS + 1e-9) + 1) {
     track.fail(`rows is ${rows}, but ${lastCycle} cycles of ${cycleS} s are ${Math.floor((lastCycle * cycleS) / stepS + 1e-9) + 1} rows of ${stepS} s`);
   }
+  const crossing = reader.nullableChild("crossing");
+  const envelopes = reader.nullableChild("envelopes");
   const judged = envelopes === null ? null : parseEnvelopes(envelopes);
-  if (judged !== null) requireWithin(envelopes!, judged, rows, "the flown track (replay.track)");
-  return {
-    replay: {
-      outcome, endCycle, crossing: crossing === null ? null : readCrossing(crossing, candidates.length),
-      flewTheSentence: reader.boolean("flewTheSentence"), notReached: reader.count("notReached"), envelopes: judged,
-    },
-    track, rows,
+  if (judged !== null) requireWithin(envelopes!, judged, rows, "the flown track (track)");
+  const heightMslM = track.numbers("heightMslM", rows);
+  const trackDeg = track.numbers("trackDeg", rows);
+  const flown: TrainingTrack = {
+    tS: Array.from({ length: rows }, (_, i) => (startIndex + i) * stepS),
+    eM: track.numbers("eM", rows), nM: track.numbers("nM", rows), lat: track.numbers("latDeg", rows),
+    lon: track.numbers("lonDeg", rows), altitudeMslM: heightMslM, altitudeHaeM: heightMslM.map((value) => value + haeMinusMslM),
+    trackDeg, trackPlotDeg: unwrapDegrees(trackDeg, observed.trackPlotDeg[Math.min(startIndex, observed.tS.length - 1)]),
+    groundSpeedMps: track.numbers("groundSpeedMps", rows), verticalRateMps: track.numbers("verticalRateMps", rows),
+    // `attitude` is on the rows of `track`
+    attitude: parseAttitudeOf(reader, rows),
   };
+  return { outcome, endCycle, crossing: crossing === null ? null : readCrossing(crossing, candidates.length), flown, envelopes: judged };
 }
 
 function parseClosedLoop(
@@ -966,25 +992,18 @@ function parseClosedLoop(
   }
   const startIndex = firstRow + flownFromRow;
   const startS = startIndex * stepS;
-  const { replay, track, rows } = parseReplay(reader.child("replay"), candidates, cycleS, stepS);
-  // the flown flight is `replay.track`; the stored states are the same flight on the rows both have, to the written rounding
-  const eM = track.numbers("eM", rows);
-  const nM = track.numbers("nM", rows);
-  const heightMslM = track.numbers("heightMslM", rows);
-  for (let i = 0; i < Math.min(rows, stateRows - flownFromRow); i += 1) {
-    const apart = Math.max(Math.abs(eM[i] - stateE[flownFromRow + i]), Math.abs(nM[i] - stateN[flownFromRow + i]),
-      Math.abs(heightMslM[i] - stateHeight[flownFromRow + i]));
-    if (apart > 0.11) track.fail(`row ${i} is ${apart.toFixed(2)} m from the stored state ${flownFromRow + i}: replay.track and states are one flight`);
+  const replayReader = reader.child("replay");
+  const block = parseFlownBlock(replayReader, TRAINING_OUTCOMES, candidates, cycleS, stepS, startIndex, haeMinusMslM, observed);
+  const flown = block.flown;
+  // the stored states are the flown flight on the rows both have, to the states' written rounding
+  for (let i = 0; i < Math.min(flown.eM.length, stateRows - flownFromRow); i += 1) {
+    const apart = Math.max(Math.abs(flown.eM[i] - stateE[flownFromRow + i]), Math.abs(flown.nM[i] - stateN[flownFromRow + i]),
+      Math.abs(flown.altitudeMslM[i] - stateHeight[flownFromRow + i]));
+    if (apart > 0.11) replayReader.fail(`track row ${i} is ${apart.toFixed(2)} m from the stored state ${flownFromRow + i}: replay.track and states are one flight`);
   }
-  const trackDeg = track.numbers("trackDeg", rows);
-  const flown: TrainingTrack = {
-    tS: Array.from({ length: rows }, (_, i) => (startIndex + i) * stepS),
-    eM, nM, lat: track.numbers("latDeg", rows), lon: track.numbers("lonDeg", rows), altitudeMslM: heightMslM,
-    altitudeHaeM: heightMslM.map((value) => value + haeMinusMslM), trackDeg,
-    trackPlotDeg: unwrapDegrees(trackDeg, observed.trackPlotDeg[Math.min(startIndex, observed.tS.length - 1)]),
-    groundSpeedMps: track.numbers("groundSpeedMps", rows), verticalRateMps: track.numbers("verticalRateMps", rows),
-    // `replay.attitude` is on the rows of `replay.track`
-    attitude: parseAttitudeOf(reader.child("replay"), rows),
+  const replay: TrainingReplay = {
+    outcome: block.outcome, endCycle: block.endCycle, crossing: block.crossing,
+    flewTheSentence: replayReader.boolean("flewTheSentence"), notReached: replayReader.count("notReached"), envelopes: block.envelopes,
   };
   return {
     rowIntervalS, firstRow, startRow, flownFromRow, startS, words, events,

@@ -183,7 +183,7 @@ describe("the Training export's checks", () => {
     const { findings, value } = checkTrainingIndex({ ...stageAIndex(), schema: "aeroviz-training-index-v1" });
     expect(value).toBeNull();
     expect(findings).toEqual([expect.objectContaining({ level: "error" })]);
-    expect(findings[0].message).toContain("training/index_v4.json is not an index");
+    expect(findings[0].message).toContain("training/index_v5.json is not an index");
     expect(findings[0].message).toContain(`schema is "aeroviz-training-index-v1", expected "${TRAINING_INDEX_SCHEMA}"`);
   });
 

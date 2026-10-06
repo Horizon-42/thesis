@@ -315,8 +315,16 @@ def airport_scenes(directory: Path, split: str, spec: VocabularySpec, interval_s
                    ) -> tuple[dict[str, Scene], list[FlightSignals]]:
     """Each airport's scene of ``split`` (its signals, the artefact's checks: C32; each flight's G from its labelled
     sentence, module docstring), and the split's signals in order."""
-    interval_rows(interval_s, spec.step_s)
     signals = load_signals(directory, split)
+    return scenes_of(signals, directory, split, spec, interval_s, geometries, category_of), signals
+
+
+def scenes_of(signals: Sequence[FlightSignals], directory: Path, split: str, spec: VocabularySpec, interval_s: float,
+              geometries: Mapping[str, AirportGeometry], category_of: Callable[[str], str] = wake_category
+              ) -> dict[str, Scene]:
+    """`airport_scenes` of the split's signals ``signals`` as the artefact's reader gives them (`load_signals`), read
+    once by a caller that holds them already (post-training C13: the split's opened start)."""
+    interval_rows(interval_s, spec.step_s)
     labelled = load_sentences(directory, split, spec, ("signal_index", "go_around_offsets", "go_around_row",
                                                        "runway_again_row"))
     offsets = labelled["go_around_offsets"]
@@ -328,7 +336,7 @@ def airport_scenes(directory: Path, split: str, spec: VocabularySpec, interval_s
     flights: dict[str, list[Recorded]] = {code: [] for code in geometries}
     for s, g in zip(signals, go_around):
         flights[s.airport].append(recorded(s, geometries[s.airport], interval_s, spec.step_s, g, category_of))
-    return {code: Scene(geometries[code], split, items, interval_s) for code, items in flights.items()}, signals
+    return {code: Scene(geometries[code], split, items, interval_s) for code, items in flights.items()}
 
 
 def real_windows(directory: Path, split: str, spec: VocabularySpec, interval_s: float, scenes: Mapping[str, Scene],

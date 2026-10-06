@@ -181,7 +181,7 @@ def test_the_warm_up_opens_every_listed_window_set(world):
     backend = SyntheticBackend(world["root"], world["flown"], world["setup"]["words"])
     lines = []
     backend.window.warm_up(lines.append)
-    assert any("1 sets ready" in line for line in lines) and post_files.INDEX_FILE == "index_post_v1.json"
+    assert any("1 sets ready" in line for line in lines) and post_files.INDEX_FILE == "index_post_v2.json"
 
 
 def test_a_lost_window_s_last_word_ends_at_the_loss(world):

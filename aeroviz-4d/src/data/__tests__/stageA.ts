@@ -3,7 +3,7 @@
  * `fixtures/stage_a/`; they are never edited by hand): the airport's index, a set's sample and two live answers of the
  * backend. A test that needs a broken file changes a clone of one of them — the file it breaks is the real one.
  */
-import indexFile from "./fixtures/stage_a/index_v4.json";
+import indexFile from "./fixtures/stage_a/index_v5.json";
 import sampleFile from "./fixtures/stage_a/fixture_set/sample.json";
 import answersFile from "./fixtures/stage_a/autopilot_segment.json";
 import { parseTrainingSample, TRAINING_SPLITS, trainingSelectionOf, type TrainingSample, type TrainingSelection } from "../trainingSample";

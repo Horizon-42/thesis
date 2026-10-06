@@ -50,6 +50,11 @@ import TrainingLegend from "./TrainingLegend";
 import TrainingReadbackWindow from "./TrainingReadbackWindow";
 import { TrainingAutopilotStatus } from "./TrainingAutopilotStatus";
 import useMeasuredWidth from "../hooks/useMeasuredWidth";
+import { chooseTrainingTab, tabForKey, useTrainingTabs } from "../data/trainingTabs";
+import { useTrainingSetIntent } from "../data/trainingSetIntent";
+import { trainingPriorOriginOf } from "../data/trainingPriorSample";
+import { trainingWindowOriginOf } from "../data/trainingWindowSample";
+import { EXPERIMENT_SECTION, requestTrainingDetails } from "./training/PanelParts";
 import {
   TRAINING_AUTOPILOT_COLOR,
   TRAINING_COLUMN_COLOR,
@@ -240,7 +245,7 @@ function useBarHeight(): (node: HTMLElement | null) => void {
 
 export default function TrainingSentenceBar() {
   const {
-    mode, trainingSelection: selection, trainingIntervalS: intervalS, setTrainingIntervalS, trainingLayers,
+    mode, trainingSelection: selection, trainingIntervalS: intervalS, trainingLayers,
     trainingColumn: focusColumn, setTrainingColumn: setFocusColumn, trainingAutopilot, trainingPick, setTrainingPick,
   } = useApp();
   const { trainingCursorS: cursorS, setTrainingCursorS: setCursorS } = useTrainingCursor();
@@ -248,10 +253,18 @@ export default function TrainingSentenceBar() {
   const bar = useBarHeight();
   const [readbackOpen, setReadbackOpen] = useState<boolean>(false);
   const [notesOpen, setNotesOpen] = useState<boolean>(false);
+  // the tabs the session on screen gives, and its set's intent (outline §6.2 items 2, 4)
+  const tabs = useTrainingTabs();
+  const intent = useTrainingSetIntent(selection?.setId ?? null);
 
   // the Training session outlives a task switch (the panel stays mounted): the bar draws only in Training
   if (!selection || mode !== "training") return null;
   const { flight, vocabulary } = selection;
+  // THE KIND OF THE SENTENCE ON SCREEN — its chips and notes follow it (outline §6.2 item 2)
+  const priorOrigin = trainingPriorOriginOf(flight);
+  const windowOrigin = trainingWindowOriginOf(flight);
+  const kind: "labelled" | "closed" | "sample" | "round" = intervalS === null ? "labelled"
+    : priorOrigin?.sentence ? "sample" : windowOrigin !== undefined ? "round" : "closed";
   const stepS = vocabulary.stepS;
   const plotW = frameW - GUTTER - PAD_R;
   const reading = trainingReadingOf(flight, stepS, intervalS);
@@ -295,25 +308,28 @@ export default function TrainingSentenceBar() {
   const flightFacts = `${flight.typecode ?? "type unknown"} · ${flight.stratum} · ${flight.kind} · ${flight.group} · ` +
     `${reading.events.length} words in ${reading.rows} rows` + (corrections === 0 ? "" : ` (${corrections} added by the closed-loop reading)`);
   const observedW = closed === null ? 0 : xFor(closed.startS) - GUTTER;
-  const intervals = vocabulary.rowIntervalsS;
 
   return (
     <section className="training-sentence-bar" aria-label="Sentence bar" ref={bar}>
       <TrainingLegend layers={trainingLayers} vocabulary={vocabulary} closed={closed !== null} corrections={corrections > 0}
         autopilotColour={autopilot?.status === "ready" && autopilotHasLine(autopilot.segment) ? autopilotColour(autopilot.segment) : null} />
       <header className="training-sentence-head">
-        <span className="training-source-tabs" role="group" aria-label="Which sentence is read">
-          <button type="button" className="training-source-tab" aria-pressed={intervalS === null}
-            title="The labeller's reading of the observed flight (open loop): its words on the 2 s rows from the first row, and the envelopes of its words on the observed track"
-            onClick={() => setTrainingIntervalS(null)}>
-            Labelled
-          </button>
-          {intervals.map((interval) => (
-            <button key={interval} type="button" className="training-source-tab" aria-pressed={intervalS === interval}
-              title={`The closed-loop sentence at Δ = ${interval} s: the words the closed-loop reading says to the executor from the first ` +
-                `predicted step on, ${interval} s apart, the ones it added marked; the executor's flown path is drawn beside the observed track`}
-              onClick={() => setTrainingIntervalS(interval)}>
-              Δ {interval} s
+        <span className="training-source-tabs" role="group" aria-label="Which sentence is read"
+          onKeyDown={(event) => {
+            if (tabs === null) return;
+            const next = tabForKey(tabs.tabs, tabs.chosen, event.key);
+            if (next === null) return;
+            event.preventDefault();
+            chooseTrainingTab(next);
+            event.currentTarget.querySelector<HTMLButtonElement>(`[data-tab="${next}"]`)?.focus();
+          }}>
+          {(tabs?.tabs ?? []).map((tab) => (
+            <button key={tab.id} type="button" className="training-source-tab" data-tab={tab.id} aria-pressed={tab.id === tabs?.chosen}
+              tabIndex={tab.id === tabs?.chosen ? 0 : -1} title={tab.title} onClick={() => chooseTrainingTab(tab.id)}>
+              {tab.outcome === null ? null : (
+                <span className="training-source-tab-dot" style={{ background: trainingOutcomeColour(tab.outcome) }} aria-hidden="true" />
+              )}
+              {tab.label}
             </button>
           ))}
         </span>
@@ -325,13 +341,29 @@ export default function TrainingSentenceBar() {
             {TRAINING_OUTCOME_TAG[replay.outcome]}
           </span>
         ) : null}
-        {decision !== null ? (
+        {decision !== null && (kind === "closed" || kind === "sample") ? (
           <span className="training-chip" title={decisionText(decision)}
             style={{ color: decision.passed ? TRAINING_DECISION_PASS_COLOR : TRAINING_DECISION_FAIL_COLOR, borderColor: "currentColor" }}>
             DA {decision.passed ? "passed" : "failed"} {checkMark(decision.passed)}
           </span>
         ) : null}
-        {closed !== null ? (
+        {kind === "sample" && priorOrigin?.sentence ? (
+          <span className="training-chip" title="the go-arounds the prior said in this sentence (D68 bounds them)">
+            {priorOrigin.sentence.goArounds} go-around{priorOrigin.sentence.goArounds === 1 ? "" : "s"}
+          </span>
+        ) : null}
+        {kind === "round" && windowOrigin !== undefined ? (
+          <>
+            <span className="training-chip" title="the round's reward for the commanded aircraft">reward {windowOrigin.sentence.end.reward.toFixed(2)}</span>
+            <span className="training-chip" title={windowOrigin.sentence.end.loss === null ? "no loss of separation ended the round"
+              : `a loss of separation with ${windowOrigin.sentence.end.loss.other}: ${windowOrigin.sentence.end.loss.distanceM.toFixed(0)} m of ` +
+                `${windowOrigin.sentence.end.loss.requiredM.toFixed(0)} m required`}
+              style={windowOrigin.sentence.end.loss === null ? undefined : { color: TRAINING_DECISION_FAIL_COLOR, borderColor: "currentColor" }}>
+              {windowOrigin.sentence.end.loss === null ? "no loss of separation" : `loss of separation · ${windowOrigin.sentence.end.loss.other}`}
+            </span>
+          </>
+        ) : null}
+        {kind === "closed" && closed !== null ? (
           <span className="training-chip" style={{ color: corrections === 0 ? undefined : TRAINING_CORRECTION_COLOR }}
             title={`${corrections} of the ${reading.events.length} words were added by the closed-loop reading (corrections, drawn dashed and orange)`}>
             {corrections} correction{corrections === 1 ? "" : "s"}
@@ -532,6 +564,14 @@ export default function TrainingSentenceBar() {
 
       {notesOpen ? (
         <footer className="training-sentence-legend">
+          <span className="training-sentence-notes-set">
+            Set <code>{selection.setId}</code>:{" "}
+            {intent.status === "ready" ? intent.intent.run : intent.status === "absent" ? intent.problem : "reading the intent …"}{" "}
+            <button type="button" className="training-details-link-inline" aria-haspopup="dialog"
+              onClick={(event) => requestTrainingDetails(EXPERIMENT_SECTION, event.currentTarget)}>
+              The set and the experiment ›
+            </button>
+          </span>
           <span>{flight.callsign}: {flightFacts}</span>
           {reading.envelopes !== null ? (
             <span>
@@ -547,7 +587,19 @@ export default function TrainingSentenceBar() {
             word's row says where the executor is — pulsing at the word's row while the backend flies it, then moving with the
             3D aircraft, left at the segment's end.
           </span>
-          {closed !== null ? (
+          {kind === "sample" && closed !== null ? (
+            <span>
+              A sentence the prior said itself (free generation) at Δ = {reading.intervalS} s, from the first predicted step
+              ({formatSeconds(closed.startS)} s) on, flown by the executor; no word was added by a reading. The solid line at the right
+              is where the flown flight ended: {replayText(closed.replay)}.
+            </span>
+          ) : kind === "round" && closed !== null ? (
+            <span>
+              The sentence a round's model said for the commanded aircraft at Δ = {reading.intervalS} s, flown by the executor among the
+              window's other aircraft; no word was added by a reading. The solid line at the right is where the flown flight ended:{" "}
+              {replayText(closed.replay)}.
+            </span>
+          ) : closed !== null ? (
             <span>
               The closed-loop sentence at Δ = {reading.intervalS} s: the words the closed-loop reading says to the executor from the
               first predicted step ({formatSeconds(closed.startS)} s) on, one row every {reading.intervalS} s. An orange, dashed band

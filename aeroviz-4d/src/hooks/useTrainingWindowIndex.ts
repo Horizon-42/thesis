@@ -1,7 +1,7 @@
 /**
  * useTrainingWindowIndex.ts
  * ------------------------
- * The airport's index of window sets (`training/index_post_v1.json`): absent (none exported — the panel offers nothing),
+ * The airport's index of window sets (`training/index_post_v2.json`): absent (none exported — the panel offers nothing),
  * invalid (named on screen), or ready. Stage A's index is the panel's own; this one is read beside it and stage B's.
  */
 

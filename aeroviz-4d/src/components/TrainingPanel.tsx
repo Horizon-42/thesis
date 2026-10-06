@@ -10,23 +10,26 @@
  * it mounted from its first visit on, only ``hidden`` in the other tasks (`WorkbenchLeftDock`): its session — set, flight,
  * Δ, live answer — outlives a task switch.
  *
- * It reads `training/index_v4.json` and nothing else: never the instruction-v3 view's `training/index.json`. The states
+ * It reads `training/index_v5.json` and nothing else: never the instruction-v3 view's `training/index.json`. The states
  * all name what failed:
  *   ① no index                      → the path, the command, the dev-server restart (AV5)
  *   ② an index of another schema    → the schema found and the one this view reads
  *   ③ a set that fails to parse     → THAT set alone, with the field (a sample of another schema: its name and the expected)
  *   ④ an entry that is not a set entry → named on its own; the others still load (AV6)
  *
- * KEPT SHORT, TOP TO BOTTOM: the set, then the session — its list, the Draw switches (short labels, the full reading in
- * each tooltip), one line per readout. Everything longer — what the module is, the vocabulary's numbers, the readouts'
- * tables — is on the DETAILS PAGE (`TrainingDetails`), opened by the header's ⓘ or by a readout's line, on its section;
- * the dock never unfolds it. The panel owns the page's state; the session supplies its sections.
+ * ONE LAYOUT FOR THE THREE STAGES (outline §6.2), KEPT SHORT, TOP TO BOTTOM: the stage switch; the set chooser (the set
+ * and its own line of the intent registry, `GET /experiments/intent`); the session — its list, one line per readout, the
+ * Draw switches. Everything longer — what the view shows, the set and its experiment, the vocabulary's numbers, the
+ * readouts' tables — is on the DETAILS PAGE (`TrainingDetails`), opened by the header's ⓘ (never disabled: on its first
+ * section, "The set and the experiment"), by a readout's line or by the sentence bar's notes; the dock never unfolds it.
+ * The panel owns the page's state (`useDetailsPage`) and gives it to every stage's session, which supplies its sections.
+ * The sentence on screen is chosen by the sentence bar's tabs, which the session gives (`data/trainingTabs.ts`).
  *
  * And THE EXECUTOR, LIVE (`useTrainingAutopilot`, run here): a word picked in the sentence bar — its Fly button, or a band
  * clicked — is flown by the backend now, never read from the file; the bar says the answer (`TrainingAutopilotStatus`).
  */
 
-import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useApp } from "../context/AppContext";
 import useTrainingAutopilot from "../hooks/useTrainingAutopilot";
 import useTrainingPriorIndex from "../hooks/useTrainingPriorIndex";
@@ -35,7 +38,11 @@ import TrainingPriorSession from "./training/TrainingPriorSession";
 import TrainingWindowSession from "./training/TrainingWindowSession";
 import ProblemBox from "./training/ProblemBox";
 import TrainingFlightSession from "./training/TrainingFlightSession";
-import type { DetailsPage } from "./training/PanelParts";
+import { EXPERIMENT_SECTION, useDetailsPage } from "./training/PanelParts";
+import TrainingDetails from "./training/TrainingDetails";
+import { SetChooser } from "./training/SetParts";
+import useTrainingSet from "../hooks/useTrainingSet";
+import { useTrainingSetIntent } from "../data/trainingSetIntent";
 import { isMissingJsonAsset } from "../utils/fetchJson";
 import {
   fetchTrainingIndex,
@@ -54,12 +61,6 @@ type IndexState =
   | { status: "absent" }
   | { status: "invalid"; problem: string }
   | { status: "ready"; index: TrainingIndex };
-
-type SetState =
-  | { status: "idle" }
-  | { status: "loading" }
-  | { status: "invalid"; problem: string }
-  | { status: "ready"; sample: TrainingSample };
 
 /** The command that writes the export, as the empty state shows it. */
 const TRAINING_EXPORT_COMMAND =
@@ -90,10 +91,8 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
 
   const [indexState, setIndexState] = useState<IndexState>({ status: "loading" });
   const [setId, setSetId] = useState<string | null>(null);
-  const [setState, setSetState] = useState<SetState>({ status: "idle" });
-  /** The details page while it is open: its section, and the control that opened it (the focus goes back there). */
-  /** Whose sets the panel shows: stage A's (`index_v4.json`), stage B's prior sets (`index_prior_v2.json`) or stage C's
-   *  window sets (`index_post_v1.json`) — B and C offered only where the airport has the file. */
+  /** Whose sets the panel shows: stage A's (`index_v5.json`), stage B's prior sets (`index_prior_v3.json`) or stage C's
+   *  window sets (`index_post_v2.json`) — B and C offered only where the airport has the file. */
   const [viewing, setViewing] = useState<"stageA" | "prior" | "window">("stageA");
   const priorIndex = useTrainingPriorIndex(activeAirportCode || null);
   const windowIndex = useTrainingWindowIndex(activeAirportCode || null);
@@ -102,20 +101,8 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
   const priorOffered = (priorIndex.status === "ready" && priorIndex.index.sets.length > 0) || priorIndex.status === "invalid";
   const windowOffered = (windowIndex.status === "ready" && windowIndex.index.sets.length > 0) || windowIndex.status === "invalid";
   const showing = (viewing === "prior" && priorOffered) || (viewing === "window" && windowOffered) ? viewing : "stageA";
-  const [shownDetails, setShownDetails] = useState<{ section: string; opener: HTMLElement } | null>(null);
-  const show = useCallback((section: string) => setShownDetails((open) => (open === null ? null : { ...open, section })), []);
-  const close = useCallback(() => setShownDetails(null), []);
-  const details: DetailsPage = {
-    // a panel hidden (another task) keeps no page open
-    shown: hidden ? null : shownDetails,
-    open: (section: string) => (event: MouseEvent<HTMLElement>) => setShownDetails({ section, opener: event.currentTarget }),
-    show,
-    close,
-  };
-  // a panel hidden (another task) closes its page: it does not come back unasked
-  useEffect(() => {
-    if (hidden) setShownDetails(null);
-  }, [hidden]);
+  // the details page's state, given to every stage's session (a panel hidden in another task keeps no page open)
+  const details = useDetailsPage(hidden);
   useTrainingAutopilot();
 
   // ── the index ─────────────────────────────────────────────────────────────
@@ -151,30 +138,21 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
     return indexState.index.sets.find((item) => item.id === setId) ?? null;
   }, [indexState, setId]);
 
-  // ── the chosen set ────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!activeAirportCode || !entry) {
-      setSetState({ status: "idle" });
-      return;
-    }
-    let live = true;
-    setSetState({ status: "loading" });
-    fetchTrainingSample(activeAirportCode, entry.file, entry.id, TRAINING_SPLITS)      // stage A's sets (D109)
-      .then((parsed) => {
-        if (!live) return;
-        if (parsed.ok) setSetState({ status: "ready", sample: parsed.value });
-        else setSetState({ status: "invalid", problem: parsed.problem });
-      })
-      .catch((error: unknown) => {
-        if (!live) return;
-        setSetState({ status: "invalid", problem: error instanceof Error ? error.message : String(error) });
-      });
-    return () => {
-      live = false;
-    };
-  }, [activeAirportCode, entry]);
+  // ── the chosen set (the one loader of every stage, outline §6.2 item 5) ─────
+  const setState = useTrainingSet<TrainingSample>(activeAirportCode && entry ? `${activeAirportCode}/${entry.id}/${entry.file}` : null,
+    () => fetchTrainingSample(activeAirportCode, entry!.file, entry!.id, TRAINING_SPLITS));      // stage A's sets (D109)
+  const intentA = useTrainingSetIntent(showing === "stageA" ? entry?.id ?? null : null);
 
   const sample = setState.status === "ready" ? setState.sample : null;
+  // whether a stage's session is on screen (it draws the details page then); otherwise why not
+  const windowShown = showing === "window" && windowIndex.status === "ready" && !!activeAirportCode && windowIndex.index.airport === activeAirportCode;
+  const priorShown = showing === "prior" && priorIndex.status === "ready" && !!activeAirportCode;
+  const stageAShown = showing === "stageA" && indexState.status === "ready" && entry !== null && !!activeAirportCode;
+  const sessionShown = windowShown || priorShown || stageAShown;
+  const nothingShown = showing === "window" ? `no window set of ${airport} can be read (${trainingWindowIndexPath(airport)})`
+    : showing === "prior" ? `no prior set of ${airport} can be read (${trainingPriorIndexPath(airport)})`
+      : indexState.status === "loading" ? `reading ${trainingIndexPath(airport)}`
+        : indexState.status === "ready" ? "the index lists no set" : `no Training export for ${airport} (${trainingIndexPath(airport)})`;
 
   return (
     <section className="training-panel" aria-label="Learning" hidden={hidden}>
@@ -184,7 +162,7 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
         {/* Everything read ONCE — what the module is, the vocabulary, the readouts — is on the details page, so the
             list keeps the dock's height. */}
         <button type="button" className="training-details-open" aria-haspopup="dialog" aria-label="Training details"
-          title="Training details" onClick={details.open("overview")} disabled={sample === null || showing === "prior"}>
+          title="Training details: the set and the experiment" onClick={details.open(EXPERIMENT_SECTION)}>
           ⓘ
         </button>
       </header>
@@ -202,27 +180,36 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
       {showing === "window" && windowIndex.status === "invalid" ? (
         <ProblemBox title={`${trainingWindowIndexPath(airport)} cannot be read.`} detail={windowIndex.problem} />
       ) : null}
-      {showing === "window" && windowIndex.status === "ready" && activeAirportCode && windowIndex.index.airport === activeAirportCode ? (
+      {windowShown ? (
         <>
           {windowIndex.index.rejected.map((item) => (
             <ProblemBox key={item.id} title={`Entry ${item.id} was rejected.`} detail={item.problem} />
           ))}
           {/* keyed by the airport: another airport's index never opens with this one's set, window or round */}
-          <TrainingWindowSession key={`${activeAirportCode}:${windowIndex.index.airport}`} airport={activeAirportCode} sets={windowIndex.index.sets} />
+          <TrainingWindowSession key={`${activeAirportCode}:${windowIndex.index.airport}`} airport={activeAirportCode} sets={windowIndex.index.sets}
+            details={details} />
         </>
       ) : null}
       {showing === "prior" && priorIndex.status === "invalid" ? (
         <ProblemBox title={`${trainingPriorIndexPath(airport)} cannot be read.`} detail={priorIndex.problem} />
       ) : null}
-      {showing === "prior" && priorIndex.status === "ready" && activeAirportCode ? (
+      {priorShown ? (
         <>
           {priorIndex.index.rejected.map((item) => (
             <ProblemBox key={item.id} title={`Entry ${item.id} was rejected.`} detail={item.problem} />
           ))}
-          <TrainingPriorSession airport={activeAirportCode} sets={priorIndex.index.sets} />
+          <TrainingPriorSession key={activeAirportCode} airport={activeAirportCode} sets={priorIndex.index.sets} details={details} />
         </>
       ) : null}
 
+      {/* no session on screen (no set to open, an index that cannot be read): the page still opens — its ⓘ is never
+          disabled — and says why there is nothing */}
+      {details.shown !== null && !sessionShown ? (
+        <TrainingDetails context={airport} sectionId={details.shown.section} onSection={details.show} onClose={details.close}
+          opener={details.shown.opener} sections={[
+            { id: EXPERIMENT_SECTION, title: "The set and the experiment", body: <p className="training-details-lede">{nothingShown}</p> },
+          ]} />
+      ) : null}
       {showing !== "stageA" ? null : <>
       {indexState.status === "loading" ? <p className="training-note" role="status">Reading {trainingIndexPath(airport)} …</p> : null}
       {indexState.status === "absent" ? <EmptyState airport={airport} /> : null}
@@ -232,15 +219,9 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
 
       {indexState.status === "ready" ? (
         <>
-          {indexState.index.sets.length > 1 ? (
-            <label className="training-field" title={entry?.title}>
-              <span>Set</span>
-              <select value={setId ?? ""} onChange={(event) => setSetId(event.target.value)}>
-                {indexState.index.sets.map((item) => (
-                  <option key={item.id} value={item.id}>{item.id} · {item.flights} flights</option>
-                ))}
-              </select>
-            </label>
+          {indexState.index.sets.length > 0 ? (
+            <SetChooser sets={indexState.index.sets.map((item) => ({ id: item.id, count: `${item.flights} flights`, title: item.title, smoke: false }))}
+              setId={setId} onChange={setSetId} intent={intentA} onOpenExperiment={details.open(EXPERIMENT_SECTION)} />
           ) : null}
 
           {/* ④ an entry that is not a set entry names itself and its field; the others load */}
@@ -254,7 +235,7 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
           {setState.status === "invalid" ? <ProblemBox title={`Set ${setId} cannot be read.`} detail={setState.problem} /> : null}
 
           {activeAirportCode && entry !== null ? (
-            <TrainingFlightSession airport={activeAirportCode} sample={sample} entry={entry} details={details} />
+            <TrainingFlightSession airport={activeAirportCode} sample={sample} entry={entry} details={details} intent={intentA} />
           ) : null}
         </>
       ) : null}

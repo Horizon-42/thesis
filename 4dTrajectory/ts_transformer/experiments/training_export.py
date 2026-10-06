@@ -16,7 +16,7 @@ process that passes the labeller's, the executor's and the closed loop's checks,
 (`closed_loop.require_conforming_closed_loop`, D73). One split's chosen flights, from their head to each Δ's closed-loop
 sentence flown again, are `split_flights` (A36): the Training export of the prior calls it with its own Δ.
 
-WRITES a set ``<root>/<airport>/training/<set-id>/sample.json`` and its entry in ``<root>/<airport>/training/index_v4.json``
+WRITES a set ``<root>/<airport>/training/<set-id>/sample.json`` and its entry in ``<root>/<airport>/training/index_v5.json``
 (`training_files`), never the instruction-v3 view's ``training/index.json``; refused when the set exists. Every airport
 is built before any is written. From a clean tree (the set records the commit).
 
@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -190,12 +191,53 @@ def flown_states_row_cycles(sentence: ClosedLoopSentence, cycle_s: float, step_s
     return np.arange(len(sentence.rows.flown_states)) * int(round(step_s / cycle_s))
 
 
+def flown_sentence(flown: Flown, j: int, geometry: AirportGeometry, reference: FlightSignals, said: np.ndarray,
+                   sentence_step_s: float, aero: np.ndarray, words: Words, *, outcome: str, end_cycle: int,
+                   last_cycle: int, crossing: dict[str, Any] | None) -> dict[str, Any]:
+    """The block of a sentence the executor flew, in every stage (vocabulary §6 item 8; outline §6.2 item 7, D135):
+    flight ``j`` of ``flown``, told the words ``said`` (``[rows, 5]``, rows ``sentence_step_s`` apart, the executor's own
+    sentence rows); ended in ``outcome`` at the state row ``end_cycle``, drawn to the state ``last_cycle``
+    (`training_flights.last_state_cycle`; a window ended at a loss of separation: the end of its row), with its
+    ``crossing`` (`training_flights.crossing_payload`; None when it crossed nothing or no judge ended it). Its outcome and
+    end cycle, the crossing with the DA check, the flight to its outcome on the 2 s rows from the first predicted step,
+    unrounded (``track``: prior D127, for every stage; with its ``attitude``), and the judge's envelopes of the words on it
+    (`envelopes`: each word from the flown row where the executor heard it, `judge.words_said`; None when fewer than two
+    rows were flown), refused unless they end within the track. ``reference``: the observed flight, of which only the
+    identity is read (`judge.flown_signals`). A stage adds its own fields beside it."""
+    spec = words.spec
+    cycles = np.arange(0, last_cycle + 1, int(round(spec.step_s / flown.cycle_s)))
+    whole = flown_track(flown.states[j, : last_cycle + 1].cpu().numpy(), geometry)
+    states = flown.states[j, cycles].cpu().numpy()
+    judged = None
+    smoothed = read_flown(flown, j, outcome, end_cycle, geometry, reference, spec)
+    if smoothed is not None:
+        heard = words_said(flown, j, replay.instructions_of(said, geometry, words), sentence_step_s, spec, end_cycle)
+        reached = [word for word in heard.moved if word.row < len(smoothed.track_deg)]
+        judged = envelopes(reached, smoothed.track_deg, smoothed.distance_m, smoothed.altitude_m,
+                           smoothed.ground_speed_mps, geometry, spec, words)
+        # a heading word whose lead runs past the flight's end has an empty band (``firstRow == stopRow``, maybe past
+        # the track): not judged, and nothing to draw (`envelope.heading_word_rows`)
+        ends = ([band["stopRow"] for band in judged["heading"] if band["stopRow"] > band["firstRow"]]
+                + [tube["endRow"] for tube in judged["altitude"]] + [span["endRow"] for span in judged["speed"]])
+        if max(ends, default=0) > len(cycles):
+            raise ValueError(f"{reference.dataset_id}: an envelope ends at row {max(ends)}, past the flown track's "
+                             f"{len(cycles)} rows")
+    return {"outcome": outcome, "endCycle": int(end_cycle), "crossing": crossing,
+            "track": {"rows": len(cycles), "lastCycle": int(last_cycle), "eM": files.unrounded(whole["e"][cycles]),
+                      "nM": files.unrounded(whole["n"][cycles]), "latDeg": files.unrounded(states[:, LAT]),
+                      "lonDeg": files.unrounded(states[:, LON]), "heightMslM": files.unrounded(states[:, ALT]),
+                      "trackDeg": files.unrounded(np.mod(whole["track"][cycles], 360.0)),
+                      "groundSpeedMps": files.unrounded(whole["ground_speed"][cycles]),
+                      "verticalRateMps": files.unrounded(whole["vertical_rate"][cycles])},
+            "attitude": attitude_payload(executor_attitude(flown, j, cycles, aero)), "envelopes": judged}
+
+
 def replay_payload(flown: Flown, j: int, verdict: Verdict, part: replay.Batch, sentence: ClosedLoopSentence,
                    aero: np.ndarray, spec: VocabularySpec, words: Words) -> dict[str, Any]:
     """The closed-loop sentence flown again (module docstring): refused unless it gives its stored states on every 2 s
-    row and its stored outcome (D74, D86); its outcome, crossing and decision-altitude check with the DA point's place, the
-    flight to its outcome on the 2 s rows from the first predicted step (``track``, with its attitude) and the judge's
-    envelopes on it (refused unless they end within it)."""
+    row and its stored outcome (D74, D86); its block (`flown_sentence`: the flight to its outcome, a dynamics failure's
+    failed state left out, as the live executor draws it) and stage A's own fields: whether it flew the sentence and the
+    words not reached."""
     geometry = part.geometries[j]
     rows = flown_states_row_cycles(sentence, flown.cycle_s, spec.step_s)
     track = flown_track(flown.states[j, : rows[-1] + 1].cpu().numpy(), geometry)
@@ -206,38 +248,12 @@ def replay_payload(flown: Flown, j: int, verdict: Verdict, part: replay.Batch, s
     if verdict.outcome != sentence.withheld.outcome:
         raise ValueError(f"{part.signals[j].dataset_id}: flown again to {verdict.outcome}, stored "
                          f"{sentence.withheld.outcome}")
-    crossing = training_flights.crossing_payload(verdict, flown, j, geometry)
-    judged = None
-    smoothed = read_flown(flown, j, verdict.outcome, verdict.end_row, geometry, part.signals[j], spec)
-    if smoothed is not None:
-        said = words_said(flown, j, part.sentences[j].instructions, part.row_interval_s, spec, verdict.end_row)
-        reached = [word for word in said.moved if word.row < len(smoothed.track_deg)]
-        judged = envelopes(reached, smoothed.track_deg, smoothed.distance_m, smoothed.altitude_m,
-                           smoothed.ground_speed_mps, geometry, spec, words)
-    # the flight to its outcome on the 2 s rows (the stored states end at the sentence's last said row): its last state
-    # the outcome's — a dynamics failure's failed state left out, as the live executor draws it
-    last = training_flights.last_state_cycle(verdict.outcome, verdict.end_row)
-    cycles = np.arange(0, last + 1, int(round(spec.step_s / flown.cycle_s)))
-    whole = flown_track(flown.states[j, : last + 1].cpu().numpy(), geometry)
-    states = flown.states[j, cycles].cpu().numpy()
-    if judged is not None:
-        # a heading word whose lead runs past the flight's end has an empty band (``firstRow == stopRow``, maybe past
-        # the track): not judged, and nothing to draw (`envelope.heading_word_rows`)
-        ends = ([band["stopRow"] for band in judged["heading"] if band["stopRow"] > band["firstRow"]]
-                + [tube["endRow"] for tube in judged["altitude"]] + [span["endRow"] for span in judged["speed"]])
-        if max(ends, default=0) > len(cycles):
-            raise ValueError(f"{part.signals[j].dataset_id}: an envelope ends at row {max(ends)}, past the flown "
-                             f"track's {len(cycles)} rows")
-    return {"outcome": verdict.outcome, "endCycle": int(verdict.end_row), "crossing": crossing,
-            "flewTheSentence": bool(verdict.flew_the_sentence),
-            "notReached": 0 if verdict.words is None else int(verdict.words["not_reached"]),
-            "track": {"rows": len(cycles), "lastCycle": int(last), "eM": files.rounded(whole["e"][cycles], 1),
-                      "nM": files.rounded(whole["n"][cycles], 1), "latDeg": files.rounded(states[:, LAT], 7),
-                      "lonDeg": files.rounded(states[:, LON], 7), "heightMslM": files.rounded(states[:, ALT], 1),
-                      "trackDeg": files.rounded(np.mod(whole["track"][cycles], 360.0), 2),
-                      "groundSpeedMps": files.rounded(whole["ground_speed"][cycles], 2),
-                      "verticalRateMps": files.rounded(whole["vertical_rate"][cycles], 2)},
-            "attitude": attitude_payload(executor_attitude(flown, j, cycles, aero)), "envelopes": judged}
+    block = flown_sentence(flown, j, geometry, part.signals[j], part.sentences[j].grid, part.row_interval_s, aero, words,
+                           outcome=verdict.outcome, end_cycle=verdict.end_row,
+                           last_cycle=training_flights.last_state_cycle(verdict.outcome, verdict.end_row),
+                           crossing=training_flights.crossing_payload(verdict, flown, j, geometry))
+    return {**block, "flewTheSentence": bool(verdict.flew_the_sentence),
+            "notReached": 0 if verdict.words is None else int(verdict.words["not_reached"])}
 
 
 def closed_loop_payload(stored: ClosedLoopSentence, replayed: dict[str, Any], interval_s: float,
@@ -315,6 +331,33 @@ def candidates_block(geometry: AirportGeometry, hae_minus_msl_m: dict[str, float
                     "verticalPath": {"crossingHeightM": path.crossing_height_m, "glidepathDeg": path.glidepath_deg,
                                      "decisionHeightM": path.decision_height_m}})
     return out
+
+
+#: The data trees every checkout links to the live data (outline §5 rule 1), by their place in a checkout.
+LINKED_TREES = ("4dTrajectory/outputs", "aeroviz-4d/public/data/airports")
+
+
+def this_checkout(recorded: str | Path, root: Path = REPO_ROOT) -> Path:
+    """A path a runner recorded — perhaps in another checkout — as this checkout reads it. The linked data trees
+    (`LINKED_TREES`) of the main checkout and of every worktree (``<main>/.claude/worktrees/<name>``) are links to the
+    live data (outline §5 rule 1), so a path under one of them, in whichever checkout recorded it, is the same path under
+    this checkout's tree (the name its checks and the sets it writes give it) — mapped by its place, never through the
+    recording checkout's links, which go when that worktree is deleted. A relative path is the repository's; any other
+    path as recorded. The main checkout is the parent of the live outputs tree's parent."""
+    path = Path(os.path.normpath(recorded))
+    if not path.is_absolute():
+        return root / path
+    main = (root / LINKED_TREES[0]).resolve().parent.parent
+    if not path.is_relative_to(main):
+        return path
+    parts = path.relative_to(main).parts
+    if parts[:2] == (".claude", "worktrees") and len(parts) > 3:
+        parts = parts[3:]                                     # the same place in the worktree that recorded it
+    inside = Path(*parts) if parts else Path()
+    for tree in LINKED_TREES:
+        if inside.is_relative_to(tree):
+            return root / tree / inside.relative_to(tree)
+    return path
 
 
 FORMATS = {"spec": SPEC_SCHEMA, "sentences": SENTENCES_SCHEMA, "closedLoop": CLOSED_LOOP_SCHEMA,
@@ -435,7 +478,8 @@ def main(argv: list[str] | None = None) -> int:
     signals_record = json.loads((instructions / "signals.json").read_text(encoding="utf-8"))
     airports = args.airports or sorted({source["airport"] for source in signals_record["sources"]})
     started = time.perf_counter()
-    existing = {airport: files.read_index(args.root / airport / "training", airport, args.set_id) for airport in airports}
+    existing = {airport: files.FILES.read_index(args.root / airport / "training", airport, args.set_id)
+                for airport in airports}
     built = {}
     for airport in airports:
         payload, count = build_airport(airport, instructions, params, words, per_stratum=args.per_stratum,
@@ -454,9 +498,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{airport}: {count} flights, {len(built[airport][1]) / 1e6:.1f} MB, {time.perf_counter() - started:.0f}s",
               flush=True)
     for airport, (entry, _) in built.items():          # every airport writable before any is written
-        files.require_writable(args.root / airport / "training", airport, entry, existing[airport])
+        files.FILES.require_writable(args.root / airport / "training", airport, entry, existing[airport])
     for airport, (entry, text) in built.items():
-        out = files.write_set(args.root / airport / "training", airport, entry, text, existing[airport])
+        out = files.FILES.write_set(args.root / airport / "training", airport, entry, text, existing[airport])
         print(f"→ {out}")
     return 0
 
