@@ -746,3 +746,51 @@ By airport, the select days' go-arounds: KMSY 3, KRDU 2, KSJC 1, KSMF 4 (one at 
 **Stage C and D133.** `notes/stage_c.md` (on `docs-training-view`, `4fa9f2ee`) step 6: the Training view's files and
 the backend's routes are not changed while the shared layout is built; none of the commits of this section touches
 them.
+
+## 25 C8: the profile at the formal size and the proposal of O13 (2026-10-06)
+
+| Step | Commit | What |
+|---|---|---|
+| The profile's record and one update's memory | `c396f9be` | After the 256-window profile ran out of the GPU's memory in the pass (16 groups an update) and lost its speaking with its record: `profile.json` written after each part; `pass_memory` before the pass — one update's forward and backward (no step) on groups that bound any update of k ≥ 2 groups (the longest, the widest, then the next longest; for k = 1 the longest and the widest), an out-of-memory recorded as the measurement (`ts-post-profile-v2`). Review in three rounds: S2 (the first k groups written are the shortest), S2 (rows bound but not traffic), S3s; all fixed |
+| Merge | `7288de0e` | Stage C onto `dev-two-tier` (the user, 2026-10-06), a merge in the main tree (the profile ran from the worktree); 140 stage C, architecture and window-segment tests passed on it |
+
+**The profiles** (B5's base, A34's artefact v12 at Δ 4 s, executor v17, the formal census; read-only under
+`outputs/POOLED/post/c8_20261006/`, groups deleted after reading). Round 0's draw, K 8, 64 data sentences an update,
+placeholder rates (prior 1e-5, traffic 1e-4, weight decay 0.01, traffic 64 / 4):
+
+| | `profile_32` (`483b81d7`) | `profile_256` (`c396f9be`) |
+|---|---|---|
+| Windows (real, A, D, B) | 8 each, batches 14 / 8 / 8 / 2 | 64 each, batches of 64 (8 left out inside a loss: 4 D, 3 A, 1 real) |
+| One batch under cProfile | 14 windows, 55 s | 64 windows, 113 s (speaker masks 30 s, edge features 4.9 s, prior step 4.1 s, separation scene 3.5 s) |
+| Speaking the round (D94's two passes) | 76 s (2.4 s a window) | 543 s (2.1 s a window) |
+| First pass's ends | 29 landed, 3 lost separation | 189 landed, 53 lost separation, 5 timeout, 4 unstable at minimums, 4 ground contact, 1 crossed another runway |
+| Informative groups, bytes | 5, 3.2 MB | 108 (42 % of the windows), 104 MB (0.96 MB a group) |
+| GPU while speaking | 0.14 GB | 1.3 GB |
+| The pass | 2 updates, 0.7 s, 2.8 GB (update groups 16, 5 held) | update groups 4: 29 updates, 10.5 s, 4.4 GB |
+| Selection readout | 50 windows, 30 s | 50 windows, 14 s |
+| Host | 5.1 GB peak resident | 5.3 GB peak resident |
+
+One update's memory (`profile_256`, the bounding groups: 480 rows, traffic 4; the data term's 64 sentences, 175 rows):
+1 group 2.2 GB, 2 groups 2.9 GB, 4 groups 4.3 GB, 8 groups out of memory (the RTX 4060's 7.6 GB, about 1.2 GB held by
+other processes). The first 256-window run (update groups 16) ran out of memory in the pass. A run stopped when another
+session's job took the host's memory (0 GB available, swap full) had written nothing.
+
+**Reading, as a proposal: the settings of O13** (Claude's, from these numbers; the user chooses, D7 is not applied):
+
+| Setting | Proposal | Basis |
+|---|---|---|
+| Update groups | 4 | 4.3 GB at the bound; 8 run out of memory |
+| Data sentences an update | 64 | measured inside that bound |
+| Batch windows | 64 | 2.1 s a window at 64 against 2.4 s (and 4 s under cProfile) at 14; 1.3 GB on the GPU while speaking; larger batches not measured |
+| Continuations K | 8 | D94 |
+| Windows of each kind in a round (real, A, D, B) | 1,000 each | D100 for real, A, D; B equal by the rule that paired quantities default to equal; the train days admit 40,472 real, 38,448 A, 14,930 D, 40,423 B windows (C9's census) |
+| Rounds | 10 | at the sizes above a round is about 2.5 h (speaking 2.4 h, about 1,700 groups and 1.6 GB on disk, about 420 updates in 2.5 min, the selection readout below 5 min): about 25 h in all |
+| Learning rate, prior | 1e-5 | a thirtieth of the base's 3e-4; at this rate one pass clipped 1.3 % of the words, its pull term 0.006 |
+| Learning rate, traffic modules | 1e-4 | new modules starting at zero output (D116) |
+| Weight decay | 0.01 | the base's |
+| Select windows of each airport | 200 | 0.28 s a window: about 5 min a round; the validation readout reads the same count (D132) |
+| Traffic attention: hidden width, heads | 64, 4 | as profiled (no measurement chose them) |
+
+Not measured: the time with other jobs on the CPU (the 256 run met a load of about 2–3 of 28 cores); larger batches;
+other traffic shapes. The first pass loses separation in 21 % of `profile_256`'s windows (the record does not split
+the ends by kind).
