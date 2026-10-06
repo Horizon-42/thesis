@@ -75,8 +75,9 @@ commits, the tests and the readings are in the implementation log.
 | Milestone | State |
 |---|---|
 | C0–C7, C9, C11 | Built and reviewed on synthetic artefacts; C1, C2 and C9 also on A34's artefact (log §2–§21) |
-| C8, C10 | Code built and reviewed on synthetic artefacts (log §16); the formal runs wait (§0.4) |
-| The validation readout of the chosen round | Not built (§8 C10) |
+| C8 | Code built and reviewed (log §16; the base on the context's device, `6d6502fa`, log §24). Under way on B5's base from `483b81d7` (log §24): the formal census `outputs/POOLED/post/windows_20261006` (D104, `44fb8af8`) and the base's free generation on the select days (`outputs/POOLED/post/c8_20261006/free_generation_select`) done; the profile running |
+| C10 | Code built and reviewed on synthetic artefacts (log §16, §23); D130 `02a85049`; D132's check of the base `483b81d7`. The formal run waits for C8's report, O13 and the user's criteria (D7) |
+| The validation readout of the chosen round | Built and reviewed on synthetic artefacts (`post_validation`, `0c95a821`, log §23; D132 `483b81d7`) |
 | C12 | After C10 |
 
 ### 0.4 Plan

@@ -710,3 +710,39 @@ Tests: every `test_post_*`, the architecture test and the backend's window segme
 - P48: the readout does not refuse a campaign whose base is a smoke prior or a fold (stage B's validation readout does,
   for its own read); `post_train` refuses neither today. The place for it is `post_train`'s formal start, which opens the
   base's run.
+
+## 24 After B5: the formal census, C8 under way, the base on its device, D132 (2026-10-06)
+
+| Step | Commit | What |
+|---|---|---|
+| Merges | `0f100083`, `812a47b1`, `fa141377` | `dev-two-tier` (B5's readout and intents; B6; D132). `812a47b1` fast-forwarded onto `dev-two-tier` (the user, 2026-10-06) |
+| Full ts suite | — | 1,840 passed, 1 skipped, 8 min on 6 workers (stage B's export on the CPU beside it) |
+| The formal census (D104, the user's order) | `44fb8af8` | `post_windows` writes it directly under `4dTrajectory/outputs/POOLED/post/<id>`, of every window of train and select, from a clean tree; anything else under the outputs refused (through the worktree's link or its target). Review: one S2 (the link untested), fixed with a test that stands the outputs in through a link; the outputs root imported from `repo_layout` |
+| The base on its device | `6d6502fa` | C8's first profile on the GPU failed in the pass: the loss's pull read the base on the CPU (`post_profile` never moved it; `run_campaign` did). `open_context` now holds the base on the context's device in eval mode for every caller. Review: no findings |
+| D132 | `483b81d7` | `open_context(formal=…)`: a formal `post_train` start and a formal `post_validation` read refuse a fold (`config.json` run `held_out`) or a smoke prior (checkpoint run `sample`) by name; smoke runs and the profile and the export do not check. On the real runs: B5's base passes, its fold `C_full_s1337/KMSY` is refused. Review: no S1/S2; two S3 (the message read `sample` as a count, the test did not pin "before the claim"), fixed |
+
+**The formal census** (`outputs/POOLED/post/windows_20261006`, from `44fb8af8` on a clean tree, 7 min, read-only with
+`SHA256SUMS` and its log): train KMSY 4,808, KRDU 11,864, KSJC 9,101, KSMF 5,377, KSTL 9,380 windows; select 657,
+1,916, 1,516, 844, 1,266. Its edge reference: 323 steps, 420 tokens, read again with the largest difference 0.0.
+
+**C8, the base's go-around on the final on the select days** (`outputs/POOLED/post/c8_20261006/free_generation_select`,
+stage B's `prior_free_generation` on B5's base, the options of its val read: 200 flights × 2 samples an airport, seed
+1337, chunk 400; from `44fb8af8`, read-only). Inside the selection (landed), pooled over the airports:
+
+| Days | Stratum | Sentences | Go-arounds said | Final rows | Mean probability of "go-around" a final row |
+|---|---|---|---|---|---|
+| select | straight-in | 1,132 | 6 | 39,727 | 7.6e-05 |
+| select | vectored | 746 | 5 | 24,027 | 1.2e-04 |
+| val (B5's readout) | straight-in | 1,242 | 5 | 44,773 | 4.2e-05 |
+| val (B5's readout) | vectored | 652 | 9 | 20,586 | 2.6e-04 |
+
+By airport, the select days' go-arounds: KMSY 3, KRDU 2, KSJC 1, KSMF 4 (one at the bound of D91), KSTL 1. The base says
+"go-around" by itself (§2 item 6); no criterion is applied (D7).
+
+**The profile**: the first run (32 windows, batches of 16, K 8) failed in the pass (above) and was moved aside as
+`profile_32.aborted-20261006T082024Z`; before it failed it spoke the round in about a minute and wrote 3.2 MB of groups
+(2 of 4 files non-empty). Run again from `483b81d7`; its numbers follow.
+
+**Stage C and D133.** `notes/stage_c.md` (on `docs-training-view`, `4fa9f2ee`) step 6: the Training view's files and
+the backend's routes are not changed while the shared layout is built; none of the commits of this section touches
+them.
