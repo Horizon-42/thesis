@@ -1,5 +1,14 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-06 — Multi-aircraft optimization merged into dev-two-tier
+
+- `dev-optimizer-multi-aircraft` merged (the user's order): dev-two-tier merged into the branch twice (de7f0daf, b9a8afec)
+  with the one conflict, aeroviz_backend/http_server.py, resolved keeping dev-two-tier's autopilot routes byte-identical
+  (the user: two-tier first, no two-tier design changed); then dev-two-tier fast-forwarded to b9a8afec. On the merged
+  tree: ts suite 1839 passed, Python 606 (145 subtests), optimizer 215, Vitest 942, tsc clean; reviewed (opus).
+- The live backend 8765 restarted (the user's choice): /traffic answers; a Training word flown live matches its stored
+  states (0.0 m). The branch, its worktree and the test stack (5177, 8782) removed.
+
 ### 2026-10-06 — Multi-aircraft optimization T11: the Optimize task's multi-aircraft mode (one controlled / all controlled)
 
 - Design §10 (the user's order). Optimize gets a mode selector: single aircraft (unchanged), multi-aircraft one

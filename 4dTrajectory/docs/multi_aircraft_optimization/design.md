@@ -10,7 +10,7 @@ miles occur only in quoted text, with the SI value beside them.
 | Item | Value |
 |---|---|
 | Base commit | `dev-two-tier` `a804633e` |
-| Code written | Branch `dev-optimizer-multi-aircraft`: T0 (`bbb18c52`, `5e3826f9`); T1–T6, M1 (`b5f4cd1a`); F9/F10/F13 (`18d73bd0`); T8, M2 (`958c4b71`); MD13 (`c7f2b99e`); T7 (`78ce2fcb`); T10a (`4e6c3ad0`). T10b, T11: in work |
+| Code written | Merged into `dev-two-tier` (fast-forward to `b9a8afec`, 2026-10-06; the branch `dev-optimizer-multi-aircraft` deleted): T0 (`bbb18c52`, `5e3826f9`); T1–T6, M1 (`b5f4cd1a`); F9/F10/F13 (`18d73bd0`); T8, M2 (`958c4b71`); MD13 (`c7f2b99e`); T7 (`78ce2fcb`); T10 (`4e6c3ad0`, `87f5f2f2`); T11 (`7a6dca9b`) |
 | Companion document | `code_review.md` (findings F1 to F13). Step T0 of this design needs F4, F5, F6 (item 3) and F7 |
 | Model of the scenario | The two-tier post-training "one aircraft commanded" (`ts_transformer/docs/two_tier/design/post_training.md` D29, D93) |
 | Dependency on `ts_transformer` | Two pure modules, read-only, through one adapter (§6, §7). No other import. No shared output |
