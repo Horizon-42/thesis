@@ -73,4 +73,8 @@ instructions/training_files.py、experiments/post_training_export.py、post/trai
       两种模式必须给出相同的掩码。
     每个里程碑：单文件测试 → 独立审查（只审代码）→ 显式路径提交 → 日志一行。
     C10 在跑：这些代码都不合并进 dev-two-tier，也不碰 two-tier-v4-post 工作树。
+11. C10 是在 .claude/worktrees/two-tier-v4-post 工作树里跑的，不是主树（你的记忆里写成了主树，请改掉）。
+    就让它在那里跑完：主树和 dev-two-tier-v4 上的提交都影响不到它。
+    只是 CPU 和 GPU 跟它共用，所以只有测速度（第 5 步对 base 的那次运行）要等 C10 结束，
+    否则测出来的时间被 C10 拖慢，不准；写代码、跑测试、A44 / C13 / B14 都不用等。
 ```
