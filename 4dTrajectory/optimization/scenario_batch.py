@@ -119,6 +119,8 @@ def _resumable_record(
     if record.get("target_state") != state_dict(scenario.target):
         return None
     final_time = record.get("final_time_s")
+    if sidecar_suffix and not (out / sidecar_filename(name, sidecar_suffix)).is_file():
+        return None                            # a traffic batch: every record, failed or solved, has its sidecar
     if final_time is None:
         return (name, _summary_record(
             scenario, status="failed", states_file=None,
@@ -126,8 +128,6 @@ def _resumable_record(
             reason=record["reason"],
         ))
     if not (out / name).is_file():
-        return None
-    if sidecar_suffix and not (out / sidecar_filename(name, sidecar_suffix)).is_file():
         return None
     row = _summary_record(
         scenario, status="solved", states_file=name, eval_file=eval_path.name,
@@ -140,11 +140,12 @@ def _resumable_record(
 
 
 def write_failed_record(
-    out: Path, scenario: FlightScenario, index: int, error: str, *,
-    optimization_config: dict[str, Any], references_dir: str | None,
+    out: Path, scenario: FlightScenario, index: int, error: str, result_dict: dict[str, Any] | None, *,
+    optimization_config: dict[str, Any], references_dir: str | None, sidecar_suffix: str | None,
 ) -> dict[str, Any]:
-    """An unsolved scenario's eval record (empty lists — how the evaluation computes the solve rate);
-    returns its summary row."""
+    """An unsolved scenario's eval record (empty lists — how the evaluation computes the solve rate), and when
+    ``sidecar_suffix`` its sidecar ``result_dict["sidecar"]`` (a traffic batch's failed sidecar: why, and the solves
+    it timed); returns its summary row."""
     eval_name = eval_filename(scenario_filename(scenario, index))
     failed_record = failed_evaluation_record(
         scenario.initial, scenario.target, scenario.source, error, subject="optimized",
@@ -152,6 +153,9 @@ def write_failed_record(
     failed_record["optimization_config"] = optimization_config
     if references_dir:
         failed_record["reference_file"] = f"{references_dir}/{reference_filename(scenario_filename(scenario, index))}"
+    if sidecar_suffix:                         # the sidecar first: a record never stands without it (resume checks)
+        (out / sidecar_filename(scenario_filename(scenario, index), sidecar_suffix)).write_text(
+            json.dumps(result_dict["sidecar"], separators=(",", ":"), allow_nan=False), encoding="utf-8")
     (out / eval_name).write_text(json.dumps(failed_record, separators=(",", ":"), allow_nan=False), encoding="utf-8")
     return _summary_record(scenario, status="failed", states_file=None, eval_file=eval_name,
                            final_time_s=None, reason=error)
@@ -268,7 +272,8 @@ def run_batch(
         scenario = scenarios[index]
         if error is not None:
             failures.append((flight_id, error))
-            records[index] = write_failed_record(out, scenario, index, error, optimization_config=optimization_config,
+            records[index] = write_failed_record(out, scenario, index, error, result_dict,
+                                                 optimization_config=optimization_config, sidecar_suffix=sidecar_suffix,
                                                  references_dir=references_dir)
             print(f"✗ {flight_id}: skipped ({error.split(':', 1)[0]})")
             return

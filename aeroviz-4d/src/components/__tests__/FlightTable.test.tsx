@@ -198,7 +198,7 @@ describe("FlightTable", () => {
     rerender(<FlightTable flightIds={flightIds} flightSummaries={flightSummaries} />);
     expect(screen.getByText("UPS1276").getAttribute("title")).toBe(`${UPS} — traffic: separated after re-solve (separated)`);
     expect(screen.getByText("FDX1738").getAttribute("title"))
-      .toBe(`${FDX} — optimized but missed the target (off target) — traffic: loss left (re-solve failed; last good solve shown) (solve_failed)`);
+      .toBe(`${FDX} — optimized but missed the target (off target) — traffic: loss left — the best of its solves is shown (fewest losses) (solve_failed)`);
   });
 
   it("adds a scene group's delay (rounded) to its row's info text, and none when it has no slot", () => {

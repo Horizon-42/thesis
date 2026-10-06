@@ -6,9 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * backend client answering from a script.
  */
 
-const { api, app, pilotMounts } = vi.hoisted(() => ({
+const { api, app, pilotMounts, pilot } = vi.hoisted(() => ({
+  pilot: { fetchPilotAircraftConfigs: vi.fn() },
   api: {
-    fetchTrafficArrivals: vi.fn(),
+    fetchTrafficScenarios: vi.fn(),
     startTrafficJob: vi.fn(),
     fetchTrafficJob: vi.fn(),
     cancelTrafficJob: vi.fn(),
@@ -31,6 +32,10 @@ vi.mock("../../context/AppContext", () => ({ useApp: () => app }));
 vi.mock("../../data/trafficJobs", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../data/trafficJobs")>()),
   ...api,
+}));
+vi.mock("../../pilot/pilotClient", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../pilot/pilotClient")>()),
+  ...pilot,
 }));
 vi.mock("../ControlPanel", () => ({ default: () => <div>CONTROL_PANEL</div> }));
 vi.mock("../FlightTable", () => ({ default: () => <div>FLIGHTS</div> }));
@@ -55,12 +60,10 @@ vi.mock("../PilotPanel", async () => {
 });
 
 import WorkbenchLeftDock from "../WorkbenchLeftDock";
+import catalogMirror from "../../data/__tests__/fixtures/trafficScenarioCatalog.json";
 
 const JOB = "20261006T120000123456Z-0123abcd";
-const ARRIVAL = {
-  flightKey: "AAL1_05L_a_1", callsign: "AAL1", runway: "05L", type: "A320",
-  entryUtc: "2026-05-21T17:00:00Z", landingUtc: "2026-05-21T17:00:10Z" };
-const running = { state: "running", progress: { done: 0, total: 1, current: null }, error: null };
+const running = { state: "running", progress: { done: 0, total: 1, current: null, phase: "optimizing 1 of 1" }, error: null };
 
 const dock = () => <WorkbenchLeftDock flightIds={[]} flightSummaries={{}} />;
 const kindSelect = () => screen.getByLabelText("Mode") as HTMLSelectElement;
@@ -69,8 +72,9 @@ const show = (mode: string) => { app.mode = mode; };
 beforeEach(() => {
   vi.useFakeTimers();
   window.localStorage.clear();
-  for (const mock of [...Object.values(api), app.setSelectedFlightId, app.setTrafficScene]) mock.mockReset();
-  api.fetchTrafficArrivals.mockResolvedValue({ airport: "KRDU", date: "2026-05-21", arrivals: [ARRIVAL] });
+  for (const mock of [...Object.values(api), ...Object.values(pilot), app.setSelectedFlightId, app.setTrafficScene]) mock.mockReset();
+  pilot.fetchPilotAircraftConfigs.mockResolvedValue([]);
+  api.fetchTrafficScenarios.mockResolvedValue(catalogMirror);   // a MIRROR of the census's catalog (data/__tests__/trafficJobs.test.ts)
   api.startTrafficJob.mockResolvedValue(JOB);
   api.fetchTrafficJob.mockResolvedValue(running);
   api.cancelTrafficJob.mockResolvedValue({ ...running, state: "cancelled" });
@@ -84,9 +88,8 @@ const settle = () => act(async () => { await vi.advanceTimersByTimeAsync(0); });
 
 async function startM1Job() {
   fireEvent.change(kindSelect(), { target: { value: "m1" } });
-  fireEvent.change(screen.getByLabelText("UTC day"), { target: { value: "2026-05-21" } });
   await settle();
-  fireEvent.click(screen.getByText("AAL1"));
+  fireEvent.click(screen.getByText(/^SWA3131 · /));
   fireEvent.click(screen.getByRole("button", { name: "Start" }));
   await settle();
 }

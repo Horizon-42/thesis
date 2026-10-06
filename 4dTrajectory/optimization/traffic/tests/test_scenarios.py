@@ -53,7 +53,7 @@ def test_judge_record_counts_only_the_instants_it_answers_for(monkeypatch):
     monkeypatch.setattr(ts, "check", lambda w, flown, *, reading, step_s: Check(np.zeros(1), conflicts, 0))
     scenario = SimpleNamespace(traffic=SimpleNamespace(flight=lambda key: own))
     row = ts.judge_record((scenario, "root", 2000.0, 1.0))
-    assert row == {"flightKey": "A", "lossInstants": 2, "kinds": [rules.RADAR_OR_VERTICAL],
+    assert row == {"flightKey": "A", "category": None, "lossInstants": 2, "kinds": [rules.RADAR_OR_VERTICAL],
                    "tightest": pytest.approx(3000.0 / 5556.0), "recordedAircraft": 1}
 
 

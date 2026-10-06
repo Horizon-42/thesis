@@ -21,11 +21,14 @@ export const TRAFFIC_OUTCOMES = [
 
 export type TrafficOutcome = typeof TRAFFIC_OUTCOMES[number];
 
+const LOSS_LEFT = "loss left — the best of its solves is shown (fewest losses)";
+
 const OUTCOME_NAMES: Record<TrafficOutcome, string> = {
   separated_at_baseline: "separated at the first solve (no re-solve)",
   separated: "separated after re-solve",
-  unresolved: "loss left (round limit)",
-  solve_failed: "loss left (re-solve failed; last good solve shown)",
+  // MD14: the loop keeps the solve with the fewest counted loss instants, so in both the record is the best of its solves
+  unresolved: LOSS_LEFT,
+  solve_failed: LOSS_LEFT,
   wake_at_fixed_time: "wake loss left (landing time fixed)",
 };
 

@@ -25,6 +25,7 @@ import HUD from "./components/HUD";
 import HudLayers from "./components/HudLayers";
 import WorkbenchRightInspector from "./components/WorkbenchRightInspector";
 import WorkbenchBottomBar from "./components/WorkbenchBottomBar";
+import SceneClockLabels from "./components/SceneClockLabels";
 import SceneTimeReadout from "./components/SceneTimeReadout";
 import ProcedureDetailsPage from "./components/ProcedureDetailsPage";
 import ProcedureAnnotationPopup from "./components/ProcedureAnnotationPopup";
@@ -121,6 +122,7 @@ function FlightApp() {
       >
         <AirportLocalTerrainAlert />
         <SceneTimeReadout />
+        <SceneClockLabels />
         <ProcedureAnnotationPopup />
         <ApproachViewPanel />
         {/* Procedures is an independent panel docked bottom-right (grid-area ops); it

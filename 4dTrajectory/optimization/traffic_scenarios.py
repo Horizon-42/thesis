@@ -44,7 +44,7 @@ def judge_record(payload: tuple[WindowScenario, str, float, float]) -> dict[str,
     own = scenario.traffic.flight(window.flight_key)
     found = check(window, FlownTrack.from_record(window, own, step_s), reading=rules.VISUAL, step_s=step_s)
     answered = [c for c in found.conflicts if c.responsible]
-    return {"flightKey": window.flight_key, "lossInstants": len({c.t_s for c in answered}),
+    return {"flightKey": window.flight_key, "category": window.category, "lossInstants": len({c.t_s for c in answered}),
             "kinds": sorted({c.kind for c in answered}),
             "tightest": min((c.distance_m / c.required_m for c in answered), default=None),
             "recordedAircraft": len(window.recorded)}
@@ -85,7 +85,7 @@ def _roster_row(flight: dict[str, Any], key: str, typecode: str | None) -> dict[
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--airport", required=True)
+    parser.add_argument("--airport", required=True, type=str.upper, help="ICAO code (the catalog's directory name)")
     parser.add_argument("--harvest-root", default=str(HARVEST_ROOT), help="the live harvest root (never harvest-heldout)")
     parser.add_argument("--procedure-root", default=str(DEFAULT_PROCEDURE_ROOT))
     parser.add_argument("--outputs-root", default=str(OUTPUTS_ROOT))

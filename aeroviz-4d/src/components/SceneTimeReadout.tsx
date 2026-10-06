@@ -12,8 +12,13 @@ import { useApp } from "../context/AppContext";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import { formatSceneTime, sceneRealTimeMs } from "../utils/sceneTime";
 
-/** The readout is redrawn at most this often (ms of wall time): a clock at 60× moves a minute per second. */
-const REDRAW_MS = 250;
+/**
+ * The readout is redrawn when a clock tick finds this much wall time gone since its last draw. It must be well under a quarter of
+ * a second: a draw waits for the next tick (a frame, 17 ms at 60 fps), so a 250 ms wait came out at 255 ms or more and the readout
+ * updated less than four times a second. At 100 ms it updates ten times a second at frame rate — and never fewer than four unless
+ * the frames themselves are slower than that, when nothing on the screen moves faster either.
+ */
+const REDRAW_MS = 100;
 
 export default function SceneTimeReadout() {
   const { viewer, sceneTime, mode, layers } = useApp();

@@ -17,7 +17,8 @@ import pytest
 from aeroviz_backend import traffic_jobs as tj
 from scenario_batch import SOLVER_THREAD_ENV
 from traffic_job_files import (
-    BLOCK_LENGTHS_S, COMPARISON_DIR, INDEX_FILE, PROCESS_FILE, PROGRESS_FILE, SPEC_FILE, STATE_FILE, write_json_atomic)
+    BLOCK_LENGTHS_S, CATALOG_SCHEMA, COMPARISON_DIR, INDEX_FILE, PROCESS_FILE, PROGRESS_FILE, SPEC_FILE, STATE_FILE,
+    catalog_command, catalog_path, write_json_atomic)
 from trajectory_data_process.harvest.utc import iso_utc, iso_utc_ms
 
 T0 = 1_800_000_000.0
@@ -32,7 +33,7 @@ FAKE_JOB = textwrap.dedent('''
         os.replace(os.path.join(out, name + ".tmp"), os.path.join(out, name))
     if behaviour == "late":
         time.sleep(60)                                         # nothing written for a long while
-    write("progress.json", {"done": 0, "total": 2, "current": None})
+    write("progress.json", {"done": 0, "total": 2, "current": None, "phase": "optimizing 1 of 2"})
     if behaviour == "env":
         write("env.json", {name: os.environ.get(name) for name in sys.argv[sys.argv.index("--vars") + 1].split(",")})
     if behaviour == "orphan":
@@ -40,7 +41,8 @@ FAKE_JOB = textwrap.dedent('''
         write("pids.json", {"pid": os.getpid(), "child": child.pid})
         sys.exit(0)
     if behaviour == "done_then_hang":
-        write("state.json", {"state": "done", "error": None, "summary": {"windows": 1}})
+        write("state.json", {"state": "done", "error": None, "summary": {"windows": 1}, "perAircraft": {},
+                             "timing": {"totalS": 1.0, "phases": {"optimizing": 1.0}}, "stayedRecords": {}})
         time.sleep(60)
     if behaviour == "hang":
         child = subprocess.Popen(["sleep", "60"])              # a grandchild in the job's process group
@@ -50,11 +52,14 @@ FAKE_JOB = textwrap.dedent('''
         sys.exit(3)
     if behaviour == "slow":
         time.sleep(0.3)
-    write("progress.json", {"done": 2, "total": 2, "current": "X"})
+    write("progress.json", {"done": 2, "total": 2, "current": "X", "phase": "building the scene"})
     if behaviour == "fail":
         write("state.json", {"state": "failed", "error": "ValueError: no way"})
         sys.exit(1)
-    write("state.json", {"state": "done", "error": None, "summary": {"windows": 1}})
+    write("state.json", {"state": "done", "error": None, "summary": {"windows": 1},
+                         "perAircraft": {"X": {"firstSolveLosses": 3, "finalLosses": 0}},
+                         "timing": {"totalS": 2.5, "phases": {"reading traffic": 0.5, "optimizing": 2.0}},
+                         "stayedRecords": {"Y": {"callsign": "YYY1", "type": "C172"}}})
 ''')
 
 
@@ -84,9 +89,75 @@ def stack(tmp_path):
         asked.append(icao24)
         return "A320" if icao24 == "a00001" else None
 
-    jobs = tj.TrafficJobs(tmp_path / "jobs", harvest_root=tmp_path / "harvest", command=command, typecode_of=typecode)
+    jobs = tj.TrafficJobs(tmp_path / "jobs", harvest_root=tmp_path / "harvest", outputs_root=tmp_path / "outputs",
+                          command=command, typecode_of=typecode)
     yield jobs, behaviour, asked, tmp_path
     jobs.shutdown()
+
+
+# ── the scenario catalog (design §10.6): read from disk, read only ─────────────────────────────────────────────
+
+def _write_catalog(tmp_path, airport, payload):
+    path = catalog_path(tmp_path / "outputs", airport)
+    path.parent.mkdir(parents=True)
+    path.write_text(payload if isinstance(payload, str) else json.dumps(payload))
+    return path
+
+
+def test_the_catalog_of_an_airport_is_served_as_written(stack):
+    jobs, _behaviour, _asked, tmp_path = stack
+    catalog = {"schema": CATALOG_SCHEMA, "airport": "KRDU", "m1": [], "m2": {"900": [], "1800": [], "3600": []}}
+    _write_catalog(tmp_path, "KRDU", catalog)
+    assert jobs.scenarios("krdu") == catalog                          # the code is normalised as the other routes' are
+
+
+def test_a_missing_catalog_is_a_file_not_found_that_names_the_command(stack):
+    jobs, _behaviour, _asked, _tmp = stack
+    with pytest.raises(FileNotFoundError) as caught:
+        jobs.scenarios("KRDU")
+    assert f"`{catalog_command('KRDU')}`" in str(caught.value)
+    assert "no scenario catalog for KRDU" in str(caught.value)
+
+
+def test_the_command_the_404_names_is_the_census_script_of_the_repository():
+    script = catalog_command("KRDU").split()[1]
+    assert (tj.paths.REPO_ROOT / script).is_file()
+    assert catalog_command("KSEA").endswith("--airport KSEA")
+
+
+@pytest.mark.parametrize("payload, found", [
+    ({"schema": "traffic-scenario-catalog-v1", "m1": []}, "'traffic-scenario-catalog-v1'"),
+    ({"m1": []}, "None"),
+    ([1, 2], "None"),
+])
+def test_a_catalog_of_another_schema_is_refused_by_the_schema_it_found(stack, payload, found):
+    jobs, _behaviour, _asked, tmp_path = stack
+    _write_catalog(tmp_path, "KRDU", payload)
+    with pytest.raises(tj.CatalogUnreadable) as caught:
+        jobs.scenarios("KRDU")
+    assert f"has schema {found}" in str(caught.value) and CATALOG_SCHEMA in str(caught.value)
+
+
+def test_a_catalog_that_is_not_json_is_refused_by_name(stack):
+    jobs, _behaviour, _asked, tmp_path = stack
+    _write_catalog(tmp_path, "KRDU", "{not json")
+    with pytest.raises(tj.CatalogUnreadable, match="is not UTF-8 JSON .JSONDecodeError"):
+        jobs.scenarios("KRDU")
+
+
+def test_a_catalog_that_is_not_utf8_is_refused_by_name_not_as_a_bad_request(stack):
+    jobs, _behaviour, _asked, tmp_path = stack
+    path = _write_catalog(tmp_path, "KRDU", "{}")
+    path.write_bytes(b'{"schema": "\xff\xfe"}')                      # UnicodeDecodeError is a ValueError: the route maps those to 400
+    with pytest.raises(tj.CatalogUnreadable, match="UnicodeDecodeError"):
+        jobs.scenarios("KRDU")
+
+
+def test_a_bad_airport_code_is_a_value_error_not_a_path(stack):
+    jobs, _behaviour, _asked, _tmp = stack
+    for bad in ("../x", "K R", ""):
+        with pytest.raises(ValueError):
+            jobs.scenarios(bad)
 
 
 def group_alive(pgid):
@@ -201,11 +272,45 @@ def test_a_job_runs_to_done_with_its_progress_and_its_readout(stack):
     running = jobs.status(job_id)
     assert running["state"] == "running" and running["error"] is None
     done = finished(jobs, job_id)
-    assert done == {"state": "done", "progress": {"done": 2, "total": 2, "current": "X"}, "error": None,
-                    "summary": {"windows": 1}}
+    assert done == {"state": "done", "error": None, "summary": {"windows": 1},
+                    "progress": {"done": 2, "total": 2, "current": "X", "phase": "building the scene"},
+                    "perAircraft": {"X": {"firstSolveLosses": 3, "finalLosses": 0}},
+                    "timing": {"totalS": 2.5, "phases": {"reading traffic": 0.5, "optimizing": 2.0}},
+                    "stayedRecords": {"Y": {"callsign": "YYY1", "type": "C172"}}}      # all four of a done state, as written
     spec = json.loads((tmp_path / "jobs" / job_id / SPEC_FILE).read_text())
     assert spec == {"mode": "m1", "airport": "KRDU", "manifest": str(tmp_path / "harvest/KRDU/arrivals/manifest.json"),
                     "flightKey": "AAA_05L"}
+
+
+def test_the_phase_the_job_wrote_is_in_the_status_while_it_runs(stack):
+    jobs, behaviour, *_ = stack
+    behaviour["now"] = "hang"
+    job_id = jobs.start(M1)["jobId"]
+    wait_for(lambda: (jobs.jobs_root / job_id / "pids.json").is_file())
+    assert jobs.status(job_id)["progress"] == {"done": 0, "total": 2, "current": None, "phase": "optimizing 1 of 2"}
+    jobs.cancel(job_id)
+
+
+@pytest.mark.parametrize("lacking", [["perAircraft"], ["timing"], ["stayedRecords"],
+                                     ["summary", "perAircraft", "timing", "stayedRecords"]])
+def test_a_done_state_without_what_a_done_state_holds_is_refused_by_name(stack, lacking):
+    jobs, behaviour, *_ = stack
+    behaviour["now"] = "slow"
+    job_id = jobs.start(M1)["jobId"]
+    finished(jobs, job_id)
+    path = jobs.jobs_root / job_id / STATE_FILE
+    state = json.loads(path.read_text())
+    write_json_atomic(path, {k: v for k, v in state.items() if k not in lacking})
+    with pytest.raises(tj.JobStateInvalid, match=f"has no {', '.join(lacking)}"):
+        jobs.status(job_id)
+
+
+def test_a_failed_job_has_no_per_aircraft(stack):
+    jobs, behaviour, *_ = stack
+    behaviour["now"] = "fail"
+    job_id = jobs.start(M1)["jobId"]
+    failed = finished(jobs, job_id)
+    assert failed["state"] == "failed" and "perAircraft" not in failed and "summary" not in failed
 
 
 def test_a_status_before_the_first_progress_has_no_total(stack):
@@ -214,7 +319,7 @@ def test_a_status_before_the_first_progress_has_no_total(stack):
     job_id = jobs.start(M1)["jobId"]
     assert not (jobs.jobs_root / job_id / PROGRESS_FILE).exists()
     assert jobs.status(job_id) == {"state": "running", "error": None,
-                                   "progress": {"done": 0, "total": None, "current": None}}
+                                   "progress": {"done": 0, "total": None, "current": None, "phase": "starting"}}
     jobs.cancel(job_id)
 
 
@@ -586,7 +691,9 @@ def test_a_cancel_never_overwrites_a_state_that_says_done(stack, monkeypatch):
 
     def finish_while_stopping(job):
         # the job wrote its result in the instant before the signal reached it
-        write_json_atomic(jobs.jobs_root / job / STATE_FILE, {"state": "done", "error": None, "summary": {"windows": 1}})
+        write_json_atomic(jobs.jobs_root / job / STATE_FILE, {"state": "done", "error": None, "summary": {"windows": 1},
+                                                              "perAircraft": {}, "timing": {"totalS": 1.0, "phases": {}},
+                                                              "stayedRecords": {}})
         real_stop(job)
     monkeypatch.setattr(jobs, "_stop", finish_while_stopping)
 
