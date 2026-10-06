@@ -60,7 +60,7 @@ changed); 3 (the runway head's class order) is a detail of the code. The code fo
 | After A36 of stage A (`split_flights`, the closed-loop part of A23's export as one function), merged into this branch | B6's export of the closed-loop sentences beside the prior's own, through `split_flights` at the prior's Δ; stage B does not change A23's code |
 | After A32 of stage A (the corrections of Claude's review, vocabulary D77–D84), merged into this branch | The reader of item 3 with the later-row fields apart (D82), the start that reads no sample after the first predicted step (D77) and the candidates decided by no flight (D78), followed in `prior/` and its runners; the tests on synthetic artefacts again |
 
-## 3 Specifications of the milestones that are done (was §12: B0–B4, B8–B13)
+## 3 Specifications of the milestones that are done (was §12: B0–B13)
 
 **B0. Package and layout.**
 
@@ -296,3 +296,40 @@ results stay valid. The report gives the changed names for §7.
   each new part of the behaviour answer changes the answer.
 - Not ordered: tying the observed rows to the `Loop` that the start returns (a change of stage A's start); stage C
   passes them as the start gives them.
+
+**B5. Cross-validation and the base** Moved here from the design on 2026-10-06, after B5 was done (`prior_base_20261006`). (D39, D40, D41, D75, D108).
+
+- The 31 training runs of §5 as one campaign (`prior_campaign`) on a clean checkout, one at a time on the GPU: each
+  fold's training and then its free generation at its held-out airport; after step 2 the choice of the configuration,
+  after step 3 the choice of the variant (`prior_select`, the rules of §5, written as a choice); then the base and its
+  one validation readout (`prior_validation`, then free generation on the val days). 65 steps in all.
+- Before each step the behaviour check of D108; the commit of each step recorded as information. A step whose output
+  lacks its last file (a crash, a kill) is moved aside and run again; a run is never repeated otherwise.
+- Every run reads the sentences of the selection `landed` (D75, D111). For each fold: the held-out loss, the first-step
+  runway at the held-out airport, the free generation at the held-out airport (§5).
+- No criterion is applied: the user reads the results (D7).
+
+**B6. The Training view of stage B (outline §6).** Moved here from the design on 2026-10-06, after B6's publication (`prior_sets_20261006`). The user sees what the prior says and how the executor flies it.
+
+- **Export** (`prior_training_export`). For each flight of the sample: the observed rows before the first predicted
+  step; the sentences that the prior says in free generation and their flown states (several sentences of one flight
+  side by side); the closed-loop sentence of the same flight; the outcome and the DA check of each; at each row, the
+  words that the procedure masks blocked; the region, the glidepath lower edge, the DA and the entry height of R. Every
+  prior sentence is flown again and must equal its readout's states within the executor's bound; its track is written
+  unrounded (D127). Sets: each fold of B5
+  at its held-out airport (the flights of its free generation), and the base model (its one validation readout, only
+  when claimed, outline D109). Its own schema names and its own index beside stage A's (outline §6 item 3).
+- **Frontend.** The Training view of stage A with the prior's sentences: the five columns, a choice of sentence, the
+  blocked words at a row, the procedure's limits drawn, the outcome. A click on a word flies its segment live with the
+  executor of stage A, refused past the executor's bound from the exported track or with another outcome (D127); the base's val set opens and flies live, and no other set with a val flight opens (outline
+  D109).
+- **Publication and view** (after B5). The intent of each set in `docs/experiments/intents.json`; a test stack from the
+  worktree; the browser check (outline §6 items 4–6).
+- **Tests.** The export (a sample written and read again); the frontend's readers on fixtures that the export writes;
+  a live segment equals the export's flown states.
+
+**B7. Close of stage B.** Moved here from the design on 2026-10-06, after B7 was done (`d1386a77`). The full ts suite passes (run detached). The implementation log and
+`docs/reference/runners.md` are updated (the runners `prior_train`, `prior_select`, `prior_free_generation`,
+`prior_validation`, `prior_campaign`, `prior_behaviour`, `prior_training_export`); the report gives the code index for
+§11 (outline §5 rule 10). `dev-two-tier-v4` merges `dev-two-tier-v4-prior` (outline §5 rule 1). Report to the user: the
+commits, the readings of each fold and of the base, the choice and its rule, and what stage C needs.
