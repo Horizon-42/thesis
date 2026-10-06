@@ -92,6 +92,8 @@ commits, the tests and the readings are in the implementation log.
 4. The window view (C11) and the window export change with the one layout of the three stages' Training views (outline
    §6.2, D133–D135: the results page, the rounds' envelopes, one block of a flown sentence), built by stage B's
    implementer.
+5. The generalisations of §9 marked "to be built" (multi-aircraft control D149, its MC0), each checked against stage
+   C's code before the change, bit for bit; nothing of them goes into C10's worktree.
 
 Every milestone from now on is built by stage B's implementer on `dev-two-tier-v4`, in the worktree
 `.claude/worktrees/two-tier-v4` (outline §5 rule 1). `dev-two-tier-v4-post` is merged into `dev-two-tier`; it and its
@@ -111,7 +113,8 @@ worktree are deleted after C10 ends.
   words and a copy of chosen aircraft), the teacher-forced loss with the sentences under a selection and the
   log-probability of given words under a record, the place for an added module, the region of a final, the step of a
   speaker's closed loop and the Training export's procedure block (items 1–8).
-- **It gives** the post-trained checkpoints and the window readouts, and their Training view (outline §6).
+- **It gives** the post-trained checkpoints and the window readouts, and their Training view (outline §6); to the
+  multi-aircraft control, its public interface (§9).
 
 ---
 
@@ -492,3 +495,31 @@ stages) on `dev-two-tier-v4`, after vocabulary A44, before the next campaign; C1
 updated; the report gives the code index for §7 (outline §5 rule 10). Report to the user: the commits, the rounds and
 their readings. The user merges (outline §5 rule 11). A later stage with every aircraft of a window commanded is
 optional (§2 item 8).
+
+---
+
+## 9 Public interface
+
+What the multi-aircraft control (stage D, `multi_control.md`) reads of the post-training, and nothing else: its code
+imports from `post/` and from stage C's runners only the names of the "Code" column (multi-aircraft control D149).
+Where one commanded aircraft becomes several, stage C's code is generalised, not copied: each generalisation is
+written here before it is built ("to be built"), keeps stage C's behaviour (with one commanded aircraft in each
+window: the same words, states, rewards and branch groups, bit for bit, on fixed inputs, against the outputs of the
+code before the change) and changes no format of this document, so C10's checkpoints and readouts stay valid. The
+implementer's report gives the names that change, and Claude writes them here.
+
+| # | Item | What it gives | Code |
+|---|---|---|---|
+| 1 | The scene and a window | The recorded flights of a split, an aircraft at a step, a scene; a window and its kinds (real, A, D, B), the census. To be built (multi-aircraft control D149, MC0): a window holds one or more commanded aircraft, each with its own shift (a whole number of Δ); stage C's windows hold one | `post/scene.py` `Recorded`, `AircraftAt`, `Scene`, `MovedScene`, `Window`, `StartMove`, `real_windows`, `inserted_window`, `leader_moved_window`, `moved_start_window`, `census` |
+| 2 | The landings of a window | The roster's landings with the window's changes, less the commanded aircraft's own (D105). To be built (multi-aircraft control D149, MC0): less every commanded aircraft's own | `post/landings.py` `window_landings` |
+| 3 | The separation judge's inputs and the losses | The aircraft of a step for the judge, "established" (D92), the separation rules of an airport, the approach clock; the loss that the commanded aircraft answers for; D113. To be built (multi-aircraft control D149, MC0): every loss of a step with its two aircraft and the ones the rules make responsible, so that a caller applies its own rule (stage D's D145); `commanded_loss` stays the loss of aircraft 0 | `post/traffic.py` `traffic`, `commanded_loss`, `loss_at_first_step`, `opens_inside_loss`, `joined`; `post/established.py` `established`; `post/runways.py` `airport_separation`, `approach_clock_m` |
+| 4 | The tokens and their conformance | The edge features and the motion of each other aircraft (`post-edges-v1`) and their check (§4 item 1, D104) | `post/edges.py` `tokens`, `TOKEN_FEATURES`; `post/conformance.py` `require_conforming_edges`; `experiments/post_window_loop.py` `checked_edges` |
+| 5 | The speed-word mask | A caller's mask on the speed column (§3, D110) | `post/speed_mask.py` `speed_check`, `along_course_speeds` |
+| 6 | The reward | D30's reward of an aircraft; the present landing direction (D112) | `post/reward.py` `reward`, `present_runways` |
+| 7 | The traffic attention | The module at each layer, its input, its learning rate (`post-traffic-attention-v2`). To be built (multi-aircraft control D149, MC0): a token part that a caller adds (its own token inputs beside the edge features, through its own projection that starts at zero, under its own format name); without it, today's module and tokens, bit for bit | `post/traffic_attention.py` `TrafficConfig`, `Traffic`, `traffic_of`, `TrafficTokens`, `TrafficAttention`, `add_traffic_attention`, `parameter_groups` |
+| 8 | The window loop | The commanded aircraft of a batch of windows through the speaker's closed loop (prior §7 item 7), the scene at each step, the judge, the masks of a caller, the copy of a window at a branch point. To be built (multi-aircraft control D149, MC0): a window is one or more rows of the batch, each joining at its own tick (prior §7 item 7); an aircraft made silent (a caller's mask that permits only "unchanged" in every column); a window ends when every commanded aircraft is done or silent; each aircraft's result; a landing in the loop added to the other aircraft's landings; the copy copies every aircraft of the window | `experiments/post_window_loop.py` `WindowLoop`, `WindowResult`, `moved_commanded` |
+| 9 | Branch training | The random numbers of a round, the branch points, the groups and their samples (D37, D94). To be built (multi-aircraft control D149, MC0): the numbers of each aircraft, the varied aircraft and their branch points, and a window's reward are rules that the caller gives (stage C's: D94's streams, its one aircraft with a reward below 1, its reward); a group names its varied aircraft | `post/branches.py` `first_numbers`, `continuation_numbers`, `branch_points`, `Group`, `samples`, `BRANCH_EVERY_S`, `CONTINUATIONS`; `experiments/post_branches.py` `branch_round` |
+| 10 | The loss | The surrogate, the pull to the base and the data term of an update (§2 item 5, D107, D115) | `post/loss.py` `Samples`, `surrogate`, `pull_to_base`, `data_term`, `update_loss`, `one_pass` |
+| 11 | The campaign's steps | The draw of a round, the batches, the speaking workers, the pass, the selection readout, the checks at the start, the resume. To be built (multi-aircraft control D149, MC0): the round's skeleton given a stage's draw, window loop and readouts; stage C's campaign is that skeleton with its own | `experiments/post_train.py` `draw_round`, `batches`, `Speakers`, `speak_round`, `train_pass`, `selection_readout`, `open_context`, `run_campaign` |
+| 12 | The checkpoint | A post-trained round (`ts-post-checkpoint-v1`) and its identity (§4 item 3). To be built (multi-aircraft control D149, MC0): one function that opens a chosen round as the start of a later stage, with its identity | `experiments/post_train.py` `POST_CHECKPOINT_SCHEMA` |
+| 13 | The window sets | The files of a window set and its Training export (for stage D's Training view) | `post/training_files.py`; `experiments/post_training_export.py` |
