@@ -153,9 +153,10 @@ The next free numbers: D159, O19.
 6. The speed of the closed loop (D138), by stage B's implementer on `dev-two-tier-v4` (§5 rule 1), before stage C's next
    campaign: vocabulary A44 first, since C13 uses it, then post-training C13 and prior B14. Each is measured after it is
    built (`post_profile` at C10's settings, `model_speed` of frontend §3 item 10). Nothing of it is merged into `dev-two-tier`
-   while C10 runs. Items 5 and 6 are built and reviewed; their steps after C10 (B14's real-data check, C13's GPU check,
-   the base's speed readout, the export of stages A's and B's sets, the browser check, the merge report) go to stage
-   D's implementer (§5 rule 1). They come first now that C10 is done.
+   while C10 runs. Items 5 and 6 are built and reviewed; their steps after C10 are done (2026-10-07, by stage D's
+   implementer, stage B's log §6): B14's real-data check word for word, C13's GPU check identical (the weights within
+   float rounding), the base's speed readout, the sets of stages A and B exported again in the new formats (the old
+   sets moved aside as `<id>.v10-old` and `<id>.v3-old`, the user's choice), the browser check.
 7. Stage D (multi-aircraft control §0.4), by stage D's implementer on `dev-multi-control` (§5 rule 1), after the
    user's decisions of its §0.1 (all decided 2026-10-06): MC0 (the interfaces of stages A, B and C that it needs, D150, D149, D152) and
    MC1 (the census). Their code and their tests on synthetic inputs while C10 runs; their checks on real data and the

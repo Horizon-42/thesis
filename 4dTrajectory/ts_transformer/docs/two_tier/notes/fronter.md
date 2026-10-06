@@ -38,6 +38,11 @@ F1 光标滑块（frontend §6.1，D155）：
   - C：失去间隔；
   - 每个阶段都标首个预测步。
 - 测试见 frontend §8 F1。
+- 阶段 D 的浏览器检查顺带看到三处小问题（阶段 B 日志 §6 末尾），F1 里一起改：
+  - docs/experiments/intents.json 里阶段 A 的 intent 还写着 index_v4.json，改成 index_v5.json；
+  - 在阶段 B 选了样本页时，读回图窗口的标题仍写 "closed loop · Δ 4 s"（数据其实是样本的），改成样本的名字；
+  - 阶段 B 左栏 "At the cursor" 的标签和文字重叠（滑块换掉概率条时一起解决）。
+- frontend §0.3 第一行（The one layout）：C10 之后的那几步已由阶段 D 做完（阶段 B 日志 §6），把状态改成已完成。
 - 浏览器检查交给一次性子代理。测试栈从你的工作树起，用自己的端口和 scratch 数据目录，放新格式的冒烟集
   （可以复制 B 当时的 /tmp/claude-1000/-home-supercomputing-studys-thesis/7767b9f9-586d-4d01-9b82-2949db171a8a/scratchpad/public_v4，
   不在了就用现有导出在 scratch 里生成）。报告给出地址和停止命令。
