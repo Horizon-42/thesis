@@ -36,6 +36,9 @@ OUTPUTS = REPO_ROOT / "4dTrajectory" / "outputs"
 STAGES = {"A": stage_a_files.FILES, "B": prior_files.FILES, "C": post_files.FILES}
 #: Stage A's labelling and closed loop: these splits only (never val, vocabulary D85).
 STAGE_A_SPLITS = ("train", "select")
+#: The variants whose scores a variant choice holds: MIRROR of `experiments/prior_select.py` `choose_variant`, which
+#: writes them by these names (a runner the backend does not import).
+CHOICE_VARIANTS = ("full", "constants")
 #: The reader of the base's teacher-forced validation readout (`experiments/prior_validation.py`'s claim).
 VALIDATION_READER = "prior_validation"
 
@@ -202,13 +205,15 @@ class TrainingResults:
                         None)
         if campaign is None:
             raise Unreadable(f"{model['prior']} belongs to no campaign under the outputs (no campaign.json above it)")
-        out = {}
-        for step in ("configuration", "variant"):
-            made = self.read(campaign / f"choice_{step}.json")
-            out[step] = {"arms": {name: {"score": arm["score"], "folds": arm["folds"]} for name, arm in made["arms"].items()},
-                         "seedScale": made["seed_scale"], "bestScore": made["best_score"], "within": made["within"],
-                         "chosen": made["chosen"]}
-        return out
+        def step(made: Mapping[str, Any]) -> dict[str, Any]:
+            return {"arms": {name: {"score": arm["score"], "folds": arm["folds"]} for name, arm in made["arms"].items()},
+                    "seedScale": made["seed_scale"], "chosen": made["chosen"]}
+
+        configuration = self.read(campaign / "choice_configuration.json")
+        variant = self.read(campaign / "choice_variant.json")
+        return {"configuration": {**step(configuration), "bestScore": configuration["best_score"],
+                                  "within": configuration["within"]},
+                "variant": {**step(variant), "scores": {name: variant[name] for name in CHOICE_VARIANTS}}}
 
     def speed(self, source: Mapping[str, Any]) -> dict[str, Any]:
         """The model's speed readout the set names (D136): the model it timed (stage B: the prior; C: the campaign's

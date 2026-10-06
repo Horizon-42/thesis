@@ -50,9 +50,16 @@ export interface TrainingFreeGenerationCell {
 export interface TrainingChoiceStep {
   arms: Record<string, { score: number; folds: Counts }>;
   seedScale: number;
+  chosen: string;
+}
+/** The configuration's choice: the best score and the configurations within the seed scale of it. */
+export interface TrainingChoiceConfiguration extends TrainingChoiceStep {
   bestScore: number;
   within: string[];
-  chosen: string;
+}
+/** The variant's choice: each variant's score. */
+export interface TrainingChoiceVariant extends TrainingChoiceStep {
+  scores: Counts;
 }
 export interface TrainingSpeedSetting {
   device: string;
@@ -86,7 +93,7 @@ export interface TrainingStageBResults {
     sides: Record<string, Record<string, Record<string, TrainingFreeGenerationCell>>> }>;
   training: TrainingResultSection<{ bestEpoch: number; epochs: Array<{ epoch: number; trainLossPerStep: number; selectLossPerStep: number }> }>;
   validation: TrainingResultSection<{ lossPerStep: number; perColumn: Counts; masksOnLabelledWords: Record<string, Record<string, Counts>> }>;
-  choice: TrainingResultSection<{ configuration: TrainingChoiceStep; variant: TrainingChoiceStep }>;
+  choice: TrainingResultSection<{ configuration: TrainingChoiceConfiguration; variant: TrainingChoiceVariant }>;
   speed: TrainingResultSection<TrainingSpeed>;
 }
 export interface TrainingStageCResults {
@@ -122,8 +129,7 @@ function choiceStep(reader: Reader): TrainingChoiceStep {
       const arm = Reader.of(value, where);
       return { score: arm.number("score"), folds: arm.record("folds", asNumber) };
     }),
-    seedScale: reader.number("seedScale"), bestScore: reader.number("bestScore"), within: reader.strings("within"),
-    chosen: reader.string("chosen"),
+    seedScale: reader.number("seedScale"), chosen: reader.string("chosen"),
   };
 }
 
@@ -208,7 +214,14 @@ export function parseTrainingSetResults(ok: boolean, raw: unknown, setId: string
           return { lossPerStep: forced.number("lossPerStep"), perColumn: forced.record("perColumn", asNumber),
             masksOnLabelledWords: s.record("masksOnLabelledWords", (side, at) => recordOf(side, at, counts)) };
         }),
-        choice: section(sections, "choice", (s) => ({ configuration: choiceStep(s.child("configuration")), variant: choiceStep(s.child("variant")) })),
+        choice: section(sections, "choice", (s) => {
+          const configuration = s.child("configuration");
+          const variant = s.child("variant");
+          return {
+            configuration: { ...choiceStep(configuration), bestScore: configuration.number("bestScore"), within: configuration.strings("within") },
+            variant: { ...choiceStep(variant), scores: variant.record("scores", asNumber) },
+          };
+        }),
         speed: section(sections, "speed", speed),
       };
     }

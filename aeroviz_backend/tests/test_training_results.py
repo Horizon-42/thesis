@@ -64,7 +64,9 @@ def world(tmp_path):
     arms = {"arms": {"C_full": {"score": 1.36, "folds": {"KXXX": 1.3}}}, "seed_scale": 0.002, "best_score": 1.36,
             "within": ["C"], "chosen": "C"}
     write(campaign / "choice_configuration.json", arms)
-    write(campaign / "choice_variant.json", arms)
+    # the variant step's own fields (prior_select): each variant's score, no best score
+    write(campaign / "choice_variant.json", {"arms": arms["arms"], "seed_scale": 0.002, "full": 1.36, "constants": 1.37,
+                                             "chosen": "full"})
     prior = campaign / "base" / "run"
     write(prior / "config.json", {})
     write(prior / "history.json", {"best_epoch": 2, "epochs": [
@@ -136,6 +138,7 @@ def test_stage_b_answers_its_results_and_the_val_days_only_for_the_claimed_set(w
     sections = answered(world, "B", "fixture_set")
     assert sections["freeGeneration"]["sides"]["inside"]["KXXX"]["vectored"]["goArounds"] == 1
     assert sections["training"]["bestEpoch"] == 2 and sections["choice"]["configuration"]["chosen"] == "C"
+    assert sections["choice"]["variant"]["scores"] == {"full": 1.36, "constants": 1.37}
     assert sections["speed"]["settings"][0]["rowMs"]["max"] == pytest.approx(8.0)
     assert sections["validation"] == {"ok": False, "problem": sections["validation"]["problem"]}
     assert "claimed validation readout" in sections["validation"]["problem"]

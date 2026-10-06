@@ -230,12 +230,12 @@
        "score": 1.36
       }
      },
-     "bestScore": 1.36,
-     "chosen": "C",
-     "seedScale": 0.002,
-     "within": [
-      "C"
-     ]
+     "chosen": "full",
+     "scores": {
+      "constants": 1.37,
+      "full": 1.36
+     },
+     "seedScale": 0.002
     }
    },
    "freeGeneration": {
@@ -377,12 +377,12 @@
        "score": 1.36
       }
      },
-     "bestScore": 1.36,
-     "chosen": "C",
-     "seedScale": 0.002,
-     "within": [
-      "C"
-     ]
+     "chosen": "full",
+     "scores": {
+      "constants": 1.37,
+      "full": 1.36
+     },
+     "seedScale": 0.002
     }
    },
    "freeGeneration": {

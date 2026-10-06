@@ -10,7 +10,9 @@
 import type { ReactElement, ReactNode } from "react";
 import type {
   Counts,
+  TrainingChoiceConfiguration,
   TrainingChoiceStep,
+  TrainingChoiceVariant,
   TrainingFreeGenerationCell,
   TrainingLabellingSplit,
   TrainingReplayResult,
@@ -145,23 +147,25 @@ export function ValidationSection({ lossPerStep, perColumn, masksOnLabelledWords
   );
 }
 
-function ChoiceTable({ name, step }: { name: string; step: TrainingChoiceStep }) {
+function ChoiceTable({ name, step, said }: { name: string; step: TrainingChoiceStep; said: string }) {
   const folds = [...new Set(Object.values(step.arms).flatMap((arm) => Object.keys(arm.folds)))].sort();
   return (
     <>
-      <h4 className="training-details-subhead">The {name}: {step.chosen} (best {step.bestScore.toFixed(4)}, seed scale {step.seedScale.toFixed(4)}, within it: {step.within.join(", ")})</h4>
+      <h4 className="training-details-subhead">The {name}: {step.chosen} ({said}, seed scale {step.seedScale.toFixed(4)})</h4>
       <Table label={`The choice of the ${name}`} head={["arm", "score", ...folds]}
         rows={Object.entries(step.arms).map(([arm, value]) => [arm, value.score.toFixed(4), ...folds.map((f) => value.folds[f]?.toFixed(4) ?? "–")])} />
     </>
   );
 }
 
-export function ChoiceSection({ configuration, variant }: { configuration: TrainingChoiceStep; variant: TrainingChoiceStep }) {
+export function ChoiceSection({ configuration, variant }: { configuration: TrainingChoiceConfiguration; variant: TrainingChoiceVariant }) {
   return (
     <>
       <p className="training-details-lede">The campaign's two choices, each arm's score over its folds (the held-out airports).</p>
-      <ChoiceTable name="configuration" step={configuration} />
-      <ChoiceTable name="variant" step={variant} />
+      <ChoiceTable name="configuration" step={configuration}
+        said={`best ${configuration.bestScore.toFixed(4)}, within twice the seed scale of it: ${configuration.within.join(", ")}`} />
+      <ChoiceTable name="variant" step={variant}
+        said={Object.entries(variant.scores).map(([name, score]) => `${name} ${score.toFixed(4)}`).join(", ")} />
     </>
   );
 }
