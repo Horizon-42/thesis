@@ -542,3 +542,21 @@ other aircraft labelled at once after a window or a round is chosen (the bar at 
 four Draw switches stay, no console error. It saw once a jump back to the first window after A → round 0 → start that
 two repeats did not show; the session file was changed (the cursor fix) while the check ran, and vite's reload of the
 module mounts the session anew on its first window — the likely cause.
+
+## 21 B13 followed (2026-10-06)
+
+| Step | Commit | What |
+|---|---|---|
+| Merge | `138b0ca0`, `ed76d6bd` | B13 (`142272f0`) and `dev-two-tier` |
+| B13 followed | `2933a66b` | PRIOR_INTERFACE: `holds_claim` (deleted by B13) replaced by `holds_written_claim`, with §7's `written_claim`, `spend_validation_claim`, `CLAIM_SPENT_BY` (each checked to exist). `prior.apart_from_exported` now refuses past the executor's bound or at another outcome or end cycle (D127), so the window export writes each round's track unrounded (`aeroviz-training-window-sample-v2`, the frontend mirror with it) and the window route passes the round's sentence; the traffic and window B's moved start stay rounded (drawn only). Reviewed, correct |
+
+Tests: Python 144 passed (the backend's window and prior segments, the architecture test, every `test_post_*`), vitest
+741 passed, tsc clean.
+
+The test stack follows: the smoke set exported again (v2, 0.9 MB for 10 windows, from 0.7 MB rounded), the test backend
+restarted on the new code; a live segment flown against it is the export's flight to 0.0 m over 126 rows (judged
+landed, 26 ms).
+
+**Reading, as a proposal.** P45: prior D127 is followed for windows (the window route uses stage B's check, which now
+refuses past the bound); the unrounded track makes a set's file larger (here 1.3×) — a formal set's size is to be read
+at its export.
