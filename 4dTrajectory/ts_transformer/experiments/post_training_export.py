@@ -312,7 +312,7 @@ def main(argv: list[str] | None = None) -> int:
     checked_edges(edges_reference)                                                  # D104
     settings = settings_of(record)
     context = open_context(Path(inputs["prior"]), instructions, executor, edges_reference, torch.device(args.device),
-                           Path(inputs["procedure_root"]), data=False)
+                           Path(inputs["procedure_root"]), formal=False, data=False)
     airports = args.airports or sorted(context.geometries)
     signals_record = json.loads((instructions / "signals.json").read_text(encoding="utf-8"))
     existing = {airport: files.read_index(args.root / airport / "training", airport, args.set_id) for airport in airports}

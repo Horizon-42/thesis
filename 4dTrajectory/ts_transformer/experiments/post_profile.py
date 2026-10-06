@@ -178,7 +178,7 @@ def main(argv: list[str] | None = None) -> int:
     edges_reference = census / "conformance" / "edges.npz"
     checked_edges(edges_reference)
     device = torch.device(args.device)
-    context = open_context(prior_dir, instructions, executor, edges_reference, device, procedure_root)
+    context = open_context(prior_dir, instructions, executor, edges_reference, device, procedure_root, formal=False)
     out.mkdir(parents=True)
     record = {"schema": PROFILE_SCHEMA, "started_utc": utc_now(), "git": git_state(), "checks": opened["checks"],
               "inputs": {"prior": str(prior_dir), "instructions": str(instructions), "executor": str(executor),

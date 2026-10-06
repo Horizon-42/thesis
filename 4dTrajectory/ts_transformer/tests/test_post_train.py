@@ -67,7 +67,7 @@ def test_the_context_holds_the_base_on_its_device(monkeypatch, tmp_path):
     monkeypatch.setattr(post_train, "Words", lambda spec: None)
     monkeypatch.setattr(post_train, "ArtefactSource", lambda *a: None)
     context = post_train.open_context(tmp_path, tmp_path, tmp_path, tmp_path, torch.device("meta"), tmp_path,
-                                      data=False, splits=())
+                                      formal=False, data=False, splits=())
     assert next(context.base.parameters()).device.type == "meta" and not context.base.training
 
 
@@ -253,3 +253,57 @@ def test_a_formal_campaign_needs_a_clean_tree_and_its_intent(tmp_path, monkeypat
     with pytest.raises(SystemExit):
         post_train.main(argv)
     assert not (tmp_path / "no_such_campaign_20991231").exists()
+
+
+def test_a_formal_context_refuses_a_fold_or_a_smoke_prior(monkeypatch, tmp_path):
+    """D132: a formal campaign and its validation readout (``formal``) take stage B's formal base only; a fold or a smoke
+    prior is refused by name; a smoke run does not check."""
+    def opened(held_out, sample):
+        base = torch.nn.Linear(2, 2)
+        base.config = SimpleNamespace(variant="full")
+        return SimpleNamespace(directory=tmp_path / "run", config={"run": {"held_out": held_out}},
+                               checkpoint=SimpleNamespace(model=base, identity={}, run={"sample": sample}),
+                               interval_s=4.0, geometries={}, landings={}, selection="landed")
+
+    monkeypatch.setattr(post_train, "load_spec", lambda instructions: None)
+    monkeypatch.setattr(post_train, "Words", lambda spec: None)
+    monkeypatch.setattr(post_train, "ArtefactSource", lambda *a: None)
+
+    def context(prior, formal):
+        monkeypatch.setattr(post_train, "open_prior", lambda *a, **k: prior)
+        return post_train.open_context(tmp_path, tmp_path, tmp_path, tmp_path, CPU, tmp_path, formal=formal,
+                                       data=False, splits=())
+
+    with pytest.raises(SystemExit, match="is a fold"):
+        context(opened("KSJC", None), True)
+    with pytest.raises(SystemExit, match="is a smoke prior"):
+        context(opened(None, {"per_airport_and_split": 200, "seed": 1337}), True)     # prior_train's record
+    assert context(opened(None, None), True).base_identity == {}
+    assert context(opened("KSJC", {"per_airport_and_split": 200, "seed": 1337}), False).base_identity == {}
+
+
+def test_a_formal_campaign_checks_its_base_and_a_smoke_does_not(tmp_path, monkeypatch):
+    """`post_train` opens the context with ``formal`` true for a formal campaign, false for a smoke (D132)."""
+    asked = []
+    intents = tmp_path / "intents.json"
+    intents.write_text(json.dumps({"campaigns": {"campaign_20991231": {}}}))
+    monkeypatch.setattr(post_train, "INTENTS", intents)
+    monkeypatch.setattr(post_train, "git_state", lambda: {"head": "x", "dirty": False})
+    monkeypatch.setattr(post_train, "require_conforming_closed_loop", lambda *a: (None, {"checks": {}}, None))
+    monkeypatch.setattr(post_train, "checked_edges", lambda path: None)
+
+    def stop(*a, formal, **k):
+        asked.append(formal)
+        raise RuntimeError("opened")
+
+    monkeypatch.setattr(post_train, "open_context", stop)
+    argv = ["--prior", str(tmp_path / "p"), "--instructions", str(tmp_path / "i"), "--executor", str(tmp_path / "e"),
+            "--windows", str(tmp_path / "w"), "--procedure-root", str(tmp_path / "cifp"),
+            "--out", str(tmp_path / "campaign_20991231"), "--rounds", "1", "--batch-windows", "1",
+            "--seed", "1", "--prior-lr", "1e-4", "--traffic-lr", "1e-3", "--weight-decay", "0", "--update-groups", "1",
+            "--data-sentences", "1", "--select-per-airport", "1", "--traffic-hidden", "16", "--traffic-heads", "4"]
+    argv += [x for kind in KINDS for x in (f"--windows-{kind.lower()}", "1")]
+    for extra in ([], ["--smoke"]):
+        with pytest.raises(RuntimeError, match="opened"):
+            post_train.main(argv + extra)
+    assert asked == [True, False] and not (tmp_path / "campaign_20991231").exists()
