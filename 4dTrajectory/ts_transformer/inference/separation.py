@@ -5,8 +5,8 @@ aircraft at one time. What the rules need that is not geometry is handed in by t
 aircraft's runway in force, its position on the approach clock (metres along its runway's landing direction from the
 airport's common origin: the threshold's `Separation.along_nm` less the distance still before it), its track less that
 runway's course and its distance right of the runway's extended centreline (both signed), whether it is established
-on its final (the capture of the labeller or the executor), and its CWT category (None: the record has no type). This package does not reach the instruction language
-(the architecture test), so the caller measures those.
+on its final (the caller's, by its rule of one row: post-training D92), and its CWT category (None: the record has no
+type). This package does not reach the instruction language (the architecture test), so the caller measures those.
 
 Two readings of the rules (design §3.2; user 2026-09-27, provisional): the closed loop's checks and the reward use
 `VISUAL`, and `IFR` is reported beside it.

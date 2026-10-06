@@ -15,9 +15,9 @@ EACH ROUND r:
 3. **The speaking** (`speak_round`, `experiments.post_branches.branch_round`): every batch's two passes of D94 with
    the model at the start of the round; its informative groups written to ``round_<r>/groups_<k>.pt`` (a round's groups
    are not held in memory, the reviewer's estimate of C6) and its first pass's ends counted.
-4. **One training pass** (`train_pass`, §2 item 5): the written groups, `update_groups` at a time, each paired with
-   `data_sentences` single-aircraft sentences of the train days in the base's selection (D36, D76;
-   `prior.source.ArtefactSource`), through the loss of C7 (`post.loss.one_pass`: the surrogate and the pull in eval
+4. **One training pass** (`train_pass`, §2 item 5): the written groups, each file's in an order shuffled by the
+   round's numbers (D130), `update_groups` at a time, each paired with `data_sentences` single-aircraft sentences of
+   the train days in the base's selection (D36, D76; `prior.source.ArtefactSource`), through the loss of C7 (`post.loss.one_pass`: the surrogate and the pull in eval
    mode, the data term with dropout, D107; every counted row alike, D115), the traffic modules at their own learning
    rate (`parameter_groups`).
 5. **The selection readout** (`selection_readout`): a fixed set of real windows of the select days (drawn once with the
@@ -288,10 +288,12 @@ def speak_round(model: Prior, context: Context, windows: Sequence[Window], setti
 def update_pairs(directory: Path, data: Sequence[Any], settings: Settings, rng: np.random.Generator,
                  device: torch.device) -> Iterator[tuple[Samples, RowTensors]]:
     """The updates of a round's pass (module docstring, step 4): its written groups, file by file in the order they were
-    spoken, `Settings.update_groups` at a time (a file's last update may hold fewer), each paired with
+    spoken, each file's groups in an order shuffled by ``rng`` (the round's numbers; D130: an update mixes branch points
+    and windows), `Settings.update_groups` at a time (a file's last update may hold fewer), each paired with
     `Settings.data_sentences` sentences of ``data`` drawn by ``rng``. A file is read when its first update is drawn."""
     for path in sorted(directory.glob("groups_*.pt"), key=lambda p: int(p.stem.split("_")[1])):
-        groups: list[Group] = torch.load(path, weights_only=False)
+        loaded: list[Group] = torch.load(path, weights_only=False)
+        groups = [loaded[int(i)] for i in rng.permutation(len(loaded))]
         for k in range(0, len(groups), settings.update_groups):
             chosen = rng.choice(len(data), size=min(settings.data_sentences, len(data)), replace=False)
             yield samples(groups[k:k + settings.update_groups], device), collate([data[int(i)] for i in chosen], device)

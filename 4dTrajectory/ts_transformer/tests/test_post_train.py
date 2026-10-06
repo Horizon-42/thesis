@@ -112,6 +112,29 @@ def test_the_pass_reads_the_groups_file_by_file_a_few_at_a_time(setup, tmp_path)
     assert train_pass(model, context, optimizer, empty, settings, np.random.default_rng(0)) == {"updates": 0}
 
 
+def test_the_pass_shuffles_each_file_s_groups_by_the_round_s_numbers(tmp_path, monkeypatch):
+    """D130: each file's groups in an order drawn by the round's numbers, the files still in the order spoken; the same
+    numbers give the same order."""
+    directory = tmp_path / "round"
+    directory.mkdir()
+    torch.save(list(range(8)), directory / "groups_0.pt")
+    torch.save(list(range(10, 15)), directory / "groups_1.pt")
+    monkeypatch.setattr(post_train, "samples", lambda groups, device: list(groups))
+    monkeypatch.setattr(post_train, "collate", lambda sentences, device: None)
+    settings = _settings(update_groups=3)
+
+    def updates(seed):
+        return [chunk for chunk, _ in update_pairs(directory, list(range(4)), settings, np.random.default_rng(seed),
+                                                   CPU)]
+
+    chunks = updates([1337, 0, 1])
+    first = [g for chunk in chunks for g in chunk]
+    assert sorted(first[:8]) == list(range(8)) and sorted(first[8:]) == list(range(10, 15))
+    assert first != sorted(first) and updates([1337, 0, 1]) == chunks and updates([1337, 1, 1]) != chunks
+    # the file is shuffled before it is cut, so an update mixes groups spoken more than one update apart
+    assert any(max(c) - min(c) >= settings.update_groups for c in chunks)
+
+
 def short_round(monkeypatch, s):
     """The round's windows replaced by one short window (its own flight inserted 8 s ahead: lost at its first row flown,
     one branch point), so a round flies only a few rows; the draw has its own test, the real window's whole flight
