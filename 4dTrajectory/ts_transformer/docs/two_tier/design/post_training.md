@@ -467,7 +467,8 @@ runs C10 to its end.
   as §4 item 2. Tests: it refuses a second read; it reads no train or select window.
 - A formal campaign and its validation readout refuse a base that is not stage B's formal base (D132).
 
-**C13. The speed of a round** (outline D138), by stage B's implementer (outline §5 rule 1: one implementer for all
+**C13. The speed of a round** (outline D138; built and reviewed, `65a21c57`; the memory rule's correction and its GPU
+run after C10 open), by stage B's implementer (outline §5 rule 1: one implementer for all
 stages) on `dev-two-tier-v4`, after vocabulary A44, before the next campaign; C10 gets none of it.
 
 - The selection readout's batches are spoken by the speaking workers (`Speakers`), each window with its own seeded
@@ -476,7 +477,10 @@ stages) on `dev-two-tier-v4`, after vocabulary A44, before the next campaign; C1
 - The windows are started through vocabulary A44's `Start`, one for each split, opened in the campaign's process before
   the workers fork, so that they share its memory.
 - O15: before a campaign starts, one worker's host and GPU memory is measured, and N workers are refused by name where
-  they do not fit.
+  they do not fit: N times one worker's peak, the main process's growth in one update (on the measured batch's groups)
+  and the other workers' held memory must fit the host and the GPU (outline D139 (9)). A worker's peak leaves out the
+  parent's pages that it shares (`SwapPss`, or its reading at its start taken off) and counts the reader model and the
+  series it keeps over a round (Claude's review, findings 9 and 10).
 - Tests: the selection readout through two workers equals the one-process readout on a synthetic campaign; a round
   started through `Start` equals one started through `start_moved` (the words, the rewards, the states).
 - Size: about 80 lines of `post_train.py`, 30 of the window loop's start, 80 of tests. After it, `post_profile` at C10's
