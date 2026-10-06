@@ -854,3 +854,38 @@ saw 480 and 4), and an update of four groups is padded to its longest and widest
 | The pass in pieces | `832555a5` | The user's decision (2026-10-06; an exception to `notes/stage_c.md`'s "C runs C10 without changing code"): `post.loss.update_step` — each branch group a piece, its surrogate and pull divided by the whole update's counted rows, its backward at once; the data term whole (its dropout); `update_loss` kept as the reference and checked equal (parts to 1e-6, gradients to rounding, the clipped counts equal; a piece normalised by its own rows fails the test). `update_pairs` yields a piece a group; the profile measures pieces, with the group of the largest rows × traffic beside (a proxy, not a bound; `ts-post-profile-v3`). Review in two rounds: two S2 (a test of the branches not updated; the profile's bound wording), four S3; all fixed. On round 4's real groups with round 3's model: an update of the four largest (668 rows, traffic 7) peaks at 1.58 GB, the same for one, two or four groups |
 | Merge | `af36ebe8` | `dev-two-tier` (docs only: D137–D139, the notes) into the branch; `dev-two-tier` fast-forwarded to it |
 | Resume | — | From the worktree at `af36ebe8`, 18:36, five workers (load 1.3, 23 GB of host memory, the GPU 0.5 GB used; the speaking's peak about 1.24 GB a worker): round 4 from round 3's checkpoint. Rounds 0–3 ran the whole update; rounds 4–9 run it in pieces (the same loss, float rounding apart) |
+
+**Round 4 and five workers (2026-10-06).** Round 4 ran 18:36–19:13 with five workers and the pass in pieces: the
+selection readout's mean reward KMSY / KRDU / KSJC / KSMF / KSTL 0.865 / 0.805 / 0.865 / 0.785 / 0.81; landed 83.7 %,
+lost separation 13.2 % of its 1,000 windows (round 0: 80.2 %, 14.9 %). The speaking with five workers peaked at 7.24 of
+the GPU's 7.59 GB; round 5's speaking ran out of the GPU's memory at 19:47 (62 of about 63 batches spoken; the five
+workers held 1.2–1.7 GB each at once). The campaign resumed at once with four workers (round 5 begun anew from round 4's
+checkpoint; the half round moved aside): their speaking peaked at about 5.6 GB in rounds 1–3, and the pass in pieces
+needs about 1.6 GB. Four is the most this GPU holds safely; the user's rule of five cannot hold on it.
+
+**C10 done (2026-10-06, 22:46).** `post_train_20261006`: ten rounds, each closed by its checkpoint; the data read-only
+(`SHA256SUMS`, 219 files; the run's logs in `logs/`). The aborted half rounds (`round_1/4/5.aborted-…`, 3.3 GB of
+groups) are kept read-only with it. The selection readout (the same 1,000 select windows and numbers every round):
+
+| Round | Workers | Landed | Lost separation | Mean reward | KMSY | KRDU | KSJC | KSMF | KSTL | Informative groups | Updates | Pull (KL) | Data term |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | 3 | 80.2 % | 14.9 % | 0.793 | 0.820 | 0.750 | 0.835 | 0.785 | 0.775 | 1,477 | 391 | 0.0117 | 1.0860 |
+| 1 | 4 | 82.6 % | 13.9 % | 0.819 | 0.875 | 0.800 | 0.845 | 0.780 | 0.794 | 1,253 | 331 | 0.0184 | 1.0807 |
+| 2 | 4 | 81.0 % | 15.7 % | 0.802 | 0.835 | 0.770 | 0.830 | 0.790 | 0.785 | 1,237 | 332 | 0.0216 | 1.0773 |
+| 3 | 4 | 83.2 % | 13.7 % | 0.824 | 0.875 | 0.800 | 0.855 | 0.775 | 0.815 | 1,144 | 307 | 0.0235 | 1.0728 |
+| 4 | 5 | 83.7 % | 13.2 % | 0.826 | 0.865 | 0.805 | 0.865 | 0.785 | 0.810 | 1,205 | 324 | 0.0262 | 1.0713 |
+| 5 | 4 | 83.8 % | 13.2 % | 0.830 | 0.894 | 0.800 | 0.850 | 0.785 | 0.820 | 1,231 | 331 | 0.0287 | 1.0783 |
+| 6 | 4 | 85.1 % | 11.3 % | 0.842 | 0.870 | 0.830 | 0.850 | 0.795 | 0.865 | 1,106 | 303 | 0.0321 | 1.0763 |
+| 7 | 4 | 84.8 % | 11.8 % | 0.840 | 0.895 | 0.830 | 0.840 | 0.780 | 0.855 | 1,201 | 326 | 0.0330 | 1.0744 |
+| 8 | 4 | 85.7 % | 11.7 % | 0.849 | 0.890 | 0.805 | 0.855 | 0.815 | 0.880 | 870 | 244 | 0.0348 | 1.0687 |
+| 9 | 4 | 85.0 % | 12.0 % | 0.840 | 0.885 | 0.810 | 0.865 | 0.820 | 0.820 | 1,161 | 315 | 0.0344 | 1.0759 |
+
+Rounds 0–3 ran the whole update, 4–9 the update in pieces (the same loss to float rounding). No criterion is applied
+(D7): the user's criterion chooses the round, then the validation readout reads val once (`post_validation`, D132).
+A landing share over 1,000 windows carries about ±1.2 points of binomial noise. `campaign.json` records its inputs
+under the worktree's path: the validation readout reads them, so the worktree is kept until it has run.
+
+**The user's decisions after C10 (2026-10-06).** The criterion that chooses the round (D7): the earliest round within the
+selection readout's noise (about one point) of the best — round 6 (landed 85.1 %, lost separation 11.3 %, mean reward
+0.842; the best is round 8 at 0.849). The validation readout is NOT run yet: the post-training may be extended; the
+worktree `two-tier-v4-post` is kept (its `campaign.json` paths) until the user decides.
