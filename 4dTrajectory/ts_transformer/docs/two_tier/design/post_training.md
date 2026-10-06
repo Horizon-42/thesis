@@ -58,6 +58,7 @@ the measurements behind it are in §6 or in the readout named.
 | D124 | The windows of a round share their flights: the round takes the train's real windows in one permutation (the seed and the round); the first ones make its real windows, and each kind A, D and B is built from the real windows in the same order until its count is reached (D admits only about 40 % of them, so it reads further down the permutation). A batch commands each flight once (a loop holds each flight once), so a real window and its A, B or D go to different batches. D113 is checked at the draw. The loss reads a round's branch groups branch point by branch point, never the whole round at once (a group is several MB; a round tens of GB) | Decided | User, 2026-10-05 (P32); the rest on the implementer's readings P27, P31 |
 | D125 | The implementer's readings of C6–C11, accepted as built: (P33) a kind with fewer windows than its count does not stop the round, and the round's record shows the shortfall; (P34) the number of rounds is a setting of the campaign, which cannot be extended after it ends; (P35, P36) C8 measures the bytes of the branch groups and the memory of the data term (every train sentence of the base's selection in memory) before the formal run; (P37) a window set carries no per-row speaker records (the probability of "go-around", the blocked words), and the window view does not show them; (P38) the window set's `procedure` block is stage B's (prior §7 item 8); (P39) the loop draws at temperature 1 (prior D121) | Decided | User, 2026-10-05, on Claude's review of the readings |
 | D129 | The window view (C11): the list names a window's runway as its recorded runway, since the round's sentence may say another; the shift of window A is shown in days or hours; the cursor starts at the window's row 0, so that the other aircraft show from the start | Decided | User, 2026-10-06, on the implementer's proposals P42–P44 |
+| D130 | The updates of a round's pass take the branch groups of each groups file in an order shuffled by the round's random numbers (the seed and the round), then `update_groups` at a time; so an update mixes branch points and windows, and a resumed campaign is the same. Why: in the order spoken, an update's groups came mostly from one branch time of one batch | Decided | User, 2026-10-06, on Claude's check of stage C |
 
 ### 0.2 Open items
 
@@ -157,7 +158,7 @@ commits, the tests and the readings are in the implementation log.
      in the base's selection `landed` (D36, D76); the flights outside it are starts like the others (D76).
 
    The masked distribution is the one that the speaker drew from: the training reads it from the speaker's records of
-   the permitted words (prior §7 items 3 and 4). Every counted row weighs the same (D115). The surrogate and the pull
+   the permitted words (prior §7 items 3 and 4). Every counted row weighs the same (D115); the groups of a file are taken in a shuffled order (D130). The surrogate and the pull
    with dropout off, the data term with the base's dropout (D107). The ratio's denominator is the model at the start of
    the pass (D117). The traffic attention has its own learning rate (O13). One pass over the samples of a round.
 6. **Go-around sampling first.** Before the training, measure the probability that the base model gives "go-around" on
