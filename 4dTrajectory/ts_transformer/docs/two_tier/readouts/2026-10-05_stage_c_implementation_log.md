@@ -811,3 +811,17 @@ The worktree's `aeroviz-4d/public/data/airports` points at the scratch tree of t
 formal census and the profiles read the CIFP procedures through it. Every live airport file is there as a link to
 the live file (checked file by file), and the base's procedure-mask check (prior D106) passed at every open: their
 results stand. The campaign reads the main tree's live airports.
+
+**Stopped and relaunched with parallel speaking (2026-10-06, the user).** The first launch spoke on one CPU core (one
+Python thread at 93 %, 1 of 28 cores; the GPU forward of the 3.8 M-parameter prior is a few % of a batch: one real
+batch of 28 windows, 74 s under cProfile — the start's rebuild of the flights from disk, stage A's `start_moved`,
+26 s for the two passes; the speaker's masks 14 s; compile set-up 10 s once; inputs, edges and scene 8 s; the prior's
+forward 5 s). The user stopped it 10 min into round 0 (moved aside as `post_train_20261006.aborted-20261006T103231Z`)
+and asked for the change:
+
+| Step | Commit | What |
+|---|---|---|
+| Parallel speaking | `0268e0ad` | `--speak-workers N`: `Speakers`, a `ProcessPoolExecutor` forked before the process uses the GPU (sharing the context's memory), every worker started at once, one torch thread each (a fork after the parent's CPU threads ran hung in the reviewer's probe), one task a batch; a worker redraws the round's windows and refuses others; the round's model by a file; a dead worker fails the round (`BrokenProcessPool`). The worker count in `round.json` (information; `campaign.json` and its schema unchanged: the frontend fixture pins the name and step 6 keeps it). Review in two rounds: four S2 (the thread hang, a test that could not fail, a dead worker hanging the round, memory at N unchecked) and three S3; all fixed but the memory at N, watched in round 0 |
+| The GPU check | — | 64 windows, one round, on the GPU, 1 against 3 workers (twice, on the pool and on the executor code): the windows, the speaking record, the groups' bytes and the selection readout identical; the pass and the weights equal to float rounding (largest weight difference 9e-7; the loss equal to its last printed digit): the parent's own GPU history changes its kernels, as on any resume |
+| Merge | `e045d5c3` | `dev-two-tier` (docs) into the branch, `dev-two-tier` fast-forwarded to it |
+| Relaunch | — | From the worktree at `e045d5c3` (the user: the branch, since `dev-two-tier` may change), repository-relative paths, `OMP_NUM_THREADS=1`, `--speak-workers 3`, 13:27 local. `campaign.json` records its inputs under the worktree's path: the worktree stays until the campaign's export and validation readout are done. At the start: three workers at 75–80 % CPU each, 14 GB of host memory available, 0.25 GB of GPU each |
