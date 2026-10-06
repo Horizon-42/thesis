@@ -48,10 +48,10 @@ Fronter keeps this table and its log, `readouts/2026-10-06_fronter_implementatio
 
 | Part | State |
 |---|---|
-| The one layout (§3, D133–D136) | Built and reviewed by stage B's implementer on `dev-two-tier-v4` (`65314499`, `92a56314`, `550fb0c2`, `67ff4ce9`, `a3cd6ae3`, `d870921f`; Claude's check `readouts/2026-10-06_training_view_and_speed_check.zh.md`). After C10, by stage D's implementer: the base's speed readout, the export of A's and B's sets in the new formats, the browser check (outline §4 item 5) |
-| F0 The user's three corrections (D159) | Not started |
-| F1 The cursor slider (D155) | Not started |
-| F2 Windows of several commanded aircraft: the format, stage C's export, the view's readers (D156) | Not started |
+| The one layout (§3, D133–D136) | Built and reviewed by stage B's implementer on `dev-two-tier-v4` (`65314499`, `92a56314`, `550fb0c2`, `67ff4ce9`, `a3cd6ae3`, `d870921f`; Claude's check `readouts/2026-10-06_training_view_and_speed_check.zh.md`). After C10, done by stage D's implementer (stage B's log §6): the base's speed readout, the export of A's and B's sets in the new formats, the browser check |
+| F0 The user's three corrections (D159) | Done: `01a8ab58` on `dev-frontend` (reviewed; browser-checked) |
+| F1 The cursor slider (D155) | Done: `e6f5c5fd`, the three small points `8c4d6af4` on `dev-frontend` (reviewed; browser-checked) |
+| F2 Windows of several commanded aircraft: the format, stage C's export, the view's readers (D156) | Done: `05963721`, `1452cccb` on `dev-frontend` (reviewed; browser-checked on a v4 smoke set) |
 | F3 Stage D's parts of the window view (D156) | Not started; after stage D's MC0 |
 | F4 Stage D's export and sets | Not started; after stage D's MC4 |
 
