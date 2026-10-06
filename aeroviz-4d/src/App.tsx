@@ -23,6 +23,7 @@ import HUD from "./components/HUD";
 import HudLayers from "./components/HudLayers";
 import WorkbenchRightInspector from "./components/WorkbenchRightInspector";
 import WorkbenchBottomBar from "./components/WorkbenchBottomBar";
+import SceneTimeReadout from "./components/SceneTimeReadout";
 import ProcedureDetailsPage from "./components/ProcedureDetailsPage";
 import ProcedureAnnotationPopup from "./components/ProcedureAnnotationPopup";
 import ProcedurePanel from "./components/ProcedurePanel";
@@ -71,7 +72,8 @@ function FlightApp() {
     observedVisible,
   );
   const comparisonLayer = useComparisonTrajectoryLayer();
-  const activeTrajectoryLayer = trajectoryComparison ? comparisonLayer : observedLayer;
+  // The Optimize task's multi-aircraft job is drawn by the comparison layer too (from the job's files).
+  const activeTrajectoryLayer = trajectoryComparison || mode === "optimize" ? comparisonLayer : observedLayer;
   const {
     observedVerdicts,
     observedEvaluation,
@@ -114,6 +116,7 @@ function FlightApp() {
         }
       >
         <AirportLocalTerrainAlert />
+        <SceneTimeReadout />
         <ProcedureAnnotationPopup />
         <ApproachViewPanel />
         {/* Procedures is an independent panel docked bottom-right (grid-area ops); it

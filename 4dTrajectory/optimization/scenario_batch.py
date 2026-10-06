@@ -36,6 +36,11 @@ def resolve_jobs(jobs: int, n_tasks: int) -> int:
     return max(1, min(workers, n_tasks)) if n_tasks else 1
 
 
+#: The thread-pool variables of the numeric libraries a solve loads (BLAS, OpenMP, numexpr, Accelerate).
+SOLVER_THREAD_ENV = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+                     "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS")
+
+
 def limit_solver_threads() -> None:
     """Pin each worker's BLAS/OpenMP pools to one thread to avoid oversubscription.
 
@@ -45,8 +50,7 @@ def limit_solver_threads() -> None:
     thread pool and fight over the cores — *slowing* the batch down instead of
     speeding it up. ``setdefault`` respects any value the caller already exported.
     """
-    for var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
-                "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
+    for var in SOLVER_THREAD_ENV:
         os.environ.setdefault(var, "1")
 
 

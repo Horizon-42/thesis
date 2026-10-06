@@ -1,8 +1,11 @@
 import contextlib
 import io
+import tempfile
 import unittest
+from pathlib import Path
 
-from aeroviz_backend.http_server import AeroVizBackendApp, AeroVizRequestHandler
+from aeroviz_backend.http_server import AeroVizBackendApp, AeroVizRequestHandler, ServedFile
+from aeroviz_backend.traffic_jobs import BadJobRequest, JobBusy, JobNotFound
 
 
 class TestAeroVizBackendApp(unittest.TestCase):
@@ -236,6 +239,153 @@ class TestAeroVizRequestHandler(unittest.TestCase):
                 handler.do_POST()
             self.assertEqual(log.getvalue().splitlines(),
                              ["[aeroviz-backend] client gone status=409 method=POST path=/autopilot/segment"])
+
+
+class FakeTrafficJobs:
+    """The job manager's interface, answering from a script (no process, no roster)."""
+
+    def __init__(self, file=None):
+        self.calls = []
+        self.busy = False
+        self.file_path = file
+
+    def arrivals(self, airport, day):
+        self.calls.append(("arrivals", airport, day))
+        if airport == "KSEA":
+            raise FileNotFoundError("no arrivals roster for KSEA")
+        if day == "bad":
+            raise ValueError("date must be YYYY-MM-DD, got 'bad'")
+        return {"airport": airport, "date": day, "arrivals": []}
+
+    def start(self, request):
+        self.calls.append(("start", request))
+        if self.busy:
+            raise JobBusy("a traffic job is running")
+        if request.get("mode") == "nope":
+            raise BadJobRequest("mode must be 'm1' or 'm2'")
+        return {"jobId": "20261006T120000123456Z-0123abcd"}
+
+    def status(self, job_id):
+        self.calls.append(("status", job_id))
+        if job_id == "missing":
+            raise JobNotFound("no traffic job 'missing'")
+        return {"state": "running", "progress": {"done": 1, "total": 3, "current": "K"}, "error": None}
+
+    def cancel(self, job_id):
+        self.calls.append(("cancel", job_id))
+        if job_id == "missing":
+            raise JobNotFound("no traffic job 'missing'")
+        return {"state": "cancelled", "progress": {"done": 1, "total": 3, "current": "K"}, "error": None}
+
+    def file(self, job_id, name):
+        self.calls.append(("file", job_id, name))
+        if name == "unlisted.json":
+            raise JobNotFound("'unlisted.json' is not a file of job's comparison index")
+        return self.file_path
+
+
+class TestTrafficJobRoutes(unittest.TestCase):
+    def setUp(self):
+        self.jobs = FakeTrafficJobs()
+        self.app = AeroVizBackendApp(
+            simulation_backend=FakeSimulationBackend(),
+            optimization_backend=FakeOptimizationBackend(),
+            traffic_jobs=self.jobs,
+        )
+
+    def test_arrivals_route_parses_the_query_and_maps_errors(self):
+        status, payload = self.app.handle_get("/traffic/arrivals?airport=KRDU&date=2026-05-21")
+        self.assertEqual((status, payload["airport"], payload["date"]), (200, "KRDU", "2026-05-21"))
+        self.assertEqual(self.app.handle_get("/traffic/arrivals?airport=KSEA&date=2026-05-21")[0], 404)
+        self.assertEqual(self.app.handle_get("/traffic/arrivals?airport=KRDU&date=bad")[0], 400)
+        self.assertEqual(self.app.handle_get("/traffic/arrivals?airport=KRDU")[0], 400)           # date is required
+        self.assertEqual(self.app.handle_get("/traffic/arrivals?date=2026-05-21")[0], 400)        # so is the airport
+
+    def test_start_route_returns_the_job_id_and_refuses_a_second_job_and_a_bad_request(self):
+        request = {"mode": "m1", "airport": "KRDU", "flightKey": "K"}
+        self.assertEqual(self.app.handle_post("/traffic/jobs", request),
+                         (200, {"jobId": "20261006T120000123456Z-0123abcd"}, None))
+        self.jobs.busy = True
+        status, payload, _log = self.app.handle_post("/traffic/jobs", request)
+        self.assertEqual(status, 409)
+        self.assertIn("running", payload["error"])
+        self.jobs.busy = False
+        self.assertEqual(self.app.handle_post("/traffic/jobs", {"mode": "nope"})[0], 400)
+        self.assertEqual(self.jobs.calls[0], ("start", request))
+
+    def test_status_and_cancel_routes_name_the_job(self):
+        job = "20261006T120000123456Z-0123abcd"
+        status, payload = self.app.handle_get(f"/traffic/jobs/{job}")
+        self.assertEqual((status, payload["state"], payload["progress"]["done"]), (200, "running", 1))
+        status, payload, _log = self.app.handle_post(f"/traffic/jobs/{job}/cancel", {})
+        self.assertEqual((status, payload["state"]), (200, "cancelled"))
+        self.assertEqual(self.app.handle_get("/traffic/jobs/missing")[0], 404)
+        self.assertEqual(self.app.handle_post("/traffic/jobs/missing/cancel", {})[0], 404)
+        self.assertEqual([c[0] for c in self.jobs.calls], ["status", "cancel", "status", "cancel"])
+
+    def test_file_route_serves_the_listed_file_and_404s_the_rest(self):
+        job = "20261006T120000123456Z-0123abcd"
+        self.jobs.file_path = Path("/jobs/comparison/comparison_KRDU_05L_g.czml")
+        status, payload = self.app.handle_get(f"/traffic/jobs/{job}/files/comparison_KRDU_05L_g.czml")
+        self.assertEqual((status, payload), (200, ServedFile(self.jobs.file_path)))
+        self.assertEqual(self.jobs.calls[-1], ("file", job, "comparison_KRDU_05L_g.czml"))
+        self.assertEqual(self.app.handle_get(f"/traffic/jobs/{job}/files/unlisted.json")[0], 404)
+        # a name with a slash is not one segment of the route; an encoded one reaches the manager, which refuses it
+        self.assertEqual(self.app.handle_get(f"/traffic/jobs/{job}/files/a/b")[0], 404)
+        self.app.handle_get(f"/traffic/jobs/{job}/files/..%2Fstate.json")
+        self.assertEqual(self.jobs.calls[-1], ("file", job, "../state.json"))
+        # cancel is a POST route only
+        self.assertEqual(self.app.handle_get(f"/traffic/jobs/{job}/cancel")[0], 404)
+
+    def test_a_served_file_goes_out_as_its_own_bytes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            czml = Path(tmp) / "comparison.czml"
+            czml.write_bytes(b'[{"id": "document"},\n {"id": "x"}]')
+            self.jobs.file_path = czml
+            handler = AeroVizRequestHandler.__new__(AeroVizRequestHandler)
+            handler.app = self.app
+            handler.request_version, handler.command = "HTTP/1.1", "GET"
+            handler.path = "/traffic/jobs/20261006T120000123456Z-0123abcd/files/comparison.czml"
+            handler.requestline, handler.client_address = f"GET {handler.path} HTTP/1.1", ("page", 0)
+            handler.headers = {}
+            handler.wfile = io.BytesIO()
+            handler.do_GET()
+            sent = handler.wfile.getvalue()
+        head, _, body = sent.partition(b"\r\n\r\n")
+        self.assertIn(b"200", head.splitlines()[0])
+        self.assertIn(b"Content-Type: application/json", head)
+        self.assertIn(b"Access-Control-Allow-Origin: *", head)       # the page is served from another origin
+        self.assertEqual(body, b'[{"id": "document"},\n {"id": "x"}]')
+
+
+class TestServedFileGone(unittest.TestCase):
+    def test_a_file_that_a_prune_removed_after_the_route_checked_it_is_a_404_not_an_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            gone = Path(tmp) / "comparison_KRDU_05L_g.czml"       # listed by the index, but its job is pruned
+            app = AeroVizBackendApp(
+                simulation_backend=FakeSimulationBackend(), optimization_backend=FakeOptimizationBackend(),
+                traffic_jobs=FakeTrafficJobs(file=gone))
+            handler = AeroVizRequestHandler.__new__(AeroVizRequestHandler)
+            handler.app = app
+            handler.request_version, handler.command = "HTTP/1.1", "GET"
+            handler.path = "/traffic/jobs/20261006T120000123456Z-0123abcd/files/comparison_KRDU_05L_g.czml"
+            handler.requestline, handler.client_address = f"GET {handler.path} HTTP/1.1", ("page", 0)
+            handler.headers = {}
+            handler.wfile = io.BytesIO()
+            log = io.StringIO()
+            with contextlib.redirect_stderr(log):
+                handler.do_GET()                                  # no FileNotFoundError out of the handler
+            head, _, body = handler.wfile.getvalue().partition(b"\r\n\r\n")
+        self.assertIn(b"404", head.splitlines()[0])
+        self.assertIn(b"pruned", body)
+        self.assertIn("status=404", log.getvalue())
+
+
+class TestJobsRoot(unittest.TestCase):
+    def test_each_backend_port_has_its_own_jobs_root(self):
+        from aeroviz_backend.traffic_jobs import DEFAULT_JOBS_ROOT, traffic_jobs_root
+        self.assertEqual(traffic_jobs_root(8765), DEFAULT_JOBS_ROOT / "8765")
+        self.assertNotEqual(traffic_jobs_root(8765), traffic_jobs_root(8766))
 
 
 class SupersedingApp:

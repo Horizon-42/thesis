@@ -47,6 +47,8 @@ import type { AirportLocalTerrainSourceKind } from "../terrain/airportLocalTerra
 import type { ObservedVerdictFilter } from "../data/observedTracks";
 import { trainingSelectionKey, type TrainingColumn, type TrainingSelection } from "../data/trainingSample";
 import type { TrainingAutopilotView, TrainingPick } from "../data/trainingAutopilot";
+import type { TrafficScene } from "../utils/comparisonSource";
+import type { SceneTime } from "../utils/sceneTime";
 
 // ── Layer names ──────────────────────────────────────────────────────────────
 // Extend this union if you add new data layers.
@@ -190,6 +192,21 @@ interface FlightSessionState {
   /** Selected optimization category dir (e.g. "asdb"); which comparison set to show. */
   trajectoryComparisonCategory: string | null;
   setTrajectoryComparisonCategory: (categoryDir: string | null) => void;
+
+  /**
+   * The finished traffic job (Optimize's multi-aircraft mode) whose scene the comparison layer draws, or null. Set by
+   * the job panel while it holds a done job and cleared with it: a job's scene never outlives the Optimize task.
+   */
+  trafficScene: TrafficScene | null;
+  setTrafficScene: (scene: TrafficScene | null) => void;
+
+  /**
+   * What the display epoch of the traffic scene on screen is in real UTC (a published M1/M2 category or a job's), for the
+   * "Scene time (UTC)" readout; null when no traffic scene is drawn or the real time is not known yet. Set by the comparison
+   * layer. The clock's own position is read where it is shown (`SceneTimeReadout`), never held here.
+   */
+  sceneTime: SceneTime | null;
+  setSceneTime: (time: SceneTime | null) => void;
 
   /** Per-kind visibility for the 3-colour comparison (reference / optimizer / simulator). */
   trajectoryComparisonKinds: Record<ComparisonKind, boolean>;
@@ -433,6 +450,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [trajectoryComparison, setTrajectoryComparison] = useState<boolean>(false);
   const [trajectoryComparisonCategory, setTrajectoryComparisonCategory] =
     useState<string | null>(null);
+  const [trafficScene, setTrafficScene] = useState<TrafficScene | null>(null);
+  const [sceneTime, setSceneTime] = useState<SceneTime | null>(null);
   const [trajectoryComparisonKinds, setTrajectoryComparisonKinds] =
     useState<Record<ComparisonKind, boolean>>({
       reference: true, optimizer: false, simulator: true, predicted: true, lookback: true });
@@ -608,6 +627,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTrajectoryComparison,
     trajectoryComparisonCategory,
     setTrajectoryComparisonCategory,
+    trafficScene,
+    setTrafficScene,
+    sceneTime,
+    setSceneTime,
     trajectoryComparisonKinds,
     setTrajectoryComparisonKind,
     trajectorySampleCount,
@@ -615,7 +638,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     observedVerdictFilter,
     setObservedVerdictFilter,
   }), [selectedFlightId, selectedRunway, trajectoryDataSource, optimizedTrajectoryDataSource,
-    trajectoryComparison, trajectoryComparisonCategory, trajectoryComparisonKinds,
+    trajectoryComparison, trajectoryComparisonCategory, trafficScene, sceneTime, trajectoryComparisonKinds,
     setTrajectoryComparisonKind, trajectorySampleCount, observedVerdictFilter]);
   const procedureSessionState: ProcedureSessionState = useMemo(() => ({
     procedureVisibility,

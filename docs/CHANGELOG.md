@@ -1,5 +1,22 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-06 — Multi-aircraft optimization T11: the Optimize task's multi-aircraft mode (one controlled / all controlled)
+
+- Design §10 (the user's order). Optimize gets a mode selector: single aircraft (unchanged), multi-aircraft one
+  controlled (M1: a recorded arrival of a UTC day), multi-aircraft all controlled (M2: a 15/30/60-min block).
+- Backend (`aeroviz_backend/traffic_jobs.py`, routes `/traffic/arrivals`, `/traffic/jobs…`): one job per backend, a
+  subprocess group at nice 10 with one solver thread (`scenario_batch.SOLVER_THREAD_ENV`), `traffic_job.py` reading
+  only the near traffic (plus one arrival per runway for the targets), the batch writers, evaluation and the
+  comparison builder into a job directory (`~/.cache/aeroviz/traffic_jobs/<port>`, last 5 kept, never public/data).
+  A group is signalled only when its leader is the job's own process (start time + boot id): a reused pid is never
+  hit. Status carries the readout when done.
+- Frontend: the panel (day, arrivals, block start in 24-h UTC selects, progress, cancel; Start disabled while a job
+  runs), the comparison layer fed from a job, a "Scene time (UTC)" readout, plain outcome names, the three-entry
+  traffic legend, M1 drawn one window at a time (the user's review). The single-aircraft panel stays mounted hidden.
+- Built by sonnet agents on Claude's orders (one later browser check ran on the session's model: sonnet access
+  was refused, oauth_org_not_allowed); reviewed (opus) frontend and backend, two rounds each. Real M1 and M2 jobs
+  on a test backend matched the batch (FFL1206: separated, +100.5 s).
+
 ### 2026-10-06 — Multi-aircraft optimization T10: an M2 run published as one scene
 
 - `4e6c3ad0`: an M2 run writes one directory and one summary.json (mode traffic:m2); `87f5f2f2`: the builder and the

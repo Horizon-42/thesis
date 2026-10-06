@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import * as Cesium from "cesium";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MAX_FLIGHT_KEYS_PER_REQUEST } from "../../data/observedTracks";
+import { clearEntryCache } from "../../utils/sceneTime";
 import { DEFAULT_MODEL_BUDGET } from "../../utils/trajectoryRenderModel";
 
 /**
@@ -15,15 +16,18 @@ const { appState, router } = vi.hoisted(() => ({
     layers: { trajectories: true },
     mode: "evaluation",
     trajectoryComparison: true,
-    trajectoryComparisonCategory: "traffic_m1_runway",
+    trajectoryComparisonCategory: "traffic_m1_runway" as string | null,
     trajectoryComparisonKinds: {
       reference: true, optimizer: false, simulator: true, predicted: true, lookback: true,
     },
     activeAirportCode: "KRDU",
     selectedRunway: null as string | null,
+    selectedFlightId: null as string | null,
+    trafficScene: null as { airportCode: string; jobId: string; baseUrl: string } | null,
     trajectorySampleCount: 0,                      // 0: every group of the index is shown
     setSelectedFlightId: () => undefined,
     setTrajectoryDataSource: () => undefined,
+    setSceneTime: vi.fn(),
   },
   router: { serve: (async (_url: string) => undefined) as (url: string) => Promise<unknown> },
 }));
@@ -42,6 +46,11 @@ const epochPlus = (seconds: number) =>
 
 const A = "AAL100_05L_a00001_20260501T000300Z";      // two commanded flights, one per runway
 const B = "BAW200_05R_b00002_20260501T020300Z";
+const ENTRY_UTC: Record<string, string> = {          // the roster's entry of each (their landing is 3 minutes later)
+  [A]: "2026-05-01T00:00:00.000Z",
+  [B]: "2026-05-01T02:00:00.000Z",
+};
+const landingDayOf = (key: string) => key.replace(/^.*_(\d{4})(\d{2})(\d{2})T\d{6}Z$/, "$1-$2-$3");
 
 function group(key: string, runway: string, recorded: string[], startOffsetsS: number[]) {
   return {
@@ -72,6 +81,7 @@ function flightPacket(id: string, durationS: number) {
   };
 }
 
+const EPOCH_ISO = "2026-04-01T08:00:00Z";             // the index's display epoch (indexOf)
 const NEIGHBOUR_DURATION_S = 300;
 const REFERENCE_DURATION_S = 200;
 
@@ -79,19 +89,41 @@ const REFERENCE_DURATION_S = 200;
 function serve(
   groups: unknown[],
   requests: string[][],
-  { withClock = true, scene, resultClockS, backendClockS = REFERENCE_DURATION_S }:
-    { withClock?: boolean; scene?: unknown; resultClockS?: number; backendClockS?: number } = {},
+  { withClock = true, scene, resultClockS, backendClockS = REFERENCE_DURATION_S, durations = {}, unserved = [], files,
+    entries = ENTRY_UTC }:
+    {
+      withClock?: boolean; scene?: unknown; resultClockS?: number; backendClockS?: number;
+      /** Reference durations by flight key (default: REFERENCE_DURATION_S for A and B). */
+      durations?: Record<string, number>;
+      /** Keys the backend answers without a packet (and whose result path the CZML lacks). */
+      unserved?: string[];
+      /** Records the URL of every index and CZML request. */
+      files?: string[];
+      /** The roster's entry time of each flight key (`/traffic/arrivals`); a key absent is not in the roster. */
+      entries?: Record<string, string>;
+    } = {},
 ) {
   router.serve = async (url: string) => {
-    if (url.endsWith("/comparison_index.json")) return indexOf(groups, scene);
+    if (url.includes("/traffic/arrivals?")) {
+      const day = new URL(url, "http://backend").searchParams.get("date");
+      return {
+        airport: "KRDU", date: day,
+        arrivals: Object.entries(entries).filter(([key]) => landingDayOf(key) === day).map(([flightKey, entryUtc]) => ({
+          flightKey, callsign: flightKey.split("_")[0], runway: "05L", type: null, entryUtc, landingUtc: entryUtc })),
+      };
+    }
+    if (url.endsWith("/comparison_index.json")) { files?.push(url); return indexOf(groups, scene); }
     if (url.endsWith(".czml")) {
+      files?.push(url);
+      const here = (groups as Array<{ group: string; czml: string }>)
+        .filter((g) => url.endsWith(g.czml) && !unserved.includes(g.group));
       return [{
         id: "document", name: "result", version: "1.0",
         ...(resultClockS === undefined ? {} : { clock: {
           interval: `${EPOCH}/${epochPlus(resultClockS).toString()}`, currentTime: EPOCH,
           multiplier: 60, range: "LOOP_STOP", step: "SYSTEM_CLOCK_MULTIPLIER",
         } }),
-      }];
+      }, ...here.map((g) => flightPacket(`sim-${g.group}`, durations[g.group] ?? REFERENCE_DURATION_S))];
     }
     const keys = new URL(url, "http://backend").searchParams.getAll("flight_key");
     requests.push(keys);
@@ -107,7 +139,8 @@ function serve(
             },
           } : {}),
         },
-        ...keys.map((key) => flightPacket(key, key === A || key === B ? REFERENCE_DURATION_S : NEIGHBOUR_DURATION_S)),
+        ...keys.filter((key) => !unserved.includes(key)).map((key) =>
+          flightPacket(key, durations[key] ?? (key === A || key === B ? REFERENCE_DURATION_S : NEIGHBOUR_DURATION_S))),
       ],
     };
   };
@@ -122,6 +155,7 @@ function viewerDouble() {
       remove: vi.fn((source: Cesium.DataSource) => { sources.splice(sources.indexOf(source), 1); return true; }),
     },
     clock: {} as Record<string, unknown>,
+    camera: { heading: 0, flyToBoundingSphere: vi.fn() },
     timeline: { zoomTo: vi.fn() },
     scene: { canvas: document.createElement("canvas") },
     trackedEntity: undefined,
@@ -145,7 +179,13 @@ beforeEach(() => {
   requests = [];
   appState.viewer = viewer;
   appState.selectedRunway = null;
+  appState.selectedFlightId = null;
+  appState.mode = "evaluation";
+  appState.trafficScene = null;
+  appState.trajectoryComparison = true;
   appState.trajectorySampleCount = 0;
+  appState.setSceneTime.mockClear();
+  clearEntryCache();
   appState.trajectoryComparisonCategory = "traffic_m1_runway";
   appState.layers = { trajectories: true };
   appState.trajectoryComparisonKinds = { ...appState.trajectoryComparisonKinds, reference: true };
@@ -154,7 +194,33 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("useComparisonTrajectoryLayer with a traffic window", () => {
-  it("shows the recorded aircraft of the shown groups, and removes a hidden group's with it", async () => {
+  it("shows ONE window: the first group's neighbours, and asks for no other window's", async () => {
+    const [a1, a2] = sampleKeys("A", 2);
+    const [b1] = sampleKeys("B", 1);
+    serve([group(A, "05L", [a1, a2], [-10, 20]), group(B, "05R", [b1], [5])], requests);
+
+    renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(trafficSource(viewer)).toBeDefined());
+    expect(trafficIds(viewer).sort()).toEqual([`traffic-${A}/${a1}`, `traffic-${A}/${a2}`].sort());
+    expect(requests.flat()).not.toContain(b1);                    // B's neighbours are not even requested
+  });
+
+  it("hides the other windows' controlled aircraft and records, and keeps every window in the list", async () => {
+    const [a1] = sampleKeys("A", 1);
+    const [b1] = sampleKeys("B", 1);
+    serve([group(A, "05L", [a1], [10]), group(B, "05R", [b1], [5])], requests, { resultClockS: 200 });
+
+    const { result } = renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(result.current.isLoaded).toBe(true));
+    await waitFor(() => expect(trafficSource(viewer)).toBeDefined());
+
+    expect(result.current.flightIds.sort()).toEqual([A, B]);             // both windows are in the Flights table
+    expect([referenceEntity(viewer, A).show, referenceEntity(viewer, B).show]).toEqual([true, false]);   // A's record
+    const sim = (key: string) => viewer.sources.flatMap((src) => src.entities.values).find((e) => e.id === `sim-${key}`)!;
+    expect([sim(A).show, sim(B).show]).toEqual([true, false]);           // A's optimized path is drawn, B's is not
+  });
+
+  it("swaps the shown window when another flight is selected, and then no neighbour of the first is shown", async () => {
     const [a1, a2] = sampleKeys("A", 2);
     const [b1] = sampleKeys("B", 1);
     serve([group(A, "05L", [a1, a2], [-10, 20]), group(B, "05R", [b1], [5])], requests);
@@ -162,17 +228,183 @@ describe("useComparisonTrajectoryLayer with a traffic window", () => {
     const { rerender } = renderHook(() => useComparisonTrajectoryLayer());
     await waitFor(() => expect(trafficSource(viewer)).toBeDefined());
     const first = trafficSource(viewer)!;
-    expect(trafficIds(viewer).sort()).toEqual([`traffic-${A}/${a1}`, `traffic-${A}/${a2}`, `traffic-${B}/${b1}`].sort());
 
-    // Hide group A (the runway selector shows only 05R): its neighbours go with it, B's are loaded again.
-    appState.selectedRunway = "05R";
+    appState.selectedFlightId = B;                                      // a click on B's row of the Flights table
     rerender();
-    await waitFor(() => {
-      expect(trafficSource(viewer)).toBeDefined();
-      expect(trafficSource(viewer)).not.toBe(first);
-    });
+    await waitFor(() => expect(trafficIds(viewer)).toEqual([`traffic-${B}/${b1}`]));
     expect(viewer.dataSources.remove).toHaveBeenCalledWith(first, true);
+    expect(viewer.sources.flatMap((src) => src.entities.values).some((e) => e.id.startsWith(`traffic-${A}/`))).toBe(false);
+    expect([referenceEntity(viewer, A).show, referenceEntity(viewer, B).show]).toEqual([false, true]);
+    const sim = (key: string) => viewer.sources.flatMap((src) => src.entities.values).find((e) => e.id === `sim-${key}`)!;
+    expect([sim(A).show, sim(B).show]).toEqual([false, true]);
+    expect(trafficSource(viewer)!.show).toBe(true);
+
+    appState.selectedFlightId = A;                                      // and back: A's neighbours again, not refetched
+    rerender();
+    await waitFor(() => expect(trafficIds(viewer).sort()).toEqual([`traffic-${A}/${a1}`, `traffic-${A}/${a2}`].sort()));
+    expect([referenceEntity(viewer, A).show, referenceEntity(viewer, B).show]).toEqual([true, false]);
+    expect(requests.flat().filter((key) => key === a1)).toHaveLength(1);
+  });
+
+  it("draws the first window when the selected flight is none of the groups", async () => {
+    const [a1] = sampleKeys("A", 1);
+    const [b1] = sampleKeys("B", 1);
+    appState.selectedFlightId = "SOMEONE_ELSE_05L_x00000_20260101T000000Z";
+    serve([group(A, "05L", [a1], [10]), group(B, "05R", [b1], [5])], requests);
+
+    renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(trafficSource(viewer)).toBeDefined());
+    expect(trafficIds(viewer)).toEqual([`traffic-${A}/${a1}`]);
+  });
+
+  it("puts the clock on the shown window's own span, and on the other's when it is selected", async () => {
+    const [a1] = sampleKeys("A", 1);
+    const [b1] = sampleKeys("B", 1);
+    serve([group(A, "05L", [a1], [10]), group(B, "05R", [b1], [5])], requests, { durations: { [A]: 200, [B]: 350 } });
+    const stop = () => Cesium.JulianDate.secondsDifference(viewer.clock.stopTime as Cesium.JulianDate, epochPlus(0));
+
+    const { rerender } = renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(trafficSource(viewer)).toBeDefined());
+    expect(stop()).toBe(200);
+    appState.selectedFlightId = B;
+    rerender();
+    await waitFor(() => expect(stop()).toBe(350));
+    expect(Cesium.JulianDate.secondsDifference(viewer.clock.startTime as Cesium.JulianDate, epochPlus(0))).toBe(0);
+  });
+
+  it("drops a window's neighbours while the next window's are fetched", async () => {
+    const [a1] = sampleKeys("A", 1);
+    const [b1] = sampleKeys("B", 1);
+    serve([group(A, "05L", [a1], [10]), group(B, "05R", [b1], [5])], requests);
+    const answer = router.serve;
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const { rerender } = renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(trafficSource(viewer)).toBeDefined());
+
+    router.serve = async (url: string) => {
+      if (url.includes("/trajectories?") && new URL(url, "http://backend").searchParams.getAll("flight_key").includes(b1)) {
+        await held;
+      }
+      return answer(url);
+    };
+    appState.selectedFlightId = B;
+    rerender();
+    await waitFor(() => expect(trafficSource(viewer)).toBeUndefined());     // A's are gone before B's have arrived
+    release();
+    await waitFor(() => expect(trafficIds(viewer)).toEqual([`traffic-${B}/${b1}`]));
+  });
+
+  it("keeps the window drawn when the selection is cleared (Reset view); only a group key changes it", async () => {
+    const [a1] = sampleKeys("A", 1);
+    const [b1] = sampleKeys("B", 1);
+    serve([group(A, "05L", [a1], [10]), group(B, "05R", [b1], [5])], requests);
+
+    const { rerender } = renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(trafficSource(viewer)).toBeDefined());
+    appState.selectedFlightId = B;
+    rerender();
+    await waitFor(() => expect(trafficIds(viewer)).toEqual([`traffic-${B}/${b1}`]));
+    const removed = viewer.dataSources.remove.mock.calls.length;
+
+    appState.selectedFlightId = null;                                   // Reset view
+    rerender();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(trafficIds(viewer)).toEqual([`traffic-${B}/${b1}`]);        // still B's window, not the first group's
+    expect([referenceEntity(viewer, A).show, referenceEntity(viewer, B).show]).toEqual([false, true]);
+    expect(viewer.dataSources.remove.mock.calls).toHaveLength(removed);
+
+    appState.selectedFlightId = "SOMEONE_ELSE_05L_x00000_20260101T000000Z";   // a flight that is none of the groups
+    rerender();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
     expect(trafficIds(viewer)).toEqual([`traffic-${B}/${b1}`]);
+  });
+
+  it("clears the layer's error when the next window starts to be drawn", async () => {
+    const [a1] = sampleKeys("A", 1);
+    const [b1] = sampleKeys("B", 1);
+    // the backend serves no track for B: its window has no span to cut its neighbours to
+    serve([group(A, "05L", [a1], [10]), group(B, "05R", [b1], [5])], requests, { unserved: [B] });
+
+    const { result, rerender } = renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(trafficSource(viewer)).toBeDefined());
+    appState.selectedFlightId = B;
+    rerender();
+    await waitFor(() => expect(result.current.error ?? "").toMatch(/no clock to cut/));
+
+    appState.selectedFlightId = A;                                      // the good window again
+    rerender();
+    await waitFor(() => expect(result.current.error).toBeNull());
+    await waitFor(() => expect(trafficIds(viewer)).toEqual([`traffic-${A}/${a1}`]));
+  });
+
+  it("publishes the real time of the shown window's start — its commanded flight's roster entry — and follows a swap", async () => {
+    const [a1] = sampleKeys("A", 1);
+    const [b1] = sampleKeys("B", 1);
+    serve([group(A, "05L", [a1], [10]), group(B, "05R", [b1], [5])], requests);
+
+    const { rerender } = renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(appState.setSceneTime).toHaveBeenCalledWith({ startUtc: ENTRY_UTC[A], epoch: EPOCH_ISO }));
+
+    appState.selectedFlightId = B;
+    rerender();
+    await waitFor(() => expect(appState.setSceneTime).toHaveBeenLastCalledWith({ startUtc: ENTRY_UTC[B], epoch: EPOCH_ISO }));
+    // unknown while it is looked up: the readout never shows the last window's time for this one
+    const calls = appState.setSceneTime.mock.calls.map(([time]) => time);
+    expect(calls.lastIndexOf(null)).toBeGreaterThan(calls.findIndex((time) => time?.startUtc === ENTRY_UTC[A]));
+  });
+
+  it("says why the real time is unknown when the roster does not have the flight — a warning, not an error — and still draws the window", async () => {
+    const [a1] = sampleKeys("A", 1);
+    serve([group(A, "05L", [a1], [10])], requests, { entries: {} });
+
+    const { result } = renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(result.current.warning ?? "").toMatch(/Scene time unavailable: .* is not in the KRDU arrivals roster/));
+    expect(result.current.error).toBeNull();                              // the red banner is for what failed to draw
+    expect(trafficIds(viewer)).toEqual([`traffic-${A}/${a1}`]);
+    expect(appState.setSceneTime).not.toHaveBeenCalledWith(expect.objectContaining({ startUtc: expect.any(String) }));
+  });
+
+  it("warns, never errors, when a swapped-to window's real time is unknown; the warning goes with the window and the files' warning stays", async () => {
+    const [a1] = sampleKeys("A", 1);
+    const [b1] = sampleKeys("B", 1);
+    // A's entry is in the roster, B's is not; the result file of a third group cannot be read
+    const C = "CAL300_05L_c00003_20260501T040300Z";
+    serve([group(A, "05L", [a1], [10]), group(B, "05R", [b1], [5]),
+           { ...group(C, "05L", [], []), czml: "comparison_KRDU_05L_missing.czml" }],
+      requests, { entries: { [A]: ENTRY_UTC[A] } });
+    const answer = router.serve;
+    router.serve = async (url: string) => {
+      if (url.endsWith("comparison_KRDU_05L_missing.czml")) throw new Error("HTTP 500");
+      return answer(url);
+    };
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const filesWarning = "1 comparison trajectory file(s) could not be loaded.";
+
+    const { result, rerender } = renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(appState.setSceneTime).toHaveBeenCalledWith({ startUtc: ENTRY_UTC[A], epoch: EPOCH_ISO }));
+    await waitFor(() => expect(result.current.isLoaded).toBe(true));
+    expect(result.current.warning).toBe(filesWarning);
+
+    appState.selectedFlightId = B;                                           // B is not in the roster
+    rerender();
+    await waitFor(() => expect(result.current.warning ?? "").toMatch(/Scene time unavailable: .* is not in the KRDU arrivals roster/));
+    expect(result.current.warning).toContain(filesWarning);
+    expect(result.current.error).toBeNull();                                 // a warning: the red banner is for failures
+    expect(trafficIds(viewer)).toEqual([`traffic-${B}/${b1}`]);              // and B's window is drawn
+
+    appState.selectedFlightId = A;                                           // back to a window with a known time
+    rerender();
+    await waitFor(() => expect(result.current.warning).toBe(filesWarning));
+    expect(result.current.error).toBeNull();
+  });
+
+  it("does not move the camera for a published category", async () => {
+    const [a1] = sampleKeys("A", 1);
+    serve([group(A, "05L", [a1], [10])], requests);
+    renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(trafficSource(viewer)).toBeDefined());
+    expect(viewer.camera.flyToBoundingSphere).not.toHaveBeenCalled();
   });
 
   const spanOf = (id: string): [number, number] => {
@@ -235,12 +467,13 @@ describe("useComparisonTrajectoryLayer with a traffic window", () => {
     expect(trafficSource(viewer)).toBeUndefined();
   });
 
-  it("refuses to draw recorded aircraft when the comparison carries no clock to cut them to", async () => {
+  it("refuses to draw a window's recorded aircraft when the window has no clock to cut them to", async () => {
     const [a1] = sampleKeys("A", 1);
-    serve([group(A, "05L", [a1], [10])], requests, { withClock: false });
+    // the backend serves no track for the window's own flight: nothing gives the window a span
+    serve([group(A, "05L", [a1], [10])], requests, { unserved: [A] });
 
     const { result } = renderHook(() => useComparisonTrajectoryLayer());
-    await waitFor(() => expect(result.current.error).toMatch(/no clock to cut the recorded aircraft's availability to/));
+    await waitFor(() => expect(result.current.error ?? "").toMatch(/no clock to cut the recorded aircraft's availability to/));
     expect(trafficSource(viewer)).toBeUndefined();
   });
 
@@ -389,6 +622,14 @@ describe("useComparisonTrajectoryLayer with an M2 scene", () => {
     expect(result.current.flightIds.sort()).toEqual([A, B]);
   });
 
+  it("publishes the scene's real start for the readout, and none of a window's lookups", async () => {
+    serve([sceneGroup(A, "05L", 0), sceneGroup(B, "05R", 500)], requests, { scene: sceneOf([], []) });
+
+    renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(appState.setSceneTime).toHaveBeenCalledWith({
+      startUtc: "2026-05-21T17:47:18.959Z", epoch: EPOCH_ISO }));
+  });
+
   it("draws each group's reference on the scene clock, at its offset, and only while it flies", async () => {
     serve([sceneGroup(A, "05L", 0), sceneGroup(B, "05R", 500)], requests, { scene: sceneOf([], []) });
 
@@ -510,5 +751,148 @@ describe("useComparisonTrajectoryLayer with an M2 scene", () => {
     rerender();
     await waitFor(() => expect(viewer.dataSources.remove).toHaveBeenCalledWith(first, true));
     appState.trajectoryComparisonCategory = "traffic_m1_runway";
+  });
+});
+
+// ── Fed from a traffic job (the Optimize task) ───────────────────────────────
+
+const JOB_BASE = "http://backend:8765/traffic/jobs/20261006T120000123456Z-0123abcd/files/";
+
+function inOptimizeWithJob(airportCode = "KRDU") {
+  appState.mode = "optimize";
+  appState.trajectoryComparison = false;
+  appState.trajectoryComparisonCategory = null;
+  appState.layers = { trajectories: false };            // the Evaluate task's switch: a job's scene needs none
+  appState.trafficScene = { airportCode, jobId: "20261006T120000123456Z-0123abcd", baseUrl: JOB_BASE };
+}
+
+describe("useComparisonTrajectoryLayer fed from a traffic job", () => {
+  it("reads the job's index and result files from its file route and draws the window, trajectories switch off", async () => {
+    const [a1] = sampleKeys("A", 1);
+    const files: string[] = [];
+    inOptimizeWithJob();
+    serve([group(A, "05L", [a1], [10])], requests, { files });
+
+    const { result } = renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(trafficSource(viewer)).toBeDefined());
+    expect(result.current.error).toBeNull();
+    expect(files).toHaveLength(2);
+    expect(files[0]).toBe(`${JOB_BASE}comparison_index.json`);
+    expect(files[1]).toBe(`${JOB_BASE}comparison_KRDU_05L_g.czml`);
+    expect(trafficIds(viewer)).toEqual([`traffic-${A}/${a1}`]);
+    expect(trafficSource(viewer)!.show).toBe(true);                    // visible without layers.trajectories
+    expect(referenceSource(viewer)!.show).toBe(true);
+    expect(requests[0]).toEqual([A]);                                  // the reference: the backend's arrival window
+  });
+
+  it("flies the camera to the job's scene once it is loaded, framing the controlled aircraft's paths", async () => {
+    const [a1] = sampleKeys("A", 1);
+    inOptimizeWithJob();
+    serve([group(A, "05L", [a1], [10])], requests);
+
+    renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(viewer.camera.flyToBoundingSphere).toHaveBeenCalledTimes(1));
+    const [sphere] = viewer.camera.flyToBoundingSphere.mock.calls[0] as [Cesium.BoundingSphere];
+    // the sim- path runs from (-78, 35, 1000 m) to (-77, 35, 900 m): its sphere is some 45 km across, 1.4 times wider framed
+    const from = Cesium.Cartesian3.fromDegrees(-78, 35, 1000);
+    const to = Cesium.Cartesian3.fromDegrees(-77, 35, 900);
+    expect(sphere.radius).toBeCloseTo(1.4 * Cesium.Cartesian3.distance(from, to) / 2, -2);
+    expect(Cesium.Cartesian3.distance(sphere.center, Cesium.Cartesian3.midpoint(from, to, new Cesium.Cartesian3())))
+      .toBeLessThan(500);
+  });
+
+  it("does not frame an M2 job's scene on the background alone: the controlled paths are what is framed", async () => {
+    const [bg] = sampleKeys("G", 1);
+    inOptimizeWithJob();
+    serve([sceneGroup(A, "05L", 0), sceneGroup(B, "05R", 500)], requests, { scene: sceneOf([bg], [10]) });
+    renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(viewer.camera.flyToBoundingSphere).toHaveBeenCalledTimes(1));
+  });
+
+  it("draws every group of a job whatever the top bar's runway is, and the sample count", async () => {
+    const [a1] = sampleKeys("A", 1);
+    const [b1] = sampleKeys("B", 1);
+    inOptimizeWithJob();
+    appState.selectedRunway = "05R";                    // Evaluate's selector: not the job's
+    appState.trajectorySampleCount = 1;
+    serve([group(A, "05L", [a1], [10]), group(B, "05R", [b1], [5])], requests);
+
+    const { result } = renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(trafficSource(viewer)).toBeDefined());
+    expect(result.current.flightIds.sort()).toEqual([A, B]);                  // both windows listed
+    expect(trafficIds(viewer)).toEqual([`traffic-${A}/${a1}`]);               // the first group is drawn, not B (05R)
+  });
+
+  it("does not reload a job's scene when the runway selector or the sample count changes", async () => {
+    const [a1] = sampleKeys("A", 1);
+    inOptimizeWithJob();
+    serve([group(A, "05L", [a1], [10])], requests);
+    const answer = router.serve;
+    let fetches = 0;
+    router.serve = (url: string) => { fetches += 1; return answer(url); };
+
+    const { rerender } = renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(trafficSource(viewer)).toBeDefined());
+    const [asked, removed] = [fetches, viewer.dataSources.remove.mock.calls.length];
+
+    appState.selectedRunway = "05R";
+    rerender();
+    appState.trajectorySampleCount = 3;
+    rerender();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(fetches).toBe(asked);
+    expect(viewer.dataSources.remove.mock.calls).toHaveLength(removed);
+    expect(viewer.camera.flyToBoundingSphere).toHaveBeenCalledTimes(1);       // and the camera is not flown again
+  });
+
+  it("draws a job's M2 scene like a published one", async () => {
+    const [bg] = sampleKeys("G", 1);
+    inOptimizeWithJob();
+    serve([sceneGroup(A, "05L", 0), sceneGroup(B, "05R", 500)], requests, { scene: sceneOf([bg], [10]) });
+
+    const { result } = renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(trafficSource(viewer)).toBeDefined());
+    expect(trafficIds(viewer)).toEqual([`traffic-scene/${bg}`]);
+    expect(result.current.flightIds.sort()).toEqual([A, B]);
+  });
+
+  it("draws nothing in the Optimize task without a job, and nothing for another airport's job", async () => {
+    serve([group(A, "05L", [], [])], requests);
+    inOptimizeWithJob("KSMF");
+    renderHook(() => useComparisonTrajectoryLayer());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+    expect(viewer.sources).toHaveLength(0);
+    expect(requests).toEqual([]);
+
+    appState.trafficScene = null;
+    const quiet = renderHook(() => useComparisonTrajectoryLayer());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+    expect(viewer.sources).toHaveLength(0);
+    expect(quiet.result.current.isLoaded).toBe(false);
+  });
+
+  it("removes the scene when the job goes (a new job, a change of mode, leaving the task)", async () => {
+    const [a1] = sampleKeys("A", 1);
+    inOptimizeWithJob();
+    serve([group(A, "05L", [a1], [10])], requests);
+
+    const { rerender } = renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(trafficSource(viewer)).toBeDefined());
+    expect(viewer.sources.length).toBeGreaterThan(1);
+
+    appState.trafficScene = null;
+    rerender();
+    await waitFor(() => expect(viewer.sources).toHaveLength(0));
+  });
+
+  it("does not draw a published category in the Optimize task", async () => {
+    inOptimizeWithJob();
+    appState.trafficScene = null;
+    appState.trajectoryComparison = true;                  // Evaluate's switch is still on; the task is Optimize
+    appState.trajectoryComparisonCategory = "traffic_m1_runway";
+    serve([group(A, "05L", [], [])], requests);
+    renderHook(() => useComparisonTrajectoryLayer());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+    expect(viewer.sources).toHaveLength(0);
   });
 });

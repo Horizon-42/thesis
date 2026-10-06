@@ -196,9 +196,9 @@ describe("FlightTable", () => {
 
     comparisonData.comparisonActive = true;
     rerender(<FlightTable flightIds={flightIds} flightSummaries={flightSummaries} />);
-    expect(screen.getByText("UPS1276").getAttribute("title")).toBe(`${UPS} — traffic: separated`);
+    expect(screen.getByText("UPS1276").getAttribute("title")).toBe(`${UPS} — traffic: separated after re-solve (separated)`);
     expect(screen.getByText("FDX1738").getAttribute("title"))
-      .toBe(`${FDX} — optimized but missed the target (off target) — traffic: solve_failed`);
+      .toBe(`${FDX} — optimized but missed the target (off target) — traffic: loss left (re-solve failed; last good solve shown) (solve_failed)`);
   });
 
   it("adds a scene group's delay (rounded) to its row's info text, and none when it has no slot", () => {
@@ -211,8 +211,8 @@ describe("FlightTable", () => {
     ]);
     render(<FlightTable flightIds={flightIds} flightSummaries={flightSummaries} />);
     fireEvent.click(screen.getByRole("button", { name: /Flights/ }));
-    expect(screen.getByText("UPS1276").getAttribute("title")).toBe(`${UPS} — traffic: separated_at_baseline — delay 13 s`);
+    expect(screen.getByText("UPS1276").getAttribute("title")).toBe(`${UPS} — traffic: separated at the first solve (no re-solve) (separated_at_baseline) — delay 13 s`);
     expect(screen.getByText("FDX1738").getAttribute("title"))
-      .toBe(`${FDX} — optimization failed — traffic: BaselineFailed: slot solve`);
+      .toBe(`${FDX} — optimization failed — traffic: not optimized: its slot could not be flown (BaselineFailed: slot solve)`);
   });
 });

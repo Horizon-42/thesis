@@ -183,9 +183,15 @@ interface PlacementBackup {
 interface PilotPanelProps {
   /** The workbench task the panel serves — the top bar's task switcher owns it. */
   mode: PilotPanelMode;
+  /**
+   * The panel stays mounted but out of sight, its scene off (no playback on the clock, no target gate, no forced procedure
+   * display, no live-state readout): Optimize shows a multi-aircraft panel instead, and a task or mode switch must not lose
+   * what was set up here. Showing it again is a task switch like Fly ↔ Optimize (the playbacks are released).
+   */
+  hidden?: boolean;
 }
 
-export default function PilotPanel({ mode: activeMode }: PilotPanelProps) {
+export default function PilotPanel({ mode: activeMode, hidden = false }: PilotPanelProps) {
   const {
     activeAirportCode,
     airport,
@@ -265,9 +271,9 @@ export default function PilotPanel({ mode: activeMode }: PilotPanelProps) {
   // + native clock dial bound to the current mode's trajectory the moment you
   // enter it (the playback hooks load it paused; Play animates).
   const isTrajectoryPlaybackActive =
-    activeMode === "optimize" && optimizedTrajectory?.playback != null;
+    !hidden && activeMode === "optimize" && optimizedTrajectory?.playback != null;
   const isComparisonPlaybackActive =
-    activeMode === "fly" && comparisonResult != null;
+    !hidden && activeMode === "fly" && comparisonResult != null;
   // The state of the run on screen: Fly's live flight, or a loaded playback's sample.
   const snapshot = activeMode === "fly" && !isComparisonPlaybackActive ? liveSnapshot : playbackSnapshot;
   // A/C/D deviations vs the reference B at the current clock time, overlaid on
@@ -478,18 +484,24 @@ export default function PilotPanel({ mode: activeMode }: PilotPanelProps) {
     aircraftConfigs.length,
   ]);
 
+  // Hidden (a multi-aircraft Optimize is shown): no globe click may move this panel's start, so an active placement is
+  // cancelled (its backup restored) and neither the placement nor its preview is drawn.
+  useEffect(() => {
+    if (hidden && isPlacingInitialPosition) cancelInitialPlacement();
+  }, [hidden, isPlacingInitialPosition, cancelInitialPlacement]);
+
   usePilotInitialPlacement({
-    enabled: isPlacingInitialPosition,
+    enabled: !hidden && isPlacingInitialPosition,
     // The static "START" preview marks the chosen start state while setting up.
     // Hide it once a live flight or a playback holds the screen (a loaded comparison
     // samples its state only while it plays, so without its own guard the START aircraft
     // would sit at the origin while the per-system models fly away).
-    previewVisible: isPlacingInitialPosition ||
+    previewVisible: !hidden && (isPlacingInitialPosition ||
       ((isInitialEditorOpen || isInitialPreviewVisible) &&
         !isEnabled &&
         !liveSnapshot &&
         !playbackSnapshot &&
-        !isComparisonPlaybackActive),
+        !isComparisonPlaybackActive)),
     initialState,
     placementGuidance,
     onPositionChange: updateInitialPosition,
@@ -507,7 +519,7 @@ export default function PilotPanel({ mode: activeMode }: PilotPanelProps) {
   });
 
   usePilotTargetGate({
-    enabled: activeMode === "optimize",
+    enabled: !hidden && activeMode === "optimize",
     target: targetGateState,
   });
 
@@ -605,7 +617,10 @@ export default function PilotPanel({ mode: activeMode }: PilotPanelProps) {
   // closes, so repeated runs are fast but the worker's memory is reclaimed once the
   // user leaves. A `pagehide` beacon also releases it when the whole tab/window
   // closes, where this cleanup would not run.
+  // Hidden (a multi-aircraft Optimize is shown) the panel holds no worker: its memory is free for the job, and a return to
+  // Optimize (single) opens it again.
   useEffect(() => {
+    if (hidden) return undefined;
     const kind: WorkerSessionKind = activeMode === "optimize" ? "optimizer" : "comparison";
     void openWorkerSession(kind);
     const releaseOnUnload = () => beaconCloseWorkerSession(kind);
@@ -614,7 +629,7 @@ export default function PilotPanel({ mode: activeMode }: PilotPanelProps) {
       window.removeEventListener("pagehide", releaseOnUnload);
       void closeWorkerSession(kind);
     };
-  }, [activeMode]);
+  }, [activeMode, hidden]);
 
   useEffect(() => {
     const aircraft = aircraftConfigs[0] ?? null;
@@ -1010,17 +1025,18 @@ export default function PilotPanel({ mode: activeMode }: PilotPanelProps) {
   }
 
   // On each task switch (the top bar's): release the clock and close the editors.
-  const previousModeRef = useRef(activeMode);
+  const taskKey = `${activeMode}:${hidden}`;
+  const previousModeRef = useRef(taskKey);
   useEffect(() => {
-    if (previousModeRef.current === activeMode) return;
-    previousModeRef.current = activeMode;
+    if (previousModeRef.current === taskKey) return;
+    previousModeRef.current = taskKey;
     if (isPlacingInitialPosition) return;
     suspendPlaybacks();
     setIsInitialEditorOpen(false);
     setIsTargetEditorOpen(false);
     if (activeMode !== "fly") setIsFlying(false);
     setError(null);
-  }, [activeMode]);
+  }, [taskKey]);
 
   function openTargetEditor() {
     if (isBusy || isTrajectoryPlaying || runwayTargets.length === 0) return;
@@ -1479,19 +1495,20 @@ export default function PilotPanel({ mode: activeMode }: PilotPanelProps) {
     ? bareRunwayIdent(selectedTargetRunway.runwayIdent)
     : null;
   useForcedProcedureDisplay({
-    active: activeMode === "optimize" && optimizerParts.constrained && forcedRunwayIdent !== null,
+    active: !hidden && activeMode === "optimize" && optimizerParts.constrained && forcedRunwayIdent !== null,
     forceRunway: forcedRunwayIdent,
   });
 
   return (
-    <div className="pilot-panel">
+    <div className="pilot-panel" hidden={hidden}>
       <PilotRealtimeStatePanel
         snapshot={snapshot}
         visible={
-          isFlying ||
-          isTrajectoryPlaying ||
-          (activeMode === "optimize" && snapshot !== null) ||
-          (isComparisonPlaybackActive && snapshot !== null)
+          !hidden &&
+          (isFlying ||
+            isTrajectoryPlaying ||
+            (activeMode === "optimize" && snapshot !== null) ||
+            (isComparisonPlaybackActive && snapshot !== null))
         }
         showControlReadout={activeMode === "optimize" || isComparisonPlaybackActive}
         simulationMode={snapshot?.simulationMode ?? simulationMode}

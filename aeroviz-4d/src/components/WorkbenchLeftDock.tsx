@@ -5,7 +5,9 @@
  * on the global workbench `mode` (the four mutually-exclusive tasks):
  *   • evaluation     → trajectory playback/options + the flight list
  *   • training       → the TrainingPanel (stage A: the two-tier model's Training view)
- *   • fly / optimize → the PilotPanel, which takes the task as its mode
+ *   • fly / optimize → the PilotPanel, which takes the task as its mode; Optimize first asks for its mode
+ *                      (`OptimizeKindSelect`): the PilotPanel's single aircraft, or a multi-aircraft job (`TrafficJobPanel`,
+ *                      the PilotPanel then stays mounted, hidden)
  *
  * Procedures is NOT a task — the procedure panel is rendered separately (gated on
  * `proceduresOpen`) so it can coexist with whichever task is active.
@@ -27,7 +29,9 @@ import type {
 } from "../data/observedTracks";
 import FlightTable from "./FlightTable";
 import EvaluationSummary from "./EvaluationSummary";
+import OptimizeKindSelect, { type OptimizeKind } from "./OptimizeKindSelect";
 import PilotPanel from "./PilotPanel";
+import TrafficJobPanel from "./TrafficJobPanel";
 import TrainingPanel from "./TrainingPanel";
 import type { ObservedFlightSummary } from "../utils/observedFlightSummary";
 
@@ -51,12 +55,23 @@ export default function WorkbenchLeftDock({
   const { mode, activeAirportCode } = useApp();
   // the airport whose Training session is kept: taken on entering Training, dropped when another airport is opened
   const [trainingAirport, setTrainingAirport] = useState<string | null>(null);
+  const [optimizeKind, setOptimizeKind] = useState<OptimizeKind>("single");
   if (mode === "training" && trainingAirport !== activeAirportCode) setTrainingAirport(activeAirportCode);
   if (mode !== "training" && trainingAirport !== null && trainingAirport !== activeAirportCode) setTrainingAirport(null);
 
   let task: ReactNode = null;
   if (mode === "fly" || mode === "optimize") {
-    task = <PilotPanel mode={mode} />;
+    // The PilotPanel keeps its place in the tree (the last child) in Fly, Optimize (single) AND Optimize (multi-aircraft,
+    // where it stays mounted but hidden, its scene off): a switch between them never loses what was set up in it. The job
+    // panel is keyed by mode and airport: another one is another job, and the old panel's running job is cancelled with it.
+    const multi = mode === "optimize" && optimizeKind !== "single";
+    task = (
+      <>
+        {mode === "optimize" ? <OptimizeKindSelect value={optimizeKind} onChange={setOptimizeKind} /> : null}
+        {multi ? <TrafficJobPanel key={`${optimizeKind}:${activeAirportCode}`} kind={optimizeKind} /> : null}
+        <PilotPanel mode={mode} hidden={multi} />
+      </>
+    );
   } else if (mode === "evaluation") {
     task = (
       <>

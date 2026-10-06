@@ -1043,6 +1043,94 @@ describe("PilotPanel", () => {
   };
   const status = () => document.querySelector(".pilot-status")?.textContent;
 
+  it("hidden (a multi-aircraft Optimize is shown): drives no procedure display, touches no runway selector, gates no target", async () => {
+    const view = render(<PilotPanel mode="optimize" hidden />);
+    expect(await screen.findByText("A320")).toBeTruthy();
+    await waitFor(() => expect(mocks.fetchRunwayThresholdTargets).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    // the visible panel does all three (the test of the procedure display above): constrained is the default
+    expect(mocks.setProceduresOpen).not.toHaveBeenCalled();
+    expect(mocks.setSelectedRunway).not.toHaveBeenCalled();
+    expect(mocks.toggleLayer).not.toHaveBeenCalled();
+    expect(lastCall(mocks.usePilotTargetGate)[0]).toMatchObject({ enabled: false });
+    expect(view.container.querySelector(".pilot-panel")?.hasAttribute("hidden")).toBe(true);
+
+    view.rerender(<PilotPanel mode="optimize" />);                       // shown again: it takes the display back
+    await waitFor(() => expect(mocks.setProceduresOpen).toHaveBeenCalledWith(true));
+    expect(lastCall(mocks.usePilotTargetGate)[0]).toMatchObject({ enabled: true });
+    expect(view.container.querySelector(".pilot-panel")?.hasAttribute("hidden")).toBe(false);
+  });
+
+  it("hidden: draws no placement and no start preview, and an active placement is cancelled, its backup restored", async () => {
+    const view = render(<PilotPanel mode="optimize" />);
+    expect(await screen.findByText("A320")).toBeTruthy();
+    fireEvent.click(within(screen.getByLabelText("Initial aircraft state summary")).getByRole("button", { name: "Edit" }));
+    const editor = await screen.findByLabelText("Initial aircraft setup");
+    fireEvent.click(within(editor).getByRole("button", { name: "Place Aircraft" }));
+    await waitFor(() => expect(lastCall(mocks.usePilotInitialPlacement)[0]).toMatchObject({ enabled: true, previewVisible: true }));
+    const placement = lastCall(mocks.usePilotInitialPlacement)[0] as { onPositionChange: (p: { lon: number; lat: number }) => void };
+    act(() => placement.onPositionChange({ lon: -79.5, lat: 35.5 }));            // a click on the globe moved the start
+
+    view.rerender(<PilotPanel mode="optimize" hidden />);
+    await waitFor(() => expect(lastCall(mocks.usePilotInitialPlacement)[0]).toMatchObject({
+      enabled: false, previewVisible: false }));
+    view.rerender(<PilotPanel mode="optimize" />);                               // shown again: not placing, the start as before
+    expect(lastCall(mocks.usePilotInitialPlacement)[0]).toMatchObject({ enabled: false });
+    const summary = within(screen.getByLabelText("Initial aircraft state summary"));
+    expect(summary.queryByText(/79\.5/)).toBeNull();                              // the placed longitude was backed out
+  });
+
+  it("hidden: the placement preview of an open editor is not drawn either", async () => {
+    const view = render(<PilotPanel mode="optimize" />);
+    expect(await screen.findByText("A320")).toBeTruthy();
+    fireEvent.click(within(screen.getByLabelText("Initial aircraft state summary")).getByRole("button", { name: "Edit" }));
+    await waitFor(() => expect(lastCall(mocks.usePilotInitialPlacement)[0]).toMatchObject({ previewVisible: true }));
+    view.rerender(<PilotPanel mode="optimize" hidden />);
+    await waitFor(() => expect(lastCall(mocks.usePilotInitialPlacement)[0]).toMatchObject({ previewVisible: false }));
+  });
+
+  it("hidden: closes the optimizer's worker session, and opens it again when Optimize (single) is shown", async () => {
+    const view = render(<PilotPanel mode="optimize" />);
+    expect(await screen.findByText("A320")).toBeTruthy();
+    await waitFor(() => expect(mocks.openWorkerSession).toHaveBeenCalledWith("optimizer"));
+    mocks.openWorkerSession.mockClear();
+    mocks.closeWorkerSession.mockClear();
+
+    view.rerender(<PilotPanel mode="optimize" hidden />);
+    await waitFor(() => expect(mocks.closeWorkerSession).toHaveBeenCalledWith("optimizer"));
+    expect(mocks.openWorkerSession).not.toHaveBeenCalled();                    // and nothing is opened while hidden
+    window.dispatchEvent(new Event("pagehide"));
+    expect(mocks.beaconCloseWorkerSession).not.toHaveBeenCalled();             // no session to release on unload
+
+    view.rerender(<PilotPanel mode="optimize" />);
+    await waitFor(() => expect(mocks.openWorkerSession).toHaveBeenCalledWith("optimizer"));
+  });
+
+  it("hidden from the start: opens no worker session at all", async () => {
+    render(<PilotPanel mode="optimize" hidden />);
+    expect(await screen.findByText("A320")).toBeTruthy();
+    expect(mocks.openWorkerSession).not.toHaveBeenCalled();
+  });
+
+  it("hidden: releases the clock from the optimized playback and the live readout, and gives them back with what was computed", async () => {
+    document.body.innerHTML = '<div class="cesium-overlay-container"></div>';
+    const view = render(<PilotPanel mode="optimize" />);
+    expect(await screen.findByText("A320")).toBeTruthy();
+    await optimizeUnconstrained();
+    fireEvent.click(screen.getByRole("button", { name: "Play" }));
+    expect(lastCall(mocks.useOptimizedTrajectoryPlayback)[0]).toMatchObject({ enabled: true });
+
+    view.rerender(<PilotPanel mode="optimize" hidden />);
+    await waitFor(() => expect(lastCall(mocks.useOptimizedTrajectoryPlayback)[0]).toMatchObject({ enabled: false }));
+    expect(screen.queryByRole("complementary", { name: "Realtime aircraft state" })).toBeNull();
+
+    view.rerender(<PilotPanel mode="optimize" />);
+    await waitFor(() => expect(lastCall(mocks.useOptimizedTrajectoryPlayback)[0]).toMatchObject({
+      enabled: true, czml: expect.any(Array) }));                         // the computed trajectory is still there
+    expect((screen.getByRole("button", { name: "Play" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(status()).toBe("Paused");                                       // loaded, paused: playing was released
+  });
+
   it("keeps a paused live flight across a trip to Optimize, never reading the playback's state as its own", async () => {
     const view = render(<PilotPanel mode="fly" />);
     expect(await screen.findByText("A320")).toBeTruthy();

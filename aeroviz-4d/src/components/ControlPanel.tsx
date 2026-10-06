@@ -22,15 +22,10 @@ import {
 } from "../utils/observedVerdictColors";
 import { useComparisonCategories } from "../hooks/useComparisonCategories";
 import { useComparisonLegend } from "../hooks/useComparisonLegend";
-import type { ComparisonLegendKind } from "../utils/comparisonLegend";
 import { isDrawableComparisonCategory } from "../data/airportData";
 import { useForcedProcedureDisplay } from "../hooks/useForcedProcedureDisplay";
-import {
-  COMPARISON_KIND_ALPHA,
-  COMPARISON_STATUS_STYLES,
-  comparisonKindSwatch,
-} from "../utils/trajectoryRenderModel";
 import ApproachViewToggle from "./ApproachViewToggle";
+import ComparisonLegendList from "./ComparisonLegendList";
 import ExperimentDetails from "./ExperimentDetails";
 import ExperimentPicker from "./ExperimentPicker";
 import { useEffect, useState } from "react";
@@ -45,13 +40,6 @@ import {
   type ResultAccuracySortKey,
   type TrajectoryResultSource,
 } from "../utils/trajectoryResultSources";
-
-const COMPARISON_KIND_LABELS: Record<ComparisonLegendKind, string> = {
-  reference: "Reference",
-  simulator: "Optimize results",
-  predicted: "Predicted",
-  lookback: "Predictor input",
-};
 
 interface ControlPanelProps {
   /**
@@ -73,8 +61,6 @@ export default function ControlPanel({
     setTrajectoryComparison,
     trajectoryComparisonCategory,
     setTrajectoryComparisonCategory,
-    trajectoryComparisonKinds,
-    setTrajectoryComparisonKind,
     trajectorySampleCount,
     setTrajectorySampleCount,
     observedVerdictFilter,
@@ -461,45 +447,7 @@ export default function ControlPanel({
               <p className="control-panel-pending-hint">Enter to apply · Esc to keep {trajectorySampleCount}</p>
             ) : null}
             {trajectoryComparison && activeComparisonCategory ? (
-              <div
-                className="control-panel-comparison-kinds"
-                aria-label="Comparison trajectory legend"
-              >
-                {comparisonLegend.kinds.map((kind) => (
-                  <label key={kind}>
-                    <input
-                      type="checkbox"
-                      checked={trajectoryComparisonKinds[kind]}
-                      onChange={(event) => setTrajectoryComparisonKind(kind, event.target.checked)}
-                    />
-                    {/* Opacity, not just hue: "Predicted" and "Predictor input" draw the same
-                        outcome colours and are told apart by their alpha alone, so the swatch
-                        has to carry that alpha too. Same source the paths are drawn with. */}
-                    <i style={{
-                      background: comparisonKindSwatch(kind),
-                      opacity: COMPARISON_KIND_ALPHA[kind],
-                    }} />
-                    {COMPARISON_KIND_LABELS[kind]}
-                  </label>
-                ))}
-                {comparisonLegend.statuses.length > 0 ? (
-                  <div
-                    className="control-panel-comparison-statuses"
-                    aria-label="Outcome colour overrides"
-                  >
-                    <span className="control-panel-comparison-status-title">Outcome colours</span>
-                    {comparisonLegend.statuses.map((status) => {
-                      const style = COMPARISON_STATUS_STYLES[status];
-                      return (
-                        <span key={status} className="control-panel-comparison-status-row">
-                          <i style={{ background: style.color, opacity: style.alpha }} />
-                          {style.label}
-                        </span>
-                      );
-                    })}
-                  </div>
-                ) : null}
-              </div>
+              <ComparisonLegendList legend={comparisonLegend} />
             ) : null}
           </div>
         ) : null}

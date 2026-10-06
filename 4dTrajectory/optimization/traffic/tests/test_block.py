@@ -31,7 +31,8 @@ def _scenario(key, start):
                            target=SimpleNamespace(V=SPEED))
 
 
-def _run(monkeypatch, *, eta_s, fail_slot=(), fail_eta=(), out_landing=T0 - 400.0, final_conflicts=()):
+def _run(monkeypatch, *, eta_s, fail_slot=(), fail_eta=(), out_landing=T0 - 400.0, final_conflicts=(),
+         on_progress=block.no_progress):
     """Fly A (start T0) and B (start T0 + 5); ``eta_s`` their minimum flight times; OUT a record outside
     the block landing at ``out_landing`` (far before the block by default)."""
     scenarios = [_scenario("A", T0), _scenario("B", T0 + 5.0)]
@@ -64,7 +65,7 @@ def _run(monkeypatch, *, eta_s, fail_slot=(), fail_eta=(), out_landing=T0 - 400.
     monkeypatch.setattr(block, "FlownTrack", SimpleNamespace(from_samples=lambda s: None))
     monkeypatch.setattr(block, "check", lambda *a, **k: Check(np.zeros(1), tuple(final_conflicts), 2))
     flown, summary = block.fly_block(scenarios, traffic, procedure_root="root", settings=block.LoopSettings(),
-                                     max_duration=2000.0, rollout_dt_s=0.5, solve_options={})
+                                     max_duration=2000.0, rollout_dt_s=0.5, solve_options={}, on_progress=on_progress)
     return flown, summary, seen
 
 
@@ -110,6 +111,20 @@ def test_the_final_check_judges_each_flown_aircraft_against_all_others(monkeypat
     _flown, summary, seen = _run(monkeypatch, eta_s={"A": 200.0, "B": 200.0}, final_conflicts=conflicts)
     assert seen["final:A"] == {"A", "B", "OUT"} and seen["final:B"] == {"A", "B", "OUT"}
     assert summary["final_losses"]["A"][rules.VISUAL] == {"answered": 1, "not_answered": 1, "background": 2}
+
+
+def test_progress_is_reported_once_per_aircraft_as_each_is_settled(monkeypatch):
+    calls = []
+    _run(monkeypatch, eta_s={"A": 200.0, "B": 200.0}, on_progress=lambda *call: calls.append(call))
+    assert calls == [(1, 2, "A"), (2, 2, "B")]                                      # in slot order
+
+
+def test_progress_counts_an_eta_failure_and_a_failed_slot_like_any_other_aircraft(monkeypatch):
+    calls = []
+    _run(monkeypatch, eta_s={"A": 200.0, "B": 200.0}, fail_eta={"A"}, fail_slot={"B"},
+         on_progress=lambda *call: calls.append(call))
+    # A settles at its failed ETA solve, before the slots; B at its failed slot solve; the last call is done == total
+    assert calls == [(1, 2, "A"), (2, 2, "B")]
 
 
 def test_an_empty_block_has_an_empty_schedule():

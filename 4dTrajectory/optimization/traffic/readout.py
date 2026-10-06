@@ -72,7 +72,8 @@ def readout(batch_dir: Path, sidecar_suffix: str = "_traffic.json") -> dict:
 
 
 def blocks_readout(m2_dir: Path) -> dict:
-    """An M2 run (its ``summary.json``, mode ``M2_MODE``, with every block): aircraft, the schedule's delays, the
+    """An M2 run (its ``summary.json``, mode ``M2_MODE``, with every block): aircraft (those with a dynamics model, the
+    ones the block controls) and ``skipped_no_dynamics`` (those without, which stay their records), the schedule's delays, the
     outcomes (a failed solve split by its delay: none, or some; ``slot_failed`` — the slot's fixed-time
     solve on the ETA's IAF failed, no other IAF is tried), and the flown aircraft with a loss left after the
     block's final check — one it answers for, one it does not."""
@@ -107,6 +108,7 @@ def blocks_readout(m2_dir: Path) -> dict:
         "blocks": len(summary["blocks"]),
         "failed_blocks": failed_blocks,
         "aircraft": aircraft,
+        "skipped_no_dynamics": sum(block["skipped_no_dynamics"] for block in summary["blocks"]),
         "scheduled": scheduled,
         "delay_s": ({"median": float(np.median(delays)), "max": float(max(delays)),
                      "delayed_over_60s": sum(d > 60.0 for d in delays)} if delays else {}),

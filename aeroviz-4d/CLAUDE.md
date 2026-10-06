@@ -170,11 +170,22 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   ids, each with the seconds it enters after the commanded aircraft (no CZML holds an absolute time, so the frontend shifts each neighbour's
   epoch by it, per shown group); drawn pink `COMPARISON_TRAFFIC_COLOR`, the references' model budget, the clock stays the groups' own span and each neighbour's availability is clipped to it on purpose (airborne at the clock start: shown mid-flight; entering after the clock stop: not loaded; no clock: an error); their keys
   are requested in arrival-window requests of at most `MAX_FLIGHT_KEYS_PER_REQUEST` (1000); an unsolved row has no `traffic`; the `categories.json`
-  entry carries no new field (AV46).
+  entry carries no new field. **An index of windows is drawn ONE window at a time** — the selected flight's group, the first by default; its
+  own reference, result and neighbours, on its own clock; the other windows stay in the Flights table, their neighbours are not fetched
+  until shown (drawn together they flew beside another window's controlled aircraft); only a selected GROUP KEY changes the window (Reset view does not).
+  Legend: "Controlled aircraft — its record" / "— optimized path" (+ the off-target yellow explained there), "Recorded traffic — not controlled".
+  A traffic scene has a **"Scene time (UTC)"** readout (`SceneTimeReadout`: real = `sceneTime.startUtc` + clock − epoch; an M1 window's start is its flight's roster entry) (AV46).
 - **An M2 run's index is ONE scene** (a `--summary` of mode `traffic:m2`): index `scene: {startUtc, background: {recorded, startOffsetsS}}`, every group
   `scene: {startOffsetS, outcome, delayS}` (never with `traffic`); the clock starts at the earliest group entry (solved and unsolved), result paths are written
   on it, the frontend shows every group (no sample, no runway filter), shifts each reference by its offset (available only while it flies), takes the clock
-  from the groups' spans on the scene clock, and loads the background once (pink, model budget, clipped to the clock) (AV47).
+  from the groups' spans on the scene clock, and loads the background once (pink, model budget, clipped to the clock); its pink legend row reads
+  "…, outside the scheduled set" (AV47).
+- **Optimize has a mode selector: Single aircraft (the `PilotPanel`, unchanged) | Multi-aircraft one controlled (M1) | all controlled (M2)**; the multi-aircraft
+  panel runs ONE backend job (`/traffic/*`, `aeroviz_backend/CLAUDE.md`), polls it every 2 s, and when it is done the comparison layer — which now has a
+  SOURCE (a published category, or the job's files at `<backend>/traffic/jobs/<id>/files/`, `AppContext.trafficScene`) — draws its scene in the Optimize task;
+  **a change of mode, another airport or leaving Optimize cancels a running job and removes the scene** (the hook's cleanup; Start is disabled while a job runs; every async continuation is epoch-gated; a failed poll keeps the job and retries with backoff); the PilotPanel stays mounted, `hidden` with its scene off, so no state is lost; a job source ignores the top-bar runway and the sample count and flies the camera to its scene. Outcomes are
+  shown by plain names from ONE mapping (`utils/trafficOutcome.ts`; the raw string follows in the title; an unknown one is shown raw); its list, the block
+  lengths and the settings are MIRRORS pinned by `aeroviz-4d/python/tests/test_traffic_mirrors.py` (AV48).
 - `states_schema` dispatches on record keys: `opt-`/`sim-` entities, or `pred-` plus `look-` for
   predictions (AV14).
 - **Predictions never get the off-target bake** (`mark_off_target = off_target and schema ==

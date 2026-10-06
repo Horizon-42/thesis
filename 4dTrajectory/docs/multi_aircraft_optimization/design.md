@@ -406,7 +406,7 @@ branch and worktree, with a review before each commit.
 | T8 | M2 (§5.6) | A readout like T5 for 5 blocks | T6, MD9 | Done (§8.2) |
 | T9 | M3 design (§5.7) | Only if T8 leaves losses that the order cannot remove | T8 | Not started |
 | T10 | M2 in the viewer (the user, 2026-10-06): (a) one directory and one `summary.json` per M2 run; (b) the builder and the frontend show a run as one scene (§9); (c) one KRDU run published | Builder and frontend tests; the publication validator; checked in the browser | T7, T8 | Done (§8.4): (a) `4e6c3ad0`; (b) `87f5f2f2`; (c) published. The legend and M1's one window: in work with T11 |
-| T11 | The Optimize task's multi-aircraft mode (§10; the user, 2026-10-06) | Backend and frontend tests; one M1 job and one 15-min M2 job on a test stack, checked in the browser | T10 | Design written (§10); the code: a sonnet agent (the user's order) |
+| T11 | The Optimize task's multi-aircraft mode (§10; the user, 2026-10-06) | Backend and frontend tests; one M1 job and one 15-min M2 job on a test stack, checked in the browser | T10 | Built (§10; this commit); reviewed; real jobs on a test stack matched the batch; checked in the browser |
 
 ### 8.1 T5 readout (KRDU, seed 11, 50 windows; the reviewed M1 code with the retry of MD13, scratch output)
 
@@ -506,12 +506,15 @@ user's order). Claude reviews it.
    roster: landing time, callsign, runway, type.
 3. M1: the user selects one arrival. M2: the user sets a block, a start time (UTC) and a length. The panel
    shows how many arrivals land in the block.
-4. The user starts the job. The panel shows the progress (aircraft done of the total, the aircraft in work)
-   and a Cancel button.
+4. The user starts the job. The panel shows the progress (aircraft done of the total, the aircraft last
+   finished) and a Cancel button. Start is disabled while a job runs: the user cancels first.
 5. When the job is done, the viewer shows the scene (§10.4). The panel shows one row per controlled aircraft
    (callsign, runway, outcome, and for M2 the delay) and one summary line (the outcome counts; for M2 also
    the delays and the losses left after the final check). A click on a row selects that flight.
-6. A new job, a change of mode, or leaving the Optimize task cancels a running job and removes the scene.
+6. A change of mode, another airport, or leaving the Optimize task cancels a running job and removes the
+   scene. The single-aircraft panel stays mounted (hidden) in the multi-aircraft modes, so its state is kept.
+7. A traffic scene shows a "Scene time (UTC)" readout: the display clock has a fixed epoch, the readout gives
+   the real time.
 
 ### 10.2 Decisions
 
@@ -522,8 +525,8 @@ These are Claude's choices for this design. The user can change them.
 | IM1 | Which aircraft can be controlled | Recorded arrivals only, built as the batch builds them: the record's start, the runway-threshold target, the constrained solve on the shortest IAF | The judge needs a record: a flight key, a runway, a type with a wake category. A hand-set aircraft has none of them |
 | IM2 | The solver settings | The batch defaults (`LoopSettings`, `max_duration` 2000 s, rollout step 0.5 s, IPOPT cap 3000), shown read-only | The same code and settings as T5 and T8, so an interactive result compares with the batch |
 | IM3 | Block length (M2) | 15, 30 or 60 min; 30 min by default | A block is serial. T8: a 1-hour block takes up to about 10 min |
-| IM4 | Where a job runs | One process per job, separate from the resident single-aircraft worker, at `nice 10`; one job per backend at a time | casadi is not thread-safe; a long job must not block the single-aircraft optimizer; the box also runs the two-tier experiments |
-| IM5 | Which traffic a job reads | Only the roster rows whose arrival slice overlaps the job's time span plus `max_duration`, and only their tracks (`load_model_arrivals_subset`) | The batch reads the whole roster (4.2 GB peak). The live backend must not |
+| IM4 | Where a job runs | One process group per job, separate from the resident single-aircraft worker, at `nice 10`, with one solver thread (the batch's thread variables); one job per backend at a time, also across a backend restart (the job directory records its process group); the job root is per backend port | casadi is not thread-safe; a long job must not block the single-aircraft optimizer; the box also runs the two-tier experiments; one thread keeps a job comparable with the batch |
+| IM5 | Which traffic a job reads | Only the roster rows whose arrival slice overlaps the job's time span plus `max_duration`, and only their tracks (`load_model_arrivals_subset`); plus one arrival per runway of the roster for the runway targets, so the job's runways are the batch's | The batch reads the whole roster (4.2 GB peak). The live backend must not |
 | IM6 | Where the result goes | A job directory in the backend's cache, not `public/data`: the batch records and `summary.json` (mode `traffic:m1` or `traffic:m2`), the evaluation report, and the comparison builder's files (§9). No `categories.json`. The backend keeps the last 5 job directories | A job result is not a publication. The frontend reads the same files as a published category |
 | IM7 | How the frontend shows the result | The comparison layer (AV46 for M1, AV47 for M2), fed from the job's files instead of `public/data` | One renderer for published and interactive results |
 
@@ -535,7 +538,9 @@ These are Claude's choices for this design. The user can change them.
   blockS}`: starts a job and returns `{jobId}`. 409 when a job runs. 400 for a bad request (an unknown flight
   key, a block length other than 900, 1800 or 3600 s).
 - `GET /traffic/jobs/<jobId>`: `{state: running | done | failed | cancelled, progress: {done, total, current},
-  error}`.
+  error}`, and when the state is `done` also `summary` (the job's `traffic.readout`: the panel's summary line
+  needs the losses left after the final check, which no served file holds). `current` is the aircraft last
+  finished.
 - `GET /traffic/jobs/<jobId>/files/<name>`: one file of the job directory that the comparison index lists (the
   index, the CZML files, the evaluation report). 404 for any other name.
 - `POST /traffic/jobs/<jobId>/cancel`: stops the job process and its process group.
@@ -545,6 +550,12 @@ These are Claude's choices for this design. The user can change them.
   evaluation and the comparison builder into `<dir>`, and writes `progress.json` after each aircraft
   (`fly_block` gets an optional progress callback). Its last write is `state.json`: `done`, or `failed` with
   the reason.
+- Safety of the job's process group: the backend signals a group only when its leader is the job's own process
+  (an unreaped child of this backend, or for a job of an earlier backend the same start time and boot id in
+  `process.json`). A job whose process is gone without `state.json` is failed at once. Known limits (rare): a job
+  of an earlier backend whose leader is gone but whose evaluation or builder step still runs is marked failed
+  and that step is not stopped; a backend that dies between starting a job and writing `process.json` leaves a
+  job the next backend cannot see. Linux only (`/proc`): elsewhere a job is refused by name.
 - The backend does not hot-reload. Test this mode on a separate backend (the worktree, a free port) with the
   worktree's frontend, never on the live backend (8765).
 

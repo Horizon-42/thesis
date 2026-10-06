@@ -894,25 +894,47 @@ that do not know it (dev-two-tier's `isComparisonIndex` accepts the built index)
 shape-checks it (`outcome` a string, `recorded` all `ref-` ids, `startOffsetsS` finite numbers of the same length) and
 refuses the index otherwise.
 
-Frontend (`utils/comparisonTraffic.ts`, `useComparisonTrajectoryLayer`): the keys of every shown group's `recorded` are
-requested from the backend with `window=arrival` (the same `fetchArrivalWindow` as the references), **split into requests of
-at most `MAX_FLIGHT_KEYS_PER_REQUEST` = 1000 keys** (`data/observedTracks.ts`, a MIRROR of the backend's
-`MAX_TRAJECTORIES_PER_RESPONSE`, pinned by a builder test; the default 200-group sample would otherwise exceed it). Each shown
-group gets its own copy of each neighbour, id `traffic-<group>/<flight_key>`, with `position.epoch` (and the orientation's)
-moved by `startOffsetsS[i]`, in its own data source, **pink `COMPARISON_TRAFFIC_COLOR` `rgb(255, 110, 199)`** on track and
-aircraft model (no other comparison colour). Only `DEFAULT_MODEL_BUDGET` (20) neighbours carry an aircraft model
-(`planTrajectoryModels`, as the references; `model.show`), the rest stay tracks; the budget is planned over the neighbours
-that are drawn (see the clip below), not over those cut away. Each neighbour has an availability interval
-(it vanishes when its track ends). **The neighbours never move the viewer clock — its bounds stay the groups' own spans — and
-each neighbour's availability is clipped to that clock on purpose** (`clipAvailabilityToClock`): a neighbour airborne at the
-clock start shows from there, mid-flight; one that enters after the clock stop is not shown — it is not even loaded (its copy is dropped before the data source is
-built); a comparison with neighbours but no clock to cut them to is an error, not an uncut draw (offsets of the 50-window sample
-run from -914 s to +1997 s against groups of about 445 s, so some neighbours of every window are cut). A flight listed by two shown groups is drawn twice,
-once on each group's clock; a group not in the sample (the runway selector, the sample count) has no neighbours loaded, and
-tearing the layer down — or a reload — removes them with the other sources, a teardown during the neighbours' fetch loads
-nothing. The neighbours follow the Reference switch and show their callsign on hover. The outcome (`separated`,
-`solve_failed`, …) is in the flight list row's tooltip (`<flight_key> — <label> — traffic: <outcome>`), only while the
+Frontend (`utils/comparisonTraffic.ts`, `useComparisonTrajectoryLayer`, 2026-10-06 "one window at a time"): **an index of
+windows is drawn ONE window at a time** (`isWindowIndex`: a `traffic` group, no `scene`) — the selected flight's group
+(`selectedFlightId`: a Flights table row, a result row), **the first shown group by default** (the layer selects it after the
+load, so the table row is lit); **only a selected GROUP KEY changes the window** (`requestedWindow`) — a cleared selection
+(Reset view) or a flight of no group leaves the window drawn, and a swap starts by clearing the layer's last error. Every window has its own clock (`t = 0` at its own entry): drawn together
+(as before 2026-10-06), one window's neighbours flew beside another window's controlled aircraft, which read as a separation
+the optimizer never faced. The other windows stay in the Flights table (the references of all shown groups are still
+loaded for the list), but their reference, their result paths and their neighbours are hidden: reference and result
+entities carry `show` for the shown window only, and the neighbours of a window are **fetched when that window is first
+shown** (a cache by flight key; a window swapped back to is not fetched again), the previous window's neighbour data source
+removed before the next one's fetch. The viewer clock is the shown window's own span (its reference and result paths,
+`windowSpan`), reset on every swap. **"Scene time (UTC)"** (`components/SceneTimeReadout.tsx`, above the transport bar; the clock
+reading stays in this leaf, the layer publishes only `AppContext.sceneTime = {startUtc, epoch}`): the real time at the clock's
+position is `startUtc + (clock − epoch)` — the display epoch is synthetic (`index.epoch`), a window's `t = 0` is its commanded
+flight's roster **entry** (asked of the backend's roster of the day the flight lands on, `GET /traffic/arrivals`, cached by
+flight key: a published M1 index holds no real time; a lookup that fails is a WARNING of the layer ("Scene time unavailable: …",
+not the red error banner — the window is drawn all the same; it goes with the window), an M2 scene's is `scene.startUtc`. Shown only while the scene is (a published category: with the Trajectories
+layer on); redrawn at most 4 times a second. The recorded keys of the window are requested from the backend with `window=arrival`
+(the same `fetchArrivalWindow` as the references), **split into requests of at most `MAX_FLIGHT_KEYS_PER_REQUEST` = 1000
+keys** (`data/observedTracks.ts`, a MIRROR of the backend's `MAX_TRAJECTORIES_PER_RESPONSE`, pinned by a builder test). Each
+neighbour is the window's own copy, id `traffic-<group>/<flight_key>`, with `position.epoch` (and the orientation's) moved by
+`startOffsetsS[i]`, **pink `COMPARISON_TRAFFIC_COLOR` `rgb(255, 110, 199)`** on track and aircraft model (no other comparison
+colour). Only `DEFAULT_MODEL_BUDGET` (20) neighbours carry an aircraft model (`planTrajectoryModels`, as the references;
+`model.show`), the rest stay tracks; the budget is planned over the neighbours that are drawn (see the clip below), not over
+those cut away. Each neighbour has an availability interval (it vanishes when its track ends). **The neighbours never move
+the viewer clock — its bounds are the window's own span — and each neighbour's availability is clipped to that clock on
+purpose** (`clipAvailabilityToClock`): a neighbour airborne at the clock start shows from there, mid-flight; one that enters
+after the clock stop is not shown — it is not even loaded (its copy is dropped before the data source is built); a window
+with neighbours but no span to cut them to (the backend served no track for the window's own flight) is an error, not an
+uncut draw (offsets of the 50-window sample run from -914 s to +1997 s against windows of about 445 s, so some neighbours of
+every window are cut). A group not in the sample (the runway selector, the sample count) is not loaded; tearing the layer
+down — or a reload — removes everything with the other sources, a teardown during a neighbours' fetch loads nothing. The
+neighbours follow the Reference switch and show their callsign on hover. The outcome is in the flight list row's tooltip
+(`<flight_key> — <label> — traffic: <plain name> (<raw outcome>)`, `utils/trafficOutcome.ts`, AV48), only while the
 comparison is active.
+
+**The legend of a traffic category** (`buildComparisonLegend` → `traffic: "windows" | "scene" | null`, rendered by
+`ComparisonLegendList`, shared by the Evaluate options and the Optimize panel): the reference switch reads **"Controlled
+aircraft — its record"** (white), the result switch **"Controlled aircraft — optimized path"** (the existing simulator
+blue), and a pink row **"Recorded traffic — not controlled"** (`COMPARISON_TRAFFIC_COLOR`; in a scene
+**"…, outside the scheduled set"**, AV47). Any other category keeps "Reference" and "Optimize results".
 
 ### AV47 · an M2 run as one scene: every group on one clock, the background once (2026-10-06)
 
@@ -949,8 +971,75 @@ is requested once for the whole scene (in requests of at most `MAX_FLIGHT_KEYS_P
 the Reference switch, availability clipped to the clock (a background aircraft that enters after the clock stop is not even
 loaded; no clock is an error). The group references are one backend request, so a scene of more than 1000 groups is refused by
 the backend's key limit (the M1 sample path is cut to the sample count). The flight list tooltip of a scene group:
-`<flight_key> — <label, if any> — traffic: <outcome> — delay <delayS rounded> s` (no delay part when `delayS` is null).
+`<flight_key> — <label, if any> — traffic: <plain name> (<raw outcome>) — delay <delayS rounded> s` (no delay part when
+`delayS` is null; names: `utils/trafficOutcome.ts`, AV48). A scene's legend is the traffic legend of AV46, its pink row
+"Recorded traffic — not controlled, outside the scheduled set" (the background); a scene is drawn whole whatever the runway
+selector says, and so is its legend.
 
 Measured on the 12-group KRDU example (one 30-minute block): 12 groups (1 unsolved), 23 background aircraft, scene start
 `2026-05-21T17:47:18.959Z`, group entries 0 .. 2076 s after it, groups' spans 0 .. 2501 s (the last result path ends at
 2368 s); `check-publication` reports 0 errors.
+
+### AV48 · the Optimize task's multi-aircraft mode: a backend job, its files fed to the comparison layer (2026-10-06)
+
+Contract: `4dTrajectory/docs/multi_aircraft_optimization/design.md` §10 (step T11). Backend: `aeroviz_backend/CLAUDE.md`
+("Traffic jobs"). **Optimize has a mode selector** (`OptimizeKindSelect`, in `WorkbenchLeftDock`): *Single aircraft* (the
+default; `PilotPanel`, unchanged), *Multi-aircraft: one controlled* (M1) and *Multi-aircraft: all controlled* (M2)
+(`TrafficJobPanel`, keyed by mode and airport). **The PilotPanel stays mounted — `hidden`, its scene off — while a multi-aircraft
+mode is shown** (no playback on the clock, no target gate, no forced procedure display and so no touch on the top bar's runway
+selector, no live-state readout, **no start placement or preview — an active placement is cancelled, its backup restored — and
+no optimizer worker session, closed on hiding and opened again on showing Optimize (single)**; showing it again is a task
+switch like Fly ↔ Optimize), so Fly ↔ Optimize and single ↔ multi never
+lose what was set up in it.
+
+- **Panel** (`components/TrafficJobPanel.tsx`): a UTC day (remembered in `localStorage`, per viewer; its field has a row of its
+  own, a native date input is clipped in a grid column) → the airport's arrivals of that day from `GET /traffic/arrivals`
+  (landing, callsign, runway, type; roster only). M1: click an arrival. M2: the block start as **24-hour UTC selects — an hour
+  00–23 and a minute of 00, 15, 30 or 45**, never a locale time field; the default is the hour of the day's first landing,
+  rounded down, until the user sets one (a new day defaults again) — and a length of 15, 30 (default) or 60 min
+  (`TRAFFIC_BLOCK_LENGTHS_S`, a MIRROR of `traffic_job_files.BLOCK_LENGTHS_S`). The count line says how many arrivals land in the
+  block (the next day's landings of a block past midnight are flown but not counted, said) and, once a job of THIS block is done,
+  how many were controlled and how many stayed records for want of an aircraft dynamics model (the readout's `aircraft` and
+  `skipped_no_dynamics`, the latter summed over the summary's `blocks[]`). The solver settings are shown read-only
+  (`TRAFFIC_JOB_SETTINGS`, a MIRROR of the batch defaults — IM2). Progress ("N of M aircraft done · last: callsign", "Reading
+  the traffic…" until the job knows its total); `current` is the aircraft LAST FINISHED, not the one in work (`fly_block` reports
+  after each aircraft; an M2 job is silent during its ETA solves, which come first).
+- **Start is DISABLED while a job starts, runs or is being cancelled** — there is no Restart; the user cancels first, so a start
+  never waits for a cancel.
+- **Result**: when the job is done the panel reads its `comparison_index.json` and lists one row per controlled aircraft
+  (callsign, runway, outcome in plain words, M2: "Delay (s)", the slot's delay) and one summary line that **names the job's inputs
+  first** — `Block 2026-05-21 18:00–18:15 UTC` / `FFL1206, 2026-07-16` (`blockJobLabel`, `flightJobLabel`, taken when Start was
+  pressed, so editing the panel afterwards never makes the old result look like a new one) — then the outcome counts by plain
+  name; M2: the arrivals that stayed records, the delay median / largest / over 60 s, and the flown aircraft with a loss of
+  VISUAL separation they answer for / do not, left after the block's final check (the one number the index lacks, taken from the
+  status' `summary`, the job's `traffic.readout`). The tables scroll vertically only: fixed layout, the outcome text wraps. A
+  click on a row selects that flight (`selectedFlightId`, the camera tracks it). Below, the traffic legend (AV46).
+- **Plain outcome names — ONE mapping** (`utils/trafficOutcome.ts`, the Flights table tooltip and the result table both):
+  `separated_at_baseline` "separated at the first solve (no re-solve)", `separated` "separated after re-solve", `unresolved` "loss left
+  (round limit)", `solve_failed` "loss left (re-solve failed; last good solve shown)", `wake_at_fixed_time` "wake loss left
+  (landing time fixed)"; by prefix of a failed record's reason: `BaselineFailed: slot solve` "not optimized: its slot could
+  not be flown", `BaselineFailed: ETA solve` "not optimized: no ETA", `block failed:` "not optimized: block failed", any
+  other `BaselineFailed` "not optimized". The raw string follows the plain name in the row's title text; **an unknown
+  string is shown raw** (a made-up name would be a guess). `TRAFFIC_OUTCOMES` is a MIRROR of the constants in `traffic/loop.py`
+  (`aeroviz-4d/python/tests/test_traffic_mirrors.py`, which also pins the block lengths, the settings, the index name).
+- **Life of a job** (`hooks/useTrafficJob.ts`): `POST /traffic/jobs` (409 while one runs — the backend is one job at a time),
+  then `GET /traffic/jobs/<id>` every 2 s (`TRAFFIC_JOB_POLL_MS`). **A change of mode (the panel is keyed by mode and airport),
+  leaving the Optimize task, another airport and a closed page (`pagehide` beacon) cancel a running job and remove the scene** —
+  the cleanup of the panel's hook. **Every async continuation (the start's answer, a poll, a cancel's answer) is gated on the
+  epoch it began with**; a start, a cancel and the cleanup each take a new one, so a late answer cannot touch what came after
+  (a cancel's answer never clears a newer job's scene). **A failed poll never drops the job**: the id is kept, the panel says
+  "Connection lost, retrying…" (Cancel enabled), and the poll is repeated after 2 s, 4 s, 8 s, … up to 15 s
+  (`retryDelayMs`) until it answers.
+- **The comparison layer has a source** (`utils/comparisonSource.ts`): a published category (Evaluate: the selected category
+  while the comparison is on) or a traffic job (Optimize: `AppContext.trafficScene`, set by the hook when the job is done and
+  cleared with it). A job's files are read from the backend's file route — `<backend>/traffic/jobs/<id>/files/<name>`, the
+  base URL ending in `/` — with the index named `comparison_index.json`; the references and neighbours still come from the
+  backend's arrival window. The layer then needs no Trajectories switch (an Evaluate option) and draws the job's scene like a
+  published one: one window (M1, AV46) or one scene (M2, AV47). **A job source ignores the top bar's runway and the sample count**
+  (no filter, no reload: they are Evaluate's) and the panel never changes the runway selector. **When a job's scene has loaded the
+  camera flies to it** (`frameTrajectoryCamera` over the controlled aircraft's `sim-` paths, margin 1.4 for the dock). `App.tsx`
+  reads the comparison layer's error in Optimize.
+- **Legend**: the optimized-path entry also explains the off-target colour — "yellow: the optimized path ended off the
+  runway-threshold target (failed the gates)" — when the scene has such groups (`statuses` has `offTargetResult`); for a traffic
+  category it is said there, under that entry, and not listed again under "Outcome colours".
+- Not here: a job result is never a category; nothing is written to `public/data` or `categories.json`.

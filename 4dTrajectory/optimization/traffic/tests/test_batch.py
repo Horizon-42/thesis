@@ -88,16 +88,18 @@ def test_the_m2_readout_counts_blocks(tmp_path):
     from traffic import M2_MODE
     none = {"answered": 0, "not_answered": 0, "background": 0}
     (tmp_path / "summary.json").write_text(json.dumps({"mode": M2_MODE, "blocks": [{
-        "label": "block_00", "aircraft": 4, "scheduled": 3,
+        "label": "block_00", "aircraft": 4, "scheduled": 3, "skipped_no_dynamics": 2,
         "slots": [{"flight_key": "A", "delay_s": 0.0}, {"flight_key": "B", "delay_s": 80.0},
                   {"flight_key": "D", "delay_s": 0.0}],
         "outcomes": {"A": "separated_at_baseline", "B": "separated", "D": "solve_failed",
                      "C": "BaselineFailed: ETA solve: x"},
         "final_losses": {"A": {"visual": none, "ifr": dict(none, answered=3)},
                          "B": {"visual": dict(none, not_answered=1), "ifr": none}}},
-        {"label": "block_01", "aircraft": 2, "scheduled": 0, "eta_failed": 0, "slot_failed": 0, "error": "x"}]}))
+        {"label": "block_01", "aircraft": 2, "scheduled": 0, "eta_failed": 0, "slot_failed": 0, "error": "x",
+         "skipped_no_dynamics": 1}]}))
     found = blocks_readout(tmp_path)
     assert found["aircraft"] == 4 and found["scheduled"] == 3 and found["failed_blocks"] == ["block_01"]
+    assert found["skipped_no_dynamics"] == 3                       # every block's, a failed one's too
     assert found["delay_s"] == {"median": 0.0, "max": 80.0, "delayed_over_60s": 1}
     assert found["outcomes"] == {"separated_at_baseline": 1, "separated": 1, "solve_failed_undelayed": 1,
                                  "eta_failed": 1}

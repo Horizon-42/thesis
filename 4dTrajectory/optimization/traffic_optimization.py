@@ -22,6 +22,7 @@ import argparse
 import json
 import random
 import sys
+from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -54,7 +55,7 @@ from scenario_optimization import (  # noqa: E402
     shipped_evaluation,
 )
 from traffic import M1_MODE, M2_MODE  # noqa: E402
-from traffic.block import BLOCK_RECORD_SCHEMA, fly_block  # noqa: E402
+from traffic.block import BLOCK_RECORD_SCHEMA, fly_block, no_progress  # noqa: E402
 from traffic.loop import TRAFFIC_RECORD_SCHEMA, LoopSettings, fly_in_traffic  # noqa: E402
 from trajectory_data_process.harvest.utc import parse_iso_utc_s  # noqa: E402
 from traffic.scene import Traffic, traffic_from_arrivals  # noqa: E402
@@ -68,6 +69,17 @@ class WindowScenario(FlightScenario):
     """A scenario with its window's recorded traffic (only the aircraft that can share it)."""
 
     traffic: Traffic = field(kw_only=True)
+
+
+def window_scenario(scenario: FlightScenario, traffic: Traffic, horizon_s: float) -> WindowScenario:
+    """``scenario`` with its window's recorded traffic: its own record and the aircraft in the air at some time in
+    ``[its entry, its entry + horizon_s]``."""
+    own = traffic.flight(scenario.source["flight_key"])
+    window = Traffic(traffic.airport,
+                     (own, *traffic.airborne(own.start_utc_s, own.start_utc_s + horizon_s, exclude=own.flight_key)),
+                     traffic.runway_targets)
+    return WindowScenario(scenario.initial, scenario.aircraft, scenario.aero, scenario.source, scenario.target,
+                          traffic=window)
 
 
 def window_scenarios(arrivals_manifest: Path, airport: str, sample: int, seed: int,
@@ -87,15 +99,37 @@ def window_scenarios(arrivals_manifest: Path, airport: str, sample: int, seed: i
         except NoAircraftDynamics:
             no_dynamics += 1
             continue
-        own = traffic.flight(scenario.source["flight_key"])
-        window = Traffic(traffic.airport,
-                         (own, *traffic.airborne(own.start_utc_s, own.start_utc_s + horizon_s, exclude=own.flight_key)),
-                         traffic.runway_targets)
-        scenarios.append(WindowScenario(scenario.initial, scenario.aircraft, scenario.aero, scenario.source,
-                                        scenario.target, traffic=window))
+        scenarios.append(window_scenario(scenario, traffic, horizon_s))
     selection = {"population": len(flights), "sample": len(scenarios), "seed": seed,
                  "skipped_no_dynamics": no_dynamics, "manifest": str(arrivals_manifest)}
     return scenarios, selection
+
+
+def worker_params(*, procedure_root: str | Path, settings: LoopSettings, max_duration: float, rollout_dt_s: float,
+                  max_iterations: int) -> dict[str, Any]:
+    """What a worker needs to fly one window or one block (M1 and M2, the batch and the interactive job)."""
+    return {"procedure_root": procedure_root, "settings": asdict(settings), "max_duration": max_duration,
+            "rollout_dt_s": rollout_dt_s, "solve_options": {"verbose": False, "max_iterations": max_iterations}}
+
+
+def run_optimization_config(*, max_duration_s: float, rollout_dt_s: float, max_iterations: int) -> dict[str, Any]:
+    """The solver recipe stamped into every record and ``summary.json`` of a traffic run."""
+    return build_optimization_config(
+        constrained_iaf=True, fitting=DEFAULT_FITTING, n_segments=DEFAULT_N_SEGMENTS,
+        n_seg_per_phase=DEFAULT_N_SEG_PER_PHASE, state_substeps=None, max_duration_s=max_duration_s,
+        rollout_dt_s=rollout_dt_s, max_iterations=max_iterations, iaf_selection="shortest")
+
+
+def m1_traffic_config(settings: LoopSettings, selection: dict[str, Any]) -> dict[str, Any]:
+    """``optimization_config["traffic"]`` of an M1 run; ``selection`` states which arrivals it flew."""
+    return {"schema": TRAFFIC_RECORD_SCHEMA, **asdict(settings), "selection": selection}
+
+
+def m2_traffic_config(settings: LoopSettings, manifest: Path, block_start: str, block_s: float,
+                      blocks: int) -> dict[str, Any]:
+    """``optimization_config["traffic"]`` of an M2 run."""
+    return {"schema": BLOCK_RECORD_SCHEMA, **asdict(settings), "selection": {
+        "manifest": str(manifest), "blocks": {"start": block_start, "block_s": block_s, "count": blocks}}}
 
 
 def _fly_one_window(payload: tuple[int, WindowScenario, dict[str, Any]]):
@@ -132,15 +166,18 @@ def block_scenarios(flights: list[dict], traffic: Traffic, airport: str, start_u
     return scenarios, Traffic(traffic.airport, tuple(near), traffic.runway_targets), no_dynamics
 
 
-def _fly_one_block(payload: tuple[str, list[FlightScenario], Traffic, dict[str, Any]]):
+def _fly_one_block(payload: tuple[str, list[FlightScenario], Traffic, dict[str, Any]],
+                   on_progress: Callable[[int, int, str], None] = no_progress):
     """Process-pool worker: one block (``traffic.block.fly_block``); results as picklable dicts. A block
     that raises is returned as its error, with a failed record for each of its aircraft, so one block never
-    ends the run and never leaves the roster."""
+    ends the run and never leaves the roster. ``on_progress`` is ``fly_block``'s (the interactive job passes one;
+    a pool cannot carry a callable, the batch does not)."""
     label, scenarios, traffic, params = payload
     try:
         flown, summary = fly_block(scenarios, traffic, procedure_root=params["procedure_root"],
                                    settings=LoopSettings(**params["settings"]), max_duration=params["max_duration"],
-                                   rollout_dt_s=params["rollout_dt_s"], solve_options=params["solve_options"])
+                                   rollout_dt_s=params["rollout_dt_s"], solve_options=params["solve_options"],
+                                   on_progress=on_progress)
     except Exception as exc:  # noqa: BLE001 — batch tool: one failed block is recorded, the others go on
         error = f"{type(exc).__name__}: {str(exc).partition(chr(10))[0][:200]}"
         failed = f"block failed: {error}"
@@ -159,6 +196,31 @@ def _fly_one_block(payload: tuple[str, list[FlightScenario], Traffic, dict[str, 
     return label, out, summary
 
 
+def write_block(out: Path, flown: list, config: dict[str, Any]) -> list[dict[str, Any]]:
+    """The records of one block (a failed aircraft: an eval record with no states) and their summary rows."""
+    rows = []
+    for index, (scenario, record, evaluation, error) in enumerate(flown):
+        if error is not None:
+            rows.append(write_failed_record(out, scenario, index, error, optimization_config=config,
+                                            references_dir=None))
+            continue
+        rows.append(write_solved_record(out, scenario, index, record, evaluation, optimization_config=config,
+                                        references_dir=None, sidecar_suffix=TRAFFIC_SUFFIX)[1])
+    return rows
+
+
+def write_m2_summary(out: Path, config: dict[str, Any], rows: dict[str, list[dict[str, Any]]],
+                     blocks: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """``summary.json`` of an M2 run: the rows of every block (by label) and each block's schedule and final check."""
+    results = [row for label in sorted(rows) for row in rows[label]]
+    (out / "summary.json").write_text(json.dumps({
+        "mode": M2_MODE, "optimization_config": config, "total": len(results),
+        "solved": sum(r["status"] == "solved" for r in results),
+        "failed": sum(r["status"] != "solved" for r in results), "results": results,
+        "blocks": [blocks[label] for label in sorted(blocks)]}, indent=1), encoding="utf-8")
+    return results
+
+
 def _run_blocks(args, settings: LoopSettings, manifest: Path, config: dict[str, Any]) -> None:
     out = Path(args.output_dir)
     old_layout = sorted(p.name for p in (*out.glob("block_*"), *out.glob("blocks.json")))
@@ -175,10 +237,9 @@ def _run_blocks(args, settings: LoopSettings, manifest: Path, config: dict[str, 
                                                        args.max_duration)
         label = f"block_{b:02d}"
         skipped[label] = no_dynamics
-        payloads.append((label, scenarios, near, {
-            "procedure_root": args.procedure_root, "settings": asdict(settings), "max_duration": args.max_duration,
-            "rollout_dt_s": args.rollout_dt,
-            "solve_options": {"verbose": False, "max_iterations": args.max_iterations}}))
+        payloads.append((label, scenarios, near, worker_params(
+            procedure_root=args.procedure_root, settings=settings, max_duration=args.max_duration,
+            rollout_dt_s=args.rollout_dt, max_iterations=args.max_iterations)))
     del flights
     out.mkdir(parents=True, exist_ok=True)
     (out / "summary.json").unlink(missing_ok=True)              # written last: never a stale one beside new records
@@ -188,24 +249,11 @@ def _run_blocks(args, settings: LoopSettings, manifest: Path, config: dict[str, 
     with ProcessPoolExecutor(max_workers=resolve_jobs(args.jobs, len(payloads))) as pool:
         for future in as_completed([pool.submit(_fly_one_block, payload) for payload in payloads]):
             label, flown, summary = future.result()
-            rows[label] = []
-            for index, (scenario, record, evaluation, error) in enumerate(flown):
-                if error is not None:
-                    rows[label].append(write_failed_record(out, scenario, index, error, optimization_config=config,
-                                                           references_dir=None))
-                    continue
-                rows[label].append(write_solved_record(out, scenario, index, record, evaluation,
-                                                       optimization_config=config, references_dir=None,
-                                                       sidecar_suffix=TRAFFIC_SUFFIX)[1])
+            rows[label] = write_block(out, flown, config)
             blocks[label] = {"label": label, **summary, "skipped_no_dynamics": skipped[label]}
             print(f"{'✗' if 'error' in summary else '✓'} {label}: {summary['scheduled']}/{summary['aircraft']} "
                   f"scheduled")
-    results = [row for label in sorted(rows) for row in rows[label]]
-    (out / "summary.json").write_text(json.dumps({
-        "mode": M2_MODE, "optimization_config": config, "total": len(results),
-        "solved": sum(r["status"] == "solved" for r in results),
-        "failed": sum(r["status"] != "solved" for r in results), "results": results,
-        "blocks": [blocks[label] for label in sorted(blocks)]}, indent=1), encoding="utf-8")
+    results = write_m2_summary(out, config, rows, blocks)
     print(f"✓ {len(blocks)} block(s), {len(results)} record(s) -> {out}")
 
 
@@ -241,24 +289,19 @@ def main() -> None:
 
     settings = LoopSettings(step_s=args.step_s, row_window_s=args.row_window_s, margin=args.margin,
                             max_rounds=args.max_rounds)
-    config = build_optimization_config(
-        constrained_iaf=True, fitting=DEFAULT_FITTING, n_segments=DEFAULT_N_SEGMENTS,
-        n_seg_per_phase=DEFAULT_N_SEG_PER_PHASE, state_substeps=None, max_duration_s=args.max_duration,
-        rollout_dt_s=args.rollout_dt, max_iterations=args.max_iterations, iaf_selection="shortest")
+    config = run_optimization_config(max_duration_s=args.max_duration, rollout_dt_s=args.rollout_dt,
+                                     max_iterations=args.max_iterations)
     manifest = Path(args.harvest_root) / args.airport / "arrivals" / "manifest.json"
     if args.mode == "m2":
-        config["traffic"] = {"schema": BLOCK_RECORD_SCHEMA, **asdict(settings), "selection": {
-            "manifest": str(manifest),
-            "blocks": {"start": args.block_start, "block_s": args.block_s, "count": args.blocks}}}
+        config["traffic"] = m2_traffic_config(settings, manifest, args.block_start, args.block_s, args.blocks)
         _run_blocks(args, settings, manifest, config)
         return
     scenarios, selection = window_scenarios(manifest, args.airport, args.sample, args.seed, args.max_duration)
-    config["traffic"] = {"schema": TRAFFIC_RECORD_SCHEMA, **asdict(settings), "selection": selection}
+    config["traffic"] = m1_traffic_config(settings, selection)
     run_batch(
         scenarios, output_dir=args.output_dir, worker=_fly_one_window,
-        params={"procedure_root": args.procedure_root, "settings": asdict(settings),
-                "max_duration": args.max_duration, "rollout_dt_s": args.rollout_dt,
-                "solve_options": {"verbose": False, "max_iterations": args.max_iterations}},
+        params=worker_params(procedure_root=args.procedure_root, settings=settings, max_duration=args.max_duration,
+                             rollout_dt_s=args.rollout_dt, max_iterations=args.max_iterations),
         optimization_config=config, mode=M1_MODE, progress=" [traffic M1]", jobs=args.jobs,
         scenarios_label=f"{args.airport} sample {selection['sample']} seed {args.seed}",
         references_dir=None, resume=args.resume, sidecar_suffix=TRAFFIC_SUFFIX,

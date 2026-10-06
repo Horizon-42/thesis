@@ -71,6 +71,7 @@ const {
     comparisonLegend: {
       kinds: [] as string[],
       statuses: [] as string[],
+      traffic: null as string | null,
       status: "idle",
     },
   };
@@ -704,6 +705,7 @@ describe("ControlPanel", () => {
     appState.comparisonLegend = {
       kinds: ["reference", "simulator"],
       statuses: ["offTargetResult"],
+      traffic: null,
       status: "ready",
     };
 
@@ -716,6 +718,25 @@ describe("ControlPanel", () => {
     expect(screen.getByText("Off-target optimize result")).toBeTruthy();
   });
 
+  it("names the controlled aircraft and the recorded traffic in a traffic category's legend", () => {
+    appState.trajectoryComparison = true;
+    appState.trajectoryComparisonCategory = "traffic_m1_runway_cons";
+    appState.comparisonCategories = [category("traffic_m1_runway_cons", true)];
+    appState.comparisonLegend = { kinds: ["reference", "simulator"], statuses: [], traffic: "windows", status: "ready" };
+
+    const { rerender } = render(<ControlPanel />);
+
+    expect(screen.getByLabelText("Controlled aircraft — its record")).toBeTruthy();       // the reference white
+    expect(screen.getByLabelText("Controlled aircraft — optimized path")).toBeTruthy();   // the result path
+    expect(screen.getByText("Recorded traffic — not controlled")).toBeTruthy();           // the pink neighbours
+    expect(screen.queryByLabelText("Reference")).toBeNull();
+    expect(screen.queryByLabelText("Optimize results")).toBeNull();
+
+    appState.comparisonLegend = { kinds: ["reference", "simulator"], statuses: [], traffic: "scene", status: "ready" };
+    rerender(<ControlPanel />);
+    expect(screen.getByText("Recorded traffic — not controlled, outside the scheduled set")).toBeTruthy();
+  });
+
   it("switches the legend to the kinds in a prediction category", () => {
     appState.trajectoryComparison = true;
     appState.trajectoryComparisonCategory = "ts_transformer";
@@ -723,6 +744,7 @@ describe("ControlPanel", () => {
     appState.comparisonLegend = {
       kinds: ["reference", "predicted", "lookback"],
       statuses: ["predictionPass", "predictionFail", "predictionIndeterminate"],
+      traffic: null,
       status: "ready",
     };
 

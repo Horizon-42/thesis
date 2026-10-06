@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import bisect
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,10 @@ from . import rules
 from .check import FlownTrack, check, make_window
 from .loop import BaselineFailed, LoopSettings, fly_in_traffic
 from .scene import RecordedFlight, Traffic
+
+def no_progress(done: int, total: int, flight_key: str) -> None:
+    """The default ``on_progress`` of :func:`fly_block`: nobody is watching."""
+
 
 #: The schema of an M2 sidecar: the M1 sidecar (``loop.TRAFFIC_RECORD_SCHEMA``) plus ``slot`` and
 #: ``block_final``.
@@ -83,8 +88,20 @@ def fly_block(
     max_duration: float,
     rollout_dt_s: float,
     solve_options: dict[str, Any],
+    on_progress: Callable[[int, int, str], None] = no_progress,
 ) -> tuple[list[Flown], dict[str, Any]]:
-    """The block flown (one entry per scenario, in slot order, then the ETA failures) and its summary."""
+    """The block flown (one entry per scenario, in slot order, then the ETA failures) and its summary.
+
+    ``on_progress(done, total, flight_key)`` is called once per aircraft when its record is settled, with the
+    aircraft's ``flight_key``: right after its ETA solve for one whose ETA solve fails, else right after its
+    slot solve (in slot order). ``total`` is the number of scenarios, so the last call has ``done == total``."""
+    done, total = 0, len(scenarios)
+
+    def settled(flight_key: str) -> None:
+        nonlocal done
+        done += 1
+        on_progress(done, total, flight_key)
+
     etas, eta_solves, eta_errors = {}, {}, {}
     for s in scenarios:
         key = s.source["flight_key"]
@@ -93,6 +110,7 @@ def fly_block(
             best = so.shortest_iaf_solve(s, target, paths, aircraft, vmin, max_duration=max_duration, **solve_options)
         except ValueError as exc:
             eta_errors[key] = str(exc).partition("\n")[0]
+            settled(key)
             continue
         etas[key], eta_solves[key] = _t0(s) + best.final_time, best
     by_key = {s.source["flight_key"]: s for s in scenarios}
@@ -123,11 +141,13 @@ def fly_block(
         except BaselineFailed as exc:
             records.append(own)                          # it flies its record for the aircraft after it
             flown.append(Flown(s, None, None, f"BaselineFailed: slot solve (delay {slot.delay_s:.1f} s): {exc}"))
+            settled(slot.key)
             continue
         sidecar["schema"] = BLOCK_RECORD_SCHEMA
         sidecar["slot"] = {"eta_utc_s": slot.eta_s, "cta_utc_s": slot.time_s, "delay_s": slot.delay_s}
         replays.append(replay_as_traffic(own, _t0(s), result.simulator_states))
         flown.append(Flown(s, result, sidecar, None))
+        settled(slot.key)
     flown += [Flown(by_key[k], None, None, f"BaselineFailed: ETA solve: {e}") for k, e in eta_errors.items()]
 
     # the block once more: each flown aircraft against all the others (replays and records)

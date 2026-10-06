@@ -543,6 +543,32 @@ body,
   box-shadow: 0 12px 30px rgba(2, 8, 23, 0.34);
 }
 
+/* "Scene time (UTC)" of a traffic scene, just above the transport bar (docs/35-viewer-reference.md AV48) */
+.scene-time-readout {
+  position: absolute;
+  bottom: 86px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 110;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 10px;
+  border: 1px solid rgba(103, 232, 249, 0.24);
+  border-radius: 6px;
+  background: rgba(15, 19, 30, 0.92);
+  color: #aebbd0;
+  font-family: "Inter", "Segoe UI", sans-serif;
+  font-size: 11px;
+  pointer-events: none;
+}
+
+.scene-time-readout time {
+  color: #e0f2fe;
+  font-family: "Courier New", monospace;
+  font-size: 12px;
+}
+
 .workbench-bottom-bar button {
   background: #2a3550;
   border: 1px solid #3a4a6a;
@@ -1968,6 +1994,18 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   gap: 6px;
   margin: 0;
   cursor: pointer;
+}
+
+.comparison-legend-kind {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* the explanation of a colour, under the entry it explains */
+.comparison-legend-explains {
+  margin-left: 20px;
+  color: #8a97ab;
 }
 
 .control-panel-comparison-kinds i {
@@ -3572,6 +3610,10 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   min-width: 0;
 }
 
+.pilot-panel[hidden] {
+  display: none;
+}
+
 .pilot-panel h3 {
   margin: 0 0 3px;
   color: #7dd3fc;
@@ -4599,6 +4641,168 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
 }
 
 .flight-table tr.selected td { background: #1a3a6a; }
+
+/* ── Optimize task: the mode selector and the multi-aircraft job panel (docs/35-viewer-reference.md AV48) ───────── */
+.optimize-kind-select {
+  display: grid;
+  gap: 2px;
+  margin-bottom: 8px;
+  color: #cbd5e1;
+  font-family: "Inter", "Segoe UI", sans-serif;
+  font-size: 12px;
+}
+
+.optimize-kind-select > span {
+  font-size: 9px;
+}
+
+.traffic-job-panel {
+  display: grid;
+  gap: 6px;
+}
+
+.traffic-job-panel .pilot-panel-header { margin-bottom: 0; }
+
+.pilot-status-starting {
+  border-color: rgba(250, 204, 21, 0.52);
+  color: #fde68a;
+}
+
+.pilot-status-failed {
+  border-color: rgba(248, 113, 113, 0.58);
+  color: #fecaca;
+}
+
+.pilot-status-cancelled {
+  color: #94a3b8;
+}
+
+.pilot-status-cancelling {
+  border-color: rgba(250, 204, 21, 0.52);
+  color: #fde68a;
+}
+
+.traffic-job-when {
+  display: grid;
+  gap: 5px;
+}
+
+/* the date field has the row to itself (a native date input needs ~140 px, and is clipped in a narrow grid column) */
+.traffic-job-date {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.traffic-job-date > span,
+.traffic-job-block label > span {
+  font-size: 9px;
+  color: #cbd5e1;
+}
+
+.traffic-job-date input {
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.traffic-job-block {
+  margin-bottom: 0;
+}
+
+.traffic-job-note {
+  margin: 0;
+  font-size: 11px;
+  color: #aebbd0;
+}
+
+/* Lists scroll vertically inside the panel and never sideways: a fixed layout, the long text (an outcome) wraps. */
+.traffic-job-table-scroll {
+  max-height: 30vh;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.traffic-job-panel table {
+  border-collapse: collapse;
+  width: 100%;
+  table-layout: fixed;
+  font-size: 11px;
+  color: #c8d8ec;
+}
+
+.traffic-job-panel th,
+.traffic-job-panel td {
+  padding: 2px 4px;
+  text-align: left;
+  border-bottom: 1px solid #2a3550;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.traffic-job-panel td.traffic-job-outcome {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.traffic-job-arrivals th:nth-child(1) { width: 26%; }
+.traffic-job-arrivals th:nth-child(2) { width: 28%; }
+.traffic-job-arrivals th:nth-child(3) { width: 14%; }
+
+.traffic-job-result th:nth-child(1) { width: 24%; }
+.traffic-job-result th:nth-child(2) { width: 12%; }
+.traffic-job-result th:nth-child(4) { width: 18%; }
+
+.traffic-job-panel thead th {
+  position: sticky;
+  top: 0;
+  background: #0f1c30;
+  color: #91a7c2;
+  font-weight: 600;
+}
+
+.traffic-job-panel tr.selected td { background: #1a3a6a; }
+.traffic-job-panel tr.in-block td { background: rgba(26, 95, 180, 0.28); }
+
+.traffic-job-settings {
+  font-size: 11px;
+  color: #aebbd0;
+}
+
+.traffic-job-settings summary { cursor: pointer; }
+.traffic-job-settings p { margin: 4px 0 0; line-height: 1.35; }
+
+.traffic-job-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.traffic-job-actions button { flex: 1 1 0; }
+
+.traffic-job-progress {
+  display: grid;
+  gap: 3px;
+  font-size: 11px;
+  color: #cbd5e1;
+}
+
+.traffic-job-progress progress {
+  width: 100%;
+  accent-color: #22d3ee;
+}
+
+.traffic-job-result {
+  display: grid;
+  gap: 6px;
+}
+
+.traffic-job-summary {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #e0f2fe;
+}
 
 
 /* Subject-aware evaluation block: title, context and Details button. */
