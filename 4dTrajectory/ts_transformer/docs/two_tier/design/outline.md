@@ -106,13 +106,13 @@ they came from. Each document lists the identities of its parts.
 | Document | Decisions | Open items |
 |---|---|---|
 | Outline | D7, D20, D21, D55, D85, D95, D131, D138, D139, D158 | — |
-| Training view (`frontend.md`) | D109, D133–D136, D154–D156 | — |
+| Training view (`frontend.md`) | D109, D133–D136, D154–D156, D159 | — |
 | Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62, D66, D67, D69–D71, D73, D74, D77–D84, D86–D90, D97, D102, D111, D126 | O8 |
 | Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60, D63–D65, D68, D72, D75, D96, D105–D108, D111, D118–D122, D126–D128 | — |
 | Post-training | D29–D31, D36, D37, D76, D91–D94, D98–D101, D103–D105, D107, D110, D112–D117, D123–D125, D129, D130, D132, D137, D157 | O15 |
 | Multi-aircraft control | D140–D153 | O16, O18 |
 
-The next free numbers: D159, O19.
+The next free numbers: D160, O19.
 
 ---
 
@@ -153,9 +153,10 @@ The next free numbers: D159, O19.
 6. The speed of the closed loop (D138), by stage B's implementer on `dev-two-tier-v4` (§5 rule 1), before stage C's next
    campaign: vocabulary A44 first, since C13 uses it, then post-training C13 and prior B14. Each is measured after it is
    built (`post_profile` at C10's settings, `model_speed` of frontend §3 item 10). Nothing of it is merged into `dev-two-tier`
-   while C10 runs. Items 5 and 6 are built and reviewed; their steps after C10 (B14's real-data check, C13's GPU check,
-   the base's speed readout, the export of stages A's and B's sets, the browser check, the merge report) go to stage
-   D's implementer (§5 rule 1). They come first now that C10 is done.
+   while C10 runs. Items 5 and 6 are built and reviewed; their steps after C10 are done (2026-10-07, by stage D's
+   implementer, stage B's log §6): B14's real-data check word for word, C13's GPU check identical (the weights within
+   float rounding), the base's speed readout, the sets of stages A and B exported again in the new formats (the old
+   sets moved aside as `<id>.v10-old` and `<id>.v3-old`, the user's choice), the browser check.
 7. Stage D (multi-aircraft control §0.4), by stage D's implementer on `dev-multi-control` (§5 rule 1), after the
    user's decisions of its §0.1 (all decided 2026-10-06): MC0 (the interfaces of stages A, B and C that it needs, D150, D149, D152) and
    MC1 (the census). Their code and their tests on synthetic inputs while C10 runs; their checks on real data and the
