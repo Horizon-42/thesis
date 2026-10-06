@@ -14,12 +14,15 @@ EACH ROUND r:
    its A, B or D are in different batches.
 3. **The speaking** (`speak_round`, `experiments.post_branches.branch_round`): every batch's two passes of D94 with
    the model at the start of the round; its informative groups written to ``round_<r>/groups_<k>.pt`` (a round's groups
-   are not held in memory, the reviewer's estimate of C6) and its first pass's ends counted.
+   are not held in memory, the reviewer's estimate of C6) and its first pass's ends counted. With ``--speak-workers N``
+   (N ≥ 2) the batches are spoken by N worker processes (`Speakers`), with the same groups and records (the pass after
+   them agrees to float rounding): the speaking is simulation on the CPU (the executor, the masks, the scene), one batch
+   at a time a process.
 4. **One training pass** (`train_pass`, §2 item 5): the written groups, each file's in an order shuffled by the
    round's numbers (D130), `update_groups` at a time, each paired with `data_sentences` single-aircraft sentences of
-   the train days in the base's selection (D36, D76; `prior.source.ArtefactSource`), through the loss of C7 (`post.loss.one_pass`: the surrogate and the pull in eval
-   mode, the data term with dropout, D107; every counted row alike, D115), the traffic modules at their own learning
-   rate (`parameter_groups`).
+   the train days in the base's selection (D36, D76; `prior.source.ArtefactSource`), through the loss of C7
+   (`post.loss.one_pass`: the surrogate and the pull in eval mode, the data term with dropout, D107; every counted row
+   alike, D115), the traffic modules at their own learning rate (`parameter_groups`).
 5. **The selection readout** (`selection_readout`): a fixed set of real windows of the select days (drawn once with the
    seed, D113 applied; the same numbers every round), the first pass only, by airport: the rewards, the outcomes (a loss
    of separation among them), the rows the speed-word mask acted (D101), the steps reading a faulty point and the losses
@@ -50,7 +53,10 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import multiprocessing
+import os
 from collections import Counter
+from concurrent.futures import ProcessPoolExecutor, wait
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Iterator, Mapping, Sequence
@@ -273,33 +279,130 @@ def batches(windows: Sequence[Window], size: int) -> list[list[int]]:
 
 
 # ---- the speaking
-def speak_round(model: Prior, context: Context, windows: Sequence[Window], settings: Settings, round_: int,
-                directory: Path) -> dict[str, Any]:
-    """Step 3 of a round (module docstring): every batch's two passes, its informative groups written, its first pass's
-    ends counted."""
+def speak_batch(model: Prior, context: Context, windows: Sequence[Window], places: Sequence[int], settings: Settings,
+                round_: int, directory: Path, k: int) -> dict[str, Any]:
+    """Batch ``k`` of a round (the windows at ``places``): its two passes (`branch_round`), its informative groups written
+    to ``groups_<k>.pt``, and its record (the counts of its groups and the ends of its first pass)."""
     train = context.splits["train"]
+    batch = [windows[p] for p in places]
+    found = branch_round(model, context.start_loop("train", batch), batch, places, train["sentences"], train["flights"],
+                         context.geometries, context.rosters, context.finals, context.words,
+                         interval_s=context.interval_s, variant=context.variant,
+                         edges_reference=context.edges_reference, faults=train["faults"], device=context.device,
+                         seed=settings.seed, round_=round_, split="train", continuations=settings.continuations)
+    informative = [g for g in found.groups if g.informative]
+    torch.save(informative, directory / f"groups_{k}.pt")
+    return {"groups": len(found.groups), "informative_groups": len(informative),
+            "spoken_again": len(found.spoken_again), "differed": list(found.differed),
+            "reward_sum": sum(r.reward for r in found.first), "faulty_steps": sum(r.faulty_steps for r in found.first),
+            "losses_reading_fault": sum(r.loss_reads_fault for r in found.first),
+            "outcomes": dict(Counter(r.outcome for r in found.first))}
+
+
+def speak_round(model: Prior, context: Context, windows: Sequence[Window], settings: Settings, round_: int,
+                directory: Path, speakers: Speakers | None = None) -> dict[str, Any]:
+    """Step 3 of a round (module docstring): every batch's two passes (`speak_batch`), here or by ``speakers`` (the
+    same groups and records: a batch reads only its windows' own random numbers), its informative groups written, its
+    first pass's ends counted; the batches' records summed in batch order."""
+    places = batches(windows, settings.batch_windows)
+    parts = (speakers.speak(model, windows, places, round_, directory) if speakers is not None else
+             [speak_batch(model, context, windows, p, settings, round_, directory, k) for k, p in enumerate(places)])
     record: dict[str, Any] = {"batches": 0, "groups": 0, "informative_groups": 0, "spoken_again": 0, "differed": [],
                               "reward_sum": 0.0, "faulty_steps": 0, "losses_reading_fault": 0}
     outcomes: Counter = Counter()
-    for k, places in enumerate(batches(windows, settings.batch_windows)):
-        batch = [windows[p] for p in places]
-        found = branch_round(model, context.start_loop("train", batch), batch, places, train["sentences"],
-                             train["flights"], context.geometries, context.rosters, context.finals, context.words,
-                             interval_s=context.interval_s, variant=context.variant,
-                             edges_reference=context.edges_reference, faults=train["faults"], device=context.device,
-                             seed=settings.seed, round_=round_, split="train", continuations=settings.continuations)
-        informative = [g for g in found.groups if g.informative]
-        torch.save(informative, directory / f"groups_{k}.pt")
+    for part in parts:
         record["batches"] += 1
-        record["groups"] += len(found.groups)
-        record["informative_groups"] += len(informative)
-        record["spoken_again"] += len(found.spoken_again)
-        record["differed"] += found.differed
-        record["reward_sum"] += sum(r.reward for r in found.first)
-        record["faulty_steps"] += sum(r.faulty_steps for r in found.first)
-        record["losses_reading_fault"] += sum(r.loss_reads_fault for r in found.first)
-        outcomes.update(r.outcome for r in found.first)
+        for key in ("groups", "informative_groups", "spoken_again", "differed", "reward_sum", "faulty_steps",
+                    "losses_reading_fault"):
+            record[key] += part[key]
+        outcomes.update(part["outcomes"])
     return {**record, "windows": len(windows), "outcomes": dict(outcomes)}
+
+
+#: What a speaker process holds (`Speakers`): set before the fork, so each worker inherits the campaign's context.
+_SPEAKER: dict[str, Any] = {}
+
+
+class Speakers:
+    """Worker processes that speak a round's batches in parallel (step 3), each a whole batch (`speak_batch`) with the
+    round's model, its groups file written by it, one task a batch. They are forked from the campaign's process once its
+    context is open and BEFORE that process uses the GPU, so they share the context's memory (its splits are read
+    once) and each starts the GPU itself; every worker is started here, at once. A worker runs torch on one thread
+    (`_initialise_speaker`: a fork after the parent's CPU threads ran would hang otherwise), draws the round's windows
+    itself (`draw_round`, the same random numbers) and refuses a batch whose windows are not the ones the campaign
+    sent; the model of the round reaches it as a file in the round's directory, deleted after the speaking. A worker
+    that dies fails the round (`BrokenProcessPool`), never hangs it. The speaking is the speaking here (a batch reads
+    only its windows' own random numbers): the same groups and records; the pass after it agrees to float rounding (the
+    GPU's kernels depend on what a process ran before, as on any resume). The number of workers is recorded as
+    information. NOT CHECKED here: the memory of N workers at the formal size (watched; an open item)."""
+
+    def __init__(self, context: Context, settings: Settings, workers: int, device: torch.device) -> None:
+        if workers < 2:
+            raise ValueError(f"{workers} worker(s): speakers are 2 or more processes (one speaks without them)")
+        if context.device.type != "cpu" or torch.cuda.is_initialized():
+            raise ValueError("speakers are forked before the campaign's process uses the GPU: open the context on the "
+                             "CPU, fork them, then move it")
+        _SPEAKER.clear()
+        _SPEAKER.update(context=context, settings=settings, device=device)
+        self.pool = ProcessPoolExecutor(workers, mp_context=multiprocessing.get_context("fork"),
+                                        initializer=_initialise_speaker)
+        list(self.pool.map(_started, range(workers)))         # every worker forked now, before the GPU is used
+        self.workers = workers
+
+    def speak(self, model: Prior, windows: Sequence[Window], places: Sequence[Sequence[int]], round_: int,
+              directory: Path) -> list[dict[str, Any]]:
+        """Every batch's record, in batch order; on a failure the batches not started are cancelled."""
+        state = directory / "speaking_model.pt"
+        torch.save(model.state_dict(), state)
+        futures = [self.pool.submit(_speak, round_, str(state), str(directory), k, list(p),
+                                    [window_record(windows[i]) for i in p]) for k, p in enumerate(places)]
+        try:
+            return [future.result() for future in futures]
+        except BaseException:
+            for future in futures:
+                future.cancel()
+            raise
+        finally:
+            wait(futures)                                  # the running batches end before their model file goes
+            state.unlink()
+
+    def close(self) -> None:
+        self.pool.shutdown(wait=True, cancel_futures=True)
+
+
+def _initialise_speaker() -> None:
+    """A worker's torch on one thread, its compiler too (module docstring of `Speakers`)."""
+    import torch._inductor.config as inductor
+
+    torch.set_num_threads(1)
+    inductor.compile_threads = 1
+
+
+def _started(_: int) -> int:
+    return os.getpid()
+
+
+def _speak(round_: int, state: str, directory: str, k: int, places: list[int], records: list[dict[str, Any]]
+           ) -> dict[str, Any]:
+    """A worker's batch (`Speakers`): the round's model and windows made once a round, then `speak_batch`."""
+    held = _SPEAKER
+    if held["context"].device != held["device"]:                         # the worker's first batch: its own GPU
+        context = held["context"]
+        held["context"] = replace(context, device=held["device"], base=context.base.to(held["device"]).eval())
+    context, settings = held["context"], held["settings"]
+    if held.get("round") != round_:
+        model, _ = start_model(context, settings)
+        model.load_state_dict(torch.load(state, map_location=context.device, weights_only=True))
+        windows, _ = draw_round(context, settings.per_kind, np.random.default_rng([settings.seed, round_]))
+        held.update(round=round_, model=model.eval(), windows=windows)
+    windows = held["windows"]
+    if [window_record(windows[i]) for i in places] != records:
+        raise ValueError(f"round {round_}, batch {k}: the worker drew other windows than the campaign")
+    try:
+        return speak_batch(held["model"], context, windows, places, settings, round_, Path(directory), k)
+    finally:
+        if context.device.type == "cuda":
+            torch.cuda.empty_cache()
 
 
 # ---- the training pass
@@ -471,8 +574,9 @@ def round_model(context: Context, settings: Settings, out: Path, round_: int | N
     return model.eval()
 
 
-def run_campaign(out: Path, settings: Settings, context: Context) -> None:
-    """The rounds not yet done (module docstring), each closed by its checkpoint."""
+def run_campaign(out: Path, settings: Settings, context: Context, speakers: Speakers | None = None) -> None:
+    """The rounds not yet done (module docstring), each closed by its checkpoint; the speaking by ``speakers`` when
+    given (`Speakers`)."""
     model, optimizer = start_model(context, settings)
     first = done_rounds(out)
     if first:
@@ -484,7 +588,7 @@ def run_campaign(out: Path, settings: Settings, context: Context) -> None:
         directory = out / f"round_{round_}"
         directory.mkdir()
         windows, drawn = draw_round(context, settings.per_kind, np.random.default_rng([settings.seed, round_]))
-        spoken = speak_round(model, context, windows, settings, round_, directory)
+        spoken = speak_round(model, context, windows, settings, round_, directory, speakers)
         torch.manual_seed(pass_seed(settings.seed, round_))                    # the data term's dropout
         passed = train_pass(model, context, optimizer, directory, settings,
                             np.random.default_rng([settings.seed, round_, 1]))
@@ -492,6 +596,7 @@ def run_campaign(out: Path, settings: Settings, context: Context) -> None:
         written = sorted(directory.glob("groups_*.pt"))
         write_json_atomic(directory / "round.json", {
             "round": round_, "git": git_state(), "finished_utc": utc_now(), "draw": drawn,
+            "speak_workers": speakers.workers if speakers is not None else 1,         # information (`Speakers`)
             "windows": [window_record(w) for w in windows], "speaking": spoken,
             "groups_bytes": sum(p.stat().st_size for p in written), "pass": passed, "selection_readout": readout})
         torch.save({"model": model.state_dict(), "optimizer": optimizer.state_dict(),
@@ -528,8 +633,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--traffic-hidden", type=int, required=True)
     parser.add_argument("--traffic-heads", type=int, required=True)
     parser.add_argument("--device", default="cuda")
+    parser.add_argument("--speak-workers", type=int, default=1,
+                        help="processes that speak a round's batches in parallel (Speakers; the same results)")
     parser.add_argument("--smoke", action="store_true", help="SMOKE: a tree with changes too; no result")
     args = parser.parse_args(argv)
+    if args.speak_workers < 1:
+        parser.error("--speak-workers is at least 1")
     prior_dir, instructions, executor, census, procedure_root, out = (p if p.is_absolute() else REPO_ROOT / p for p in (
         args.prior, args.instructions, args.executor, args.windows, args.procedure_root, args.out))
     settings = Settings(args.rounds, {kind: getattr(args, f"windows_{kind.lower()}") for kind in KINDS},
@@ -544,13 +653,22 @@ def main(argv: list[str] | None = None) -> int:
     _, opened, _ = require_conforming_closed_loop(instructions, executor)          # D69: the checks run here (D73)
     edges_reference = census / "conformance" / "edges.npz"
     checked_edges(edges_reference)                                                 # D104
-    context = open_context(prior_dir, instructions, executor, edges_reference, torch.device(args.device),
-                           procedure_root, formal=not args.smoke)                  # D132
+    device = torch.device(args.device)
+    # with speakers, the context is opened on the CPU and they are forked before this process uses the GPU
+    context = open_context(prior_dir, instructions, executor, edges_reference,
+                           torch.device("cpu") if args.speak_workers > 1 else device, procedure_root,
+                           formal=not args.smoke)                                  # D132
+    speakers = Speakers(context, settings, args.speak_workers, device) if args.speak_workers > 1 else None
+    context = replace(context, device=device, base=context.base.to(device).eval())
     inputs = {"prior": str(prior_dir), "instructions": str(instructions), "executor": str(executor),
               "windows": str(census), "procedure_root": str(procedure_root), "settings": asdict(settings),
               "smoke": args.smoke}
-    open_campaign(out, inputs, git, opened["checks"])
-    run_campaign(out, settings, context)
+    try:
+        open_campaign(out, inputs, git, opened["checks"])
+        run_campaign(out, settings, context, speakers)
+    finally:
+        if speakers is not None:
+            speakers.close()
     return 0
 
 
