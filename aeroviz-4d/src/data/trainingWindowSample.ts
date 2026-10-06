@@ -559,6 +559,11 @@ export function windowShiftText(seconds: number): string {
 
 // ── a round's sentence as the stage-A views read it ──────────────────────────
 
+/** A round as the view's lines and titles name it. */
+export function roundLabel(round: TrainingWindowRound): string {
+  return round === TRAINING_WINDOW_START ? "start (base)" : `round ${round}`;
+}
+
 /** A window time (s from its row 0) on ``aircraft``'s flight clock. */
 export function onAircraftClock(aircraft: TrainingWindowAircraft, windowS: number): number {
   return windowS + aircraft.clockS;

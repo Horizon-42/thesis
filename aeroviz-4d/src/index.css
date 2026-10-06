@@ -1028,6 +1028,21 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   background: #1e2a44;
 }
 
+/* a readout's one line that opens no page (B's "At the cursor", C's "The window"): its name and its summary side by
+   side, as a readout's link lays them out */
+.training-readout-line {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  padding: 5px 8px;
+  border: 1px solid #2a3552;
+  border-radius: 6px;
+  color: #c8d8ec;
+  font-size: 11px;
+  list-style: none;
+}
+
 .training-details-link-name {
   font-weight: 600;
   color: #e0e6f0;

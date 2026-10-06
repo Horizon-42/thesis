@@ -45,7 +45,7 @@ import TrainingWindow from "./training/TrainingWindow";
 import { SwatchIcon, type Swatch } from "./training/chartKit";
 import NotesToggle, { NotesList } from "./training/NotesToggle";
 import { readbackModel, type ReadbackModel } from "./training/readbackModel";
-import { flownSentenceKind, TRAINING_SENTENCE_KIND_TEXT } from "../data/trainingSentenceKind";
+import { flownSentenceKind, sentenceName, TRAINING_SENTENCE_KIND_TEXT } from "../data/trainingSentenceKind";
 import ReadbackPlan from "./training/ReadbackPlan";
 import ReadbackHeading from "./training/ReadbackHeading";
 import ReadbackAltitude from "./training/ReadbackAltitude";
@@ -119,7 +119,7 @@ export default function TrainingReadbackWindow(props: TrainingReadbackWindowProp
         <span>{flight.callsign}</span>
         <span>runway {flight.runway}</span>
         <span>{flight.stratum}</span>
-        <span>{reading.loop === "open" ? "labelled sentence" : `closed loop · Δ ${reading.intervalS} s`}</span>
+        <span>{sentenceName(flight, reading.intervalS)}</span>
       </>}>
       <div className="training-readback-frame" ref={frame}>
         <ReadbackPlan m={m} />

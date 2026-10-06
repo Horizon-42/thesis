@@ -28,6 +28,7 @@ import { setTrainingWindowLayer, useTrainingWindowLayers } from "../../data/trai
 import {
   fetchTrainingWindowSample,
   lossesOf,
+  roundLabel,
   onAircraftClock,
   otherOf,
   trainingWindowFlightView,
@@ -65,11 +66,6 @@ export const TRAINING_WINDOW_KIND_TEXT: Record<TrainingWindow["kind"], string> =
   D: "D: the aircraft ahead moved in time",
   B: "B: the commanded aircraft's start moved",
 };
-
-/** A round as its table names it. */
-export function roundLabel(round: TrainingWindowRound): string {
-  return round === "start" ? "start (base)" : `round ${round}`;
-}
 
 /** The cursor of a window. When a window comes on screen, at its row 0 (D129), so the other aircraft show from the start
  *  (the cursor resets to the flight's row 0, which is before the window's, with each flight on screen). On a change of the

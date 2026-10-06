@@ -10,7 +10,7 @@
 import { TRAINING_SENTENCE_COLOR, type TrainingSentenceKind } from "../utils/trainingWordColors";
 import { trainingPriorOriginOf } from "./trainingPriorSample";
 import type { TrainingFlight } from "./trainingSample";
-import { TRAINING_WINDOW_START, trainingWindowOriginOf, type TrainingWindowRound } from "./trainingWindowSample";
+import { roundLabel, TRAINING_WINDOW_START, trainingWindowOriginOf, type TrainingWindowRound } from "./trainingWindowSample";
 
 /** The kind of the sentences a round of a campaign says: the start is the base's. */
 export function roundKind(round: TrainingWindowRound): TrainingSentenceKind {
@@ -25,6 +25,17 @@ export const TRAINING_SENTENCE_KIND_TEXT: Record<TrainingSentenceKind, string> =
   postTrained: "a post-trained round's sentence, flown by the executor",
   multi: "stage D's model's sentence, flown by the executor",
 };
+
+/** The name of the sentence on screen, as the read-back window's title says it: the labelled sentence, the closed loop at
+ *  its Δ, a sample of the prior, a round of a campaign. */
+export function sentenceName(flight: TrainingFlight, intervalS: number | null): string {
+  if (intervalS === null) return "labelled sentence";
+  const prior = trainingPriorOriginOf(flight);
+  if (prior?.sentence) return `sample ${prior.sentence.sample} · Δ ${intervalS} s`;
+  const window = trainingWindowOriginOf(flight);
+  if (window !== undefined) return `${roundLabel(window.round)} · Δ ${intervalS} s`;
+  return `closed loop · Δ ${intervalS} s`;
+}
 
 /** The kind of the flown sentence of ``flight`` (its closed-loop reading at the Δ on screen). */
 export function flownSentenceKind(flight: TrainingFlight): TrainingSentenceKind {

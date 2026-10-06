@@ -14,6 +14,7 @@ import { trainingReadingOf, type TrainingColumn } from "../../data/trainingSampl
 import type { TrainingLayers } from "../../context/AppContext";
 import { TRAINING_SENTENCE_COLOR, TRAINING_WORD_COLOR } from "../../utils/trainingWordColors";
 import { stageBSample, stageBSelection } from "../../data/__tests__/stageB";
+import { stageCSample, stageCSelection } from "../../data/__tests__/stageC";
 import { requestOf, stageAAnswers, stageASampleFile, stageASelection } from "../../data/__tests__/stageA";
 import { parseTrainingSample, TRAINING_SPLITS, trainingSelectionOf } from "../../data/trainingSample";
 
@@ -182,6 +183,15 @@ describe("the flown line in its kind's colour (frontend §3 item 11, D159)", () 
       expect(chart(name).querySelector(`polyline[stroke="${TRAINING_SENTENCE_COLOR.base}"]`), name).not.toBeNull();
       expect(chart(name).querySelector(`polyline[stroke="${TRAINING_SENTENCE_COLOR.closedLoop}"]`), name).toBeNull();
     }
+    // the title names the sentence it reads: the prior's sample, not the closed loop (stage D's browser check, 2026-10-07)
+    expect(screen.getByText("sample 0 · Δ 4 s")).toBeTruthy();
+    expect(screen.queryByText("closed loop · Δ 4 s")).toBeNull();
+    cleanup();
+    const c = stageCSample();
+    const round = stageCSelection(c, 0);
+    render(<TrainingReadbackWindow selection={round} reading={trainingReadingOf(round.flight, round.vocabulary.stepS, 4)}
+      layers={ALL} cursorS={100} onCursorChange={vi.fn()} column={null} onColumnChange={vi.fn()} onClose={vi.fn()} autopilot={null} />);
+    expect(screen.getByText("start (base) · Δ 4 s")).toBeTruthy();
     cleanup();
     open(4);
     expect(chart("Heading chart").querySelector(`polyline[stroke="${TRAINING_SENTENCE_COLOR.closedLoop}"]`)).not.toBeNull();
