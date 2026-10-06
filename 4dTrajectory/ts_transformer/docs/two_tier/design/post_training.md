@@ -88,7 +88,7 @@ commits, the tests and the readings are in the implementation log.
 
 1. C10 is done (ten rounds, 2026-10-06 22:46). C13 (outline D138, built by stage B's implementer): its check on the
    GPU, by stage D's implementer (outline §5 rule 1), before any run uses it.
-2. C14 (D157): the code first, on `dev-two-tier-v4` before its merge; after the user's merge, rounds 10–13 of
+2. C14 (D157): the code first, on `dev-two-tier-v4`; after the user's fast-forward of `dev-two-tier`, rounds 10–13 of
    `post_train_20261006`, with no other job on the host or the GPU (outline §5 rule 13).
 3. The user's criterion for the round (D7) over the 14 rounds; the validation readout of the chosen round; then its
    speed (frontend §3 item 10, `model_speed`), with no other job on the host or the GPU.
@@ -504,7 +504,7 @@ run after C10 open, by stage D's implementer), built by stage B's implementer on
 
 **C14. C10 to 14 rounds** (D157). By stage D's implementer (outline §5 rule 1).
 
-- The code, on `dev-two-tier-v4` before its merge: `open_campaign` takes a resume whose inputs equal the record's with
+- The code, on `dev-two-tier-v4`: `open_campaign` takes a resume whose inputs equal the record's with
   the rounds left out and whose rounds are more than the record's; it writes the new count into the record's settings
   and adds the change (the time, the old and the new count, the commit, the checks) to the record. Any other difference
   is refused as now. The recorded input paths are compared, and read by `post_validation`, as `this_checkout`
@@ -517,7 +517,7 @@ run after C10 open, by stage D's implementer), built by stage B's implementer on
   differs is refused.
 - Before the worktree `.claude/worktrees/two-tier-v4-post` is removed (outline §5 rule 1): every reader of a
   campaign's recorded inputs (`command grep -rn '"inputs"'` in `experiments/`) reads them through `this_checkout`.
-- The run, after the user's merge and C13's check on the GPU, from the main checkout on a clean tree (outline §5 rule
+- The run, after the user's fast-forward of `dev-two-tier` and C13's check on the GPU, from the main checkout on a clean tree (outline §5 rule
   1): the C10 directory made writable; the campaign command with `--rounds 14` and every other argument as C10's last
   resume, its paths the main checkout's; the workers by C13's memory rule (O15); the intent of the new rounds in
   `docs/experiments/intents.json` before the launch. No code is merged into `dev-two-tier` while the rounds run (the

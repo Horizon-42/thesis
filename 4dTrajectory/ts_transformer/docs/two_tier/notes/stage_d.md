@@ -6,7 +6,8 @@
 ```
 C10 已于 2026-10-06 22:46 跑完（十轮，只读）。用户的决定：
 - C10 续训到 14 轮，作为同一个 campaign，新加的 4 轮用合并后的代码（含 C13），从主检出跑（post_training D157、C14）；
-- 除多机控制外，其余分支都合进 dev-two-tier；dev-two-tier-v4 等阶段 B 的收尾做完再合（outline §4 item 9）。
+- 除多机控制外，能合的分支都已合进 dev-two-tier（7e581b88：v4、frontend.md、C14 的设计；780b7bfc：dev-traffic-scenarios），
+  从最新提交继续（outline §4 item 9）。
 路径相对 4dTrajectory/ts_transformer/。
 
 先读：outline §4 items 3、6、7、9，§5 rule 1；post_training D157、§0.4、§8 C14；outline D158（只读）。
@@ -14,8 +15,9 @@ C10 已于 2026-10-06 22:46 跑完（十轮，只读）。用户的决定：
 一、暂停多机控制
 在 dev-multi-control 上，把已经审查过的工作提交；没审查的留在工作树里，不提交。日志写一行停在哪里。
 
-二、阶段 B 的收尾（在 .claude/worktrees/two-tier-v4 上做）
-先等用户把 dev-c10-extension-design 快进进 dev-two-tier-v4（它包含 dev-frontend-design）。
+二、阶段 B 的收尾（在 .claude/worktrees/two-tier-v4 上做；你已经开始了，从当前这一步接着做）
+dev-two-tier-v4 现在是 dev-two-tier 的祖先。等当前这一项跑完、下一项开始之前，在 two-tier-v4 工作树里执行
+git merge --ff-only dev-two-tier。ts 的代码没有变，只多了文档和 traffic-scenarios 的前端、后端、优化器代码。
 主机和 GPU 上没有别的任务时，按顺序一项一项做：
 1. B14 的真实数据检查：用 BATCH 把 B5 的 KRDU 折在 select 日重说一遍，写在 scratch。
    句子必须和它的读数逐词相同；不同就停下报告。
@@ -36,18 +38,14 @@ C10 已于 2026-10-06 22:46 跑完（十轮，只读）。用户的决定：
 4. 在 docs/experiments/intents.json 写新 4 轮的 intent，和代码一起提交。必须在启动之前提交，不能在运行中改。
 5. 单文件测试 → 独立审查 → 提交。
 
-四、合并前的准备（在 two-tier-v4 工作树里）
-1. 把 dev-two-tier 合进 dev-two-tier-v4。到那时 dev-two-tier 应该已经带上用户合并的 dev-traffic-scenarios。
-2. 已知只有一处冲突：post_training.md §0.3 的 C10 行。
-   - 保留 dev-two-tier 那一行（Done），也保留 v4 的 C13 行；
-   - 两行都按实际情况更新，再加一行 C14。
-3. 跑测试：
-   - 全套 ts 测试：-n 8 --dist worksteal，OMP_NUM_THREADS=1；
-   - aeroviz-4d：npx tsc --noEmit 和 npx vitest run；
-   - aeroviz_backend/tests。
-   test_traffic_jobs.py::test_no_exited_child_is_left_behind_a_finished_job 在负载下会偶发失败，单独重跑能过就算通过，
-   但失败要记进日志。
-4. 报告 dev-two-tier-v4 能否快进 dev-two-tier，由用户合并。
+四、报告
+跑测试：
+- 全套 ts 测试：-n 8 --dist worksteal，OMP_NUM_THREADS=1；
+- aeroviz-4d：npx tsc --noEmit 和 npx vitest run；
+- aeroviz_backend/tests。
+test_traffic_jobs.py::test_no_exited_child_is_left_behind_a_finished_job 在负载下会偶发失败，单独重跑能过就算通过，
+但失败要记进日志。
+然后报告 dev-two-tier-v4 能否快进 dev-two-tier，由用户快进。
 
 五、用户快进 dev-two-tier 之后
 1. 跑 C14：
@@ -66,10 +64,9 @@ C10 已于 2026-10-06 22:46 跑完（十轮，只读）。用户的决定：
    - 工作树 merge-a43、training-attitude、stage2-restart，以及它们的分支
      dev-two-tier-merge-a43、dev-training-attitude、dev-stage2-restart；
    - 分离的工作树 a25-build、stage2-real400；
-   - 没有工作树的分支：docs-optimizer-multi-aircraft、dev-frontend-design、dev-multi-control-design、
-     dev-c10-extension-design；
-   - 用户合并 traffic-scenarios 之后：工作树 traffic-scenarios 和分支 dev-traffic-scenarios；
-   - 第三步做完、合并之后：工作树 two-tier-v4-post 和分支 dev-two-tier-v4-post。
+   - 没有工作树的分支：docs-optimizer-multi-aircraft、dev-frontend-design、dev-multi-control-design；
+   - 工作树 traffic-scenarios 和分支 dev-traffic-scenarios；
+   - 第三步的代码进了 dev-two-tier 之后：工作树 two-tier-v4-post 和分支 dev-two-tier-v4-post。
    每个工作树按这个顺序删：
    - 先用 find <工作树> -maxdepth 4 -type l 列出数据链接，逐个 unlink；
    - 再 git worktree remove；

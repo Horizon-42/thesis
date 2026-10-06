@@ -57,7 +57,7 @@ Fronter keeps this table and its log, `readouts/2026-10-06_fronter_implementatio
 
 1. F1 now, on fronter's branch (§8).
 2. F2 now: the window sample of several commanded aircraft with stage C's windows of one.
-3. F3 after stage D's MC0 is on `dev-two-tier-v4` (post-training §9 items 1, 3 and 8: a window of several commanded
+3. F3 after stage D's MC0 is on `dev-two-tier` (post-training §9 items 1, 3 and 8: a window of several commanded
    aircraft, its losses, its loop), on fixtures that stage C's export writes for a synthetic window of two.
 4. F4 after stage D's MC4 (its runners): its export and a smoke set; its formal sets after MC6, their intent first.
 
@@ -499,7 +499,7 @@ the window segment's request. Stage C has no published set, so no set of C is ex
 ## 8 Who and where; the milestones
 
 **Fronter** (D154) builds the Training view: on its own branch `dev-frontend`, in the worktree
-`.claude/worktrees/frontend`, made from `dev-two-tier-v4`; it merges `dev-two-tier-v4` into its branch before each
+`.claude/worktrees/frontend`, made from `dev-two-tier`; it merges `dev-two-tier` into its branch before each
 milestone and before its report; the user merges `dev-frontend`. It changes the files of §1, the Training exports
 (`experiments/training_export.py`, `experiments/prior_training_export.py`, `experiments/post_training_export.py`,
 `experiments/multi_training_export.py`) and the Training files' modules (`instructions/training_files.py`,
@@ -525,7 +525,7 @@ backend and the frontend); the view's reader, session and scene layer take the l
 export written and read again; the window segment with the aircraft named, and refused for an aircraft not in the
 window. About 200 lines and their tests.
 
-**F3. Stage D's parts** (§5.1–§5.6), after stage D's MC0 is on `dev-two-tier-v4`. Fixtures: stage C's export on a
+**F3. Stage D's parts** (§5.1–§5.6), after stage D's MC0 is on `dev-two-tier`. Fixtures: stage C's export on a
 synthetic window of two commanded aircraft (through post-training §9 items 1, 3 and 8). The stage switch's D and its
 index; the aircraft strip; the other commanded aircraft and the silent aircraft in the scene; every loss by pair; the
 bar's chips; D's readouts; the slider's marks of D; D's sections of the details page and `stage=D` of the results
