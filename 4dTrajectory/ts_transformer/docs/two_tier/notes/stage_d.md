@@ -1,85 +1,87 @@
 # 阶段 D：当前命令
 
 只放最新一条命令，新命令整份覆盖，不是日志（过程记在 `readouts/2026-10-06_stage_d_implementation_log.md`）。
-2026-10-06，Claude 写，用户转发。
+2026-10-06 深夜，Claude 写，用户转发。
 
 ```
-你是阶段 D（多机控制）的实现者，同时接手阶段 B 的收尾（outline §5 rule 1，用户 2026-10-06）。
+C10 已于 2026-10-06 22:46 跑完（十轮，只读）。用户的决定：
+- C10 续训到 14 轮，作为同一个 campaign，新加的 4 轮用合并后的代码（含 C13），从主检出跑（post_training D157、C14）；
+- 除多机控制外，其余分支都合进 dev-two-tier；dev-two-tier-v4 等阶段 B 的收尾做完再合（outline §4 item 9）。
 路径相对 4dTrajectory/ts_transformer/。
 
-优先级：C10（阶段 C 的正式训练）还在跑，跑完前主机不能做大测量，所以：
-- C10 运行期间：先做多机控制的编码（下面「一」）。
-- C10 结束后：先做阶段 B 的收尾（「二」），它卡着 dev-two-tier-v4 的合并；再做多机控制在真实数据上的检查和普查（「三」）。
-版本 2（multi_control D153，MC8 起）现在不做。
+先读：outline §4 items 3、6、7、9，§5 rule 1；post_training D157、§0.4、§8 C14；outline D158（只读）。
 
-先读：
-- docs/two_tier/design/outline.md：§4 items 5–7、§5（尤其 rules 1、2、3、4、10、13）、§3 的 D131（复审标准）；
-- docs/two_tier/design/multi_control.md 全文；
-- vocabulary.md §6 item 5、prior.md §7 items 2、3、7、post_training.md §9：标「To be built」的条目就是你要建的接口；
-- docs/two_tier/review_guide.md；
-- 阶段 B 的日志 readouts/2026-10-05_stage_b_implementation_log.md §4、§5（在 dev-two-tier-v4 上），
-  以及 readouts/2026-10-06_training_view_and_speed_check.zh.md：收尾各步的来由和细节。
+一、暂停多机控制
+在 dev-multi-control 上，把已经审查过的工作提交；没审查的留在工作树里，不提交。日志写一行停在哪里。
 
-分支和工作树：
-1. 等用户把 dev-multi-control-design（设计文字）合进 dev-two-tier-v4。
-2. 在 .claude/worktrees/two-tier-v4 里把 dev-two-tier 合进 dev-two-tier-v4。dev-two-tier 带着阶段 C 的修复 832555a5
-   （一次更新分块算，post.loss.update_step，设计见 post_training §2 item 5），它和 C13 都改了 experiments/post_train.py：
-   两边都保留，跑 test_post_* 各单文件，审查后提交。
-3. 从 dev-two-tier-v4 建分支 dev-multi-control，工作树 .claude/worktrees/multi-control；忽略的数据目录按 outline §5 rule 1
-   用绝对路径链到 live 数据。多机控制只在这条分支上做；阶段 B 的收尾在 dev-two-tier-v4 上做。
-4. 多机控制的每个里程碑之前、每次报告之前，把 dev-two-tier-v4 合进 dev-multi-control。
-5. 不碰 .claude/worktrees/two-tier-v4-post（C10 正在跑）；不合并进 dev-two-tier，由用户合并。
-6. Training 视图的代码（前端 Training 页、后端 Training 路由和实时航段、各阶段的 Training 导出和 training_files 模块）
-   归 fronter（frontend.md D154）：你不改这些文件。阶段 B 收尾里的重导和浏览器检查照旧由你跑；
-   多机控制的 Training 视图（multi_control MC7）不是你的。
+二、阶段 B 的收尾（在 .claude/worktrees/two-tier-v4 上做）
+先等用户把 dev-c10-extension-design 快进进 dev-two-tier-v4（它包含 dev-frontend-design）。
+主机和 GPU 上没有别的任务时，按顺序一项一项做：
+1. B14 的真实数据检查：用 BATCH 把 B5 的 KRDU 折在 select 日重说一遍，写在 scratch。
+   句子必须和它的读数逐词相同；不同就停下报告。
+2. C13 在 GPU 上的检查：跑一轮，单进程和 N 个 worker 的结果必须相同。这也是续训用 C13 之前必须通过的检查（D138）。
+3. 对 base 测速（model_speed）：base 是 4dTrajectory/outputs/POOLED/prior/prior_base_20261006，
+   结果写进 4dTrajectory/outputs/POOLED/speed/ 下的新目录。
+4. 先对 base 跑 sha256sum -c；再重导 A 的 closed_loop_v12_20261005 和 B 的 prior_sets_20261006
+   （同名，新格式，B 的带 source.speed）；再跑一遍 sha256sum -c，结果必须一致。旧的索引和集合先留着。
+5. 浏览器检查交给一次性子代理。测试栈从 two-tier-v4 工作树起，端口和停止命令写进报告。
+结果写进阶段 B 的日志，新开一节，注明由阶段 D 的实现者完成；更新 vocabulary、prior、post_training 的 §0.3 状态行。
 
-一、C10 运行期间：多机控制的编码（只写代码，只用合成输入，只跑改动模块的测试，进程少，线程 1）
-1. MC0 · 阶段 A（vocabulary §6 item 5）：
-   - Start.moved 收每架飞机的 join tick；
-   - Loop 给执行器每架的起始周期：(join tick + s) × 一个 Δ 行的周期数，用 Executor(start_cycle=…)；
-   - 没开始的飞机不被听到：语法和复飞上限只读已开始的飞机；
-   - 每架的句子时间各算各的；Loop.copy 保留 join tick。
-   测试：join tick 全为 0 时和今天逐位相同；在 tick j 加入的飞机，用同样的词，飞出的状态和它单独飞时相差不超过 STATE_BOUND_M。
-2. MC0 · 阶段 B（prior §7 items 2、3、7）：
-   - LoopRows 按每架的 join tick 取行（压缩窗口用挪动后的 entry 时刻）；
-   - 说话器的一行里可以同时有未加入、观察段、说话段的飞机；
-   - SpeakingLoop.step 每个 tick 推进一次；
-   - 循环中可以给指定飞机加一条着陆（LandingIndex 的检查保留），copy 一起带上。
-   测试：multi_control §6.2 items 2–3 和 §6.3 的 Tests。
-3. MC0 · 静默飞机（multi_control §6.2 item 4）：确认说话器每一列都接受调用方的 mask，并且首个预测步之后语法在每一列都允许
-   "unchanged"。在只许 "unchanged" 的 mask 下，飞机按生效的词飞，对数概率为 0。语法不允许就停下来报告。
-4. MC0 · 阶段 C（post_training §9 items 1、2、3、7、8、9、11、12 的 To be built）：
-   - 每改一处，先把改动前代码在合成窗口上的输出存下来作参照，改完逐位比对（CPU 单线程）；
-   - item 7 的 token 附加部分放在阶段 C 的 token 网络旁边，投影从零开始，格式名另起；
-     不要改 post-edges-v1 的特征，不要改 post-traffic-attention-v2 的形状，否则 C10 的 checkpoint 读不进来。
-5. MC1 · multi/ 里普查要用的部分（multi_control §10）：窗口抽取（锚点、跨度 L、压缩窗口）和普查，及测试。
-6. MC1 · runner experiments/multi_windows.py 及测试；不在真实数据上跑。
+三、C14 的代码（post_training §8 C14，在 dev-two-tier-v4 上）
+1. open_campaign：续跑时只允许轮数变大，其他设置和输入都必须相同。
+   campaign.json 记下每次改轮数：时间、旧轮数、新轮数、commit、checks。
+2. 记录里的输入路径用 this_checkout（experiments/training_export.py，只用这一份定义，像 model_speed 那样 import）
+   映射后再比对；post_validation 也这样读。记录里原来的路径不改，每次续跑在自己那一条里写下实际读的路径。
+3. 测试按 C14 写的做。另外在 experiments/ 里查所有读 campaign 记录 "inputs" 的地方，确认都经过 this_checkout。
+4. 在 docs/experiments/intents.json 写新 4 轮的 intent，和代码一起提交。必须在启动之前提交，不能在运行中改。
+5. 单文件测试 → 独立审查 → 提交。
 
-二、C10 结束后，先做阶段 B 的收尾（在 dev-two-tier-v4 上；主机和 GPU 上没有别的任务时，一项一项来）
-1. B14 的真实数据检查（prior §12 B14）：用 BATCH 把 B5 的 KRDU 折在 select 日重说一遍（写在 scratch），
-   句子必须和它的读数逐词相同；不同就停下来报告。在这一步之前，不要用 BATCH 跑任何真实数据。
-2. C13 在 GPU 上的检查（post_training §8 C13）：跑一轮，单进程和 N 个 worker 的结果必须相同。
-3. 对 base 测速（outline §6.2 item 10，model_speed）：base 是 4dTrajectory/outputs/POOLED/prior/prior_base_20261006，
-   写进 4dTrajectory/outputs/POOLED/speed/ 下的新目录。
-4. 跑 sha256sum -c 校验 base 的 SHA256SUMS；重导 A 的 closed_loop_v12_20261005 和 B 的 prior_sets_20261006
-   （同名，新格式，B 的带 source.speed，outline §6.2 item 9）；再跑一遍 sha256sum -c，结果必须一致。旧的索引和集合先留着。
-5. 浏览器检查交给一次性子代理（测试栈从 two-tier-v4 工作树起，端口和停止命令写进报告）。
-6. 报告 dev-two-tier-v4 能否快进 dev-two-tier，由用户合并。
-这些结果写进阶段 B 的日志（新的一节，注明由阶段 D 的实现者完成），并更新 vocabulary、prior、post_training 的 §0.3 状态行。
+四、合并前的准备（在 two-tier-v4 工作树里）
+1. 把 dev-two-tier 合进 dev-two-tier-v4。到那时 dev-two-tier 应该已经带上用户合并的 dev-traffic-scenarios。
+2. 已知只有一处冲突：post_training.md §0.3 的 C10 行。
+   - 保留 dev-two-tier 那一行（Done），也保留 v4 的 C13 行；
+   - 两行都按实际情况更新，再加一行 C14。
+3. 跑测试：
+   - 全套 ts 测试：-n 8 --dist worksteal，OMP_NUM_THREADS=1；
+   - aeroviz-4d：npx tsc --noEmit 和 npx vitest run；
+   - aeroviz_backend/tests。
+   test_traffic_jobs.py::test_no_exited_child_is_left_behind_a_finished_job 在负载下会偶发失败，单独重跑能过就算通过，
+   但失败要记进日志。
+4. 报告 dev-two-tier-v4 能否快进 dev-two-tier，由用户合并。
 
-三、然后做多机控制在真实数据上的部分（在 dev-multi-control 上）
-1. MC0 改了 autopilot/：跑 vocabulary D73 的检查（closed_loop_start_check 先跑三项），日志写最大差。
-2. D149 的真实窗口检查：正式普查 outputs/POOLED/post/windows_20261006 里每种窗口、每个机场各 10 个（seed 1337）。
-   改动前的输出用 MC0 之前的提交在临时工作树里跑；和改动后逐位比对（CPU 单线程）。
-3. MC1 的普查：train 和 select 日，L = 0、5、10、20 min，压缩窗口 c_min = 0.6、0.8，写在 scratch；报告给用户选 O16。
-4. 报告 dev-multi-control 能否合并进 dev-two-tier-v4，由用户合并。
+五、用户快进 dev-two-tier 之后
+1. 跑 C14：
+   - 在主检出（树必须干净）上跑。先把 4dTrajectory/outputs/POOLED/post/post_train_20261006 改成可写；
+   - 命令和 C10 最后一次 resume 一样（见阶段 C 的日志 §26），只把 --rounds 改成 14，路径用主检出的；
+   - worker 数按 C13 的内存规则（O15）定。
+   跑完以后：
+   - SHA256SUMS 加上新文件，目录改回只读；
+   - 每一轮的 selection readout 写进阶段 C 的日志；
+   - 报告给用户，由用户按 D7 在 14 轮里选一轮。
+   C14 运行期间，不要把任何代码合进 dev-two-tier，因为主检出正在跑它。
+2. C14 运行期间：先把 dev-two-tier 合进 dev-multi-control，然后继续多机控制，只写代码、只在合成输入上测试
+   （rule 13：不做任何会拖慢 C14 的事）。
+3. 清理已经合并的工作树和分支（只是 git 操作，C14 运行期间也可以做）：
+   - 工作树 merge-a43、training-attitude、stage2-restart，以及它们的分支
+     dev-two-tier-merge-a43、dev-training-attitude、dev-stage2-restart；
+   - 分离的工作树 a25-build、stage2-real400；
+   - 没有工作树的分支：docs-optimizer-multi-aircraft、dev-frontend-design、dev-multi-control-design、
+     dev-c10-extension-design；
+   - 用户合并 traffic-scenarios 之后：工作树 traffic-scenarios 和分支 dev-traffic-scenarios；
+   - 第三步做完、合并之后：工作树 two-tier-v4-post 和分支 dev-two-tier-v4-post。
+   每个工作树按这个顺序删：
+   - 先用 find <工作树> -maxdepth 4 -type l 列出数据链接，逐个 unlink；
+   - 再 git worktree remove；
+   - 最后 git branch -d。不用 -D；-d 拒绝就停下来报告。
+   以下不动：
+   - 分支 dev-kaus-parts、dev-airport-embedding、dev-step9-one-commanded、wip-r32-leg-timing、dev-multi-control、main；
+   - 工作树 kaus-parts、airport-embedding、step9-one-commanded、step9-run、multi-control；
+   - ~/.claude/jobs 下的工作树。
+4. C14 跑完以后：做多机控制在真实数据上的部分（MC0 的 D73 检查、D149 真实窗口逐位比对、MC1 普查，同上一份命令），
+   然后报告 dev-multi-control 能否合并。
 
-每一步：单文件测试 → 独立审查（只审代码，审查者不是作者）→ 显式路径提交（不用 git add -A，提交前看
-git diff --cached --stat）→ 日志一行。
-你写的设计文本只有：multi_control §0.3 的状态表、各文档 §0.3 的状态行、你的日志 readouts/2026-10-06_stage_d_implementation_log.md
-（阶段 B 收尾的结果写进阶段 B 的日志）。设计没说到的地方写成读法，放进 docs/two_tier/design/requests_from_d_to_designer.md
-（整份重写），等用户定。日志和 requests 文件提交到 dev-two-tier：用一个临时工作树加快进，只放这些文件。
-
-规模估计：MC0 阶段 A、B 约 200 行；阶段 C 约 300 行改动，加 token 附加部分约 50 行；multi/ 约 150 行；
-MC1 runner 约 200 行；测试约 800 行。阶段 B 的收尾只跑已有的 runner，不写新代码。
+每一步的做法：单文件测试 → 独立审查（只审代码，审查者不能是作者）→ 用显式路径提交
+（不用 git add -A，提交前看 git diff --cached --stat）→ 日志写一行。
+你只能写这些设计文本：各文档 §0.3 的状态行、multi_control §0.3、你的日志。设计没说到的地方写成读法，
+放进 docs/two_tier/design/requests_from_d_to_designer.md（整份重写），等用户定。
 ```
