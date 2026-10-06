@@ -112,6 +112,7 @@ The commits, dates, branches, test counts and measurements of every milestone ar
 |---|---|
 | A0–A42 | Done, each milestone reviewed; merged into `dev-two-tier` (A41 `362234ee`; A42 `06b8fde1`) |
 | A43 (D73) | Done: `60bbc901` on `dev-two-tier-v4`, reviewed; merged into `dev-two-tier` with stage B's B12 (`645e4cf0`, 2026-10-05) |
+| A44 (D138) | Built and reviewed by stage B's implementer (outline §5 rule 1): `3b535db6` on `dev-two-tier-v4`, `Start.release` with C13 (`65a21c57`); `closed_loop_start_check` on v12 / v17 (train, 50 an airport, Δ 2, 4, 8 s): 750 flights, largest position difference 0 m. Not merged: the user merges |
 | The formal artefact | `instruction_language/v12_20261005`, `executor/v17_20261005` (A34; read-only, `SHA256SUMS`); its Training sets `closed_loop_v12_20261005`, 5 airports (A35). The superseded `v11_20261004`, `v16_20261004` and `closed_loop_v11_20261004` are deleted |
 | The replay of the val days | Not run; it waits for the user (outline D85) |
 | Worktrees `two-tier-v4-a32`, `two-tier-v4-a37` | Deleted with their branches on 2026-10-06 (the user); their ignored scratch (`smoke_v4/data/a33`, `a34`, `a37`, `a38`), cited by the A33, A34, A37 and A38 reports, went with them |
