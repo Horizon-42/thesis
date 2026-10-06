@@ -91,7 +91,8 @@ function flightTabs(sample: TrainingPriorSample, flight: TrainingPriorFlight): T
       title: `Stage A's closed-loop sentence of the flight at Δ = ${intervalS} s, flown by the executor — ` +
         ending(closed.replay.outcome, endS(flight, sample.model.rowIntervalS, closed.replay.endCycle), closed.replay.crossing?.decision ?? null, null) },
     ...flight.sentences.map((sentence) => ({
-      id: sampleTab(sentence.sample), label: `Sample ${sentence.sample}`, outcome: sentence.outcome,
+      // the tab says the sample's number alone; its tooltip says what it is (the user, 2026-10-06)
+      id: sampleTab(sentence.sample), label: `${sentence.sample}`, outcome: sentence.outcome,
       title: `A sentence the prior said (sample ${sentence.sample}, temperature ${sample.model.temperature}), flown by the executor — ` +
         ending(sentence.outcome, endS(flight, sample.model.rowIntervalS, sentence.endCycle), sentence.crossing?.decision ?? null, sentence.goArounds),
     })),
@@ -156,7 +157,7 @@ function AtTheCursor({ sample, flight, sentence, onOpen }: {
 }) {
   const { trainingCursorS, setTrainingCursorS } = useTrainingCursor();
   if (sentence === null) {
-    return <DetailsLink name="At the cursor" summary="a sample's records: choose a Sample tab" onOpen={onOpen} />;
+    return <DetailsLink name="At the cursor" summary="a sample's records: choose a sample's tab (0, 1 …)" onOpen={onOpen} />;
   }
   const view = trainingPriorFlightView(sample, flight, sentence.sample);
   const reading = trainingReadingOf(view, sample.vocabulary.stepS, sample.model.rowIntervalS);
@@ -324,7 +325,7 @@ export default function TrainingPriorSession({ airport, sets, details }: {
         <NotesList items={[
           { key: "labelled", name: "Labelled", text: "the labeller's open-loop reading of the observed flight (not flown)" },
           { key: "closed", name: "Closed loop", text: "stage A's closed-loop sentence of the flight at the prior's Δ, flown by the executor" },
-          { key: "sample", name: "Sample 0, 1 …", text: "a sentence the prior said in free generation, flown by the executor; the dot is its outcome's colour" },
+          { key: "sample", name: "0, 1 …", text: "a sentence the prior said in free generation (its sample's number), flown by the executor; the dot is its outcome's colour" },
         ]} />
         <h4 className="training-details-subhead">What each switch draws</h4>
         <NotesList items={[
@@ -336,7 +337,7 @@ export default function TrainingPriorSession({ airport, sets, details }: {
     sample === null ? { id: SENTENCES_SECTION, title: "Sentences", body: null, absent }
       : { id: SENTENCES_SECTION, title: "Sentences", body: <SentencesTable sample={sample} /> },
     sample === null || flight === null || said === null
-      ? { id: INSPECTOR_SECTION, title: "Row inspector", body: null, absent: sample === null ? absent : "a prior sample's records: choose a Sample tab" }
+      ? { id: INSPECTOR_SECTION, title: "Row inspector", body: null, absent: sample === null ? absent : "a prior sample's records: choose a sample's tab (0, 1 …)" }
       : { id: INSPECTOR_SECTION, title: "Row inspector", body: <RowInspector sample={sample} flight={flight} sentence={said} /> },
   ];
 

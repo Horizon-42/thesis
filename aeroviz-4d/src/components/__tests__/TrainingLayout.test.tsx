@@ -33,6 +33,7 @@ import { stageBIndex, stageBSampleFile, stageBValSampleFile } from "../../data/_
 import { stageCIndex, stageCSample, stageCSampleFile, WINDOW_SET_ID } from "../../data/__tests__/stageC";
 import { chooseTrainingTab, useTrainingTabs, type TrainingTabs } from "../../data/trainingTabs";
 import { requestTrainingDetails } from "../training/PanelParts";
+import { roundTabLabel } from "../training/TrainingWindowSession";
 
 const intentUrl = (setId: string) => `${AEROVIZ_BACKEND_URL.replace(/\/+$/, "")}/experiments/intent?run=${encodeURIComponent(setId)}`;
 const json = (body: unknown, ok = true) => ({ ok, status: ok ? 200 : 404, headers: { get: () => "application/json" }, text: async () => JSON.stringify(body) });
@@ -139,5 +140,12 @@ describe("one layout for the three stages", () => {
     act(() => requestTrainingDetails("row-inspector", opener));
     const page = await screen.findByRole("dialog");
     expect(page.querySelector('[aria-label="The words at a row"]')).not.toBeNull();
+  });
+});
+
+describe("the tabs' short labels (the user, 2026-10-06)", () => {
+  it("a round is r1, r2 …; the base's start is Start (base)", () => {
+    expect([1, 2, 12].map(roundTabLabel)).toEqual(["r1", "r2", "r12"]);
+    expect(roundTabLabel("start")).toBe("Start (base)");
   });
 });

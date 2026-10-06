@@ -83,7 +83,8 @@ describe("the prior's sets in the Training panel", () => {
     expect(screen.queryByRole("table")).toBeNull();                                     // no table in the left panel
     // the set opens on the first flight's first prior sentence, read at the prior's Δ
     await waitFor(() => expect(lastPublished()?.flight.flightKey).toBe(`${head.flightKey}~prior-0`));
-    expect(shownTabs!.tabs.map((tab) => tab.label)).toEqual(["Labelled", "Closed loop", ...sentences.map((s) => `Sample ${s.sample}`)]);
+    expect(shownTabs!.tabs.map((tab) => tab.label)).toEqual(["Labelled", "Closed loop", ...sentences.map((s) => `${s.sample}`)]);
+    expect(shownTabs!.tabs[2].title).toContain("A sentence the prior said (sample 0");
     expect(shownTabs!.chosen).toBe("sample-0");
     expect(shownTabs!.tabs.map((tab) => tab.outcome)).toEqual([null, head.closedLoop["4"].replay.outcome, ...sentences.map((s) => s.outcome)]);
     expect(setTrainingIntervalS).toHaveBeenCalledWith(4);
@@ -92,7 +93,7 @@ describe("the prior's sets in the Training panel", () => {
     await waitFor(() => expect(lastPublished().flight.flightKey).toBe(`${head.flightKey}~prior-1`));
     act(() => chooseTrainingTab("closed-loop"));
     await waitFor(() => expect(lastPublished().flight.flightKey).toBe(`${head.flightKey}~closed-loop`));
-    expect(screen.getByRole("button", { name: /^At the cursor/ }).textContent).toContain("choose a Sample tab");
+    expect(screen.getByRole("button", { name: /^At the cursor/ }).textContent).toContain("choose a sample's tab (0, 1 …)");
     act(() => chooseTrainingTab("labelled"));
     await waitFor(() => expect(setTrainingIntervalS).toHaveBeenLastCalledWith(null));
     expect(screen.getByRole("button", { name: /^This sentence/ }).textContent).toContain("not flown");

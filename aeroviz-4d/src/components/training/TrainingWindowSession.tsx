@@ -139,9 +139,9 @@ function ending(window: TrainingWindow, sentence: TrainingWindowSentence): strin
     (loss === null ? "no loss of separation" : `loss of separation with ${loss.other}`);
 }
 
-/** A round's tab label (outline §6.2 item 2). */
-function roundTabLabel(round: TrainingWindowRound): string {
-  return round === "start" ? "Start (base)" : `Round ${round}`;
+/** A round's tab label (outline §6.2 item 2): short, r1, r2 … (the user, 2026-10-06); its tooltip says what it is. */
+export function roundTabLabel(round: TrainingWindowRound): string {
+  return round === "start" ? "Start (base)" : `r${round}`;
 }
 
 /** The window's tabs. */
@@ -277,7 +277,7 @@ export default function TrainingWindowSession({ airport, sets, details }: {
         <NotesList items={[
           { key: "labelled", name: "Labelled", text: "the labeller's open-loop reading of the commanded aircraft's recorded flight (not flown)" },
           { key: "start", name: "Start (base)", text: "the sentence the base model said, before any round" },
-          { key: "round", name: "Round 1 …", text: "the sentence each round's model said; the dot is its outcome's colour" },
+          { key: "round", name: "r1, r2 …", text: "the sentence each round's model said (round 1, 2 …); the dot is its outcome's colour" },
         ]} />
         <h4 className="training-details-subhead">Window kinds</h4>
         <NotesList items={Object.entries(TRAINING_WINDOW_KIND_TEXT).map(([kind, text]) => ({ key: kind, name: kind, text }))} />
