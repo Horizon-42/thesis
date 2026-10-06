@@ -12,12 +12,19 @@ WHAT IT MEASURES, from the base of stage B with zero-output traffic modules (the
 2. **The round** (`post_train.speak_round` on every batch, then `post_train.train_pass`), each timed: the speaking (the
    second pass included), the training pass, the selection readout; the groups written (their count and bytes on
    disk).
-3. **Memory** at the formal size, after each part: the GPU's peak allocated and reserved memory DURING that part (the
+3. **One update's memory** (`pass_memory`, before the pass): the peak GPU memory and the time of one update's forward
+   and backward (no optimizer step: the model is unchanged) for k of the round's branch groups that bound any update
+   of k ≥ 2 groups in rows and traffic (the longest, the widest, then the next longest), k in
+   ``--pass-memory-groups``, with
+   ``data_sentences`` sentences of the data term — what `Settings.update_groups` costs (O13). An update that runs out
+   of the GPU's memory is recorded as such (it is the measurement), and no larger k is tried.
+4. **Memory** at the formal size, after each part: the GPU's peak allocated and reserved memory DURING that part (the
    peak is reset before it) and its free memory; the host's free memory and this process's peak resident memory SINCE
    ITS START (the host keeps no peak that can be reset: a part's own figure is the rise over the part before).
 
 The windows are drawn as `post_train` draws round 0 (the same seed gives the same windows); its groups are written
-under ``--out`` (a scratch directory: no campaign, nothing published) and the record is ``profile.json``.
+under ``--out`` (a scratch directory: no campaign, nothing published) and the record is ``profile.json``, written again
+after each part, so a part that fails (the GPU's memory at a size tried) leaves the parts before it.
 
     python run_ts.py post_profile --prior <the base> --instructions <A34's artefact> --executor <its spec> \\
         --windows <the census> --out <scratch>/post_profile --batch-windows … (post_train's counts)
@@ -32,7 +39,7 @@ import pstats
 import resource
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 import numpy as np
 import torch
@@ -46,10 +53,13 @@ from ts_transformer.experiments.post_train import (
 )
 from ts_transformer.experiments.post_window_loop import checked_edges
 from ts_transformer.io_utils import utc_now, write_json_atomic
-from ts_transformer.post.branches import CONTINUATIONS
+from ts_transformer.post.branches import CONTINUATIONS, samples
+from ts_transformer.post.loss import PassStart, update_loss
+from ts_transformer.prior.batch import collate
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
-PROFILE_SCHEMA = "ts-post-profile-v1"
+#: v2 (C8, 2026-10-06): one update's memory by its groups (``pass_memory``); the record written after each part.
+PROFILE_SCHEMA = "ts-post-profile-v2"
 #: The parts of a speaking batch (module docstring, item 1): each the functions (a file of the package and a name) whose
 #: cumulative time it is.
 PARTS = {
@@ -61,6 +71,8 @@ PARTS = {
     "edge_features": (("post/edges.py", "tokens"),),
     "loop_copies": (("experiments/post_window_loop.py", "copy"),),
 }
+#: The branch groups of one update whose memory `pass_memory` measures, by default.
+PASS_MEMORY_GROUPS = (1, 2, 4, 8, 16)
 APPROXIMATION = ("cProfile's cumulative time of each part's functions; on a GPU a part's kernels run asynchronously and "
                  "their time shows where the host waits for them (the speaker's draw), not in the part")
 
@@ -104,8 +116,77 @@ def timed(device: torch.device, run: Callable[[], Any]) -> tuple[Any, float]:
     return out, time.perf_counter() - start
 
 
-def profile(context: Context, settings: Settings, out: Path) -> dict[str, Any]:
-    """The record of the profile (module docstring)."""
+def group_size(group: Any) -> tuple[int, int]:
+    """What an update holding ``group`` is padded to: its longest sentence's rows and the most traffic tokens at a row
+    of any of its sentences (the update's tensors grow with both, D116)."""
+    return (max(len(s.tokens) for s in group.sentences),
+            max([1] + [len(row) for s in group.sentences for row in s.tokens]))
+
+
+def pass_memory(model: Any, context: Context, directory: Path, settings: Settings, counts: Sequence[int],
+                saved: Callable[[dict[str, Any]], None] = lambda part: None) -> dict[str, Any]:
+    """Part 3 of the module docstring: for each k of ``counts`` (ascending), one update's forward and backward on k
+    branch groups written in ``directory`` — an update is padded to its longest sentence and its widest traffic
+    (`group_size`, D116), so the k are the longest group, the widest group (by traffic, then rows) and the next longest,
+    which bound any update of k ≥ 2 groups; for k = 1 the longest, and the widest alone too (``1_widest``) when it is
+    not the longest (not a bound: a group between them in both is not measured) — with ``data_sentences`` sentences of the data term; its peak GPU memory, its time and its padded shape; the
+    gradients dropped after each, no optimizer step. The groups are read file by file, the longest and the widest kept
+    (the round's are not held at once). A k past the groups held is recorded as such; an update out of the GPU's memory
+    is recorded and stops the rest. ``saved`` gets the record after each one measured. APPROXIMATIONS, stated: the data
+    term's sentences are one draw, not a bound (the pass draws them again for each update; they carry no traffic); an
+    update of the pass holds the groups of one file (`update_pairs`), so a k past a file's groups is measured but never
+    formed; the first update's time includes the process's first backward."""
+    device = context.device
+    wanted = max(counts)
+    longest: list[Any] = []
+    widest: Any = None
+    sizes: list[tuple[int, int]] = []
+    for path in sorted(directory.glob("groups_*.pt"), key=lambda p: int(p.stem.split("_")[1])):
+        loaded = torch.load(path, weights_only=False)
+        sizes += [group_size(g) for g in loaded]
+        longest = sorted(longest + loaded, key=group_size, reverse=True)[:wanted]
+        widest = max(([widest] if widest is not None else []) + loaded, key=lambda g: group_size(g)[::-1],
+                     default=None)
+    order = longest if widest is None or widest is longest[0] else (
+        [longest[0], widest] + [g for g in longest[1:] if g is not widest])
+    runs = []
+    for k in sorted(counts):
+        runs.append((str(k), order[:k]))
+        if k == 1 and order and order[0] is not widest:
+            runs.append(("1_widest", [widest]))
+    chosen = np.random.default_rng([settings.seed, 0, 3]).choice(
+        len(context.data), size=min(settings.data_sentences, len(context.data)), replace=False)
+    data = [context.data[int(i)] for i in chosen]
+    start = PassStart(model)
+    out: dict[str, Any] = {"data_sentences": len(data), "groups_written": len(sizes),
+                           "largest_rows": max([0] + [r for r, _ in sizes]),
+                           "largest_traffic": max([0] + [n for _, n in sizes]), "updates": {}}
+    for label, groups in runs:
+        if label != "1_widest" and int(label) > len(order):
+            out["updates"][label] = "fewer groups held"
+            continue
+        try:
+            batch = samples(groups, device)
+            rows = collate(data, device)
+            shape = {"sentences": int(batch.rows.asked.shape[0]), "rows": int(batch.rows.asked.shape[1]),
+                     "traffic": int(batch.traffic.tokens.shape[2]), "data_rows": int(rows.asked.shape[1])}
+            _, seconds = timed(device, lambda: update_loss(model, start, context.base, batch, rows).loss.backward())
+            out["updates"][label] = {"s": seconds, **shape, **memory(device)}
+        except torch.OutOfMemoryError:
+            out["updates"][label] = "out of memory"
+            break
+        finally:
+            batch = rows = None
+            model.zero_grad(set_to_none=True)
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+            saved(out)
+    return out
+
+
+def profile(context: Context, settings: Settings, out: Path, counts: Sequence[int] = PASS_MEMORY_GROUPS,
+            save: Callable[[dict[str, Any]], None] = lambda record: None) -> dict[str, Any]:
+    """The record of the profile (module docstring), handed to ``save`` after each part."""
     device = context.device
     record: dict[str, Any] = {"memory_before": memory(device)}
     model, optimizer = start_model(context, settings)
@@ -127,15 +208,21 @@ def profile(context: Context, settings: Settings, out: Path) -> dict[str, Any]:
     record["one_batch"] = {"windows": len(batch), "wall_s": wall, "parts_s": part_times(stats),
                            "approximation": APPROXIMATION, "spoken_again": len(found.spoken_again),
                            "groups": len(found.groups), "memory": memory(device)}
+    save(record)
     # 2. the round
     directory = out / "round_0"
     directory.mkdir(parents=True)
     spoken, speaking_s = timed(device, lambda: speak_round(model, context, windows, settings, 0, directory))
     record["round"] = {"speaking_s": speaking_s, "speaking": spoken, "memory_after_speaking": memory(device),
                        "groups_bytes": sum(p.stat().st_size for p in directory.glob("groups_*.pt"))}
+    save(record)
+    record["pass_memory"] = pass_memory(model, context, directory, settings, counts,
+                                        lambda part: save({**record, "pass_memory": part}))
+    save(record)
     passed, pass_s = timed(device, lambda: train_pass(model, context, optimizer, directory, settings,
                                                       np.random.default_rng([settings.seed, 0, 1])))
     record["round"].update(pass_s=pass_s, passed=passed, memory_after_pass=memory(device))
+    save(record)
     select = selection_windows(context, settings)
     _, readout_s = timed(device, lambda: selection_readout(model, context, select, settings))
     record["round"].update(selection_windows=len(select), selection_readout_s=readout_s,
@@ -164,8 +251,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--select-per-airport", type=int, required=True)
     parser.add_argument("--traffic-hidden", type=int, required=True)
     parser.add_argument("--traffic-heads", type=int, required=True)
+    parser.add_argument("--pass-memory-groups", type=int, nargs="+", default=list(PASS_MEMORY_GROUPS),
+                        help="the branch groups of one update whose memory is measured (part 3)")
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args(argv)
+    if min(args.pass_memory_groups) < 1:
+        parser.error("--pass-memory-groups are at least 1")
     prior_dir, instructions, executor, census, procedure_root, out = (p if p.is_absolute() else REPO_ROOT / p for p in (
         args.prior, args.instructions, args.executor, args.windows, args.procedure_root, args.out))
     if out.exists():
@@ -180,13 +271,17 @@ def main(argv: list[str] | None = None) -> int:
     device = torch.device(args.device)
     context = open_context(prior_dir, instructions, executor, edges_reference, device, procedure_root, formal=False)
     out.mkdir(parents=True)
-    record = {"schema": PROFILE_SCHEMA, "started_utc": utc_now(), "git": git_state(), "checks": opened["checks"],
-              "inputs": {"prior": str(prior_dir), "instructions": str(instructions), "executor": str(executor),
-                         "windows": str(census), "settings": {k: v for k, v in vars(args).items()
-                                                              if k not in ("prior", "instructions", "executor",
-                                                                           "windows", "out", "procedure_root")}},
-              **profile(context, settings, out), "finished_utc": utc_now()}
-    write_json_atomic(out / "profile.json", json.loads(json.dumps(record, default=str)))
+    head = {"schema": PROFILE_SCHEMA, "started_utc": utc_now(), "git": git_state(), "checks": opened["checks"],
+            "inputs": {"prior": str(prior_dir), "instructions": str(instructions), "executor": str(executor),
+                       "windows": str(census), "settings": {k: v for k, v in vars(args).items()
+                                                            if k not in ("prior", "instructions", "executor",
+                                                                         "windows", "out", "procedure_root")}}}
+
+    def save(parts: dict[str, Any], **more: Any) -> None:
+        write_json_atomic(out / "profile.json", json.loads(json.dumps({**head, **parts, **more}, default=str)))
+
+    record = profile(context, settings, out, args.pass_memory_groups, save)
+    save(record, finished_utc=utc_now())
     print(json.dumps({"one_batch": record["one_batch"], "round": {k: v for k, v in record["round"].items()
                                                                   if k.endswith("_s")}}, indent=1), flush=True)
     return 0
