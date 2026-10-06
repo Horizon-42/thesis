@@ -589,20 +589,26 @@ hint which days hold data and which flights meet traffic).
   track, in its recorded traffic, with the M1 judge (`traffic.check.check`, reading VISUAL, MD2). This is the
   same rule set as the M1 baseline, so a loss in the list means what a loss in a result means.
 - **Check step.** The census check step is an option, stated in the catalog (the M1 loop uses 1 s, MD6).
-- **M1 rows.** Every arrival with at least one loss it answers for: flight key, callsign, runway, type, entry
-  and landing UTC, the loss instants it answers for, their kinds, the tightest one (distance / required), and
-  the recorded aircraft in its window. Sorted by the loss instants. The catalog states how many arrivals were
-  judged and how many have a loss; no row is dropped.
+- **M1 rows.** Every arrival with at least one loss it answers for: flight key, callsign, runway, type, its CWT
+  category, entry and landing UTC, the loss instants it answers for, their kinds, the tightest one (distance /
+  required), and the recorded aircraft in its window. Sorted by the loss instants. The catalog states how many
+  arrivals were judged and how many have a loss; no row is dropped. The panel hides CWT category I (light
+  aircraft) by default, with a checkbox: on KRDU, C172 practice traffic tops the ranking otherwise (the first
+  browser check, 2026-10-06).
 - **M2 rows.** For each block length (15, 30, 60 min, aligned to the length): every block in which at least
   one arrival lands, with its start, its arrivals, its runways, and the loss instants its arrivals answer
   for. Sorted by those losses, then by arrivals.
 - **Where.** `4dTrajectory/outputs/<ICAO>/traffic_scenarios/catalog.json` (schema
-  `traffic-scenario-catalog-v1`, with the configuration and the roster it judged), served by `GET
+  `traffic-scenario-catalog-v2`, with the configuration and the roster it judged), served by `GET
   /traffic/scenarios?airport=<ICAO>`; a missing catalog is a 404 naming the command that makes it. Not in
   `public/data`.
 - **Interpretation.** A loss in the record is a loss between recorded aircraft as flown, judged by these rules.
   It marks dense traffic. It does not say that the optimized baseline will have a loss (T5: 7 of 50 sampled
   windows had one).
+- **The panel.** Lists show 100 rows at a time with the count of the rest. The result shows, per controlled
+  aircraft, what changed: the loss instants in its record, after the first solve and at the end, and its landing
+  against its record (M2 also its delay; an aircraft that was not flown shows no delay). While a job runs the panel
+  shows its phase and the elapsed time. While a scene is shown the clock widgets display its real UTC time.
 
 ## 11. Open questions
 
