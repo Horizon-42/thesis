@@ -33,7 +33,7 @@ def campaign(setup, tmp_path, monkeypatch):  # noqa: F811
                              {"head": "x", "dirty": False}, {})
     post_train.run_campaign(source, _settings(rounds=1, continuations=2), context)
     start = post_train.start_of(source, 0, formal=False)
-    window = _ahead(s["windows"][0])
+    window = replace(_ahead(s["windows"][0]), span_s=1.0)                  # of the campaign's span
     with monkeypatch.context() as patch:
         patch.setattr(multi_train, "draw_windows", lambda context, settings, rng: ([window], {"drawn": {REAL_KIND: 1}}))
         settings = _multi_settings(start=start, spans_s=[1.0, 2.0])            # two spans: the coverage by span

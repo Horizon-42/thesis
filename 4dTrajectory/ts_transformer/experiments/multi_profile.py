@@ -4,11 +4,13 @@ counts, measured span by span. No criterion is applied (D7): the report goes to 
 
 WHAT IT MEASURES, from stage D's start (`multi_train.stage_d`: the round of stage C given, its token part at zero):
 
-1. **One batch of each span** (the round's first batch of each span L, `Stage.batches`: at most ``--batch-rows``
-   commanded aircraft of one span), spoken in this process with its two passes (`multi_train.speak_batch`): its wall
-   time, its windows, rows and groups, the bytes of its groups, the GPU's peak during it and the host's memory after.
+1. **One batch of each span** (the round's first batch of each span L, `Stage.batches`: at most its span's
+   ``--batch-rows`` commanded aircraft), with its two passes (`multi_train.speak_batch`): its time, its windows and
+   rows, the GPU's peak during it — spoken by one worker in part 2 (the user, 2026-10-07: not twice), or here, in this
+   process, without workers (with its groups and their bytes, and the host's memory after).
 2. **The speaking workers' memory** (post-training O15, with ``--speak-workers`` of 2 or more): one worker's peak on the
-   first batch of each span and the batch of the most rows (`post_train.measured_batches`), spoken with round 0's model,
+   first batch of each span and the batch of the most rows (`post_train.measured_batches`; each batch's time and GPU
+   peak beside), spoken with round 0's model,
    this process's in one update of the pass on their groups (`post_train.pass_memory_of`), and for each N up to
    ``--speak-workers`` what does not fit (`post_train.workers_fit`; empty: N fits). Where ``--speak-workers`` do not fit,
    the profile stops there by name (the record up to part 2 written).
@@ -49,7 +51,9 @@ import numpy as np
 import torch
 
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
-from ts_transformer.experiments.multi_train import add_arguments, settings_from, span_key, stage_d
+from ts_transformer.experiments.multi_train import (
+    MULTI_PROFILE_SCHEMA, add_arguments, settings_from, span_key, stage_d,
+)
 from ts_transformer.experiments.post_profile import memory, timed
 from ts_transformer.experiments.post_train import (
     Context, Speakers, Stage, available_memory, measured_batches, open_context, pass_memory_of, start_of, train_pass,
@@ -61,7 +65,6 @@ from ts_transformer.post.scene import Window
 from ts_transformer.prior.model import Prior
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
-PROFILE_SCHEMA = "ts-multi-profile-v1"
 #: The standard errors of W per aircraft for which `spread` gives the windows needed.
 TARGET_SE = (0.01, 0.02)
 
@@ -150,20 +153,21 @@ def profile(context: Context, settings: Any, out: Path, speakers: Speakers | Non
     record["batches"] = {span: {"batches": len(ks), "windows": sum(len(found[k]) for k in ks),
                                 "rows": [rows_of(windows, found[k]) for k in ks]} for span, ks in by_span.items()}
     save(record)
-    # 1. one batch of each span, here
-    record["one_batch"] = {}
-    with tempfile.TemporaryDirectory(prefix="multi_profile_batch_", dir=out) as scratch:
-        for span, ks in by_span.items():
-            k = ks[0]
-            spoken, seconds = timed(device, lambda: stage.speak_batch(model, context, windows, found[k], settings, 0,
-                                                                      Path(scratch), k))
-            record["one_batch"][span] = {"batch": k, "windows": len(found[k]), "rows": rows_of(windows, found[k]),
-                                         "wall_s": seconds, "speaking": spoken,
-                                         "groups_bytes": (Path(scratch) / f"groups_{k}.pt").stat().st_size,
-                                         "memory": memory(device)}
-            if device.type == "cuda":
-                torch.cuda.empty_cache()
-            save(record)
+    # 1. one batch of each span, here (without workers: with them, the worker's measure of part 2 speaks them)
+    if speakers is None:
+        record["one_batch"] = {}
+        with tempfile.TemporaryDirectory(prefix="multi_profile_batch_", dir=out) as scratch:
+            for span, ks in by_span.items():
+                k = ks[0]
+                spoken, seconds = timed(device, lambda: stage.speak_batch(model, context, windows, found[k], settings,
+                                                                          0, Path(scratch), k))
+                record["one_batch"][span] = {"batch": k, "windows": len(found[k]), "rows": rows_of(windows, found[k]),
+                                             "wall_s": seconds, "speaking": spoken,
+                                             "groups_bytes": (Path(scratch) / f"groups_{k}.pt").stat().st_size,
+                                             "memory": memory(device)}
+                if device.type == "cuda":
+                    torch.cuda.empty_cache()
+                save(record)
     # 2. the speaking workers' memory
     if speakers is not None:
         with tempfile.TemporaryDirectory(prefix="multi_profile_measure_", dir=out) as scratch:
@@ -172,7 +176,7 @@ def profile(context: Context, settings: Any, out: Path, speakers: Speakers | Non
         available = available_memory(device)
         record["workers"] = {"measured": measured, "pass": passed, "available": available,
                              "measured_batches": measured_batches(windows, found),
-                             "short": {str(n): workers_fit(n, measured, passed, available)
+                             "short": {str(n): workers_fit(n, measured, passed, available, held_now=True)
                                        for n in range(1, speakers.workers + 1)}}
         save(record)
         if record["workers"]["short"][str(speakers.workers)]:
@@ -235,7 +239,7 @@ def main(argv: list[str] | None = None) -> int:
     speakers = Speakers(context, settings, args.speak_workers, device, stage=stage) if args.speak_workers > 1 else None
     context = replace(context, device=device, base=context.base.to(device).eval())
     out.mkdir(parents=True)
-    head = {"schema": PROFILE_SCHEMA, "started_utc": utc_now(), "git": git_state(), "checks": opened["checks"],
+    head = {"schema": MULTI_PROFILE_SCHEMA, "started_utc": utc_now(), "git": git_state(), "checks": opened["checks"],
             "inputs": {"prior": str(prior_dir), "instructions": str(instructions), "executor": str(executor),
                        "windows": str(census), "procedure_root": str(procedure_root), "settings": asdict(settings),
                        "speak_workers": args.speak_workers, "approximation": (
@@ -251,8 +255,10 @@ def main(argv: list[str] | None = None) -> int:
         if speakers is not None:
             speakers.close()
     save(record, finished_utc=utc_now())
-    print(json.dumps({"one_batch": {span: {k: b[k] for k in ("windows", "rows", "wall_s")}
-                                    for span, b in record["one_batch"].items()},
+    batches = (record["workers"]["measured"]["batches"] if "workers" in record else
+               [{"span_s": span, **{k: b[k] for k in ("windows", "rows", "wall_s")}}
+                for span, b in record["one_batch"].items()])
+    print(json.dumps({"batches": batches,
                       "round": {k: v for k, v in record["round"].items() if k.endswith("_s")},
                       "spread": {span: {k: s[k] for k in ("units", "mean_0", "se_0", "paired_se")}
                                  for span, s in record["spread"].items()}}, indent=1), flush=True)

@@ -69,6 +69,7 @@ import pickle
 import subprocess
 import tempfile
 import threading
+import time
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor, wait
 from dataclasses import asdict, dataclass, replace
@@ -454,14 +455,18 @@ class Speakers:
     a campaign, one worker speaks a batch at the formal size and its memory is measured (`measure`, O15)."""
 
     def __init__(self, context: Context, settings: Settings, workers: int, device: torch.device,
-                 stage: Stage = STAGE_C) -> None:
+                 stage: Stage = STAGE_C, gpu_budget: int | None = None) -> None:
+        """``gpu_budget``: each worker's GPU memory, bytes (its CUDA context and what its allocator holds; stage D's,
+        from its profile, `multi_train.profiled_fit`): a worker's allocator is capped at it less its context, measured
+        at its first task, so a worker past it stops by name (CUDA's out of memory) and takes nothing of the others';
+        None: no cap (stage C's campaign)."""
         if workers < 2:
             raise ValueError(f"{workers} worker(s): speakers are 2 or more processes (one speaks without them)")
         if context.device.type != "cpu" or torch.cuda.is_initialized():
             raise ValueError("speakers are forked before the campaign's process uses the GPU: open the context on the "
                              "CPU, fork them, then move it")
         _SPEAKER.clear()
-        _SPEAKER.update(context=context, settings=settings, device=device, stage=stage)
+        _SPEAKER.update(context=context, settings=settings, device=device, stage=stage, gpu_budget=gpu_budget)
         self.stage = stage
         self.pool = ProcessPoolExecutor(workers, mp_context=multiprocessing.get_context("fork"),
                                         initializer=_initialise_speaker)
@@ -541,7 +546,20 @@ def _worker_context() -> tuple[Context, Settings, Stage]:
     if held["context"].device != held["device"]:                         # the worker's first task: its own GPU
         context = held["context"]
         held["context"] = replace(context, device=held["device"], base=context.base.to(held["device"]).eval())
+        if held["gpu_budget"] is not None:
+            _cap_gpu(held["device"], held["gpu_budget"])
     return held["context"], held["settings"], held["stage"]
+
+
+def _cap_gpu(device: torch.device, budget: int) -> None:
+    """A worker's allocator capped at ``budget`` less its CUDA context (`Speakers`' ``gpu_budget``): its use by
+    ``nvidia-smi`` less what its allocator holds now."""
+    context_bytes = _gpu_used() - torch.cuda.memory_reserved(device)
+    total = torch.cuda.get_device_properties(device).total_memory
+    if budget <= context_bytes:
+        raise SystemExit(f"a speaking worker's GPU budget {budget / 2**30:.2f} GiB is not above its CUDA context "
+                         f"{context_bytes / 2**30:.2f} GiB")
+    torch.cuda.set_per_process_memory_fraction((budget - context_bytes) / total, device)
 
 
 def _speak(round_: int, state: str, directory: str, k: int, places: list[int], records: list[dict[str, Any]]
@@ -591,8 +609,9 @@ def _read(reading: int, state: str, split: str, places: list[int], records: list
 
 def _measure(round_: int, state: str, directory: str) -> dict[str, Any]:
     """A worker's measure (`Speakers.measure`): the measured batches of round ``round_`` spoken one after another
-    (`measured_batches`), its own host memory sampled meanwhile (`_PeakSampler`: the most of any), then its memory after
-    them (`_memory_after_batch`: the GPU's peak the most of any) and what a worker holds besides
+    (`measured_batches`), each with its time and, on a GPU, the most its allocator held in it, its own host memory sampled
+    meanwhile (`_PeakSampler`: the most of any), then its memory after them (`_memory_after_batch`: the GPU's peak the
+    most of any) and what a worker holds besides
     in a round (``held``): the selection readout's model (as large as the round's: `_read`) and the round's kept series
     (`Start.release` at each round) — at most the round's flights, at the mean pickled size of the series this batch
     kept (an estimate: a series in memory is not its pickle). Not counted: the selection readout's windows and the
@@ -609,17 +628,29 @@ def _measure(round_: int, state: str, directory: str) -> dict[str, Any]:
     windows, _ = stage.draw(context, settings, round_)
     found = stage.batches(windows, settings)
     measured = measured_batches(windows, found)
+    cuda = context.device.type == "cuda"
+    each = []
     with _PeakSampler(swapped_here) as sampled:
         for k in measured:
+            if cuda:
+                torch.cuda.reset_peak_memory_stats(context.device)
+            started = time.perf_counter()
             stage.speak_batch(model, context, windows, found[k], settings, round_, Path(directory), k)
+            if cuda:
+                torch.cuda.synchronize(context.device)
+            each.append({"batch": k, "span_s": windows[found[k][0]].span_s, "windows": len(found[k]),
+                         "rows": sum(len(windows[p].signal_indices) for p in found[k]),
+                         "s": time.perf_counter() - started,
+                         "gpu_reserved_peak": torch.cuda.max_memory_reserved(context.device) if cuda else None})
+            if cuda:
+                torch.cuda.empty_cache()                 # each batch's own peak (as a worker's batch, `_speak`)
     kept = [len(pickle.dumps(series)) for series in start.series.values()]
     flights = len({i for w in windows for i in w.signal_indices})      # every commanded flight's series
     held = {"reader_model": sum(t.numel() * t.element_size() for t in (*model.parameters(), *model.buffers())),
             "series": flights * sum(kept) // len(kept), "round_flights": flights}
-    return {"round": round_, "windows": sum(len(found[k]) for k in measured),
-            "batches": [{"batch": k, "span_s": windows[found[k][0]].span_s, "windows": len(found[k]),
-                         "rows": sum(len(windows[p].signal_indices) for p in found[k])} for k in measured],
-            **_memory_after_batch(context.device, sampled.peak), "held": held}
+    reserved_peak = max(b["gpu_reserved_peak"] for b in each) if cuda else None
+    return {"round": round_, "windows": sum(len(found[k]) for k in measured), "batches": each,
+            **_memory_after_batch(context.device, sampled.peak, reserved_peak), "held": held}
 
 
 def measured_batches(windows: Sequence[Window], found: Sequence[Sequence[int]]) -> list[int]:
@@ -682,16 +713,16 @@ class _PeakSampler:
         self._sample()
 
 
-def _memory_after_batch(device: torch.device, host_peak: int) -> dict[str, Any]:
+def _memory_after_batch(device: torch.device, host_peak: int, reserved_peak: int | None) -> dict[str, Any]:
     """This process's memory, bytes (`Speakers.measure`). Host: its own peak (``host_peak``, `_PeakSampler`) and its own
     resident memory now (`_own_memory`; what is swapped out gives back no RAM). GPU (a CUDA device): its use now by
     ``nvidia-smi`` (the context and what the allocator holds), less what the allocator holds now, plus the most it
-    held — the peak — and its use after the cache is released."""
+    held (``reserved_peak``: the most of the measured batches') — the peak — and its use after the cache is released."""
     now = _own_memory()["resident"]
     out: dict[str, Any] = {"host": {"peak": max(host_peak, now), "now": now}, "gpu": None}   # held after: held at the peak
     if device.type == "cuda":
         used = _gpu_used()
-        peak_gpu = used - torch.cuda.memory_reserved(device) + torch.cuda.max_memory_reserved(device)
+        peak_gpu = used - torch.cuda.memory_reserved(device) + reserved_peak
         torch.cuda.empty_cache()
         out["gpu"] = {"peak": peak_gpu, "now": _gpu_used()}
     return out
@@ -741,9 +772,11 @@ def pass_memory_of(context: Context, settings: Settings, directory: Path, stage:
 
 
 def workers_fit(workers: int, measured: Mapping[str, Any], passed: Mapping[str, Any] | None,
-                available: Mapping[str, int | None]) -> list[str]:
+                available: Mapping[str, int | None], *, held_now: bool) -> list[str]:
     """O15: where ``workers`` workers do not fit, read after the measures (``available``: the host's and the GPU's free
-    memory, with the measured worker and this process holding what they hold after them). Each worker needs the
+    memory; ``held_now``: with the measured worker and this process holding what they hold after them, as just after
+    `Speakers.measure`, or with nothing held yet, as at a campaign's start from its profile's measures,
+    `multi_train.profiled_fit`). Each worker needs the
     measured worker's peak (``measured``, `Speakers.measure`; it holds part of it already) and what a worker holds
     besides in a round (``measured["held"]``: the readout's model on the campaign's device, the round's kept series on
     the host). The pass, on a GPU: this process grows to its pass's peak (``passed``, `pass_memory_of`) while each of
@@ -758,14 +791,15 @@ def workers_fit(workers: int, measured: Mapping[str, Any], passed: Mapping[str, 
         if measured[name] is None:
             continue
         one = measured[name]["peak"] + besides[name]
-        need, have = workers * one, available[name] + measured[name]["now"]
+        need, have = workers * one, available[name] + (measured[name]["now"] if held_now else 0)
         if need > have:
             out.append(f"{name}: {workers} workers speaking need {need / 2**30:.1f} GiB (one worker's peak "
                        f"{measured[name]['peak'] / 2**30:.2f} GiB and {besides[name] / 2**30:.2f} GiB held in a round), "
                        f"{have / 2**30:.1f} GiB available")
     if passed is not None:
         each = measured["gpu"]["now"] + reader["gpu"]
-        need = passed["peak"] - passed["now"] + (workers - 1) * each + reader["gpu"]
+        need = (passed["peak"] - passed["now"] + (workers - 1) * each + reader["gpu"] if held_now else
+                passed["peak"] + workers * each)
         if need > available["gpu"]:
             out.append(f"gpu: the pass beside {workers} workers needs {need / 2**30:.1f} GiB more (its peak "
                        f"{passed['peak'] / 2**30:.2f} GiB, each worker holding {each / 2**30:.2f} GiB), "
@@ -797,7 +831,7 @@ def require_workers_fit(speakers: Speakers, context: Context, settings: Settings
     available = available_memory(context.device)
     out = {"speak_workers": speakers.workers, "measured": measured, "pass": passed, "available": available}
     print(json.dumps(out), flush=True)
-    short = workers_fit(speakers.workers, measured, passed, available)
+    short = workers_fit(speakers.workers, measured, passed, available, held_now=True)
     if short:
         raise SystemExit("the speaking workers do not fit (O15): " + "; ".join(short) + " — start fewer "
                          "(--speak-workers)")

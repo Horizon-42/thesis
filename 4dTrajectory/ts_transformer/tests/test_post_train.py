@@ -424,15 +424,27 @@ def test_n_workers_are_refused_by_name_where_one_workers_measured_memory_does_no
     passed = {"peak": 3 * gib, "now": gib // 2, "groups": 4}
     # host: 3 × (2 + 0.5 series) = 7.5 ≤ 6.5 + 1; GPU: 3 × (1 + 0.25 model) = 3.75 ≤ 3.75 + 0.25, the pass
     # 2.5 + 2 × (0.25 + 0.25) + 0.25 = 3.75 ≤ 3.75
-    assert post_train.workers_fit(3, measured, passed, {"host": int(6.5 * gib), "gpu": int(3.75 * gib)}) == []
-    short = post_train.workers_fit(3, measured, passed, {"host": 6 * gib, "gpu": int(3.25 * gib)})
+    assert post_train.workers_fit(3, measured, passed, {"host": int(6.5 * gib), "gpu": int(3.75 * gib)},
+                                  held_now=True) == []
+    short = post_train.workers_fit(3, measured, passed, {"host": 6 * gib, "gpu": int(3.25 * gib)}, held_now=True)
     assert [line.split(":")[0] for line in short] == ["host", "gpu", "gpu"]
     assert "3 workers speaking need 7.5 GiB" in short[0] and "the pass beside 3 workers needs 3.8 GiB more" in short[2]
     assert [line.split(":")[0] for line in post_train.workers_fit(3, measured, passed, {"host": int(6.5 * gib),
-                                                                                      "gpu": int(3.7 * gib)})] == ["gpu"]
+                                                                                      "gpu": int(3.7 * gib)},
+                                                                  held_now=True)] == ["gpu"]
+    # nothing held yet (a campaign's start from its profile): host 3 × 2.5 = 7.5 ≤ 7.5; GPU speaking 3.75 ≤ 3.75, the
+    # pass its whole peak 3 beside 3 workers holding 0.25 + 0.25 each: 4.5 > 3.75
+    assert [line.split(":")[0] for line in post_train.workers_fit(3, measured, passed, {"host": int(7.5 * gib),
+                                                                                      "gpu": int(3.75 * gib)},
+                                                                  held_now=False)] == ["gpu"]
+    assert post_train.workers_fit(3, measured, passed, {"host": int(7.5 * gib), "gpu": int(4.5 * gib)},
+                                  held_now=False) == []
+    assert [line.split(":")[0] for line in post_train.workers_fit(3, measured, passed, {"host": int(7.4 * gib),
+                                                                                      "gpu": int(4.5 * gib)},
+                                                                  held_now=False)] == ["host"]
     on_cpu = {**measured, "gpu": None}                     # the readout's model on the host: 3 × 2.75 = 8.25 ≤ 7.25 + 1
-    assert post_train.workers_fit(3, on_cpu, None, {"host": int(7.25 * gib), "gpu": None}) == []
-    assert post_train.workers_fit(3, on_cpu, None, {"host": 7 * gib, "gpu": None})
+    assert post_train.workers_fit(3, on_cpu, None, {"host": int(7.25 * gib), "gpu": None}, held_now=True) == []
+    assert post_train.workers_fit(3, on_cpu, None, {"host": 7 * gib, "gpu": None}, held_now=True)
     s = setup
     context = _context(s)
     short_round(monkeypatch, s)                            # before the fork: the workers draw the short round too
@@ -896,7 +908,10 @@ def test_the_speaking_workers_run_the_stages_parts(setup, tmp_path):
     assert sorted(p.name for p in tmp_path.glob("spoken_*")) == ["spoken_0", "spoken_1"]
     assert (measured / "spoken_0").exists()                       # the measure spoke the stage's batch
     assert len(list(marks.glob("started_*"))) >= 1 and not (marks / f"started_{os.getpid()}").exists()
-    assert Speakers.__init__.__defaults__[-1] is post_train.STAGE_C
+    import inspect
+
+    defaults = inspect.signature(Speakers.__init__).parameters
+    assert defaults["stage"].default is post_train.STAGE_C and defaults["gpu_budget"].default is None
 
 
 def test_a_stage_made_from_stage_cs_runs_its_own_batches_through_the_campaign(setup, tmp_path, monkeypatch):

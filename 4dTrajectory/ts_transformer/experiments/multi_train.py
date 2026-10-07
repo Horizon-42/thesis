@@ -19,8 +19,9 @@ parts (`stage_d`):
   kind still short, its window of that span, and for a compressed one its later aircraft moved toward the anchor by c
   in [c_min, 1) (`multi.windows.compressed`; a window without a later aircraft has no compressed form); a window left
   out when one of its commanded aircraft opens inside a loss it answers for (`multi.windows.left_out`), until each
-  kind's count of each span is reached; a shortfall of a span is recorded, never silent. The batches hold at most
-  ``--batch-rows`` commanded aircraft of windows of one span and command each flight once (`post_train.batches`).
+  kind's count of each span is reached; a shortfall of a span is recorded, never silent. The batches hold windows of
+  one span, at most that span's ``--batch-rows`` commanded aircraft (one number a span: a batch's memory grows with its
+  ticks too, the user, 2026-10-07, after MC5's profile), and command each flight once (`span_batches`).
 - **The speaking** (`speak_batch`, `post_branches.branch_round`): stage D's rules (`multi.credit.rules`: W the sum,
   spoken again below the count, the varied aircraft and their branch points, each aircraft's own numbers, D141–D143)
   and its loop (`loop_options`: the rule of who answers, D145; the token part, D152). Its record is stage C's
@@ -41,12 +42,14 @@ THE CHECKS, as stage C's: the closed loop's (D69, with the labeller's and the ex
 A formal campaign (not ``--smoke``) runs from a clean checkout (a run worktree at the merged commit, outline D163; its
 intent is written by hand before the publication, not checked here), on stage B's formal base, from a formal campaign
 of stage C. Its campaign record is `MULTI_CAMPAIGN_SCHEMA`, resumable as stage C's (`post_train.open_campaign` with stage
-D's format and reader).
+D's format and reader). Its speaking workers (``--speak-workers`` above 1) are sized from stage D's profile of these
+inputs and settings (``--profile``, `profiled_fit`: the profile's measure and the memory free now, each worker's GPU
+capped at its share), never measured before a run (the user, 2026-10-07).
 
     python run_ts.py multi_train --prior <the base> --instructions <A34's artefact> --executor <its spec> \\
         --windows <stage C's census: its edge reference> --start-campaign <stage C's campaign> --start-round <r> \\
         --out 4dTrajectory/outputs/POOLED/multi/<campaign id> --rounds … --spans-s 300 600 1200 --c-min … \
-        --batch-rows … (every count given)
+        --batch-rows 64 48 24 (every count given)
 
 The readout also gives the time the aircraft take (§5 item 4, O18; `multi.timing`): each landing's delay against its
 record (p50, p90), the spacing at the threshold of successive landings on one runway (p1, p5, p50) beside the records' of
@@ -70,9 +73,8 @@ from flight_scenarios.procedure_final import DEFAULT_PROCEDURE_ROOT
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
 from ts_transformer.experiments.post_branches import Rules, branch_round
 from ts_transformer.experiments.post_train import (
-    Context, Speakers, Stage, batches, campaign_model, done_rounds, open_campaign, open_context, require_workers_fit,
-    round_start,
-    run_campaign, settings_of, source_campaign, speak_round, start_checkpoint, start_model, start_of,
+    Context, Speakers, Stage, available_memory, batches, done_rounds, open_campaign, open_context, round_start,
+    run_campaign, settings_of, source_campaign, speak_round, start_checkpoint, start_model, start_of, workers_fit,
 )
 from ts_transformer.experiments.post_window_loop import LANDED, LOST_SEPARATION, WindowLoop, checked_edges
 from ts_transformer.multi import credit
@@ -95,6 +97,15 @@ MULTI_CAMPAIGN_SCHEMA = "ts-multi-train-v1"
 MULTI_CHECKPOINT_SCHEMA = "ts-multi-checkpoint-v1"
 #: The reader's name in the claim of a campaign's val read (the validation readout of stage D).
 MULTI_CLAIM_READER = "multi_validation"
+#: The format of stage D's profile (`multi_profile`), which a campaign's speaking workers are sized from (`profiled_fit`).
+MULTI_PROFILE_SCHEMA = "ts-multi-profile-v1"
+#: The settings that set a round's memory, which a campaign shares with its profile (`profiled_fit`); the others (its
+#: rounds, seed, learning rates, and a start of the same traffic shape) change the words spoken, not the shapes — a
+#: worker past its share stops by name.
+PROFILED_SETTINGS = ("per_kind", "spans_s", "c_min", "batch_rows", "continuations", "update_groups", "data_sentences",
+                     "select_per_airport")
+#: The inputs a campaign shares with its profile.
+PROFILED_INPUTS = ("prior", "instructions", "executor", "windows", "procedure_root")
 
 
 @dataclass(frozen=True)
@@ -106,8 +117,8 @@ class MultiSettings:
     #: the spans L of the windows, s, increasing (D146; each kind's count in equal parts of them, `span_counts`)
     spans_s: list[float]
     c_min: float
-    #: the most commanded aircraft (rows) of a batch (`post_train.batches`)
-    batch_rows: int
+    #: the most commanded aircraft (rows) of a batch of each span, in the order of `spans_s` (`span_batches`)
+    batch_rows: list[int]
     continuations: int
     seed: int
     prior_lr: float
@@ -127,7 +138,9 @@ class MultiSettings:
                 or not 0.0 < self.c_min < 1.0):
             raise ValueError(f"spans L above 0 s, increasing, and c_min in (0, 1), not {self.spans_s} s and "
                              f"{self.c_min:g} (L = 0 is stage C's window, not one of stage D's spans)")
-        if min(self.rounds, self.batch_rows, self.continuations, self.update_groups, self.data_sentences,
+        if len(self.batch_rows) != len(self.spans_s):
+            raise ValueError(f"a batch's rows for each span, not {self.batch_rows} for {self.spans_s}")
+        if min(self.rounds, *self.batch_rows, self.continuations, self.update_groups, self.data_sentences,
                self.select_per_airport) <= 0:
             raise ValueError("rounds, batch rows, continuations, groups an update, data sentences and select windows "
                              "are positive")
@@ -146,6 +159,19 @@ def span_counts(settings: MultiSettings) -> dict[str, dict[str, int]]:
     n = len(settings.spans_s)
     return {kind: {span_key(span): count // n + (k < count % n) for k, span in enumerate(settings.spans_s)}
             for kind, count in settings.per_kind.items()}
+
+
+def span_batches(windows: Sequence[Window], settings: MultiSettings) -> list[list[int]]:
+    """The windows' places in batches (`Stage.batches`): the windows of each span in `post_train.batches` of that span's
+    `MultiSettings.batch_rows`, span after span; a window of another span is refused by name."""
+    others = {w.span_s for w in windows} - set(settings.spans_s)
+    if others:
+        raise ValueError(f"windows of spans {sorted(others)} s, not of this campaign's {settings.spans_s}")
+    out = []
+    for span, size in zip(settings.spans_s, settings.batch_rows):
+        places = [p for p, w in enumerate(windows) if w.span_s == span]
+        out += [[places[i] for i in batch] for batch in batches([windows[p] for p in places], size)]
+    return out
 
 
 def kind_of(window: Window) -> str:
@@ -399,6 +425,43 @@ def round_model(context: Context, settings: MultiSettings, out: Path, round_: in
     return model.eval()
 
 
+def profiled_fit(profile: Path, settings: MultiSettings, inputs: dict[str, Any], workers: int,
+                 device: torch.device) -> dict[str, Any]:
+    """The speaking workers' memory read from stage D's profile (the user, 2026-10-07: measured once, never before each
+    run): the profile's measure of one worker and of the pass (`multi_profile` part 2) and the memory free now
+    (`post_train.available_memory`, before any worker or this process uses the GPU), ``workers`` workers refused by name
+    where they do not fit (`post_train.workers_fit` with nothing held yet), and each worker's GPU budget (the GPU free
+    now less what this process holds beside its pass, in equal shares: `Speakers`' ``gpu_budget``, None on the CPU).
+    Refused by name besides unless the profile is of these inputs (`PROFILED_INPUTS`, as this checkout reads them) and
+    these settings (`PROFILED_SETTINGS`), on this kind of device, with its workers measured."""
+    from ts_transformer.experiments.training_export import this_checkout
+
+    record = json.loads((profile / "profile.json").read_text(encoding="utf-8"))
+    if record["schema"] != MULTI_PROFILE_SCHEMA:
+        raise SystemExit(f"{profile} is a {record['schema']} record, not {MULTI_PROFILE_SCHEMA}")
+    if "workers" not in record:
+        raise SystemExit(f"{profile}: no measure of the speaking workers (a profile with --speak-workers 2 or more)")
+    held = record["inputs"]
+    other = [key for key in PROFILED_INPUTS if this_checkout(held[key]) != this_checkout(inputs[key])]
+    other += [key for key in PROFILED_SETTINGS if held["settings"][key] != asdict(settings)[key]]
+    measured, passed = record["workers"]["measured"], record["workers"]["pass"]
+    if (measured["gpu"] is None) != (device.type != "cuda"):
+        other.append("device")
+    if other:
+        raise SystemExit(f"{profile} is a profile of other {', '.join(other)} than this campaign's: profile these "
+                         f"(multi_profile)")
+    available = available_memory(device)
+    short = workers_fit(workers, measured, passed, available, held_now=False)
+    budget = None if passed is None else (available["gpu"] - passed["now"]) // workers
+    if budget is not None and budget < measured["gpu"]["peak"] + measured["held"]["reader_model"]:
+        short.append(f"gpu: a worker's share {budget / 2**30:.2f} GiB is below its profiled peak and readout model "
+                     f"{(measured['gpu']['peak'] + measured['held']['reader_model']) / 2**30:.2f} GiB")
+    if short:
+        raise SystemExit("the speaking workers do not fit (O15, from the profile): " + "; ".join(short)
+                         + " — start fewer (--speak-workers)")
+    return {"profile": str(profile), "speak_workers": workers, "available": available, "gpu_budget": budget}
+
+
 def require_finished(campaign: Path) -> None:
     """D166 item 19: a formal start of stage D comes from a campaign of stage C that has done every round (as
     `post_validation`'s formal read: its round is chosen on every round's selection readout, D7), refused by name
@@ -458,7 +521,7 @@ def stage_d() -> Stage:
                  speak=lambda *args, stage: speak_round(*args, stage=stage),
                  selection=lambda context, settings, split: selection_windows(context, settings, split),
                  readout=selection_readout, record=window_record, speak_batch=speak_batch, read_batch=read_batch,
-                 part_width=TokenPart.width, batches=lambda windows, settings: batches(windows, settings.batch_rows))
+                 part_width=TokenPart.width, batches=span_batches)
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -477,8 +540,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         parser.add_argument(f"--windows-{kind}", type=int, required=True, help=f"the {kind} windows of a round (O16)")
     parser.add_argument("--spans-s", type=float, nargs="+", required=True, help="the spans L, s, increasing (D146)")
     parser.add_argument("--c-min", type=float, required=True, help="the least c of a compressed window (O16)")
-    parser.add_argument("--batch-rows", type=int, required=True,
-                        help="the most commanded aircraft flown in one batch (its windows of one span)")
+    parser.add_argument("--batch-rows", type=int, nargs="+", required=True,
+                        help="the most commanded aircraft flown in one batch of each span, in the order of --spans-s")
     parser.add_argument("--continuations", type=int, default=CONTINUATIONS, help="D94, D143: K")
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--prior-lr", type=float, required=True)
@@ -502,10 +565,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     add_arguments(parser)
     parser.add_argument("--out", type=Path, required=True, help="the campaign's directory (new, or a resume)")
+    parser.add_argument("--profile", type=Path,
+                        help="stage D's profile (multi_profile) of these inputs and settings, which the speaking workers "
+                             "are sized from: with --speak-workers above 1")
     parser.add_argument("--smoke", action="store_true", help="SMOKE: a tree with changes too; no result")
     args = parser.parse_args(argv)
     if args.speak_workers < 1:
         parser.error("--speak-workers is at least 1")
+    if (args.speak_workers > 1) != (args.profile is not None):
+        parser.error("--profile goes with --speak-workers above 1 (the workers are sized from it)")
     source = args.start_campaign if args.start_campaign.is_absolute() else REPO_ROOT / args.start_campaign
     try:
         start = start_of(source, args.start_round, formal=not args.smoke)            # D164: the start's setting
@@ -529,16 +597,18 @@ def main(argv: list[str] | None = None) -> int:
                            formal=not args.smoke)
     stage = stage_d()
     stage.start(context, settings)                  # refused by name before the workers and campaign.json (D164)
-    speakers = Speakers(context, settings, args.speak_workers, device, stage=stage) if args.speak_workers > 1 else None
-    context = replace(context, device=device, base=context.base.to(device).eval())
     inputs = {"prior": str(prior_dir), "instructions": str(instructions), "executor": str(executor),
               "windows": str(census), "procedure_root": str(procedure_root), "settings": asdict(settings),
               "smoke": args.smoke}
+    speakers = None
+    if args.speak_workers > 1:                      # O15 from the profile, before any process uses the GPU
+        profile = args.profile if args.profile.is_absolute() else REPO_ROOT / args.profile
+        fit = profiled_fit(profile, settings, inputs, args.speak_workers, device)
+        print(json.dumps({"profiled_fit": fit}), flush=True)
+        speakers = Speakers(context, settings, args.speak_workers, device, stage=stage, gpu_budget=fit["gpu_budget"])
+    context = replace(context, device=device, base=context.base.to(device).eval())
     try:
         open_campaign(out, inputs, git, opened["checks"], schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER)
-        if speakers is not None and done_rounds(out) < settings.rounds:          # O15, before any round
-            require_workers_fit(speakers, context, settings, done_rounds(out),
-                                campaign_model(out, context, settings, stage)[0])
         run_campaign(out, settings, context, speakers, stage=stage)
     finally:
         if speakers is not None:

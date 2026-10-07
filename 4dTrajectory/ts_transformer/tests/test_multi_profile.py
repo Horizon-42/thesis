@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import replace
 
 import pytest
 
@@ -55,15 +56,15 @@ def test_a_profile_measures_each_spans_batch_the_round_and_the_spread(setup, tmp
     short_round(monkeypatch, s)
     context = _context(s)
     start = _stage_c(s, tmp_path, context)
-    window = _ahead(s["windows"][0])
+    window = replace(_ahead(s["windows"][0]), span_s=1.0)                  # of the campaign's span
     monkeypatch.setattr(multi_train, "draw_windows", lambda context, settings, rng: ([window], {"drawn": {REAL_KIND: 1}}))
     out = tmp_path / "profile"
     out.mkdir()
     saved = []
     record = multi_profile.profile(context, _multi_settings(start=start), out, None, multi_train.stage_d(),
                                    lambda part: saved.append(json.loads(json.dumps(part, default=str))))
-    assert record["batches"] == {"0": {"batches": 1, "windows": 1, "rows": [1]}}
-    batch = record["one_batch"]["0"]
+    assert record["batches"] == {"1": {"batches": 1, "windows": 1, "rows": [1]}}
+    batch = record["one_batch"]["1"]
     assert batch["windows"] == 1 and batch["rows"] == 1 and batch["wall_s"] > 0 and batch["groups_bytes"] > 0
     assert batch["speaking"]["outcomes"] == {"lost_separation": 1}
     assert "workers" not in record and record["round"]["speak_workers"] == 1
@@ -86,7 +87,7 @@ def test_a_profile_with_workers_measures_them_and_stops_where_they_do_not_fit(se
     short_round(monkeypatch, s)
     context = _context(s)
     start = _stage_c(s, tmp_path, context)
-    window = _ahead(s["windows"][0])
+    window = replace(_ahead(s["windows"][0]), span_s=1.0)                  # of the campaign's span
     monkeypatch.setattr(multi_train, "draw_windows", lambda context, settings, rng: ([window], {"drawn": {REAL_KIND: 1}}))
     settings = _multi_settings(start=start)
     stage = multi_train.stage_d()
@@ -97,6 +98,9 @@ def test_a_profile_with_workers_measures_them_and_stops_where_they_do_not_fit(se
         record = multi_profile.profile(context, settings, out, speakers, stage)
         workers = record["workers"]
         assert workers["measured"]["windows"] == 1 and workers["pass"] is None and workers["measured_batches"] == [0]
+        assert "one_batch" not in record                                # each span's batch spoken once, by the worker
+        (batch,) = workers["measured"]["batches"]
+        assert batch["span_s"] == 1.0 and batch["rows"] == 1 and batch["s"] > 0 and batch["gpu_reserved_peak"] is None
         assert set(workers["short"]) == {"1", "2"} and record["round"]["speak_workers"] == 2
         assert set(record["spread"]) == {"1", "all"}
         monkeypatch.setattr(multi_profile, "available_memory", lambda device: {"host": 0, "gpu": None})
