@@ -12,7 +12,7 @@ import pytest
 
 from ts_transformer.experiments import multi_train, post_train
 from ts_transformer.experiments import multi_validation as validation
-from ts_transformer.experiments.multi_train import MULTI_CAMPAIGN_SCHEMA, MULTI_CLAIM_READER, stage_d
+from ts_transformer.experiments.multi_train import MULTI_CAMPAIGN_SCHEMA, MULTI_CLAIM_READER, MultiSettings, stage_d
 from ts_transformer.multi.windows import REAL_KIND
 from ts_transformer.tests.test_multi_train import _multi_settings
 from ts_transformer.tests.test_post_branches import _ahead
@@ -33,16 +33,16 @@ def campaign(setup, tmp_path, monkeypatch):  # noqa: F811
                              {"head": "x", "dirty": False}, {})
     post_train.run_campaign(source, _settings(rounds=1, continuations=2), context)
     start = post_train.start_of(source, 0, formal=False)
-    window = _ahead(s["windows"][0])
+    window = replace(_ahead(s["windows"][0]), span_s=1.0)                  # of the campaign's span
     with monkeypatch.context() as patch:
         patch.setattr(multi_train, "draw_windows", lambda context, settings, rng: ([window], {"drawn": {REAL_KIND: 1}}))
-        settings = _multi_settings(start=start)
+        settings = _multi_settings(start=start, spans_s=[1.0, 2.0])            # two spans: the coverage by span
         out = tmp_path / "multi"
         inputs = {"prior": str(tmp_path / "prior"), "instructions": str(s["directory"]),
                   "executor": str(tmp_path / "executor"), "windows": str(tmp_path / "census"),
                   "procedure_root": str(tmp_path / "cifp"), "settings": asdict(settings), "smoke": False}
         post_train.open_campaign(out, inputs, {"head": "x", "dirty": False}, {}, schema=MULTI_CAMPAIGN_SCHEMA,
-                                 reader=MULTI_CLAIM_READER)
+                                 reader=MULTI_CLAIM_READER, settings_type=MultiSettings)
         post_train.run_campaign(out, settings, context, stage=stage_d())
     assert post_train.done_rounds(out) == 1
     asked = []
@@ -79,11 +79,12 @@ def test_stage_ds_chosen_round_reads_the_val_days_once(campaign, tmp_path):
     assert asked == [("context", (), False, True, False), ("recount", "val", True), ("split", "val", True)]
     readout = json.loads((readout_dir / "readout.json").read_text())
     assert readout["schema"] == validation.MULTI_VALIDATION_SCHEMA and readout["split"] == "val"
-    assert readout["round"] == 0 and len(readout["windows"]) == 1
+    assert readout["round"] == 0 and [w["span_s"] for w in readout["windows"]] == [1.0, 2.0]
     (coverage,) = readout["coverage"].values()
-    assert coverage == {"anchors": 1, "read": 1}
+    assert coverage == {"anchors": 1, "read": {"1": 1, "2": 1}}           # by span
     (airport,) = readout["readout"].values()
-    assert airport["all"]["windows"] == 1 and airport["all"]["aircraft"] == 1 and "reward_mean" in airport
+    assert airport["all"]["all"]["windows"] == 2 and airport["1"]["all"]["aircraft"] == 1 and "reward_mean" in airport
+    assert airport["2"]["all"]["windows"] == 1
     held = json.loads(claim.read_text())
     assert "spent_utc" in held and held["options"] == {"round": 0, "device": "cpu"}
     config = json.loads((readout_dir / "config.json").read_text())

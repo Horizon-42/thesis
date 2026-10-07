@@ -150,6 +150,10 @@ def stage_c_campaign_scenario(s, tmp_path, monkeypatch) -> dict[str, str]:
             # the commit and the time, and the bytes of the groups written (information: a branch group of MC0 holds two
             # fields more, `Sentence.until` and `Group.varied`, so its pickle is a few bytes longer), are left out
             record.pop("git"), record.pop("finished_utc"), record.pop("groups_bytes")
+            record.pop("speak_device")              # the workers' device, recorded after it (information, `--speak-device`)
+            # the pass's records added after it (information: the gradients' norms, D168; each pass's means, D169)
+            for key in ("grad_norm_mean", "grad_norm_max", "grad_clipped_share", "passes"):
+                record["pass"].pop(key, None)
             digest.add(json.dumps(record, sort_keys=True))
             state = torch.load(out / f"round_{r}" / "checkpoint.pt", weights_only=False)
             digest.add(json.dumps(state["identity"], sort_keys=True))

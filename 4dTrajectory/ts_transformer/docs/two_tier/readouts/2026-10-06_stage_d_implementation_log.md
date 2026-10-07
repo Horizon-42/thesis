@@ -31,52 +31,109 @@ they start with `4dTrajectory/` or `.claude/`.
 | The full ts suite on dev-multi-control (fccbab8d) | dev-multi-control | 1,963 passed, 1 skipped (8 workers, 13.2 min, 2026-10-07) |
 | dev-multi-control into dev-two-tier | dev-two-tier | Merged at the user's word ("合进去", 2026-10-07): b967d2b1, no conflict, no code differs from the tested branch |
 
-### 0.1 Where to resume (2026-10-07, before a compression of the context)
+### 0.1 Handover: where the next implementer of stage D starts (2026-10-07)
 
-- **State**: MC0–MC4 of version 1 built, reviewed and merged into `dev-two-tier` (b967d2b1, the user's word; full ts
-  suite 1,963 passed); MC0's D73 checks and D149's real-window check (200/200 bit for bit) passed; MC1's census done as a
-  stated sample (500 anchors an airport and split; §10). The branch `dev-multi-control` and its worktree
-  `.claude/worktrees/multi-control` are kept for the next steps.
-- **The user decided everything asked (designer's commit 7decd7b9)**: O16 → D146 rewritten (spans L = 5, 10, 20 min
-  mixed; each kind's 1,000 windows of a round in equal parts of the spans, each window's span drawn with the round's
-  numbers, a shortfall of a span recorded; one L a batch; real and compressed windows, c_min 0.8; select set and
-  readouts by span, at most `select_per_airport` per airport and span; identity and campaign settings record the spans
-  and their counts); D166: requests items 6, 7, 19, 21, 22, 25, 29–35 accepted (31 and 35 as stated limits). The names
-  of MC0–MC4 are now in vocabulary §6 item 5, prior §7 items 2, 3, 7, post-training §9 (item 12: `round_start`,
-  `start_of`, `source_campaign`).
-- **The orders now (notes/stage_d.md of 2026-10-07, read it first)**:
-  1. **Code, on dev-multi-control after merging dev-two-tier in**: `experiments/multi_train.py` by D146 and §3.1 — the
-     draw by span (equal parts, the span drawn with the round's numbers, shortfalls recorded), batches by L (one L a
-     batch; each flight commanded once a batch), the select set / readouts / validation readout by span, the identity
-     and the settings with the spans and counts (`MultiSettings.span_s` becomes the spans). Also D166 item 19 (built
-     neither yet): a formal start of stage D refuses a source campaign with rounds still to run (as `post_validation`),
-     beside the smoke refusal `source_campaign` already makes. Tests: each kind's counts split equally by span with the
-     shortfall recorded; one L a batch; the select set by span and airport; the spans in the identity; MC2's bit-for-bit
-     check with stage C's numbers still passes (D166 item 22: `tests/test_multi_control.py`
-     `test_with_one_commanded_aircraft_stage_ds_rules_give_stage_cs_groups`). Then tests → independent review (D131's
-     depth) → explicit-path commit → a log line.
-  2. **MC4's smoke and MC5, only with the host and GPU free (rule 13) and never while stage C's C17 runs**: smoke =
-     `multi_train --smoke`, two rounds, a few windows of each airport and span, the start round 6 of
-     `4dTrajectory/outputs/POOLED/post/post_train_20261006` (smoke only; the formal start is the user's, D164), a seed
-     other than 1337. MC5 at the formal size, per span: the time of a batch and of a round, the memory with N speaking
-     workers (batch size set by a batch's rows), the bytes of the branch groups, the spread of round 0's W per aircraft
-     (the select set's size); report the proposed settings to the user.
-  3. After the user's settings: MC6 from a run worktree at the merged commit (outline D163).
-- **The requests note** (`design/requests_from_d_to_designer.md`): rewrite it whole, the decided items deleted (all
-  of 1–36 are decided now; keep only new readings).
-- **Left running from earlier**: the test stack of stage B's browser check from `.claude/worktrees/two-tier-v4`
-  (vite 5185, backend 8795; stop: `kill $(lsof -t -iTCP:5185 -sTCP:LISTEN) $(lsof -t -iTCP:8795 -sTCP:LISTEN)`).
-- **Scratch results kept** (`/tmp/claude-1000/`): `d73/` (the D73 checks), `d149/` (the real-window check's
-  `check.py`, `compare.py`, digests `old.json`, `new.json`), `mc1/s500/` (the census parts, `join.py`, `table.txt`).
-- **Code to know**: `multi/{windows,census,separation,tokens,credit,timing}.py`; `experiments/multi_train.py`
-  (`MultiSettings`, `draw_windows`, `speak_batch`, `selection_windows`, `read_batch`, `window_losses_of`,
-  `window_timing`, `selection_readout`, `multi_settings_of`, `round_model`, `stage_d()`); `experiments/multi_validation.py`;
-  `post_train.Stage` (start, start_model, identity, draw, speak, selection(split), readout, record, speak_batch,
-  read_batch, part_width), `round_start`, `start_of`, `source_campaign`, `Context.formal`; tests
-  `tests/test_multi_{train,validation,control,windows}.py`.
-- **The working rules** (notes/stage_d.md): every step single-file tests → an independent review (code only, at D131's
-  depth: review_guide §3 step 6, §6, checklist §5) → an explicit-path commit (`git diff --cached --stat` first) → one line
-  here. Real-data jobs only with the host and GPU free, one thread each, outputs in scratch; tests on the CPU.
+Stage D's first implementer stopped here at the user's word; the next one takes the work from this section. Paths are
+relative to `4dTrajectory/ts_transformer/` unless they start with `4dTrajectory/` or `/`.
+
+**Read first, in this order**: `docs/two_tier/notes/stage_d.md` (the current orders, 2026-10-07: part 一 is done,
+二 and 三 remain); `docs/two_tier/design/multi_control.md` (§0 status, D140–D172, O18–O19, §3, §5, §7, §11 MC5–MC6);
+`docs/two_tier/review_guide.md` §3 (the procedure and the severities S1–S3, outline D131); this log §11–§12 (what was
+built and measured last); `docs/two_tier/design/requests_from_d_to_designer.md` (the readings still open).
+
+**State of the code** (everything merged; nothing uncommitted):
+- `dev-two-tier` = `dev-multi-control` = **246eca69** (fast-forwarded at the user's word). The worktree
+  `/home/supercomputing/studys/thesis/.claude/worktrees/multi-control` (branch `dev-multi-control`, data trees linked to
+  the live ones) is clean and kept for stage D; merge dev-two-tier into it before new work.
+- Built and reviewed: MC0–MC4 (version 1: windows of several commanded aircraft, the loop, the credit, the runners
+  `multi_train`, `multi_validation`), the spans of D146 (5 / 10 / 20 min mixed, one span a batch, select set and
+  readouts by span, 6cc49ad1), D166 item 19 (a formal start refuses a source with rounds to run), MC5's runner
+  `experiments/multi_profile.py` (bd6dd1be), D172 (fffe900d: the workers sized from the profile with `--profile`, each
+  worker's GPU capped at its share; `MultiSettings.batch_rows` one number a span; the profile speaks each span's batch
+  once), the merge of stage C's C17–C20 (f2bb4a5d: C18's `workers_fit`, C19's `settings_type`, stage D on
+  `train_pass`'s defaults — no clipping, one pass).
+- Tests: the changed files' tests and `test_architecture` pass (last: 114 + 2, beside stage C's campaign, low
+  priority). **The full ts suite has not been run since fccbab8d** (1,963 passed then): run it once the host is free,
+  before MC6 (`-n 8 --dist worksteal`, `OMP_NUM_THREADS=1`, about 3 min).
+
+**Work left, in order**:
+1. **MC5, the profile at the formal size** (orders 二; multi_control §11 MC5). Only when the host and the GPU are free:
+   check `ps aux | grep run_ts.py` and `nvidia-smi` first (stage C's campaigns run from their own worktrees; on
+   2026-10-07 evening `post_train --method …` was running). Run from the multi-control worktree at 246eca69 (or later
+   merged code) **in a systemd unit** (`systemd-run --user --unit=mc5-profile …`; nohup/setsid died with a session
+   once), output to a NEW directory under `4dTrajectory/outputs/POOLED/multi/` (the user, 2026-10-07: MC6 reads it
+   with `--profile`; `multi_profile` refuses an existing directory; the old `/tmp/claude-1000/mc5/profile` holds the
+   old integer `batch_rows` and `profiled_fit` refuses it):
+
+       python run_ts.py multi_profile --prior 4dTrajectory/outputs/POOLED/prior/prior_base_20261006/base/run \
+         --instructions 4dTrajectory/outputs/POOLED/instruction_language/v12_20261005 \
+         --executor 4dTrajectory/outputs/POOLED/executor/v17_20261005 \
+         --windows 4dTrajectory/outputs/POOLED/post/windows_20261006 \
+         --start-campaign 4dTrajectory/outputs/POOLED/post/post_train_20261006 --start-round 6 \
+         --out 4dTrajectory/outputs/POOLED/multi/profile_<YYYYMMDD> --rounds 1 --windows-real 1000 --windows-compressed 1000 --spans-s 300 600 1200 \
+         --c-min 0.8 --batch-rows 64 48 24 --continuations 8 --seed 2027 --prior-lr 1e-5 --traffic-lr 1e-4 \
+         --weight-decay 0.01 --update-groups 4 --data-sentences 64 --select-per-airport 100 \
+         --device cuda --speak-workers 3
+
+   (`OMP_NUM_THREADS=1`; start round 6 and seed 2027 as the smoke: the profile's start, not the formal one; 3 workers is
+   Claude's estimate from §12 — each span's batch about 2 GiB at these rows; the profile records what 1…N need and
+   stops by name where N does not fit, its record written up to there: then run again with fewer). It writes
+   `profile.json` after each part: the draw and batches by span; one worker's measure on each span's first batch and the
+   largest (`workers.measured.batches`: each batch's time and GPU peak), the pass's memory, what fits for each N; the
+   round's speaking time with the workers; the selection readout read twice (draws 0, 1) and its time; the pass's time;
+   `spread` (W per aircraft by span and over all, its standard error, the paired one of the two draws, `units_for` the
+   select windows for a standard error of 0.01 / 0.02, in all and an airport). Expect several hours (one round at the
+   formal size: about 12.6 h of speaking in one process at 64 rows, §12, divided by the workers). Arm a Monitor on its
+   end and errors; the user must not learn hours later that it ended.
+   After it ends: the profile's directory read-only, with a `SHA256SUMS` (MC6 reads it; a campaign refuses a profile
+   of other inputs or settings, `profiled_fit`).
+2. **Record it and propose MC6's settings to the user** (as a question, AskUserQuestion): the profile's numbers in a
+   new section of this log; then the proposals — `--speak-workers` (the largest N with an empty `workers.short[N]`),
+   `--batch-rows` (keep 64 / 48 / 24 unless one span's GPU peak in `workers.measured.batches` is far from the others),
+   `--select-per-airport` (from `spread[<span>].units_for["0.01" or "0.02"].paired_se.an_airport`, the user picks the
+   resolution), `--rounds` (from the round's time), and the start (`--start-campaign`, `--start-round`: a formal,
+   finished campaign of stage C, D164 and D166 item 19; the user chooses which campaign and round; the seed must differ
+   from that campaign's seed, 1337 for `post_train_20261006`). The user also sets the criterion that chooses the round
+   (D7). MC6 keeps D142 / D143 (O19: no value function in stage D for now).
+3. **MC6, the formal campaign** (orders 三; outline D163), after the user's settings and merge: a detached run worktree
+   at the merged commit, data trees as absolute links to the live data, a clean tree, `multi_train` without `--smoke`,
+   with `--profile <the profile>` and `--speak-workers N`, in a systemd unit, output under
+   `4dTrajectory/outputs/POOLED/multi/<campaign id>`. Write its intent into `docs/experiments/intents.json` before any
+   publication. After it ends: data read-only and `SHA256SUMS`, each round's selection readout into this log, the run
+   worktree unlinked and removed; report to the user, who chooses the round (D7); then `multi_validation` (the val days,
+   read once, with its claim) only at the user's word.
+4. **Later** (not now): MC7 is fronter's (the Training view of stage D, frontend F3–F4); MC8–MC10 (version 2, D153)
+   after MC6.
+
+**Open for the user** (in the requests note): readings 1–5, 8–17, 24, 26–28, 37–45 (none blocks MC5 or MC6); whether
+stage C's campaigns should read a profile too (D172 covers stage D only; stage C measures once and records it, D167).
+
+**Rules that bind this work** (the user's, 2026-10-05…07):
+- Each step: the changed files' tests and an independent review **started together** → fixes → an explicit-path commit
+  (never `git add -A`; `git diff --cached --stat` first) → one line in this log. The reviewer is never the author
+  (`opus-code-reviewer`).
+- A review is scoped to the changed lines (a merge: its conflict resolutions); S1 fixed, S2 fixed when cheap (else an
+  O item), **S3 one line and no fix**; a second round only on what was fixed. A large change goes to 2–3 reviewers by
+  area.
+- While another stage's campaign runs: no GPU, no full suite, only the changed files' tests with at most 2 processes at
+  `nice -n 19`; the host's RAM is shared (31 GB; a stage C campaign held 20–24 GB).
+- Measure once and reuse (the profile); never add a per-run cost (a check, a measure) without stating it to the user
+  first.
+- No `.get(key, default)` fallbacks, no compatibility code (one standing exception: a new campaign setting may default
+  to the old code's behaviour); tests never write under live roots.
+- The design text is not the implementer's: only this log, multi_control §0.3 and other documents' §0.3 status lines,
+  and the requests note (rewritten whole, the decided items deleted). Docs commit straight to `dev-two-tier`.
+
+**Code to know**: `multi/{windows,census,separation,tokens,credit,timing}.py`; `experiments/multi_train.py`
+(`MultiSettings`, `span_counts`, `span_batches`, `draw_windows`, `speak_batch`, `selection_windows`, `read_batch`,
+`selection_readout`, `profiled_fit`, `require_finished`, `round_model`, `stage_d()`, `add_arguments`, `settings_from`);
+`experiments/multi_profile.py` (`profile`, `spread`, `ratio_se`, `windows_for`); `experiments/multi_validation.py`;
+`experiments/post_train.py` (`Stage` with `batches`, `train`, `pass_memory`; `batches`, `measured_batches`,
+`Speakers(…, gpu_budget=)`, `_measure`, `workers_fit(held_now=)`, `campaign_model`, `round_start`, `start_of`,
+`source_campaign`); tests `tests/test_multi_{train,profile,validation,control,windows}.py`.
+
+**Scratch** (`/tmp/claude-1000/`, not durable): `mc4/smoke` (the smoke campaign, 3 rounds), `mc5/profile` (the profile
+at 64 rows, §12; old format), `d73/`, `d149/`, `mc1/s500/` (earlier checks). No test stack of stage D is running.
 
 ## 1 The branches (2026-10-06)
 
@@ -352,4 +409,12 @@ workers asked. Started 05:39 UTC, stopped by name at part 2 at 06:19 UTC (exit 1
 - dev-two-tier merged into `dev-multi-control` (**ea9d5217**; C17's `Settings.method`, `select_seed`, `STAGE_C_LANDED`;
   the conflicts in `post_train` resolved by keeping both: `Stage.batches` beside `Stage.train` and `pass_memory`;
   `test_post_train` and `test_multi_train` 53 passed). The profile is run again with 64 / 48 / 24 after C17 ends.
+- notes/stage_d.md 一 (2026-10-07, after D172 and O19): dev-two-tier (C17–C20) merged into `dev-multi-control`,
+  **f2bb4a5d**: `workers_fit` is C18's (the check of workers on the CPU kept; with nothing held, `passed["now"]`
+  taken out once, so `profiled_fit`'s own share check, the same condition, dropped; its GPU budget kept); `STAGE_C`
+  with both `batches` and C's `train` (`clip_norm`, `epochs`); stage C's `main` with C18's recorded measure, the
+  measure spoken with the round's model; `settings_type=MultiSettings` kept; stage D runs `train_pass`'s defaults (no
+  clipping, one pass). Tests of the changed files and `test_architecture` (2 low-priority processes beside stage C's
+  campaign): 114 passed, 1 failed (stage D's runner test replaced `MultiSettings`, now records the spans through
+  `settings_from`; passed). Reviewed in parallel (opus: no S1; S2 `test_post_landed.py` to be staged — done; two S3).
 

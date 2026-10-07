@@ -3,6 +3,8 @@ MC1; `multi/windows.py`, `multi/census.py`) — on the synthetic flights of stag
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
@@ -37,8 +39,11 @@ def test_a_window_commands_every_flight_whose_row_0_is_within_its_span(built):
     windows, _, _ = built
     anchors = Anchors(windows)
     a, b, c, far = windows
-    assert anchors.window_of(a, 0.0) == a
+    assert anchors.window_of(a, 0.0) == a and a.span_s == 0.0
     five = anchors.window_of(a, 300.0)
+    assert five.span_s == 300.0                                        # its span, which its batch reads (D146)
+    with pytest.raises(ValueError, match="span is not negative"):
+        replace(a, span_s=-1.0)
     assert [r.key for r in five.commanded_all] == ["KXXX:a", "KXXX:b", "KXXX:c"]
     assert five.signal_indices == (a.signal_index, b.signal_index, c.signal_index)
     assert np.allclose(five.join_steps() * DELTA, [0.0, b.row0_s - a.row0_s, c.row0_s - a.row0_s])

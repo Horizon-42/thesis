@@ -78,7 +78,7 @@ class Anchors:
                                                                                          side="left")
         joined = tuple(Joined(w.commanded, w.signal_index) for w in items[low:high]
                        if w.signal_index != anchor.signal_index)
-        return replace(anchor, joined=joined)
+        return replace(anchor, joined=joined, span_s=float(span_s))
 
 
 def compressed(window: Window, rng: np.random.Generator, c_min: float) -> Drawn:

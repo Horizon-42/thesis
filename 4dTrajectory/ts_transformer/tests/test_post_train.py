@@ -3,6 +3,7 @@ fixture of `test_post_window_loop`); every write root under tmp."""
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 from dataclasses import asdict, replace
@@ -91,7 +92,8 @@ def test_the_settings_take_a_count_of_every_kind_and_positive_sizes():
 
 
 def test_a_batch_commands_each_flight_once_in_signal_order():
-    windows = [SimpleNamespace(signal_index=i, signal_indices=(i,)) for i in (3, 3, 1, 2, 3, 1)]   # stage C: one aircraft
+    windows = [SimpleNamespace(signal_index=i, signal_indices=(i,), span_s=0.0)                  # stage C: one aircraft
+               for i in (3, 3, 1, 2, 3, 1)]
     out = batches(windows, 2)
     assert sorted(p for b in out for p in b) == list(range(6))
     for b in out:
@@ -135,7 +137,11 @@ def test_the_pass_reads_the_groups_file_by_file_a_few_at_a_time(setup, tmp_path)
     assert any(not torch.equal(a, p) for a, p in zip(before, model.parameters()))
     empty = tmp_path / "empty"
     empty.mkdir()
-    assert train_pass(model, context, optimizer, empty, settings, np.random.default_rng(0), part_width=0) == {"updates": 0}
+    assert train_pass(model, context, optimizer, empty, settings, np.random.default_rng(0), part_width=0) == {
+        "updates": 0, "passes": [{"updates": 0}]}
+    twice = train_pass(model, context, optimizer, directory, settings, np.random.default_rng(0), part_width=0, epochs=2)
+    assert twice["updates"] == 6 and [p["updates"] for p in twice["passes"]] == [3, 3]      # D169: each pass's means
+    assert twice["loss"] == pytest.approx(np.mean([p["loss"] for p in twice["passes"]]))
 
 
 def test_the_pass_shuffles_each_file_s_groups_by_the_round_s_numbers(tmp_path, monkeypatch):
@@ -423,22 +429,24 @@ def test_n_workers_are_refused_by_name_where_one_workers_measured_memory_does_no
     passed = {"peak": 3 * gib, "now": gib // 2, "groups": 4}
     # host: 3 × (2 + 0.5 series) = 7.5 ≤ 6.5 + 1; GPU: 3 × (1 + 0.25 model) = 3.75 ≤ 3.75 + 0.25, the pass
     # 2.5 + 2 × (0.25 + 0.25) + 0.25 = 3.75 ≤ 3.75
-    assert post_train.workers_fit(3, measured, passed, {"host": int(6.5 * gib), "gpu": int(3.75 * gib)}) == []
-    short = post_train.workers_fit(3, measured, passed, {"host": 6 * gib, "gpu": int(3.25 * gib)})
+    assert post_train.workers_fit(3, measured, passed, {"host": int(6.5 * gib), "gpu": int(3.75 * gib)},
+                                  held_now=True) == []
+    short = post_train.workers_fit(3, measured, passed, {"host": 6 * gib, "gpu": int(3.25 * gib)}, held_now=True)
     assert [line.split(":")[0] for line in short] == ["host", "gpu", "gpu"]
     assert "3 workers speaking need 7.5 GiB" in short[0] and "the pass beside 3 workers needs 3.8 GiB more" in short[2]
     assert [line.split(":")[0] for line in post_train.workers_fit(3, measured, passed, {"host": int(6.5 * gib),
-                                                                                      "gpu": int(3.7 * gib)})] == ["gpu"]
+                                                                                      "gpu": int(3.7 * gib)},
+                                                                      held_now=True)] == ["gpu"]
     on_cpu = {**measured, "gpu": None}                     # the readout's model on the host: 3 × 2.75 = 8.25 ≤ 7.25 + 1
-    assert post_train.workers_fit(3, on_cpu, None, {"host": int(7.25 * gib), "gpu": None}) == []
-    assert post_train.workers_fit(3, on_cpu, None, {"host": 7 * gib, "gpu": None})
+    assert post_train.workers_fit(3, on_cpu, None, {"host": int(7.25 * gib), "gpu": None}, held_now=True) == []
+    assert post_train.workers_fit(3, on_cpu, None, {"host": 7 * gib, "gpu": None}, held_now=True)
     s = setup
     context = _context(s)
     short_round(monkeypatch, s)                            # before the fork: the workers draw the short round too
     speakers = Speakers(context, _settings(continuations=2), 2, CPU)
     try:
         settings = _settings(continuations=2)
-        measure = post_train.require_workers_fit(speakers, context, settings, 0)
+        measure = post_train.require_workers_fit(speakers, context, settings, 0, start_model(context, settings)[0])
         assert measure["pass"] is None and measure["measured"]["gpu"] is None and measure["measured"]["windows"] >= 1
         assert measure["measured"]["host"]["peak"] >= measure["measured"]["host"]["now"] > 0
         held = measure["measured"]["held"]
@@ -447,9 +455,114 @@ def test_n_workers_are_refused_by_name_where_one_workers_measured_memory_does_no
                                                    *start_model(context, settings)[0].buffers()))
         monkeypatch.setattr(post_train, "available_memory", lambda device: {"host": 0, "gpu": None})
         with pytest.raises(SystemExit, match=r"do not fit \(O15\): host: 2 workers speaking need"):
-            post_train.require_workers_fit(speakers, context, settings, 0)
+            post_train.require_workers_fit(speakers, context, settings, 0, start_model(context, settings)[0])
     finally:
         speakers.close()
+
+
+def test_with_nothing_held_yet_the_workers_and_the_pass_need_their_whole_peaks():
+    """D167: a fit read from a recorded measure, before this process uses the GPU (``held_now`` false): N workers need N
+    times a worker's peak and what it holds besides of the free memory, the pass its whole peak beside what each
+    worker holds."""
+    gib = 1 << 30
+    held = {"reader_model": gib // 4, "series": gib // 2, "round_flights": 100}
+    measured = {"host": {"peak": 2 * gib, "now": 1 * gib}, "gpu": {"peak": 1 * gib, "now": gib // 4}, "held": held}
+    passed = {"peak": 3 * gib, "now": gib // 2, "groups": 4}
+    # host: 3 × 2.5 = 7.5; GPU: 3 × 1.25 = 3.75; the pass 3 + 3 × (0.25 + 0.25) = 4.5
+    assert post_train.workers_fit(3, measured, passed, {"host": int(7.5 * gib), "gpu": int(4.5 * gib)},
+                                  held_now=False) == []
+    short = post_train.workers_fit(3, measured, passed, {"host": int(7.4 * gib), "gpu": int(4.4 * gib)},
+                                   held_now=False)
+    assert [line.split(":")[0] for line in short] == ["host", "gpu"] and "the pass beside 3 workers" in short[1]
+    # the workers on the GPU beside what this process holds after a pass: 3 × 1.25 = 3.75 > 4.2 − 0.5
+    short = post_train.workers_fit(3, measured, {"peak": gib // 2, "now": gib // 2, "groups": 4},
+                                   {"host": 8 * gib, "gpu": int(4.2 * gib)}, held_now=False)
+    assert len(short) == 1 and short[0].startswith("gpu: 3 workers speaking need 3.8 GiB")
+
+
+def _measure(workers):
+    """A measure as `require_workers_fit` returns it (on the CPU: the host only)."""
+    return {"speak_workers": workers, "pass": None, "available": {"host": 64 << 30, "gpu": None},
+            "measured": {"host": {"peak": 1 << 30, "now": 1 << 29}, "gpu": None,
+                         "held": {"reader_model": 1 << 20, "series": 1 << 20, "round_flights": 1}}}
+
+
+def test_a_recorded_measure_is_read_on_its_devices_for_as_many_workers_as_it_was_checked_for(monkeypatch):
+    """D167: the newest measure on the launch's devices, for at most the workers it admitted, checked against the free
+    memory now; none on these devices, or more workers, or a record from before D167: a new measure is due; workers
+    that do not fit are refused by name."""
+    cpu, cuda = torch.device("cpu"), torch.device("cuda")
+    monkeypatch.setattr(post_train, "available_memory", lambda device: {"host": 8 << 30, "gpu": None})
+    measures = [{**_measure(4), "utc": "first", "round": 0, "device": "cpu", "speak_device": "cpu"},
+                {**_measure(2), "utc": "on the gpu", "round": 1, "device": "cuda", "speak_device": "cpu"},
+                {**_measure(3), "utc": "newest", "round": 2, "device": "cpu", "speak_device": "cpu"}]
+    record = {"measures": measures}
+    assert post_train.recorded_fit({}, 2, cpu, cpu) is None                       # a record from before D167
+    assert post_train.recorded_fit(record, 4, cpu, cpu) is None                    # the newest admitted 3
+    fit = post_train.recorded_fit(record, 3, cpu, cpu)
+    assert fit == {"measure": 2, "measured": False, "speak_workers": 3, "available": {"host": 8 << 30, "gpu": None}}
+    assert post_train.recorded_fit(record, 2, cuda, cpu)["measure"] == 1
+    assert post_train.recorded_fit(record, 2, cuda, cuda) is None                  # no measure on these devices
+    monkeypatch.setattr(post_train, "available_memory", lambda device: {"host": 2 << 30, "gpu": None})
+    with pytest.raises(SystemExit, match=r"do not fit \(O15, the measure recorded newest\): host: 3 workers"):
+        post_train.recorded_fit(record, 3, cpu, cpu)
+
+
+def test_a_launch_measures_once_and_a_resume_reads_the_recorded_measure(tmp_path, monkeypatch):
+    """D167 through the runner: the first launch measures and records it, its entry naming it; a resume reads it and
+    measures nothing; more workers than it admitted measure again; a record without a measure (from before D167, left
+    as it was otherwise) measures; a launch without workers names none."""
+    measured = []
+
+    class Workers:
+        def __init__(self, context, settings, workers, device, *, stage):
+            self.workers = workers
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(post_train, "git_state", lambda: {"head": "x", "dirty": False})
+    monkeypatch.setattr(post_train, "require_conforming_closed_loop", lambda *a: (None, {"checks": {}}, None))
+    monkeypatch.setattr(post_train, "checked_edges", lambda path: None)
+    monkeypatch.setattr(post_train, "open_context", lambda *a, **k: SimpleNamespace(base=torch.nn.Linear(1, 1),
+                                                                                   device=CPU))
+    order = []
+    monkeypatch.setattr(post_train, "replace", lambda c, **k: (order.append("moved"), c)[1])
+    monkeypatch.setattr(post_train, "Speakers", Workers)
+    monkeypatch.setattr(post_train, "available_memory", lambda device: (order.append("read"),
+                                                                        {"host": 64 << 30, "gpu": None})[1])
+    monkeypatch.setattr(post_train, "campaign_model", lambda out, context, settings, stage: ("the round's model", None))
+    monkeypatch.setattr(post_train, "require_workers_fit", lambda speakers, context, settings, round_, model: (
+        measured.append(speakers.workers), model == "the round's model" or pytest.fail(model),
+        _measure(speakers.workers))[2])
+    monkeypatch.setattr(post_train, "run_campaign", lambda *a, **k: None)
+    out = tmp_path / "campaign"
+
+    def launch(rounds, workers):
+        argv = ["--prior", str(tmp_path / "p"), "--instructions", str(tmp_path / "i"), "--executor",
+                str(tmp_path / "e"), "--windows", str(tmp_path / "w"), "--out", str(out), "--rounds", str(rounds),
+                "--batch-windows", "1", "--seed", "1", "--prior-lr", "1e-4", "--traffic-lr", "1e-3",
+                "--weight-decay", "0", "--update-groups", "1", "--data-sentences", "1", "--select-per-airport", "1",
+                "--traffic-hidden", "16", "--traffic-heads", "4", "--method", "branch", "--select-seed", "1",
+                "--device", "cpu", *(["--speak-workers", str(workers)] if workers > 1 else [])]
+        assert post_train.main(argv + [x for kind in KINDS for x in (f"--windows-{kind.lower()}", "1")]) == 0
+        return json.loads((out / "campaign.json").read_text())
+
+    first = launch(1, 3)
+    assert measured == [3] and len(first["measures"]) == 1 and first["measures"][0]["device"] == "cpu"
+    assert first["fit"]["measure"] == 0 and first["fit"]["measured"] is True
+    again = launch(2, 2)                                                          # fewer workers: the record read
+    assert order[-2:] == ["read", "moved"]                     # the free memory read before the GPU is used
+    assert measured == [3] and again["resumed"][-1]["fit"] == {
+        "measure": 0, "measured": False, "speak_workers": 2, "available": {"host": 64 << 30, "gpu": None}}
+    more = launch(2, 4)                                                           # more than it admitted
+    assert measured == [3, 4] and len(more["measures"]) == 2 and more["resumed"][-1]["fit"]["measure"] == 1
+    assert launch(2, 1)["resumed"][-1]["fit"] is None                             # no workers
+    record = json.loads((out / "campaign.json").read_text())
+    del record["measures"]                                                        # a record from before D167
+    (out / "campaign.json").write_text(json.dumps(record))
+    older = launch(2, 2)
+    assert measured == [3, 4, 2] and len(older["measures"]) == 1 and older["resumed"][-1]["fit"]["measured"] is True
 
 
 def short_round(monkeypatch, s):
@@ -694,6 +807,84 @@ def test_a_resume_may_raise_the_rounds_and_change_nothing_else(tmp_path):
     assert open_campaign(out, _inputs(settings, tmp_path), git, {})["resumed"][0]["rounds"] == {"before": 3, "after": 3}
 
 
+def test_a_setting_added_after_a_record_reads_as_its_default_and_a_resume_compares_it(tmp_path):
+    """D168 under the user's standing permission (2026-10-07): a campaign recorded before `Settings.clip_norm` (its
+    record without the field, left as it was) opens with the default, None, and resumes with it; another value is
+    refused by name, as a campaign recorded with a clip refuses a resume without it. Only the settings named added
+    carry a default."""
+    git = {"head": "x", "dirty": False}
+    out = tmp_path / "campaign"
+    open_campaign(out, _inputs(_settings(), tmp_path), git, {})
+    record = json.loads((out / "campaign.json").read_text())
+    del record["inputs"]["settings"]["clip_norm"]                           # a record from before D168
+    (out / "campaign.json").write_text(json.dumps(record))
+    assert post_train.settings_of(record) == _settings()
+    with pytest.raises(SystemExit, match="other inputs or settings"):
+        open_campaign(out, _inputs(_settings(clip_norm=1.0), tmp_path), git, {})
+    reopened = open_campaign(out, _inputs(_settings(), tmp_path), git, {})
+    assert "clip_norm" not in reopened["inputs"]["settings"] and len(reopened["resumed"]) == 1
+    clipped = tmp_path / "clipped"
+    open_campaign(clipped, _inputs(_settings(clip_norm=1.0), tmp_path), git, {})
+    with pytest.raises(SystemExit, match="other inputs or settings"):
+        open_campaign(clipped, _inputs(_settings(), tmp_path), git, {})
+    defaults = {f.name for f in dataclasses.fields(Settings) if f.default is not dataclasses.MISSING}
+    assert defaults == set(post_train.SETTINGS_ADDED)
+    for wrong in (0.0, -1.0):
+        with pytest.raises(ValueError, match="clip_norm"):
+            _settings(clip_norm=wrong)
+    record = json.loads((out / "campaign.json").read_text())
+    del record["inputs"]["settings"]["epochs"]                              # and from before D169
+    (out / "campaign.json").write_text(json.dumps(record))
+    assert post_train.settings_of(record) == _settings()
+    assert len(open_campaign(out, _inputs(_settings(), tmp_path), git, {})["resumed"]) == 2
+    with pytest.raises(SystemExit, match="other inputs or settings"):
+        open_campaign(out, _inputs(_settings(epochs=2), tmp_path), git, {})
+    with pytest.raises(ValueError, match="epochs"):
+        _settings(epochs=0)
+
+
+def test_stage_c_s_pass_clips_and_passes_as_its_settings_say(monkeypatch):
+    """D168, D169: stage C's pass (`STAGE_C`, `STAGE_C_LANDED`) hands `Settings.clip_norm` to `post.loss.passes` and
+    makes `Settings.epochs` passes, each with its own numbers (`pass_orders`); stage D's (the skeleton's default pass:
+    its settings name neither) clips nothing and makes one pass."""
+    from ts_transformer.experiments.multi_train import stage_d
+
+    seen, numbers = [], []
+    monkeypatch.setattr(post_train, "passes", lambda model, base, optimizer, each, step=None, clip_norm=None: (
+        seen.append((clip_norm, len(each))), [list(pairs) for pairs in each])[1])
+    monkeypatch.setattr(post_train, "update_pairs", lambda directory, data, settings, rng, device, **k: (
+        numbers.append(rng), [])[1])
+    monkeypatch.setattr(post_train, "landed_pairs", lambda directory, data, settings, rng, device: (
+        numbers.append(rng), [])[1])
+    context = SimpleNamespace(base=None, data=None, device=CPU)
+    settings = _settings(clip_norm=0.5, epochs=2)
+    for stage in (post_train.STAGE_C, post_train.STAGE_C_LANDED):
+        rng = np.random.default_rng([1337, 0, 1])
+        assert stage.train(None, context, None, None, settings, rng, part_width=0) == {
+            "updates": 0, "passes": [{"updates": 0}, {"updates": 0}]}
+        assert numbers[-2] is rng and numbers[-1] is not rng
+    stage_d().train(None, context, None, None, settings, np.random.default_rng(0), part_width=0)
+    assert seen == [(0.5, 2), (0.5, 2), (None, 1)]
+
+
+def test_each_pass_has_numbers_of_its_own_and_the_first_is_the_round_s():
+    """D169: the first pass reads the round's numbers as the pass before D169 did; a later pass, a child of them (from
+    the seed, the round and the pass), draws another order; the round's own numbers are not moved by the children."""
+    rng = np.random.default_rng([2026, 3, 1])
+    first, second, third = post_train.pass_orders(rng, 3)
+    assert first is rng
+    assert list(first.permutation(20)) == list(np.random.default_rng([2026, 3, 1]).permutation(20))
+    assert list(second.permutation(20)) != list(np.random.default_rng([2026, 3, 1]).permutation(20))
+    assert list(second.permutation(20)) != list(third.permutation(20))
+    again = post_train.pass_orders(np.random.default_rng([2026, 3, 1]), 3)[1]
+    assert list(again.permutation(20)) == list(post_train.pass_orders(np.random.default_rng([2026, 3, 1]), 3)[1]
+                                               .permutation(20))
+    assert post_train.pass_orders(rng, 1) == [rng]
+    seed, round_ = 2026, 3                      # no continuation's numbers (their fourth word a branch point)
+    later = post_train.pass_orders(np.random.default_rng([seed, round_, 1]), 2)[1]
+    assert later.random() == np.random.default_rng([seed, round_, 1, 1 << 31, 1]).random()
+
+
 def test_a_campaign_recorded_in_a_worktree_resumes_from_another_checkout(tmp_path, monkeypatch):
     """D157: the recorded paths are compared as this checkout reads them (`this_checkout`, its own test in
     `test_training_export`): a campaign recorded under a worktree's linked data trees, the worktree deleted since,
@@ -818,8 +1009,8 @@ def test_a_stage_gives_the_campaigns_round_its_parts_and_stage_cs_is_the_campaig
         run_campaign(out, settings, _context(s), stage=stage)
         states.append(torch.load(out / "round_0" / "checkpoint.pt", weights_only=False))
     # the speaking and the readout run the stage's own batch speaker and reader (the campaign hands them the stage)
-    assert called == ["start", "selection", "draw", "speak", "speak_batch", "train", "readout", "read_batch", "record",
-                      "identity"]
+    assert called == ["start", "selection", "draw", "speak", "batches", "speak_batch", "train", "readout", "batches",
+                      "read_batch", "record", "identity"]
     assert states[0]["model"].keys() == states[1]["model"].keys()
     assert all(torch.equal(states[0]["model"][k], states[1]["model"][k]) for k in states[0]["model"])
     assert states[0]["identity"] == states[1]["identity"]
@@ -849,6 +1040,7 @@ def test_the_speaking_workers_run_the_stages_parts(setup, tmp_path):
         (directory / f"spoken_{k}").write_text("stage")
         if directory.name == "measured":                          # the measure: a real batch, whose series it weighs
             assert [windows[i].kind for i in places] == [INSERTED]  # of the stage's draw
+            (marks / "measured_with").write_text(repr(sum(float(p.detach().double().sum()) for p in model.parameters())))
             return post_train.speak_batch(model, context, windows, places, settings, round_, directory, k)
         return {"k": k, "windows": len(places), "groups": 0, "informative_groups": 0, "spoken_again": 0, "differed": [],
                 "reward_sum": 0.0, "faulty_steps": 0, "losses_reading_fault": 0, "outcomes": {}}
@@ -879,7 +1071,12 @@ def test_the_speaking_workers_run_the_stages_parts(setup, tmp_path):
         assert [(x["k"], x["windows"]) for x in speakers.speak(model, windows, places, 0, tmp_path)] == [(0, 1), (1, 1)]
         assert list(marks.glob("started_*"))                     # the speaking workers' model: the stage's
         assert speakers.read(model, windows, places, "select") == [[("read", "select", 1)]] * 2
-        assert speakers.measure(0, measured)["windows"] == 1
+        given, _ = start_model(context, settings)               # the round's model, not the stage's start model
+        with torch.no_grad():
+            next(given.parameters()).add_(0.5)
+        assert speakers.measure(0, measured, given)["windows"] == 1
+        assert float((marks / "measured_with").read_text()) == sum(float(p.detach().double().sum()) for p in given.parameters())
+        assert not (measured / "measuring_model.pt").exists()
         with pytest.raises(ValueError, match="another stage"):
             post_train.speak_round(model, context, windows, settings, 0, tmp_path, speakers)
         with pytest.raises(ValueError, match="another stage"):
@@ -891,7 +1088,10 @@ def test_the_speaking_workers_run_the_stages_parts(setup, tmp_path):
     assert sorted(p.name for p in tmp_path.glob("spoken_*")) == ["spoken_0", "spoken_1"]
     assert (measured / "spoken_0").exists()                       # the measure spoke the stage's batch
     assert len(list(marks.glob("started_*"))) >= 1 and not (marks / f"started_{os.getpid()}").exists()
-    assert Speakers.__init__.__defaults__[-1] is post_train.STAGE_C
+    import inspect
+
+    defaults = inspect.signature(Speakers.__init__).parameters
+    assert defaults["stage"].default is post_train.STAGE_C and defaults["gpu_budget"].default is None
 
 
 def test_a_stage_made_from_stage_cs_runs_its_own_batches_through_the_campaign(setup, tmp_path, monkeypatch):
@@ -975,7 +1175,8 @@ def test_a_round_opens_as_a_start_through_one_function(setup, tmp_path, monkeypa
 def test_a_batch_commands_each_flight_once_with_windows_of_several_aircraft():
     """Multi-aircraft control D146: windows that share any commanded flight (an anchor or a later aircraft) go to
     different batches; stage C's windows of one aircraft as before."""
-    window = lambda indices: SimpleNamespace(signal_index=indices[0], signal_indices=tuple(indices))  # noqa: E731
+    window = lambda indices: SimpleNamespace(signal_index=indices[0], signal_indices=tuple(indices),  # noqa: E731
+                                             span_s=300.0)
     windows = [window((1, 4)), window((2,)), window((4, 6)), window((3, 5)), window((5,))]
     out = batches(windows, 10)
     for batch in out:

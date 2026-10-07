@@ -96,7 +96,9 @@ class TokenPart:
         if self._table is None or self._table[0] is not loop or self._table[1] != t:
             parts = []
             for b, heard in enumerate(loop.speaking.speaker.heard):
-                _, _, heading, levels, _ = heard.inputs(0.0)
+                # at the time of its last word (the heading and the levels do not depend on it): its times since a
+                # word, not read here, are then not negative
+                _, _, heading, levels, _ = heard.inputs(float(heard.said_s.max()))
                 parts.append(commanded_part(bool(loop.silent[b]), heading, levels, self.words))
             self._table = (loop, t, np.stack(parts) if parts else np.zeros((0, self.width), dtype=np.float32))
         return self._table[2]
