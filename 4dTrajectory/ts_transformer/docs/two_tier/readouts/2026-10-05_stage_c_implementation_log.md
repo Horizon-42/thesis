@@ -986,3 +986,63 @@ rounds and keeps the worktree paths.
 - The user's criterion (D7) chooses the round. The ceiling readout (requests P48) comes first, on the user's word of
   2026-10-07.
 
+## 28 C15, C16 and the intent at launch (2026-10-07)
+
+The order is `notes/stage_c.md` of 2026-10-07 (`8012daff`), and the design is post-training D161, D162 and D163, §8 C15
+and C16.
+
+| Step | Commit | What |
+|---|---|---|
+| C15, C16, the intent | `3c10e08f` | See the list below |
+| Merge | `67f5d25c` | `dev-two-tier` (docs only) into the branch; no Python changed against `3c10e08f`. `dev-two-tier` can fast-forward to the branch |
+
+**C15 (D161), the ceiling readout.**
+- `experiments/post_ceiling.py`: each model reads the select windows N times. Draw 0 is checked against the round's
+  `round.json` before the other draws.
+- `post_train`: `readout_numbers(seed, place, draw=0)`, with draw 0 unchanged bit for bit; `read_batch`,
+  `Speakers.read` and `_read` take the draw; `counted_ends` is split out of `selection_readout`.
+- `runners.md` R64, and one index line in the package's `CLAUDE.md`.
+
+**C16 (D162), a campaign's start.**
+- `Settings.start` and `campaign_start`. The start's bytes, identity and seed are checked (D162: refused when its seed
+  is the source campaign's).
+- The start is checked before the workers fork and before `campaign.json` is written.
+- `--start-campaign` / `--start-round`; the path is recorded repo-relative through `this_checkout`.
+- `round_model(None)` gives the campaign's start; the optimizer starts afresh; the pull term still pulls toward the
+  base.
+- The checkpoint identity is unchanged.
+- The stage C frontend fixtures were written again by the export: their `settings` gain `"start":null`, which the
+  frontend never reads.
+
+**The intent at launch.** `post_train` no longer checks the intent when a campaign starts (the user; D163). The
+publisher still checks it (L27).
+
+**Tests.**
+- The affected files: 83 passed. `test_post_ceiling`: 5 passed. The 11 vitest files that read the stage C fixtures: 75
+  passed.
+- New tests:
+  - a start from round 0 speaks its round 0 with the start's weights, and its optimizer counts only its own updates;
+  - the seed rule, the bytes and the identity refused by name;
+  - the CLI's refusals, each checked by its message;
+  - draw d reaches every window's numbers in one process and through the workers.
+- Each new test fails under the mutation it guards against.
+
+**Review** (opus, independent, two rounds):
+- Four S2 findings, all fixed:
+  - the D162 seed rule, decided after the review started;
+  - the start test could not see the start's weights;
+  - no test that the draw reaches the numbers;
+  - the memory of 4 reading workers (the run uses 3).
+- The S3 findings are fixed: the order of the models (a round first, so that draw 0 is checked first); a refused start
+  wrote `campaign.json`; the start's path given from a worktree; a bad model name; the CLI messages; the start checked
+  after the workers forked.
+- The reviewer checked, on the CPU, that draw 0 of C10's rounds 6 and 8 gives their `round.json` readout exactly.
+
+**The run.**
+- First launch: 03:20 from the development worktree, on the user's word "先跑上限检测", before their merge. Draw 0 of
+  round 6 equalled its `round.json`.
+- Stopped after 4 draws (10 min), when the newest note asked for a detached run worktree (D163). The partial output
+  (`config.json` only) was moved aside as `ceiling_20261007.aborted-20261007T013056Z`.
+- Relaunch: from `.claude/worktrees/run-post-ceiling`, detached at `67f5d25c`, its data trees linked to the live ones.
+  It waited for another session's tests to end (rule 13). Output: `outputs/POOLED/post/ceiling_20261007`.
+
