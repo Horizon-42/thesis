@@ -4,13 +4,13 @@ Stage D's implementer writes this file (outline §5 rule 10, multi-aircraft cont
 time. Each item is a reading the implementer made where the design says nothing, or a gap; a reading is a proposal
 until the user decides. Paths are relative to `4dTrajectory/ts_transformer/`. The numbers are kept from the earlier
 notes; the items the user decided are deleted (D166: 6, 7, 19, 21, 22, 25, 29–35; O16: 36, written into D146; the
-census's sample: 18), item 23 (it asked for 6 and 7), item 20 (built: item 40) and the names of MC0–MC4 (written
-into the interfaces).
+census's sample: 18; D172: 46–48), item 23 (it asked for 6 and 7), item 20 (built: item 40) and the names of MC0–MC4
+(written into the interfaces).
 
-State: 2026-10-07: MC0–MC4 merged into `dev-two-tier` (b967d2b1); the windows of several spans (D146) and D166
-item 19 built and reviewed on `dev-multi-control` (6cc49ad1, items 37–43); MC4's smoke passed; MC5's runner
-committed (bd6dd1be, items 44–45); its profile read (one worker fits at 64 rows); the user's decisions after it
-built (fffe900d, items 46–48); dev-two-tier merged in (ea9d5217).
+State: 2026-10-07: MC0–MC4 merged into `dev-two-tier` (b967d2b1). On `dev-multi-control`, not merged: the windows of
+several spans (D146) and D166 item 19 (6cc49ad1, items 37–43), MC4's smoke passed, MC5's runner (bd6dd1be, items
+44–45), its profile read (one worker fits at 64 rows), D172 built (fffe900d); dev-two-tier merged in (C17–C20,
+f2bb4a5d). MC5's profile at 64 / 48 / 24 rows waits for the host (stage C's campaign runs).
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -154,15 +154,3 @@ built (fffe900d, items 46–48); dev-two-tier merged in (ea9d5217).
     independent numbers: an upper bound of the noise of comparing two rounds, which share their numbers. Over all spans
     the unit is an anchor (its windows of the spans are nested and share their aircraft); within a span, windows of
     other anchors may still share flights in a dense select set (stated).
-46. **Decided (the user, 2026-10-07), for the designer to write into §11 MC5 and post-training O15**: a campaign of
-    stage D sizes its speaking workers from its profile (`multi_train.profiled_fit`, `--profile`): the profile's measure
-    of one worker and of the pass and the memory free now, refused by name for a profile of other inputs or of other
-    settings that set the memory (`PROFILED_SETTINGS`: the counts, spans, c_min, batch rows, K, update groups, data
-    sentences, select windows), and each worker's GPU capped at its share. Nothing is measured before a run. Stage C's
-    campaign still measures before its rounds (O15 as written): whether it reads a profile too is the user's to say.
-47. **Decided (the user, 2026-10-07)**: one batch size a span (`MultiSettings.batch_rows`, one number a span; 64 / 48 /
-    24 rows for 5 / 10 / 20 min): a batch's GPU memory grows with its ticks as well as its rows (MC5's profile: one
-    batch of 64 rows peaked at 1.4, 1.9 and 3.6 GiB).
-48. **Decided (the user, 2026-10-07)**: the profile speaks each span's batch once (in the worker whose memory it
-    measures; in its own process only without workers).
-
