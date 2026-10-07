@@ -473,7 +473,8 @@ def main(argv: list[str] | None = None) -> int:
               "windows": str(census), "procedure_root": str(procedure_root), "settings": asdict(settings),
               "smoke": args.smoke}
     try:
-        open_campaign(out, inputs, git, opened["checks"], schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER)
+        open_campaign(out, inputs, git, opened["checks"], schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER,
+                      settings_type=MultiSettings)
         if speakers is not None and done_rounds(out) < settings.rounds:
             require_workers_fit(speakers, context, settings, done_rounds(out))       # O15, before any round
         run_campaign(out, settings, context, speakers, stage=stage)

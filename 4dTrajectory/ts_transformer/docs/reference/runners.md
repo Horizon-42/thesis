@@ -1702,6 +1702,9 @@ checkpoint.
   the first round (O15).
 - `--select-seed`: the selection readout's windows and numbers, apart from `--seed` (C10's: 1337), so that a campaign
   from a round reads its source's select windows.
+- `--clip-norm` (D168, C19): each update's gradient clipped to that norm before the optimizer's step; left out, not
+  clipped (the behaviour before it; a record without the setting reads so). `round.json`'s pass gives the updates'
+  gradient norms before the clip (mean, largest) and the share clipped.
 - A clean tree unless `--smoke`; formal runs from a detached run worktree (D163).
 - Writes `campaign.json` (`ts-post-train-v1`) and, for each round, `round.json` and `checkpoint.pt`
   (`ts-post-checkpoint-v1`).

@@ -3,6 +3,7 @@ fixture of `test_post_window_loop`); every write root under tmp."""
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 from dataclasses import asdict, replace
@@ -692,6 +693,49 @@ def test_a_resume_may_raise_the_rounds_and_change_nothing_else(tmp_path):
         open_campaign(out, _inputs(replace(settings, rounds=4), tmp_path), git, {})
     assert (out / "campaign.json").read_text() == written
     assert open_campaign(out, _inputs(settings, tmp_path), git, {})["resumed"][0]["rounds"] == {"before": 3, "after": 3}
+
+
+def test_a_setting_added_after_a_record_reads_as_its_default_and_a_resume_compares_it(tmp_path):
+    """D168 under the user's standing permission (2026-10-07): a campaign recorded before `Settings.clip_norm` (its
+    record without the field, left as it was) opens with the default, None, and resumes with it; another value is
+    refused by name, as a campaign recorded with a clip refuses a resume without it. Only the settings named added
+    carry a default."""
+    git = {"head": "x", "dirty": False}
+    out = tmp_path / "campaign"
+    open_campaign(out, _inputs(_settings(), tmp_path), git, {})
+    record = json.loads((out / "campaign.json").read_text())
+    del record["inputs"]["settings"]["clip_norm"]                           # a record from before D168
+    (out / "campaign.json").write_text(json.dumps(record))
+    assert post_train.settings_of(record) == _settings()
+    with pytest.raises(SystemExit, match="other inputs or settings"):
+        open_campaign(out, _inputs(_settings(clip_norm=1.0), tmp_path), git, {})
+    reopened = open_campaign(out, _inputs(_settings(), tmp_path), git, {})
+    assert "clip_norm" not in reopened["inputs"]["settings"] and len(reopened["resumed"]) == 1
+    clipped = tmp_path / "clipped"
+    open_campaign(clipped, _inputs(_settings(clip_norm=1.0), tmp_path), git, {})
+    with pytest.raises(SystemExit, match="other inputs or settings"):
+        open_campaign(clipped, _inputs(_settings(), tmp_path), git, {})
+    defaults = {f.name for f in dataclasses.fields(Settings) if f.default is not dataclasses.MISSING}
+    assert defaults == set(post_train.SETTINGS_ADDED)
+    for wrong in (0.0, -1.0):
+        with pytest.raises(ValueError, match="clip_norm"):
+            _settings(clip_norm=wrong)
+
+
+def test_stage_c_s_pass_clips_to_its_setting(monkeypatch):
+    """D168: stage C's pass (`STAGE_C`, `STAGE_C_LANDED`) hands `Settings.clip_norm` to `one_pass`; stage D's (the
+    skeleton's default pass: its settings do not name a clip) clips nothing."""
+    from ts_transformer.experiments.multi_train import stage_d
+
+    seen = []
+    monkeypatch.setattr(post_train, "one_pass", lambda *a, step=None, clip_norm: (seen.append(clip_norm), [])[1])
+    monkeypatch.setattr(post_train, "update_pairs", lambda *a, **k: [])
+    monkeypatch.setattr(post_train, "landed_pairs", lambda *a, **k: [])
+    context = SimpleNamespace(base=None, data=None, device=CPU)
+    for stage in (post_train.STAGE_C, post_train.STAGE_C_LANDED):
+        assert stage.train(None, context, None, None, _settings(clip_norm=0.5), None, part_width=0) == {"updates": 0}
+    stage_d().train(None, context, None, None, _settings(clip_norm=0.5), None, part_width=0)
+    assert seen == [0.5, 0.5, None]
 
 
 def test_a_campaign_recorded_in_a_worktree_resumes_from_another_checkout(tmp_path, monkeypatch):

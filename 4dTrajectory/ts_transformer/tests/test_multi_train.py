@@ -121,7 +121,7 @@ def test_a_round_of_stage_d_from_a_round_of_stage_c_end_to_end(setup, tmp_path, 
     shaped, _ = stage.start_model(context, settings)
     assert shaped.state_dict().keys() == model.state_dict().keys()                     # what a resume loads into
     out = tmp_path / "stage_d"
-    options = dict(schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER)
+    options = dict(schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER, settings_type=MultiSettings)
 
     def inputs(rounds):
         paths = {key: str(tmp_path / "inputs" / key) for key in post_train.INPUT_PATHS}
@@ -195,7 +195,7 @@ def test_stage_ds_round_with_speaking_workers_is_the_round_of_one_process(setup,
                         lambda context, settings, rng: ([window], {"drawn": {REAL_KIND: 1}}))
     stage = stage_d()
     settings = _multi_settings(start=start)
-    options = dict(schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER)
+    options = dict(schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER, settings_type=MultiSettings)
     records = []
     for name, workers in (("here", 0), ("there", 2)):
         out = tmp_path / name
@@ -351,7 +351,8 @@ def test_the_runner_records_stage_ds_campaign_and_opens_its_context_formal_or_sm
         calls.clear()
         assert multi_train.main(argv + extra) == 0
         assert calls == [("start_of", formal), ("context", formal), ("start", start),
-                         ("campaign", {"schema": MULTI_CAMPAIGN_SCHEMA, "reader": MULTI_CLAIM_READER}), ("run", True)]
+                         ("campaign", {"schema": MULTI_CAMPAIGN_SCHEMA, "reader": MULTI_CLAIM_READER,
+                                       "settings_type": MultiSettings}), ("run", True)]
 
 
 def test_the_time_the_aircraft_take(built):
@@ -428,7 +429,7 @@ def test_a_round_of_stage_d_is_refused_unless_its_identity_is_the_campaigns(setu
     settings = _multi_settings(start=start)
     out = tmp_path / "stage_d"
     post_train.open_campaign(out, {"settings": asdict(settings)}, {"head": "x", "dirty": False}, {},
-                             schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER)
+                             schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER, settings_type=MultiSettings)
     post_train.run_campaign(out, settings, context, stage=stage_d())
     assert not multi_train.round_model(context, settings, out, 0).training
     for wrong in (replace(settings, seed=7), replace(settings, span_s=60.0), replace(settings, c_min=0.8)):

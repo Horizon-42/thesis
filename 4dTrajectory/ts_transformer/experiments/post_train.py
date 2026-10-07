@@ -24,7 +24,9 @@ EACH ROUND r:
    round's numbers (D130), `update_groups` at a time, each paired with `data_sentences` single-aircraft sentences of
    the train days in the base's selection (D36, D76; `prior.source.ArtefactSource`), through the loss of C7
    (`post.loss.one_pass`: the surrogate and the pull in eval mode, the data term with dropout, D107; every counted row
-   alike, D115), the traffic modules at their own learning rate (`parameter_groups`).
+   alike, D115), the traffic modules at their own learning rate (`parameter_groups`); each update's gradient clipped to
+   `Settings.clip_norm` before its step (D168; None, the default: not clipped), its norms and the share clipped in the
+   round's record.
 5. **The selection readout** (`selection_readout`): a fixed set of real windows of the select days (drawn once with the
    seed, D113 applied; the same numbers every round), the first pass only, by airport: the rewards, the outcomes (a loss
    of separation among them), the rows the speed-word mask acted (D101), the steps reading a faulty point and the losses
@@ -47,7 +49,8 @@ left half done is moved aside as ``round_<r>.aborted-<UTC>`` (outline E8) and ru
 rerun may raise the rounds and change nothing else (D157): the campaign goes on to the new count, unless its val read
 is claimed (P47: the round would then be chosen after the val days were read). The recorded paths
 are compared as this checkout reads them (`inputs_here`: a campaign recorded in a worktree resumes from another
-checkout). Every random number of a round comes from the seed and the round (the draw, the speaking's, the data term's
+checkout), the recorded settings as the stage's settings read them (a setting added after the record, its default,
+`SETTINGS_ADDED`). Every random number of a round comes from the seed and the round (the draw, the speaking's, the data term's
 sentences and its dropout, `pass_seed`), so a resumed campaign is the campaign run through, a raised one the campaign
 of the larger count from its start. THE LANDED SENTENCES (``--method landed``, P49; the user, 2026-10-07): instead of steps 3
 and 4's branch groups and clipped surrogate, each window is spoken `Settings.continuations` times (the first pass,
@@ -158,6 +161,10 @@ class Settings:
     #: campaign started from a round takes another seed (D162) and still reads the select windows and numbers of its
     #: source (the user, 2026-10-07; C10's: 1337, as its seed).
     select_seed: int
+    #: The norm each update's gradient is clipped to before the optimizer's step (D168, `post.loss.one_pass`), or None:
+    #: not clipped. A setting added after campaigns were recorded: its default is the code's behaviour before it, and a
+    #: record without it reads as that default (the user's standing permission, 2026-10-07; `SETTINGS_ADDED`).
+    clip_norm: float | None = None
 
     def __post_init__(self) -> None:
         if set(self.per_kind) != set(KINDS) or min(self.per_kind.values()) < 0 or not any(self.per_kind.values()):
@@ -170,6 +177,8 @@ class Settings:
             raise ValueError(f"a start is its campaign, round and checkpoint_sha256, not {sorted(self.start)}")
         if self.method not in METHODS:
             raise ValueError(f"method {self.method!r} is none of {METHODS}")
+        if self.clip_norm is not None and not self.clip_norm > 0:
+            raise ValueError(f"clip_norm {self.clip_norm} is positive, or None (not clipped)")
 
 
 @dataclass
@@ -310,7 +319,8 @@ class Stage:
     part_width: int
     #: the pass of a round (``(model, context, optimizer, directory, settings, rng, part_width=)``) and this process's
     #: memory in one update of it (``(context, settings, directory, stage)``, O15): branch training's, `train_pass` and
-    #: `pass_memory_of`, unless the stage names others (`STAGE_C_LANDED`: the landed sentences, P49)
+    #: `pass_memory_of`, unless the stage names others (`STAGE_C`: its gradient clip, D168; `STAGE_C_LANDED`: the
+    #: landed sentences, P49)
     train: Callable[..., dict[str, Any]] = lambda *args, **kwargs: train_pass(*args, **kwargs)
     pass_memory: Callable[..., dict[str, Any] | None] = lambda *args: pass_memory_of(*args)
 
@@ -334,7 +344,10 @@ STAGE_C = Stage(start_model=lambda context, settings: start_model(context, setti
                 selection=lambda context, settings, split: selection_windows(context, settings, split),
                 readout=lambda *args, stage: _stage_c_readout(*args, stage=stage),
                 record=lambda window: window_record(window),
-                speak_batch=lambda *args: speak_batch(*args), read_batch=lambda *args: read_batch(*args), part_width=0)
+                speak_batch=lambda *args: speak_batch(*args), read_batch=lambda *args: read_batch(*args), part_width=0,
+                train=lambda model, context, optimizer, directory, settings, rng, *, part_width: train_pass(
+                    model, context, optimizer, directory, settings, rng, part_width=part_width,
+                    clip_norm=settings.clip_norm))
 #: Stage C's campaign that trains on the landed sentences (P49, `Settings.method` `LANDED_SENTENCES`): stage C's parts,
 #: but its batches spoken `Settings.continuations` times with their best landed sentences kept (`speak_landed_batch`),
 #: and its pass on them (`landed_train_pass`, its memory `landed_pass_memory`).
@@ -909,23 +922,24 @@ def pass_seed(seed: int, round_: int) -> int:
 
 
 def train_pass(model: Prior, context: Context, optimizer: torch.optim.Optimizer, directory: Path, settings: Settings,
-               rng: np.random.Generator, *, part_width: int) -> dict[str, Any]:
+               rng: np.random.Generator, *, part_width: int, clip_norm: float | None = None) -> dict[str, Any]:
     """Step 4 of a round: one pass (`post.loss.one_pass`: the model at its start is the one that spoke the groups) over
-    `update_pairs` (``part_width``: the stage's token part); its means, or no update where the round has no informative
-    group."""
+    `update_pairs` (``part_width``: the stage's token part), each update's gradient clipped to ``clip_norm`` (D168;
+    stage C's `Settings.clip_norm`, `STAGE_C`; None: not clipped, a stage whose settings do not name it); its means, or
+    no update where the round has no informative group."""
     parts = one_pass(model, context.base, optimizer, update_pairs(directory, context.data, settings, rng, context.device,
-                                                                  part_width=part_width))
+                                                                  part_width=part_width), clip_norm=clip_norm)
     return {"updates": len(parts), **(stacked(parts) if parts else {})}
 
 
 def landed_train_pass(model: Prior, context: Context, optimizer: torch.optim.Optimizer, directory: Path,
                       settings: Settings, rng: np.random.Generator, part_width: int = 0) -> dict[str, Any]:
     """Step 4 of a round of a campaign that trains on the landed sentences (P49, `STAGE_C_LANDED`): one pass
-    (`post.loss.one_pass` with `landed_step`) over `landed_pairs`; its means (``nll``: the kept words' negative
-    log-likelihood a row), or no update where the round kept no sentence. ``part_width``: the skeleton's argument; stage
-    C has no token part."""
+    (`post.loss.one_pass` with `landed_step`, each update's gradient clipped to `Settings.clip_norm`, D168) over
+    `landed_pairs`; its means (``nll``: the kept words' negative log-likelihood a row), or no update where the round
+    kept no sentence. ``part_width``: the skeleton's argument; stage C has no token part."""
     parts = one_pass(model, context.base, optimizer, landed_pairs(directory, context.data, settings, rng, context.device),
-                     step=landed_step)
+                     step=landed_step, clip_norm=settings.clip_norm)
     means = stacked(parts) if parts else {}
     return {"updates": len(parts), **{("nll" if key == "surrogate" else key): value for key, value in means.items()
                                       if key != "clipped_share"}}
@@ -1039,27 +1053,35 @@ def inputs_here(inputs: Mapping[str, Any]) -> dict[str, Any]:
     return {**inputs, **{key: str(this_checkout(inputs[key])) for key in INPUT_PATHS}}
 
 
+#: The settings added after campaigns were recorded, each with its default: the code's behaviour before it (the user's
+#: standing permission, 2026-10-07): a record without one reads as its default, and no record is edited.
+SETTINGS_ADDED = ("clip_norm",)
+
+
 def _but_rounds(inputs: Mapping[str, Any]) -> dict[str, Any]:
     """The inputs with the rounds left out (D157: the one setting a resume may change)."""
     return {**inputs, "settings": {k: v for k, v in inputs["settings"].items() if k != "rounds"}}
 
 
 def open_campaign(out: Path, inputs: dict[str, Any], git: dict[str, Any], checks: Any, *,
-                  schema: str = CAMPAIGN_SCHEMA, reader: str = CLAIM_READER) -> dict[str, Any]:
+                  schema: str = CAMPAIGN_SCHEMA, reader: str = CLAIM_READER,
+                  settings_type: Callable[..., Any] = Settings) -> dict[str, Any]:
     """``campaign.json``: a new campaign's, or a resume's. A resume is refused unless its inputs are the record's — the
-    recorded paths as this checkout reads them (`inputs_here`), the rounds left out — and its rounds at least the
+    recorded paths as this checkout reads them (`inputs_here`), the recorded settings as ``settings_type`` reads them
+    (a setting added after the record takes its default, `SETTINGS_ADDED`), the rounds left out — and its rounds at least the
     record's; more rounds raise the record's count (D157), its paths kept as recorded, and are refused once the
     campaign's val read is claimed (`post_validation`, P47), spent or not. Each resume adds its entry: the
     time, the commit, the checks, the paths it read and the rounds before and after it. A round left half done (its
     directory without its checkpoint) is moved aside as ``round_<r>.aborted-<UTC>``. A stage's own campaign gives its
-    format (``schema``) and the reader of its val read's claim (``reader``); stage C's by default (post-training §9 item
-    11)."""
+    format (``schema``), the reader of its val read's claim (``reader``) and its settings (``settings_type``); stage C's
+    by default (post-training §9 item 11)."""
     path = out / "campaign.json"
     if path.exists():
         record = json.loads(path.read_text(encoding="utf-8"))
         if record["schema"] != schema:
             raise SystemExit(f"{out}: a {record['schema']} campaign, not {schema}")
         recorded, asked = inputs_here(record["inputs"]), inputs_here(inputs)
+        recorded = {**recorded, "settings": asdict(settings_type(**recorded["settings"]))}
         if _but_rounds(recorded) != _but_rounds(asked):
             raise SystemExit(f"{out}: a campaign of other inputs or settings; a resume takes the same, its rounds or more")
         before, after = recorded["settings"]["rounds"], asked["settings"]["rounds"]
@@ -1267,6 +1289,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="the seed of the selection readout's windows and numbers (C10's: 1337)")
     parser.add_argument("--method", choices=METHODS, required=True,
                         help="how a round trains: branch groups (D94) or the landed sentences (P49)")
+    parser.add_argument("--clip-norm", type=float,
+                        help="D168: the norm each update's gradient is clipped to (default: not clipped)")
     parser.add_argument("--start-campaign", type=Path,
                         help="start from a round of this campaign (with --start-round); the base when left out")
     parser.add_argument("--start-round", type=int, help="the round of --start-campaign whose weights the campaign starts from")
@@ -1298,7 +1322,7 @@ def main(argv: list[str] | None = None) -> int:
     settings = Settings(args.rounds, {kind: getattr(args, f"windows_{kind.lower()}") for kind in KINDS},
                         args.batch_windows, args.continuations, args.seed, args.prior_lr, args.traffic_lr,
                         args.weight_decay, args.update_groups, args.data_sentences, args.select_per_airport,
-                        args.traffic_hidden, args.traffic_heads, start, args.method, args.select_seed)
+                        args.traffic_hidden, args.traffic_heads, start, args.method, args.select_seed, args.clip_norm)
     git = git_state()
     if git["dirty"] and not args.smoke:
         parser.error("a campaign that is not a smoke runs on a clean checkout")
