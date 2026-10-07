@@ -43,8 +43,10 @@ D's format and reader).
         --windows <stage C's census: its edge reference> --start-campaign <stage C's campaign> --start-round <r> \\
         --out 4dTrajectory/outputs/POOLED/multi/<campaign id> --rounds … --span-s … --c-min … (every count given)
 
-Not yet here (stated): the readouts of the time the aircraft take (the delay of each landing against its record, the spacing
-at the threshold, the landing order: §5 item 4, O18); the validation readout (`multi_validation`).
+The readout also gives the time the aircraft take (§5 item 4, O18; `multi.timing`): each landing's delay against its
+record (p50, p90), the spacing at the threshold of successive landings on one runway (p1, p5, p50) beside the records' of
+the same windows, and the pairs landed in the recorded order. Not yet here (stated): the validation readout
+(`multi_validation`).
 """
 
 from __future__ import annotations
@@ -66,10 +68,13 @@ from ts_transformer.experiments.post_train import (
     Context, Speakers, Stage, batches, done_rounds, open_campaign, open_context, require_workers_fit, round_start,
     run_campaign, settings_of, source_campaign, speak_round, start_checkpoint, start_model, start_of,
 )
-from ts_transformer.experiments.post_window_loop import LOST_SEPARATION, WindowLoop, checked_edges
+from ts_transformer.experiments.post_window_loop import LANDED, LOST_SEPARATION, WindowLoop, checked_edges
 from ts_transformer.multi import credit
 from ts_transformer.multi.census import WindowCount, flown_positions, window_losses
 from ts_transformer.multi.separation import PAIRS, Answering
+from ts_transformer.multi.timing import (
+    delays, landed, loop_spacings, order, quantiles, record_spacings, recorded_landings,
+)
 from ts_transformer.multi.tokens import PART_FEATURES, TOKENS_SCHEMA, TokenPart
 from ts_transformer.multi.windows import COMPRESSED, KINDS, REAL_KIND, Anchors, Drawn, compressed, left_out
 from ts_transformer.post.branches import CONTINUATIONS
@@ -229,10 +234,12 @@ def selection_windows(context: Context, settings: MultiSettings, split: str = "s
 
 
 def read_batch(model: Prior, context: Context, windows: Sequence[Window], places: Sequence[int],
-               settings: MultiSettings, split: str, draw: int = 0) -> list[tuple[list[Any], dict[str, int], int]]:
+               settings: MultiSettings, split: str, draw: int = 0
+               ) -> list[tuple[list[Any], dict[str, int], int, dict[str, Any]]]:
     """A batch of the readout (the windows at ``places``): their first pass under stage D's loop, each aircraft with its
-    own numbers (`readout_numbers` of ``draw``); for each window, its aircraft's ends (`WindowResult`, in the window's order), its
-    steps with a loss of each pair and its steps judged (the states flown judged again, module docstring)."""
+    own numbers (`readout_numbers` of ``draw``); for each window, its aircraft's ends (`WindowResult`, in the window's
+    order), its steps with a loss of each pair and its steps judged (the states flown judged again, module docstring),
+    and the time its aircraft took (`window_timing`)."""
     data = context.splits[split]
     batch = [windows[p] for p in places]
     loop, order, observed = context.start_loop(split, batch)(sorted(i for w in batch for i in w.signal_indices))
@@ -247,8 +254,19 @@ def read_batch(model: Prior, context: Context, windows: Sequence[Window], places
     for window, rows in zip(batch, window_loop.members):
         ends = [results[b] for b in rows]
         losses, steps = window_losses_of(window, ends, window_loop.speaking.start, context)
-        out.append((ends, losses, steps))
+        out.append((ends, losses, steps, window_timing(window, ends, window_loop.speaking.loop.params.cycle_s)))
     return out
+
+
+def window_timing(window: Window, ends: Sequence[Any], cycle_s: float) -> dict[str, Any]:
+    """The time a window's commanded aircraft took (`multi.timing`, §5 item 4, O18): each landing's delay against its
+    record, the spacing at the threshold of successive landings in the loop and on the records, and the pairs landed in
+    the recorded order (with the pairs)."""
+    items = landed(window.commanded_all, [e.crossing if e.outcome == LANDED else None for e in ends], cycle_s)
+    last_s = max([record.landing_s for record in window.commanded_all] + [item.loop_s for item in items])
+    recorded = recorded_landings(window, last_s)
+    return {"delays_s": delays(items), "spacing_s": loop_spacings(items, recorded),
+            "record_spacing_s": record_spacings(window.commanded_all, recorded), "order": list(order(items))}
 
 
 def window_losses_of(window: Window, ends: Sequence[Any], start: int, context: Any) -> tuple[dict[str, int], int]:
@@ -270,17 +288,18 @@ def window_losses_of(window: Window, ends: Sequence[Any], start: int, context: A
 
 
 def selection_readout(model: Prior, context: Context, windows: Sequence[Window], settings: MultiSettings,
-                      speakers: Speakers | None, *, stage: Stage) -> dict[str, Any]:
-    """The readout of ``windows`` (module docstring): its batches read here (``stage``'s `Stage.read_batch`) or by
-    ``speakers`` (refused unless they run ``stage``), summed by airport and kind."""
+                      speakers: Speakers | None, *, stage: Stage, split: str = "select") -> dict[str, Any]:
+    """The readout of ``windows`` of ``split`` (module docstring; `multi_validation`: the val days): its batches read
+    here (``stage``'s `Stage.read_batch`) or by ``speakers`` (refused unless they run ``stage``), summed by airport and
+    kind."""
     if speakers is not None and speakers.stage is not stage:
         raise ValueError("the speaking workers run another stage's parts than the one given (Speakers(..., stage=))")
     places = batches(windows, settings.batch_windows)
-    read = (speakers.read(model, windows, places, "select") if speakers is not None else
-            [stage.read_batch(model, context, windows, p, settings, "select") for p in places])
+    read = (speakers.read(model, windows, places, split) if speakers is not None else
+            [stage.read_batch(model, context, windows, p, settings, split) for p in places])
     counted: dict[str, dict[str, dict[str, Any]]] = {}
     for batch, parts in zip(places, read, strict=True):
-        for window, (ends, losses, steps) in zip((windows[p] for p in batch), parts, strict=True):
+        for window, (ends, losses, steps, timing) in zip((windows[p] for p in batch), parts, strict=True):
             for kind in (kind_of(window), "all"):
                 c = counted.setdefault(window.scene.geometry.code, {}).setdefault(kind, _empty())
                 c["windows"] += 1
@@ -296,10 +315,17 @@ def selection_readout(model: Prior, context: Context, windows: Sequence[Window],
                 for pair in PAIRS:
                     c["loss_windows"][pair] += losses[pair] > 0
                     c["loss_steps"][pair] += losses[pair]
+                for key in ("delays_s", "spacing_s", "record_spacing_s"):
+                    c[key] += timing[key]
+                c["order"] = [c["order"][0] + timing["order"][0], c["order"][1] + timing["order"][1]]
     out = {}
     for code, kinds in sorted(counted.items()):
         out[code] = {kind: {**c, "outcomes": dict(c["outcomes"]), "reward_mean": c["reward_sum"] / c["aircraft"],
-                            "window_reward_mean": c["reward_sum"] / c["windows"]} for kind, c in kinds.items()}
+                            "window_reward_mean": c["reward_sum"] / c["windows"],
+                            "delays_s": quantiles(c["delays_s"], (50, 90)),
+                            "spacing_s": quantiles(c["spacing_s"], (1, 5, 50)),
+                            "record_spacing_s": quantiles(c["record_spacing_s"], (1, 5, 50)),
+                            "order": {"same": c["order"][0], "pairs": c["order"][1]}} for kind, c in kinds.items()}
         out[code]["reward_mean"] = out[code]["all"]["reward_mean"]          # what the campaign's log prints
     return out
 
@@ -307,7 +333,34 @@ def selection_readout(model: Prior, context: Context, windows: Sequence[Window],
 def _empty() -> dict[str, Any]:
     return {"windows": 0, "aircraft": 0, "reward_sum": 0.0, "outcomes": Counter(), "go_arounds": 0, "silent": 0,
             "speed_mask_rows": 0, "faulty_steps": 0, "losses_reading_fault": 0, "steps_judged": 0,
-            "loss_windows": dict.fromkeys(PAIRS, 0), "loss_steps": dict.fromkeys(PAIRS, 0)}
+            "loss_windows": dict.fromkeys(PAIRS, 0), "loss_steps": dict.fromkeys(PAIRS, 0), "delays_s": [],
+            "spacing_s": [], "record_spacing_s": [], "order": [0, 0]}
+
+
+def multi_settings_of(record: dict[str, Any]) -> MultiSettings:
+    """A campaign's settings as its ``campaign.json`` records them, refused unless it is a campaign of stage D."""
+    if record["schema"] != MULTI_CAMPAIGN_SCHEMA:
+        raise ValueError(f"a {record['schema']} campaign, not {MULTI_CAMPAIGN_SCHEMA}")
+    return MultiSettings(**record["inputs"]["settings"])
+
+
+def round_model(context: Context, settings: MultiSettings, out: Path, round_: int) -> Prior:
+    """The model of stage D's campaign ``out`` after round ``round_`` (its checkpoint), in eval mode, refused by name
+    unless its identity is this campaign's (§7 row 3): stage D's format, the start's identity on this base, today's
+    procedure masks, the token part, the seed, L, the kinds, c_min and that round."""
+    model, _ = stage_d().start_model(context, settings)
+    state = torch.load(out / f"round_{round_}" / "checkpoint.pt", weights_only=False, map_location=context.device)
+    held = state["identity"]
+    expected = {"schema": MULTI_CHECKPOINT_SCHEMA, "procedure_masks": PROCEDURE_MASKS,
+                "token_part": {"schema": TOKENS_SCHEMA, "features": list(PART_FEATURES)}, "seed": settings.seed,
+                "span_s": settings.span_s, "per_kind": settings.per_kind, "c_min": settings.c_min}
+    start = torch.load(start_checkpoint(settings.start), weights_only=False, map_location="cpu")["identity"]
+    if ({k: held[k] for k in expected} != expected or held["start"] != start
+            or held["start"]["base"] != context.base_identity or len(held["rounds"]) != round_ + 1):
+        raise ValueError(f"{out}/round_{round_}: a checkpoint of another start, base, masks, token part, settings or "
+                         f"round than this campaign's")
+    model.load_state_dict(state["model"])
+    return model.eval()
 
 
 # ---- the stage

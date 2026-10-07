@@ -136,6 +136,7 @@ def test_a_round_of_stage_d_from_a_round_of_stage_c_end_to_end(setup, tmp_path, 
     assert readout["all"]["windows"] == 1 and readout["all"]["aircraft"] == 1
     assert set(readout["all"]["loss_steps"]) == set(PAIRS)
     assert readout["reward_mean"] == readout["all"]["reward_mean"] == readout[REAL_KIND]["reward_mean"]
+    assert {"delays_s", "spacing_s", "record_spacing_s", "order"} <= set(readout["all"])        # O18's readouts
     identity = torch.load(out / "round_0" / "checkpoint.pt", weights_only=False)["identity"]
     assert identity["schema"] == MULTI_CHECKPOINT_SCHEMA and identity["start"] == identity_c
     assert identity["token_part"] == {"schema": TOKENS_SCHEMA, "features": list(PART_FEATURES)}
@@ -351,3 +352,91 @@ def test_the_runner_records_stage_ds_campaign_and_opens_its_context_formal_or_sm
         assert multi_train.main(argv + extra) == 0
         assert calls == [("start_of", formal), ("context", formal), ("start", start),
                          ("campaign", {"schema": MULTI_CAMPAIGN_SCHEMA, "reader": MULTI_CLAIM_READER}), ("run", True)]
+
+
+def test_the_time_the_aircraft_take(built):
+    """§5 item 4, O18 (`multi.timing`; the review of MC4's timing): each landing's delay against its record; the spacing
+    at the threshold of successive landings on one runway that hold a commanded aircraft, the recorded aircraft landing
+    between them counted, in the loop and on the records; the pairs landed in the recorded order; a silent aircraft's
+    crossing is no landing; the readout of a window holds them."""
+    from ts_transformer.multi import timing
+    from ts_transformer.multi.windows import Anchors
+
+    windows, _, _ = built
+    window = Anchors(windows).window_of(windows[0], 130.0)                # a and b commanded, c recorded
+    records = window.commanded_all
+    c = next(f for f in window.scene.flights if f.key == "KXXX:c")
+    cycle_s = 1.0
+
+    def at(record, delay_s):
+        return {"runway_index": 0, "at_row": (record.landing_s + delay_s - record.first_step_s) / cycle_s}
+
+    # a lands 150 s late (after b, before c): the order of the pair reversed; b 10 s early
+    crossings = [at(records[0], 150.0), at(records[1], -10.0)]
+    items = timing.landed(records, crossings, cycle_s)
+    assert [x.key for x in items] == ["KXXX:a", "KXXX:b"]
+    assert np.allclose(timing.delays(items), [150.0, -10.0]) and timing.order(items) == (0, 1)
+    recorded = timing.recorded_landings(window, max(records[0].landing_s + 150.0, records[1].landing_s))
+    # c (in the air while the window flies) is its recorded aircraft; far (2 h later, landing far after) is not
+    assert recorded == [(c.runway_index, c.landing_s, False)] and c.landing_s - records[1].landing_s == 122.0
+    # in the loop: b (−10 s), a (+150 s), c; on the records: a, b, c 120 s and 122 s apart
+    assert np.allclose(timing.loop_spacings(items, recorded),
+                       [records[0].landing_s + 150.0 - (records[1].landing_s - 10.0), c.landing_s - records[0].landing_s - 150.0])
+    assert np.allclose(timing.record_spacings(records, recorded), [120.0, 122.0])
+    assert timing.spacings([(0, 10.0, True), (1, 5.0, False), (0, 40.0, False), (1, 15.0, False), (0, 70.0, False)]) \
+        == [30.0]                                                             # gaps that hold a commanded aircraft only
+    assert timing.quantiles([], (50,)) == {"n": 0} and timing.quantiles([1.0, 3.0], (50,))["p50"] == 2.0
+    ends = [SimpleNamespace(crossing=crossings[0], outcome="landed"),
+            SimpleNamespace(crossing=crossings[1], outcome="lost_separation")]          # silent b crossed: no landing
+    out = multi_train.window_timing(window, ends, cycle_s)
+    assert np.allclose(out["delays_s"], [150.0]) and out["order"] == [0, 0]
+    # every spacing within the window's own time (none to "far", 2 h later, or to another day)
+    assert out["spacing_s"] and max(out["spacing_s"] + out["record_spacing_s"]) < 400.0
+    far = windows[3]                                   # alone, 2 h after c: no neighbour from outside its own time
+    assert multi_train.window_timing(far, [SimpleNamespace(crossing=None, outcome="timeout")], cycle_s)[
+        "record_spacing_s"] == []
+
+
+def test_the_loops_crossing_time_is_the_timing_readouts(setup, monkeypatch):
+    """The review of MC4's timing (S3): the time of a loop landing that `multi.timing.landed` reads is the one the window
+    loop adds to the other aircraft's landings (`WindowLoop._landed`, D147)."""
+    from ts_transformer.experiments.post_window_loop import LANDED
+    from ts_transformer.multi import timing
+    from ts_transformer.tests.test_post_window_loop import _with_module
+    from ts_transformer.tests.test_post_window_multi import _multi
+
+    s = setup
+    _, loop_of = _multi(s)
+    loop = loop_of(_with_module(s["base"]))
+    crossing = {"at_row": 37.5, "runway_index": 0, "cross_m": 0.0, "height_m": 15.0}
+    monkeypatch.setattr(loop.speaking.loop, "outcome", lambda b: SimpleNamespace(outcome=LANDED, crossing=crossing))
+    loop._landed(np.array([True, False, False]))
+    (added,) = [x for x in loop.landings[1].landings if x.flight_key == loop.keys[0]]
+    (item,) = timing.landed(loop.records[:1], [crossing], loop.speaking.loop.params.cycle_s)
+    assert item.loop_s == added.time_s
+
+
+def test_a_round_of_stage_d_is_refused_unless_its_identity_is_the_campaigns(setup, tmp_path, monkeypatch):
+    """§7 row 3 (the review of MC4's timing, S2-3): `round_model` refuses a round whose identity is not the campaign's
+    — another seed, span, c_min, base — and a round not of that count; the campaign's own round opens."""
+    s = setup
+    short_round(monkeypatch, s)
+    context = _context(s)
+    start = _stage_c(s, tmp_path, context)
+    window = _ahead(s["windows"][0])
+    monkeypatch.setattr(multi_train, "draw_windows", lambda context, settings, rng: ([window], {"drawn": {REAL_KIND: 1}}))
+    settings = _multi_settings(start=start)
+    out = tmp_path / "stage_d"
+    post_train.open_campaign(out, {"settings": asdict(settings)}, {"head": "x", "dirty": False}, {},
+                             schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER)
+    post_train.run_campaign(out, settings, context, stage=stage_d())
+    assert not multi_train.round_model(context, settings, out, 0).training
+    for wrong in (replace(settings, seed=7), replace(settings, span_s=60.0), replace(settings, c_min=0.8)):
+        with pytest.raises(ValueError, match="another start, base, masks, token part, settings or round"):
+            multi_train.round_model(context, wrong, out, 0)
+    with pytest.raises(ValueError, match="another start, base"):
+        multi_train.round_model(replace(context, base_identity={"base": "another"}), settings, out, 0)
+    (out / "round_1").mkdir()
+    (out / "round_1" / "checkpoint.pt").write_bytes((out / "round_0" / "checkpoint.pt").read_bytes())
+    with pytest.raises(ValueError, match="or round than this campaign's"):
+        multi_train.round_model(context, settings, out, 1)

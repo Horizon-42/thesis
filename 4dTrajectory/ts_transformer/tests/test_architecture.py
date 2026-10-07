@@ -948,10 +948,11 @@ TRAINING_EXPORT_NAMES = {
 }
 
 
-def _experiments_imports_refused(source: str) -> list[str]:
-    """Each import of ``source`` from `experiments/` that is neither a stage C module (`post_*`), a name of prior §7
-    item 7's module nor a name of the Training export (`TRAINING_EXPORT_NAMES`), by the names imported; a relative import is refused outright (a runner's imports are qualified,
-    L1)."""
+def _experiments_imports_refused(source: str, own: tuple[str, ...] = ("post_",)) -> list[str]:
+    """Each import of ``source`` from `experiments/` that is neither a stage C module (`post_*`; ``own``: the prefixes of
+    the runners' own stage too), a name of prior §7 item 7's module nor a name of the Training export
+    (`TRAINING_EXPORT_NAMES`), by the names imported; a relative import is refused outright (a runner's imports are
+    qualified, L1)."""
     refused = []
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.ImportFrom) and node.level:
@@ -961,18 +962,18 @@ def _experiments_imports_refused(source: str) -> list[str]:
             if module.split(".")[0] != "experiments":
                 continue
             if module == "experiments":
-                refused += [f"from experiments import {a.name}" for a in node.names if not a.name.startswith("post_")]
+                refused += [f"from experiments import {a.name}" for a in node.names if not a.name.startswith(own)]
             elif module in TRAINING_EXPORT_NAMES:
                 refused += [f"from {module} import {a.name}" for a in node.names
                             if a.name not in TRAINING_EXPORT_NAMES[module]]
             elif module == SPEAKING_LOOP:
                 refused += [f"from {module} import {a.name}" for a in node.names if a.name not in SPEAKING_LOOP_NAMES]
-            elif not module.split(".")[1].startswith("post_"):
+            elif not module.split(".")[1].startswith(own):
                 refused += [f"from {module} import {a.name}" for a in node.names]
         elif isinstance(node, ast.Import):
             refused += [f"import {_package_relative(a.name)}" for a in node.names
                         if _package_relative(a.name).split(".")[0] == "experiments"
-                        and not _package_relative(a.name).startswith("experiments.post_")]
+                        and not _package_relative(a.name).split(".", 1)[-1].startswith(own)]
     return refused
 
 
@@ -1180,10 +1181,13 @@ def _multi_runners() -> list[Path]:
 def test_the_stage_d_runners_take_only_the_names_of_the_interfaces():
     """Multi-aircraft control §10: stage D's runners import from `autopilot/` only the names of vocabulary §6, from
     `prior/` only those of prior §7, from `post/` only those of post-training §9, and from `experiments/` only stage C's
-    runners (their names in §9) and the shared step of the loop."""
+    runners (their names in §9), stage D's own runners (`multi_validation` reads `multi_train`'s stage, as stage C's
+    validation reads `post_train`'s: stage D's requests item 36) and the shared step of the loop."""
     assert _multi_runners(), "no runner of stage D; this test would pass vacuously"
     for path in _multi_runners():
         source = path.read_text(encoding="utf-8")
         for refused in (_autopilot_imports_refused(source), _prior_imports_refused(source), _post_imports_refused(source),
-                        _experiments_imports_refused(source)):
+                        _experiments_imports_refused(source, ("post_", "multi_"))):
             assert not refused, f"{path.name}: {refused}"
+    assert _experiments_imports_refused("from ts_transformer.experiments.multi_train import stage_d\n") == [
+        "from experiments.multi_train import stage_d"]                   # stage C's runners do not reach stage D's
