@@ -1683,3 +1683,31 @@ window in one process. Tests: `tests/test_post_ceiling.py`.
 
     python run_ts.py post_ceiling --campaign 4dTrajectory/outputs/POOLED/post/<campaign id> --models start 6 13 \
         --draws 32 --out <a new directory> [--speak-workers 4]
+
+### R65 · `run_ts.py post_train` — stage C's post-training campaign: branch training (D94) or the landed sentences (P49)
+
+2026-10-07. One campaign of rounds in windows of recorded traffic, one commanded aircraft each (post-training §2, §8
+C10, C14, C16, C17). `--method` (required, a setting of the campaign):
+- `branch` (C10): each window spoken, then K continuations at its branch points, and the groups whose rewards differ
+  learned with the clipped surrogate;
+- `landed` (P49): each window spoken `--continuations` times, its best landed sentence kept, and the kept words
+  learned (their negative log-likelihood).
+
+Both keep the pull toward the base and the data term, and each round ends with the selection readout and a
+checkpoint.
+- The start is the base with zero-output traffic modules, or a round of another campaign (`--start-campaign`,
+  `--start-round`; D162: a seed other than the source's).
+- A resume continues from the last checkpoint and may raise `--rounds` (D157).
+- `--speak-workers` speaks the batches in worker processes, measured against the host's and the GPU's memory before
+  the first round (O15).
+- `--select-seed`: the selection readout's windows and numbers, apart from `--seed` (C10's: 1337), so that a campaign
+  from a round reads its source's select windows.
+- A clean tree unless `--smoke`; formal runs from a detached run worktree (D163).
+- Writes `campaign.json` (`ts-post-train-v1`) and, for each round, `round.json` and `checkpoint.pt`
+  (`ts-post-checkpoint-v1`).
+- Tests: `tests/test_post_train.py`, `tests/test_post_landed.py`.
+
+    python run_ts.py post_train --method landed --prior <base> --instructions <artefact> --executor <spec> \
+        --windows <census> --out 4dTrajectory/outputs/POOLED/post/<campaign id> --rounds 6 --continuations 8 \
+        --start-campaign 4dTrajectory/outputs/POOLED/post/post_train_20261006 --start-round 8 --seed 2024 \
+        --select-seed 1337 --update-groups 16 …   # the readout's seed: C10's select windows and numbers

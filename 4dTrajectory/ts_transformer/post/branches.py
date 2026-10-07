@@ -54,6 +54,14 @@ def continuation_numbers(seed: int, round_: int, window: int, branch: int, k: in
     return np.random.default_rng([seed, round_, window, branch, k])
 
 
+def landed_numbers(seed: int, round_: int, window: int, draw: int) -> np.random.Generator:
+    """The random numbers of draw ``draw`` of window ``window`` in round ``round_`` of a campaign that trains on the landed
+    sentences (P49): draw 0 is the window's first sentence (`first_numbers`), draw d a stream of its own (its fourth
+    number, 2**30, is no Δ row of a continuation's)."""
+    return first_numbers(seed, round_, window) if draw == 0 else np.random.default_rng([seed, round_, window, 1 << 30,
+                                                                                        draw])
+
+
 def branch_points(start: int, end_step: int, interval_s: float) -> list[int]:
     """The branch points of a first sentence (module docstring), as Δ rows: the first predicted step ``start`` and every
     `BRANCH_EVERY_S` after it, before its event at Δ row ``end_step``."""
@@ -127,3 +135,26 @@ def samples(groups: Sequence[Group], device: torch.device, part_width: int = 0) 
     advantage = torch.tensor([a for _, a, _ in items], dtype=torch.float32, device=device)[:, None] * counted
     return Samples(rows, Permitted.join([s.permitted for s, _, _ in items]), traffic_of(tokens, device, part_width),
                    advantage, counted)
+
+
+@dataclass(frozen=True)
+class Landed:
+    """A window's kept sentence in a campaign that trains on the landed sentences (P49): the window (its place in the
+    round) and its landed sentence of the highest reward among its draws."""
+
+    window: int
+    sentence: Sentence
+
+
+def landed_samples(kept: Sequence[Landed], device: torch.device) -> Samples:
+    """The loss's batch of kept sentences (`post.loss.landed_step`): every row a sentence said counts (its words are
+    the targets), the speaker's records joined and the tokens padded to the longest. The advantage is not read by that
+    loss; it is the counted rows, so the batch is a `Samples`."""
+    if not kept:
+        raise ValueError("no kept sentence: no sample")
+    rows = collate([k.sentence.rows for k in kept], device)
+    length = rows.asked.shape[1]
+    empty = np.zeros((0, kept[0].sentence.tokens[0].shape[1]), dtype=np.float32)
+    tokens = [k.sentence.tokens + [empty] * (length - len(k.sentence.tokens)) for k in kept]
+    return Samples(rows, Permitted.join([k.sentence.permitted for k in kept]), traffic_of(tokens, device),
+                   rows.asked.to(torch.float32), rows.asked)

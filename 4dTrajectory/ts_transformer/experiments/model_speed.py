@@ -377,7 +377,7 @@ def main(argv: list[str] | None = None) -> int:
             "instructions", "executor", "prior", "windows", "procedure_root")}}}
         require_conforming_closed_loop(Path(record["inputs"]["instructions"]),
                                        Path(record["inputs"]["executor"]))     # D69: the checks run here (D73)
-        seed = settings_of(record).seed
+        seed = settings_of(record).select_seed                    # the selection readout's numbers (C17)
         subject = {"stage": "C", "campaign": repo_relative(campaign), "round": args.round, "split": SPLIT}
         for name in args.devices:
             context, model, windows = open_round(campaign, record, args.round, torch.device(name))

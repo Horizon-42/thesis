@@ -48,8 +48,8 @@ from flight_scenarios.procedure_final import DEFAULT_PROCEDURE_ROOT
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
 from ts_transformer.experiments.post_branches import branch_round
 from ts_transformer.experiments.post_train import (
-    KINDS, STAGE_C, Context, Settings, batches, draw_round, open_context, selection_readout, selection_windows,
-    speak_round, start_model, train_pass,
+    BRANCH, KINDS, STAGE_C, Context, Settings, batches, draw_round, open_context, selection_readout,
+    selection_windows, speak_round, start_model, train_pass,
 )
 from ts_transformer.experiments.post_window_loop import checked_edges
 from ts_transformer.io_utils import utc_now, write_json_atomic
@@ -278,7 +278,7 @@ def main(argv: list[str] | None = None) -> int:
     settings = Settings(1, {kind: getattr(args, f"windows_{kind.lower()}") for kind in KINDS}, args.batch_windows,
                         args.continuations, args.seed, args.prior_lr, args.traffic_lr, args.weight_decay,
                         args.update_groups, args.data_sentences, args.select_per_airport, args.traffic_hidden,
-                        args.traffic_heads, None)                     # the base's start (D29): the profile's model
+                        args.traffic_heads, None, BRANCH, args.seed)  # the base's start (D29), D94's method, the readout's seed
     _, opened, _ = require_conforming_closed_loop(instructions, executor)
     edges_reference = census / "conformance" / "edges.npz"
     checked_edges(edges_reference)

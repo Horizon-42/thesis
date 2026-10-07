@@ -282,3 +282,64 @@ labelled words: not a model's result, §5 item 4).
 | select | 20min | compressed_0.6 | 2330 | 152 (anchor 2, later 150) | 4.0 / 8.0 / 13.0 | 0.0 / 2.0 | 30.2 / 12.0 / 0.0 / 5.7 | 30.1 / 12.9 / 2.3 / 5.2 |
 | select | 20min | compressed_0.8 | 2330 | 63 (anchor 2, later 61) | 4.0 / 8.0 / 13.0 | 0.0 / 2.0 | 18.2 / 10.5 / 0.0 / 5.6 | 20.2 / 11.4 / 2.7 / 4.9 |
 | select | 20min | real | 2500 | 11 (anchor 2, later 9) | 4.0 / 8.0 / 13.0 | 0.0 / 2.0 | 7.4 / 5.7 / 0.0 / 4.6 | 9.8 / 6.2 / 2.7 / 3.9 |
+
+## 11 MC4 · the windows of several spans (notes/stage_d.md 一; 2026-10-07)
+
+- dev-two-tier (8eeaf4bf) merged into `dev-multi-control` (a fast-forward). The windows of several spans (D146 after
+  O16) and D166 item 19 built, reviewed (opus, two rounds: S2 the memory measure of every span, fixed by
+  `post_train.measured_batches`; S2 the readout of two spans untested, tested; clean), committed **6cc49ad1**: each
+  kind's count in equal parts of the spans (1,000 → 334 / 333 / 333), each window's span drawn with the round's numbers,
+  the counts by kind and span; a batch of one span up to `batch_rows` commanded aircraft (`post_train.batches`, stage
+  C's batches unchanged, checked by the reviewer on 3,000 random inputs); the select set, the readouts and the
+  validation readout by span; the identity with `spans_s`, `per_kind`, `per_span`; `multi_train.require_finished`.
+  Tests: the post_* and multi_* files and `test_architecture` (D149's digests and MC2's check with stage C's numbers
+  among them) passed. Readings 37–43 in the requests note (rewritten, the decided items deleted).
+- MC4's smoke (notes/stage_d.md 二 1; scratch `/tmp/claude-1000/mc4/smoke`, from 6cc49ad1 with the token part's fix of
+  bd6dd1be in the tree for the resume): `multi_train --smoke`, start round 6 of `post_train_20261006`, seed 2027, 6
+  windows of each kind over the spans 300, 600 and 1200 s, `batch_rows` 64, 2 select windows an airport and span; two
+  rounds, exit 0 (round 0 about 5 min: 6 batches of one span each, 46 commanded aircraft, 31 landed, 14 lost separation,
+  1 timeout); the draw 2 of each kind and span, no shortfall, the windows without a later aircraft counted by span (2,
+  1, 1). The resume (`--rounds 3`, 2 speaking workers): the O15 measure on the first batch of each span (9, 13 and 18
+  rows; one worker's host peak 1.5 GB, GPU 2.0 GB; the pass 2.1 GB), round 2 spoken by the workers, exit 0; round 2's
+  identity holds three rounds, the spans and their counts, stage C's round as its start. The smoke's log warned of
+  `log1p` (invalid value) on every call: the token part read `Heard.inputs` at 0, so the unused times since went
+  negative (no value read changed); fixed in bd6dd1be.
+- MC5's runner `experiments/multi_profile.py` built, reviewed (opus, two rounds: S2 the workers not refused where they
+  do not fit, S2 the worker's measure spoken with the stage's start model and not the round's — the campaign's O15 check
+  too, fixed by `Speakers.measure(…, model)` and `post_train.campaign_model`, S2 the spread over all by window where an
+  anchor's windows of the spans are nested — now an anchor the unit; clean), committed **bd6dd1be**. MC5 at the formal
+  size started 2026-10-07 (scratch `/tmp/claude-1000/mc5/profile`): 1,000 windows of each kind, spans 300, 600, 1200 s,
+  `batch_rows` 64, 4 speaking workers, 100 select windows an airport and span read twice, start round 6, seed 2027.
+
+## 12 MC5 · the profile at the formal size (2026-10-07, bd6dd1be; scratch `/tmp/claude-1000/mc5/profile/profile.json`)
+
+Settings: 1,000 windows of each kind, spans 300, 600, 1200 s, c_min 0.8, `batch_rows` 64, K = 8, update groups 4, data
+sentences 64, 100 select windows an airport and span; start round 6 of `post_train_20261006`, seed 2027; 4 speaking
+workers asked. Started 05:39 UTC, stopped by name at part 2 at 06:19 UTC (exit 1): 4 workers do not fit on the GPU.
+
+- **The draw** (round 0): each kind 334 / 333 / 333 over the spans, no shortfall; left out (D146) real 0 / 2 / 3,
+  compressed 3 / 6 / 10; without a later aircraft (no compressed form) 245 / 83 / 24.
+- **The batches** (64 rows, one span each): 23 / 31 / 50 batches of 668 / 666 / 666 windows; almost every batch full (no
+  window above 64 rows).
+- **One batch of each span** in the campaign's process (GPU, two passes):
+
+  | Span | Windows | Time | Groups (informative) | Groups' bytes | GPU peak (allocator) | Host peak RSS |
+  |---|---|---|---|---|---|---|
+  | 300 s | 34 | 191 s | 29 | 28 MiB | 1.37 GiB | 4.69 GiB |
+  | 600 s | 24 | 284 s | 30 | 34 MiB | 1.89 GiB | 4.86 GiB |
+  | 1200 s | 15 | 641 s | 37 | 51 MiB | 3.57 GiB | 5.02 GiB |
+
+  The round's speaking in one process, from these: 23 × 191 + 31 × 284 + 50 × 641 s ≈ 12.6 h (an estimate: one batch a
+  span); the 20 min windows are 71 % of it.
+- **One speaking worker** (`Speakers.measure` on the first batch of each span, with round 0's model): its peak on the
+  GPU 3.71 GiB (CUDA context and allocator; 0.51 GiB after), on the host 1.69 GiB; besides in a round 0.02 GiB (the
+  readout's model) and 0.13 GiB of series (4,167 flights). The pass's update (4 groups, 96 groups written): its peak
+  2.18 GiB. Free: host 15.8 GiB, GPU 5.96 GiB.
+- **What fits**: 1 worker; 2, 3, 4 workers need 7.5, 11.2, 14.9 GiB of the GPU against 6.5 GiB (the host would hold
+  about 8). The GPU binds, through the 20 min batch: its peak grows with the batch's ticks, not only its rows.
+- Not measured (the profile stopped before part 3): the round's speaking by the workers, the selection readout and its
+  spread, the pass's time.
+- The user (2026-10-07): a campaign's workers are sized from the profile, never measured before each run (the measure
+  of every span was about 20 min a launch); built on `dev-multi-control` (`multi_train.profiled_fit`, `--profile`, each
+  worker's GPU capped at its share), in review.
+
