@@ -1046,3 +1046,48 @@ publisher still checks it (L27).
 - Relaunch: from `.claude/worktrees/run-post-ceiling`, detached at `67f5d25c`, its data trees linked to the live ones.
   It waited for another session's tests to end (rule 13). Output: `outputs/POOLED/post/ceiling_20261007`.
 
+**The run, continued (2026-10-07).**
+- On the GPU with 3 workers a draw of 1,000 windows took about 2 min (96 draws: about 3.2 h). The user asked for the
+  CPU with 8 workers. The GPU run was stopped after 15 draws, and its partial output (`config.json`) moved aside as
+  `.aborted-20261007T020311Z`.
+- CPU, 8 workers (04:03): about 47 s a draw. Each CPU worker holds about 0.55 GB of its own memory, against 1.5 GB for
+  a GPU worker.
+- The user asked for more workers. Restarted at 04:14 with 16 (a draw is 16 batches of 64 windows). The 8-worker
+  partial output was moved aside too.
+- With 16 workers, a draw still took about 50 s. A draw waits for its slowest batch before the next draw starts, and
+  the host's load was about 12. A runner that sends the next draws' batches before the current draw ends would use the
+  workers fully; it is not built.
+- Draw 0 equalled its round's `round.json` readout on the GPU and on the CPU, for round 6 and for round 8.
+- The run ended 05:27, exit 0. Sealed: `logs/` (the run's log and launch script), `SHA256SUMS` (7 files, checked), the
+  directory read-only. The run worktree was removed, its data links unlinked first.
+
+**The ceiling readout** (`outputs/POOLED/post/ceiling_20261007`; the 1,000 select windows of the selection readout, 32
+draws each; the share of windows landed in at least one of the first n draws; no conclusion is drawn here, D7):
+
+| Model | n = 1 | 2 | 4 | 8 | 16 | 32 | Never landed | Lost to separation in every draw | Mean best reward, n = 1 / 32 |
+|---|---|---|---|---|---|---|---|---|---|
+| Start (the base with zero-output traffic modules) | 79.5 % | 88.1 % | 94.3 % | 97.5 % | 98.7 % | 99.3 % | 7 | 5 | 0.787 / 0.987 |
+| Round 6 | 85.1 % | 92.3 % | 95.7 % | 97.9 % | 98.6 % | 99.3 % | 7 | 5 | 0.842 / 0.987 |
+| Round 8 | 85.7 % | 92.4 % | 96.5 % | 98.2 % | 99.0 % | 99.4 % | 6 | 5 | 0.849 / 0.988 |
+
+By airport (200 windows each; n = 1 / 4 / 32, and the windows never landed):
+
+| Airport | Start | Round 6 | Round 8 |
+|---|---|---|---|
+| KMSY | 83.5 / 98.0 / 100 %, 0 | 88.0 / 98.5 / 100 %, 0 | 90.0 / 99.5 / 100 %, 0 |
+| KRDU | 72.0 / 93.5 / 99.0 %, 2 | 84.0 / 93.5 / 99.0 %, 2 | 81.0 / 97.0 / 99.0 %, 2 |
+| KSJC | 80.0 / 92.0 / 99.0 %, 2 | 86.0 / 96.5 / 99.0 %, 2 | 86.5 / 96.5 / 99.5 %, 1 |
+| KSMF | 82.0 / 96.0 / 99.5 %, 1 | 81.0 / 95.0 / 99.0 %, 2 | 83.0 / 94.0 / 99.5 %, 1 |
+| KSTL | 80.0 / 92.0 / 99.0 %, 2 | 86.5 / 95.0 / 99.5 %, 1 | 88.0 / 95.5 / 99.0 %, 2 |
+
+**The windows never landed** (10 windows across the three models, all real windows). Four were never landed by any of
+the three models:
+- 263 (KRDU, EDV5114): `dynamics_failure` in all 96 draws;
+- 350 (KRDU, N592DR), 549 (KSJC, SWA3106) and 700 (KSMF, SWA2234): lost separation in all 96 draws.
+
+Pairs: rounds 6 and 8 share 5, round 6 and the start 5, round 8 and the start 4. The other six windows lost
+separation in most draws and landed in a few:
+- 486 (KSJC) and 685 (KSMF) were never landed by the start or round 6 respectively;
+- 871 and 876 (KSTL) were never landed by the start, but landed 3–4 and 10–11 times in 32 by rounds 6 and 8;
+- 900 and 906 (KSTL) were never landed by round 8, or by rounds 6 and 8.
+
