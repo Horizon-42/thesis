@@ -244,6 +244,10 @@ def test_a_kept_sentence_goes_from_the_speaking_through_the_workers_to_the_pass(
     assert [k.window for k in kept] == [0, 1] and all(k.sentence.reward == 1.0 for k in kept)
     passed = post_train.landed_train_pass(model, context, optimizer, here, settings, np.random.default_rng(0))
     assert passed["updates"] == 2 and passed["words"] > 0 and passed["nll"] > 0.0
+    twice = post_train.landed_train_pass(model, context, optimizer, here, replace(settings, epochs=2),
+                                         np.random.default_rng(0))                      # D169: each pass named alike
+    assert twice["updates"] == 4 and [p["updates"] for p in twice["passes"]] == [2, 2]
+    assert all("nll" in p and "surrogate" not in p and "clipped_share" not in p for p in twice["passes"])
 
 
 def test_the_runner_hands_the_method_s_stage_to_the_workers_and_the_campaign(tmp_path, monkeypatch):

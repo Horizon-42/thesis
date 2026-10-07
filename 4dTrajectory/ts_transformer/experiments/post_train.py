@@ -27,7 +27,8 @@ EACH ROUND r:
    (`post.loss.one_pass`: the surrogate and the pull in eval mode, the data term with dropout, D107; every counted row
    alike, D115), the traffic modules at their own learning rate (`parameter_groups`); each update's gradient clipped to
    `Settings.clip_norm` before its step (D168; None, the default: not clipped), its norms and the share clipped in the
-   round's record.
+   round's record. `Settings.epochs` passes over the round's groups (D169; 1, the default: one pass), each in its own
+   order, every pass's ratio against the model at the round's start; each pass's means in the round's record.
 5. **The selection readout** (`selection_readout`): a fixed set of real windows of the select days (drawn once with the
    seed, D113 applied; the same numbers every round), the first pass only, by airport: the rewards, the outcomes (a loss
    of separation among them), the rows the speed-word mask acted (D101), the steps reading a faulty point and the losses
@@ -102,7 +103,7 @@ from ts_transformer.instructions.words import Words
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.post.branches import CONTINUATIONS, Group, Landed, Sentence, landed_numbers, landed_samples, samples
 from ts_transformer.post.fault_census import fault_rows
-from ts_transformer.post.loss import PassStart, Samples, landed_step, one_pass, stacked
+from ts_transformer.post.loss import LossParts, PassStart, Samples, landed_step, passes, stacked
 from ts_transformer.post.reward import LANDED
 from ts_transformer.post.runways import airport_separation
 from ts_transformer.post.scene import (
@@ -166,6 +167,9 @@ class Settings:
     #: not clipped. A setting added after campaigns were recorded: its default is the code's behaviour before it, and a
     #: record without it reads as that default (the user's standing permission, 2026-10-07; `SETTINGS_ADDED`).
     clip_norm: float | None = None
+    #: The passes over a round's groups (D169, `post.loss.passes`), each in its own order. A setting added after
+    #: campaigns were recorded, as ``clip_norm``: its default, 1, is the code's behaviour before it.
+    epochs: int = 1
 
     def __post_init__(self) -> None:
         if set(self.per_kind) != set(KINDS) or min(self.per_kind.values()) < 0 or not any(self.per_kind.values()):
@@ -178,6 +182,8 @@ class Settings:
             raise ValueError(f"a start is its campaign, round and checkpoint_sha256, not {sorted(self.start)}")
         if self.method not in METHODS:
             raise ValueError(f"method {self.method!r} is none of {METHODS}")
+        if self.epochs < 1:
+            raise ValueError(f"epochs {self.epochs}: at least one pass a round")
         if self.clip_norm is not None and not self.clip_norm > 0:
             raise ValueError(f"clip_norm {self.clip_norm} is positive, or None (not clipped)")
 
@@ -348,7 +354,7 @@ STAGE_C = Stage(start_model=lambda context, settings: start_model(context, setti
                 speak_batch=lambda *args: speak_batch(*args), read_batch=lambda *args: read_batch(*args), part_width=0,
                 train=lambda model, context, optimizer, directory, settings, rng, *, part_width: train_pass(
                     model, context, optimizer, directory, settings, rng, part_width=part_width,
-                    clip_norm=settings.clip_norm))
+                    clip_norm=settings.clip_norm, epochs=settings.epochs))
 #: Stage C's campaign that trains on the landed sentences (P49, `Settings.method` `LANDED_SENTENCES`): stage C's parts,
 #: but its batches spoken `Settings.continuations` times with their best landed sentences kept (`speak_landed_batch`),
 #: and its pass on them (`landed_train_pass`, its memory `landed_pass_memory`).
@@ -977,28 +983,53 @@ def pass_seed(seed: int, round_: int) -> int:
     return int(np.random.default_rng([seed, round_, 2]).integers(1 << 62))
 
 
+def pass_orders(rng: np.random.Generator, epochs: int) -> list[np.random.Generator]:
+    """The numbers of each of a round's ``epochs`` passes (D169): the first pass the round's own (``rng``, so one pass
+    is the pass before D169); pass e ≥ 1 its own, from the round's seed words (the seed, the round, 1) with 1 << 31 and
+    e after them — a key of five words that no branch's continuation draws (`post.branches.continuation_numbers`: its
+    fourth word a branch point, never 1 << 31)."""
+    words = [int(w) for w in np.atleast_1d(rng.bit_generator.seed_seq.entropy)]      # a word, or the round's words
+    return [rng, *(np.random.default_rng([*words, 1 << 31, e]) for e in range(1, epochs))]
+
+
+def pass_means(each: Sequence[Sequence[LossParts]]) -> dict[str, Any]:
+    """A round's pass record: its updates and means over every pass (no means where none updated), and each pass's
+    (D169)."""
+    every = [part for parts in each for part in parts]
+    return {"updates": len(every), **(stacked(every) if every else {}),
+            "passes": [{"updates": len(parts), **(stacked(parts) if parts else {})} for parts in each]}
+
+
 def train_pass(model: Prior, context: Context, optimizer: torch.optim.Optimizer, directory: Path, settings: Settings,
-               rng: np.random.Generator, *, part_width: int, clip_norm: float | None = None) -> dict[str, Any]:
-    """Step 4 of a round: one pass (`post.loss.one_pass`: the model at its start is the one that spoke the groups) over
-    `update_pairs` (``part_width``: the stage's token part), each update's gradient clipped to ``clip_norm`` (D168;
-    stage C's `Settings.clip_norm`, `STAGE_C`; None: not clipped, a stage whose settings do not name it); its means, or
-    no update where the round has no informative group."""
-    parts = one_pass(model, context.base, optimizer, update_pairs(directory, context.data, settings, rng, context.device,
-                                                                  part_width=part_width), clip_norm=clip_norm)
-    return {"updates": len(parts), **(stacked(parts) if parts else {})}
+               rng: np.random.Generator, *, part_width: int, clip_norm: float | None = None, epochs: int = 1
+               ) -> dict[str, Any]:
+    """Step 4 of a round: ``epochs`` passes (`post.loss.passes`: the model at the first's start is the one that spoke
+    the groups, every pass's ratio against it; D169) over `update_pairs` (``part_width``: the stage's token part), each
+    in its own order (`pass_orders`), each update's gradient clipped to ``clip_norm`` (D168). Stage C's
+    `Settings.clip_norm` and `Settings.epochs` (`STAGE_C`); None and 1 — not clipped, one pass — for a stage whose
+    settings do not name them. Its means (`pass_means`), or no update where the round has no informative group."""
+    each = passes(model, context.base, optimizer,
+                  [update_pairs(directory, context.data, settings, numbers, context.device, part_width=part_width)
+                   for numbers in pass_orders(rng, epochs)], clip_norm=clip_norm)
+    return pass_means(each)
 
 
 def landed_train_pass(model: Prior, context: Context, optimizer: torch.optim.Optimizer, directory: Path,
                       settings: Settings, rng: np.random.Generator, part_width: int = 0) -> dict[str, Any]:
-    """Step 4 of a round of a campaign that trains on the landed sentences (P49, `STAGE_C_LANDED`): one pass
-    (`post.loss.one_pass` with `landed_step`, each update's gradient clipped to `Settings.clip_norm`, D168) over
-    `landed_pairs`; its means (``nll``: the kept words' negative log-likelihood a row), or no update where the round
-    kept no sentence. ``part_width``: the skeleton's argument; stage C has no token part."""
-    parts = one_pass(model, context.base, optimizer, landed_pairs(directory, context.data, settings, rng, context.device),
-                     step=landed_step, clip_norm=settings.clip_norm)
-    means = stacked(parts) if parts else {}
-    return {"updates": len(parts), **{("nll" if key == "surrogate" else key): value for key, value in means.items()
-                                      if key != "clipped_share"}}
+    """Step 4 of a round of a campaign that trains on the landed sentences (P49, `STAGE_C_LANDED`): `Settings.epochs`
+    passes (`post.loss.passes` with `landed_step`, each in its own order, `pass_orders`; D169; each update's gradient
+    clipped to `Settings.clip_norm`, D168) over `landed_pairs`; its means (`pass_means`; ``nll``: the kept words'
+    negative log-likelihood a row), or no update where the round kept no sentence. ``part_width``: the skeleton's
+    argument; stage C has no token part."""
+    each = passes(model, context.base, optimizer,
+                  [landed_pairs(directory, context.data, settings, numbers, context.device)
+                   for numbers in pass_orders(rng, settings.epochs)], step=landed_step, clip_norm=settings.clip_norm)
+
+    def named(means: dict[str, Any]) -> dict[str, Any]:
+        return {("nll" if key == "surrogate" else key): value for key, value in means.items() if key != "clipped_share"}
+    record = pass_means(each)
+    return {**named({k: v for k, v in record.items() if k != "passes"}),
+            "passes": [named(means) for means in record["passes"]]}
 
 
 # ---- the selection readout
@@ -1111,7 +1142,7 @@ def inputs_here(inputs: Mapping[str, Any]) -> dict[str, Any]:
 
 #: The settings added after campaigns were recorded, each with its default: the code's behaviour before it (the user's
 #: standing permission, 2026-10-07): a record without one reads as its default, and no record is edited.
-SETTINGS_ADDED = ("clip_norm",)
+SETTINGS_ADDED = ("clip_norm", "epochs")
 
 
 def _but_rounds(inputs: Mapping[str, Any]) -> dict[str, Any]:
@@ -1347,6 +1378,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="how a round trains: branch groups (D94) or the landed sentences (P49)")
     parser.add_argument("--clip-norm", type=float,
                         help="D168: the norm each update's gradient is clipped to (default: not clipped)")
+    parser.add_argument("--epochs", type=int, default=Settings.epochs,
+                        help="D169: the passes over a round's groups, each in its own order (default: one)")
     parser.add_argument("--start-campaign", type=Path,
                         help="start from a round of this campaign (with --start-round); the base when left out")
     parser.add_argument("--start-round", type=int, help="the round of --start-campaign whose weights the campaign starts from")
@@ -1378,7 +1411,8 @@ def main(argv: list[str] | None = None) -> int:
     settings = Settings(args.rounds, {kind: getattr(args, f"windows_{kind.lower()}") for kind in KINDS},
                         args.batch_windows, args.continuations, args.seed, args.prior_lr, args.traffic_lr,
                         args.weight_decay, args.update_groups, args.data_sentences, args.select_per_airport,
-                        args.traffic_hidden, args.traffic_heads, start, args.method, args.select_seed, args.clip_norm)
+                        args.traffic_hidden, args.traffic_heads, start, args.method, args.select_seed, args.clip_norm,
+                        args.epochs)
     git = git_state()
     if git["dirty"] and not args.smoke:
         parser.error("a campaign that is not a smoke runs on a clean checkout")

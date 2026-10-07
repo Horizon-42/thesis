@@ -136,7 +136,11 @@ def test_the_pass_reads_the_groups_file_by_file_a_few_at_a_time(setup, tmp_path)
     assert any(not torch.equal(a, p) for a, p in zip(before, model.parameters()))
     empty = tmp_path / "empty"
     empty.mkdir()
-    assert train_pass(model, context, optimizer, empty, settings, np.random.default_rng(0), part_width=0) == {"updates": 0}
+    assert train_pass(model, context, optimizer, empty, settings, np.random.default_rng(0), part_width=0) == {
+        "updates": 0, "passes": [{"updates": 0}]}
+    twice = train_pass(model, context, optimizer, directory, settings, np.random.default_rng(0), part_width=0, epochs=2)
+    assert twice["updates"] == 6 and [p["updates"] for p in twice["passes"]] == [3, 3]      # D169: each pass's means
+    assert twice["loss"] == pytest.approx(np.mean([p["loss"] for p in twice["passes"]]))
 
 
 def test_the_pass_shuffles_each_file_s_groups_by_the_round_s_numbers(tmp_path, monkeypatch):
@@ -825,22 +829,57 @@ def test_a_setting_added_after_a_record_reads_as_its_default_and_a_resume_compar
     for wrong in (0.0, -1.0):
         with pytest.raises(ValueError, match="clip_norm"):
             _settings(clip_norm=wrong)
+    record = json.loads((out / "campaign.json").read_text())
+    del record["inputs"]["settings"]["epochs"]                              # and from before D169
+    (out / "campaign.json").write_text(json.dumps(record))
+    assert post_train.settings_of(record) == _settings()
+    assert len(open_campaign(out, _inputs(_settings(), tmp_path), git, {})["resumed"]) == 2
+    with pytest.raises(SystemExit, match="other inputs or settings"):
+        open_campaign(out, _inputs(_settings(epochs=2), tmp_path), git, {})
+    with pytest.raises(ValueError, match="epochs"):
+        _settings(epochs=0)
 
 
-def test_stage_c_s_pass_clips_to_its_setting(monkeypatch):
-    """D168: stage C's pass (`STAGE_C`, `STAGE_C_LANDED`) hands `Settings.clip_norm` to `one_pass`; stage D's (the
-    skeleton's default pass: its settings do not name a clip) clips nothing."""
+def test_stage_c_s_pass_clips_and_passes_as_its_settings_say(monkeypatch):
+    """D168, D169: stage C's pass (`STAGE_C`, `STAGE_C_LANDED`) hands `Settings.clip_norm` to `post.loss.passes` and
+    makes `Settings.epochs` passes, each with its own numbers (`pass_orders`); stage D's (the skeleton's default pass:
+    its settings name neither) clips nothing and makes one pass."""
     from ts_transformer.experiments.multi_train import stage_d
 
-    seen = []
-    monkeypatch.setattr(post_train, "one_pass", lambda *a, step=None, clip_norm: (seen.append(clip_norm), [])[1])
-    monkeypatch.setattr(post_train, "update_pairs", lambda *a, **k: [])
-    monkeypatch.setattr(post_train, "landed_pairs", lambda *a, **k: [])
+    seen, numbers = [], []
+    monkeypatch.setattr(post_train, "passes", lambda model, base, optimizer, each, step=None, clip_norm=None: (
+        seen.append((clip_norm, len(each))), [list(pairs) for pairs in each])[1])
+    monkeypatch.setattr(post_train, "update_pairs", lambda directory, data, settings, rng, device, **k: (
+        numbers.append(rng), [])[1])
+    monkeypatch.setattr(post_train, "landed_pairs", lambda directory, data, settings, rng, device: (
+        numbers.append(rng), [])[1])
     context = SimpleNamespace(base=None, data=None, device=CPU)
+    settings = _settings(clip_norm=0.5, epochs=2)
     for stage in (post_train.STAGE_C, post_train.STAGE_C_LANDED):
-        assert stage.train(None, context, None, None, _settings(clip_norm=0.5), None, part_width=0) == {"updates": 0}
-    stage_d().train(None, context, None, None, _settings(clip_norm=0.5), None, part_width=0)
-    assert seen == [0.5, 0.5, None]
+        rng = np.random.default_rng([1337, 0, 1])
+        assert stage.train(None, context, None, None, settings, rng, part_width=0) == {
+            "updates": 0, "passes": [{"updates": 0}, {"updates": 0}]}
+        assert numbers[-2] is rng and numbers[-1] is not rng
+    stage_d().train(None, context, None, None, settings, np.random.default_rng(0), part_width=0)
+    assert seen == [(0.5, 2), (0.5, 2), (None, 1)]
+
+
+def test_each_pass_has_numbers_of_its_own_and_the_first_is_the_round_s():
+    """D169: the first pass reads the round's numbers as the pass before D169 did; a later pass, a child of them (from
+    the seed, the round and the pass), draws another order; the round's own numbers are not moved by the children."""
+    rng = np.random.default_rng([2026, 3, 1])
+    first, second, third = post_train.pass_orders(rng, 3)
+    assert first is rng
+    assert list(first.permutation(20)) == list(np.random.default_rng([2026, 3, 1]).permutation(20))
+    assert list(second.permutation(20)) != list(np.random.default_rng([2026, 3, 1]).permutation(20))
+    assert list(second.permutation(20)) != list(third.permutation(20))
+    again = post_train.pass_orders(np.random.default_rng([2026, 3, 1]), 3)[1]
+    assert list(again.permutation(20)) == list(post_train.pass_orders(np.random.default_rng([2026, 3, 1]), 3)[1]
+                                               .permutation(20))
+    assert post_train.pass_orders(rng, 1) == [rng]
+    seed, round_ = 2026, 3                      # no continuation's numbers (their fourth word a branch point)
+    later = post_train.pass_orders(np.random.default_rng([seed, round_, 1]), 2)[1]
+    assert later.random() == np.random.default_rng([seed, round_, 1, 1 << 31, 1]).random()
 
 
 def test_a_campaign_recorded_in_a_worktree_resumes_from_another_checkout(tmp_path, monkeypatch):

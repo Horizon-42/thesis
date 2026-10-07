@@ -11,7 +11,7 @@ import torch
 from ts_transformer.instructions.words import Words
 from ts_transformer.post.edges import TOKEN_FEATURES
 from ts_transformer.post.loss import (
-    CLIP, PassStart, Samples, data_term, one_pass, pull_to_base, stacked, surrogate, update_loss, update_step,
+    CLIP, PassStart, Samples, data_term, one_pass, passes, pull_to_base, stacked, surrogate, update_loss, update_step,
 )
 from ts_transformer.post.traffic_attention import (
     Traffic, TrafficConfig, add_traffic_attention, parameter_groups, traffic_modules, traffic_of,
@@ -334,3 +334,30 @@ def test_a_clip_norm_holds_each_update_s_gradient_to_it_and_counts_the_updates_c
             assert all(torch.equal(a, b) for a, b in zip(held.state_dict().values(), model.state_dict().values()))
         stepped.clear()
 
+
+def test_every_pass_of_a_round_is_against_the_model_that_spoke_its_samples():
+    """D169: E passes share one `PassStart` — the model at the first pass's start, its weights unchanged by the passes
+    — and each pass draws its own updates (one pass is the loop before D169: the test of D168 above)."""
+    base, samples, data, fresh = _clip_world()
+    model, optimizer = fresh()
+    spoke = copy.deepcopy(model.state_dict())
+    starts = []
+
+    def step(model_, start, base_, pieces, rows):
+        starts.append(start)
+        return update_step(model_, start, base_, pieces, rows)
+
+    drawn = []
+
+    def pairs(e):
+        for k in range(2):
+            drawn.append((e, k))
+            yield [samples], data
+
+    torch.manual_seed(3)
+    each = passes(model, base, optimizer, [pairs(0), pairs(1)], step=step)
+    assert [len(parts) for parts in each] == [2, 2] and drawn == [(0, 0), (0, 1), (1, 0), (1, 1)]
+    assert len({id(s) for s in starts}) == 1
+    assert all(torch.equal(spoke[n], v) for n, v in starts[0].model.state_dict().items())
+    assert any(not torch.equal(spoke[n], v) for n, v in model.state_dict().items())
+    assert each[1][0].clipped > 0 or float(each[1][0].surrogate) != float(each[0][0].surrogate)  # moved from the start

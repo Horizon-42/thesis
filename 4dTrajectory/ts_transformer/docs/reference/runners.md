@@ -1707,6 +1707,9 @@ checkpoint.
 - `--clip-norm` (D168, C19): each update's gradient clipped to that norm before the optimizer's step; left out, not
   clipped (the behaviour before it; a record without the setting reads so). `round.json`'s pass gives the updates'
   gradient norms before the clip (mean, largest) and the share clipped.
+- `--epochs` (D169, C20): the passes over a round's groups (default 1, the behaviour before it), each in its own order
+  (the first the round's numbers, the others children of them), every pass's ratio against the model at the round's
+  start; `round.json`'s pass gives the means over every pass and each pass's (`passes`).
 - A clean tree unless `--smoke`; formal runs from a detached run worktree (D163).
 - Writes `campaign.json` (`ts-post-train-v1`) and, for each round, `round.json` and `checkpoint.pt`
   (`ts-post-checkpoint-v1`).

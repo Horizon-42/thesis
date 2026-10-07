@@ -38,6 +38,10 @@ whole update at once, is the readable reference `update_step` is checked against
 parameters, is scaled to that norm where its norm is above it, before the optimizer's step
 (`torch.nn.utils.clip_grads_with_norm_`, as `torch.nn.utils.clip_grad_norm_`). Every update's norm before the clip is
 kept (`LossParts.grad_norm`), clipped or not; with ``clip_norm`` None no gradient is touched (the pass before D168).
+
+**Passes per round** (D169, `passes`): E passes over a round's samples, each drawn in its own order by the caller, the
+ratio of every pass against the same `PassStart` (the model that spoke the samples, at the round's start), the clip of
+the ratio unchanged; one pass is `one_pass`.
 """
 
 from __future__ import annotations
@@ -252,8 +256,24 @@ def one_pass(model: Prior, base: Prior, optimizer: torch.optim.Optimizer,
     data term, drawn from ``pairs`` one at a time (a round's samples need not be held at once); one optimizer step for
     each, its gradient clipped to ``clip_norm`` first (D168; None: not clipped). The parts of each update, detached,
     with its gradient's norm before the clip."""
+    return passes(model, base, optimizer, [pairs], step, clip_norm)[0]
+
+
+def passes(model: Prior, base: Prior, optimizer: torch.optim.Optimizer,
+           each: Sequence[Iterable[tuple[Sequence[Samples], RowTensors]]], step: Callable[..., LossParts] = update_step,
+           clip_norm: float | None = None) -> list[list[LossParts]]:
+    """E passes over a round's samples (D169; E = ``len(each)``): the model at the start of the first is the one that
+    spoke them, and every pass's ratio is against it (one `PassStart`); pass e's updates drawn from ``each[e]`` (its own
+    order), each as `one_pass`'s. The parts of each pass's updates."""
     start = PassStart(model)
     parameters = [p for group in optimizer.param_groups for p in group["params"]]
+    return [_updates(model, start, base, optimizer, parameters, pairs, step, clip_norm) for pairs in each]
+
+
+def _updates(model: Prior, start: PassStart, base: Prior, optimizer: torch.optim.Optimizer,
+             parameters: Sequence[torch.nn.Parameter], pairs: Iterable[tuple[Sequence[Samples], RowTensors]],
+             step: Callable[..., LossParts], clip_norm: float | None) -> list[LossParts]:
+    """One pass's updates against ``start`` (`one_pass`)."""
     out = []
     for pieces, rows in pairs:
         optimizer.zero_grad(set_to_none=True)
