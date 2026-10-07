@@ -1168,4 +1168,14 @@ reads C10 as its start.
 - Resumed at 11:52 with the same command, now in a systemd user unit of its own (`systemd-run --user`, unit
   `post-landed-115211`, its cgroup checked). The half round is moved aside by `open_campaign`. The first run's log is
   kept as `campaign_1.log`.
+- Round 2 rerun ended 12:39 (84.8 %); round 3 ended 13:21 (85.1 %). The user's rule, 2026-10-07: if this round is
+  still flat, stop. My reading of "flat": below the start's 85.7 % plus the readout's noise, 86.9 %. A watcher in its
+  own systemd unit read round 3's readout after its checkpoint and stopped the campaign at 13:21:47. Round 4, just
+  begun, was moved aside as `round_4.aborted-…`.
+- Sealed: `logs/` (both runs' logs, the launch and the watcher), `SHA256SUMS` 78 files checked, read-only. The run
+  worktree was removed, its data links unlinked first.
+- Rounds 0–3 against the start (C10 round 8: 85.7 %, 11.7 %, 0.849): 84.2 / 84.5 / 84.8 / 85.1 % landed, 12.9 / 12.2 /
+  12.0 / 11.3 % lost separation. The table, the intent and my reading of why it did not help are in the experiment log,
+  `readouts/2026-10-07_stage_c_experiments.zh.md`, which also holds the next experiment: branch training with K = 16
+  (the user's priority, 2026-10-07; an experiment within the design, not a design change).
 
