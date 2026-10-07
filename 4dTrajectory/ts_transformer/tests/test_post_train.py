@@ -439,7 +439,7 @@ def test_n_workers_are_refused_by_name_where_one_workers_measured_memory_does_no
     speakers = Speakers(context, _settings(continuations=2), 2, CPU)
     try:
         settings = _settings(continuations=2)
-        measure = post_train.require_workers_fit(speakers, context, settings, 0)
+        measure = post_train.require_workers_fit(speakers, context, settings, 0, start_model(context, settings)[0])
         assert measure["pass"] is None and measure["measured"]["gpu"] is None and measure["measured"]["windows"] >= 1
         assert measure["measured"]["host"]["peak"] >= measure["measured"]["host"]["now"] > 0
         held = measure["measured"]["held"]
@@ -448,7 +448,7 @@ def test_n_workers_are_refused_by_name_where_one_workers_measured_memory_does_no
                                                    *start_model(context, settings)[0].buffers()))
         monkeypatch.setattr(post_train, "available_memory", lambda device: {"host": 0, "gpu": None})
         with pytest.raises(SystemExit, match=r"do not fit \(O15\): host: 2 workers speaking need"):
-            post_train.require_workers_fit(speakers, context, settings, 0)
+            post_train.require_workers_fit(speakers, context, settings, 0, start_model(context, settings)[0])
     finally:
         speakers.close()
 
@@ -848,6 +848,7 @@ def test_the_speaking_workers_run_the_stages_parts(setup, tmp_path):
         (directory / f"spoken_{k}").write_text("stage")
         if directory.name == "measured":                          # the measure: a real batch, whose series it weighs
             assert [windows[i].kind for i in places] == [INSERTED]  # of the stage's draw
+            (marks / "measured_with").write_text(repr(sum(float(p.detach().double().sum()) for p in model.parameters())))
             return post_train.speak_batch(model, context, windows, places, settings, round_, directory, k)
         return {"k": k, "windows": len(places), "groups": 0, "informative_groups": 0, "spoken_again": 0, "differed": [],
                 "reward_sum": 0.0, "faulty_steps": 0, "losses_reading_fault": 0, "outcomes": {}}
@@ -878,7 +879,12 @@ def test_the_speaking_workers_run_the_stages_parts(setup, tmp_path):
         assert [(x["k"], x["windows"]) for x in speakers.speak(model, windows, places, 0, tmp_path)] == [(0, 1), (1, 1)]
         assert list(marks.glob("started_*"))                     # the speaking workers' model: the stage's
         assert speakers.read(model, windows, places, "select") == [[("read", "select", 1)]] * 2
-        assert speakers.measure(0, measured)["windows"] == 1
+        given, _ = start_model(context, settings)               # the round's model, not the stage's start model
+        with torch.no_grad():
+            next(given.parameters()).add_(0.5)
+        assert speakers.measure(0, measured, given)["windows"] == 1
+        assert float((marks / "measured_with").read_text()) == sum(float(p.detach().double().sum()) for p in given.parameters())
+        assert not (measured / "measuring_model.pt").exists()
         with pytest.raises(ValueError, match="another stage"):
             post_train.speak_round(model, context, windows, settings, 0, tmp_path, speakers)
         with pytest.raises(ValueError, match="another stage"):

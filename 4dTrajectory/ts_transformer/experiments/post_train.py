@@ -490,13 +490,19 @@ class Speakers:
                                                           [self.stage.record(windows[i]) for i in p], draw)
                                          for p in places])
 
-    def measure(self, round_: int, directory: Path) -> dict[str, Any]:
+    def measure(self, round_: int, directory: Path, model: Prior) -> dict[str, Any]:
         """O15: one worker's memory at the formal size — the measured batches of round ``round_`` (`measured_batches`: stage
-        C's first batch) spoken by one worker with the model at the start (APPROXIMATION, stated: a resumed campaign's model says other words, so other groups and
-        lengths), its groups written to ``directory`` — its own peak host memory (sampled, not shared with the campaign's
-        process), and on the GPU its peak (the CUDA context and the most the allocator held), each with what it still
-        holds after the batch, and what a worker holds besides in a round (`_measure`)."""
-        return self.pool.submit(_measure, round_, str(directory)).result()
+        C's first batch) spoken by one worker with ``model``, the model the round starts from (`campaign_model`; it
+        reaches the worker as a file in ``directory``, deleted after), its groups written to ``directory`` — its own peak
+        host memory (sampled, not shared with the campaign's process), and on the GPU its peak (the CUDA context and the
+        most the allocator held), each with what it still holds after the batch, and what a worker holds besides in a
+        round (`_measure`)."""
+        state = directory / "measuring_model.pt"
+        torch.save(model.state_dict(), state)
+        try:
+            return self.pool.submit(_measure, round_, str(state), str(directory)).result()
+        finally:
+            state.unlink()
 
     @staticmethod
     def _results(state: Path, futures: list[Any]) -> list[Any]:
@@ -583,7 +589,7 @@ def _read(reading: int, state: str, split: str, places: list[int], records: list
             torch.cuda.empty_cache()
 
 
-def _measure(round_: int, directory: str) -> dict[str, Any]:
+def _measure(round_: int, state: str, directory: str) -> dict[str, Any]:
     """A worker's measure (`Speakers.measure`): the measured batches of round ``round_`` spoken one after another
     (`measured_batches`), its own host memory sampled meanwhile (`_PeakSampler`: the most of any), then its memory after
     them (`_memory_after_batch`: the GPU's peak the most of any) and what a worker holds besides
@@ -598,6 +604,8 @@ def _measure(round_: int, directory: str) -> dict[str, Any]:
     context, settings, stage = _worker_context()
     start = context.splits["train"]["start"]
     model, _ = stage.start_model(context, settings)
+    model.load_state_dict(torch.load(state, map_location=context.device, weights_only=True))
+    model.eval()
     windows, _ = stage.draw(context, settings, round_)
     found = stage.batches(windows, settings)
     measured = measured_batches(windows, found)
@@ -776,14 +784,15 @@ def available_memory(device: torch.device) -> dict[str, int | None]:
     return {"host": host, "gpu": int(free.strip()) * (1 << 20)}
 
 
-def require_workers_fit(speakers: Speakers, context: Context, settings: Settings, round_: int) -> dict[str, Any]:
+def require_workers_fit(speakers: Speakers, context: Context, settings: Settings, round_: int, model: Prior
+                        ) -> dict[str, Any]:
     """O15, before a campaign's rounds: one worker's memory measured on the measured batches of round ``round_``
-    (`Speakers.measure`, `measured_batches`) and this process's in one update of the pass on their groups
-    (`pass_memory_of`), and
+    (`Speakers.measure`, `measured_batches`; spoken with ``model``, the round's start: `campaign_model`) and this
+    process's in one update of the pass on their groups (`pass_memory_of`), and
     the workers refused by name where they do not fit (`workers_fit`). The measures are printed (the campaign's log)
     and returned."""
     with tempfile.TemporaryDirectory(prefix="post_measure_") as scratch:
-        measured = speakers.measure(round_, Path(scratch))
+        measured = speakers.measure(round_, Path(scratch), model)
         passed = pass_memory_of(context, settings, Path(scratch), speakers.stage)
     available = available_memory(context.device)
     out = {"speak_workers": speakers.workers, "measured": measured, "pass": passed, "available": available}
@@ -1092,6 +1101,19 @@ def round_model(context: Context, settings: Settings, out: Path, round_: int | N
     return model.eval()
 
 
+def campaign_model(out: Path, context: Context, settings: Settings, stage: Stage = STAGE_C
+                   ) -> tuple[Prior, torch.optim.Optimizer]:
+    """The model and optimizer that campaign ``out``'s next round starts from: a new campaign's the stage's start
+    (`Stage.start`), a resumed one's its last checkpoint loaded into the stage's model (`Stage.start_model`)."""
+    first = done_rounds(out)
+    model, optimizer = stage.start_model(context, settings) if first else stage.start(context, settings)
+    if first:
+        state = torch.load(out / f"round_{first - 1}" / "checkpoint.pt", weights_only=False, map_location=context.device)
+        model.load_state_dict(state["model"])
+        optimizer.load_state_dict(state["optimizer"])
+    return model, optimizer
+
+
 def run_campaign(out: Path, settings: Settings, context: Context, speakers: Speakers | None = None,
                  stage: Stage = STAGE_C) -> None:
     """The rounds not yet done (module docstring), each closed by its checkpoint; the speaking by ``speakers`` when
@@ -1100,11 +1122,7 @@ def run_campaign(out: Path, settings: Settings, context: Context, speakers: Spea
     model (`Stage.start_model`)."""
     _require_stage(speakers, stage)
     first = done_rounds(out)
-    model, optimizer = stage.start_model(context, settings) if first else stage.start(context, settings)
-    if first:
-        state = torch.load(out / f"round_{first - 1}" / "checkpoint.pt", weights_only=False, map_location=context.device)
-        model.load_state_dict(state["model"])
-        optimizer.load_state_dict(state["optimizer"])
+    model, optimizer = campaign_model(out, context, settings, stage)
     select = stage.selection(context, settings, "select")
     for round_ in range(first, settings.rounds):
         directory = out / f"round_{round_}"
@@ -1204,8 +1222,8 @@ def main(argv: list[str] | None = None) -> int:
               "smoke": args.smoke}
     try:
         open_campaign(out, inputs, git, opened["checks"])           # a resume of other inputs refused before the measure
-        if speakers is not None and done_rounds(out) < settings.rounds:
-            require_workers_fit(speakers, context, settings, done_rounds(out))       # O15, before any round
+        if speakers is not None and done_rounds(out) < settings.rounds:          # O15, before any round
+            require_workers_fit(speakers, context, settings, done_rounds(out), campaign_model(out, context, settings)[0])
         run_campaign(out, settings, context, speakers)
     finally:
         if speakers is not None:

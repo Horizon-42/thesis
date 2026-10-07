@@ -70,7 +70,8 @@ from flight_scenarios.procedure_final import DEFAULT_PROCEDURE_ROOT
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
 from ts_transformer.experiments.post_branches import Rules, branch_round
 from ts_transformer.experiments.post_train import (
-    Context, Speakers, Stage, batches, done_rounds, open_campaign, open_context, require_workers_fit, round_start,
+    Context, Speakers, Stage, batches, campaign_model, done_rounds, open_campaign, open_context, require_workers_fit,
+    round_start,
     run_campaign, settings_of, source_campaign, speak_round, start_checkpoint, start_model, start_of,
 )
 from ts_transformer.experiments.post_window_loop import LANDED, LOST_SEPARATION, WindowLoop, checked_edges
@@ -460,8 +461,9 @@ def stage_d() -> Stage:
                  part_width=TokenPart.width, batches=lambda windows, settings: batches(windows, settings.batch_rows))
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
+def add_arguments(parser: argparse.ArgumentParser) -> None:
+    """The inputs and settings of a campaign of stage D (`settings_from`), which its profile (`multi_profile`) takes
+    too."""
     parser.add_argument("--prior", type=Path, required=True, help="the base: a prior_train run's directory")
     parser.add_argument("--instructions", type=Path, required=True)
     parser.add_argument("--executor", type=Path, required=True, help="the directory of the artefact's executor spec")
@@ -470,7 +472,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--procedure-root", type=Path, default=DEFAULT_PROCEDURE_ROOT)
     parser.add_argument("--start-campaign", type=Path, required=True, help="stage C's campaign (post_train)")
     parser.add_argument("--start-round", type=int, required=True, help="its chosen round (§5 item 1, D164)")
-    parser.add_argument("--out", type=Path, required=True, help="the campaign's directory (new, or a resume)")
     parser.add_argument("--rounds", type=int, required=True)
     for kind in KINDS:
         parser.add_argument(f"--windows-{kind}", type=int, required=True, help=f"the {kind} windows of a round (O16)")
@@ -488,6 +489,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--select-per-airport", type=int, required=True)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--speak-workers", type=int, default=1)
+
+
+def settings_from(args: argparse.Namespace, start: dict[str, Any]) -> MultiSettings:
+    """The settings of `add_arguments`' ``args`` with the start ``start`` (`post_train.start_of`)."""
+    return MultiSettings(args.rounds, {kind: getattr(args, f"windows_{kind}") for kind in KINDS}, args.spans_s,
+                         args.c_min, args.batch_rows, args.continuations, args.seed, args.prior_lr, args.traffic_lr,
+                         args.weight_decay, args.update_groups, args.data_sentences, args.select_per_airport, start)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
+    add_arguments(parser)
+    parser.add_argument("--out", type=Path, required=True, help="the campaign's directory (new, or a resume)")
     parser.add_argument("--smoke", action="store_true", help="SMOKE: a tree with changes too; no result")
     args = parser.parse_args(argv)
     if args.speak_workers < 1:
@@ -502,10 +516,7 @@ def main(argv: list[str] | None = None) -> int:
     prior_dir, instructions, executor, census, procedure_root, out = (
         p if p.is_absolute() else REPO_ROOT / p for p in (args.prior, args.instructions, args.executor, args.windows,
                                                           args.procedure_root, args.out))
-    settings = MultiSettings(args.rounds, {kind: getattr(args, f"windows_{kind}") for kind in KINDS}, args.spans_s,
-                             args.c_min, args.batch_rows, args.continuations, args.seed, args.prior_lr,
-                             args.traffic_lr, args.weight_decay, args.update_groups, args.data_sentences,
-                             args.select_per_airport, start)
+    settings = settings_from(args, start)
     git = git_state()
     if git["dirty"] and not args.smoke:
         parser.error("a campaign that is not a smoke runs on a clean checkout")
@@ -525,8 +536,9 @@ def main(argv: list[str] | None = None) -> int:
               "smoke": args.smoke}
     try:
         open_campaign(out, inputs, git, opened["checks"], schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER)
-        if speakers is not None and done_rounds(out) < settings.rounds:
-            require_workers_fit(speakers, context, settings, done_rounds(out))       # O15, before any round
+        if speakers is not None and done_rounds(out) < settings.rounds:          # O15, before any round
+            require_workers_fit(speakers, context, settings, done_rounds(out),
+                                campaign_model(out, context, settings, stage)[0])
         run_campaign(out, settings, context, speakers, stage=stage)
     finally:
         if speakers is not None:
