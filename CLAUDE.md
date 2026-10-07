@@ -147,7 +147,9 @@ Full text, with the investigation behind each line: `docs/environment.md` (E1–
 - **兼容 (compatibility) is a FORBIDDEN word** (user, 2026-09-19): no `.get(key, default)` fallbacks, no schema-version
   branches, no "an older artefact reads as …" — refuse by name at the boundary. Every compatibility decision needs
   the user's explicit permission, case by case. **A class / payload / schema an experiment reads or writes is
-  settled BEFORE that experiment runs**. An artefact produced by unfinished code is superseded and deleted, never kept
+  settled BEFORE that experiment runs**. One standing permission (user, 2026-10-07): a NEW campaign setting may carry a
+  default that is exactly the old code's behaviour (e.g. no gradient clipping, one pass), and a record without the
+  field reads as that default — no edit of existing records; every other field stays required. An artefact produced by unfinished code is superseded and deleted, never kept
   beside the real one.
 - **Results made by different code may be compared once the code is shown to behave the same — by a behaviour check
   on fixed inputs, never by an equal commit or source hash** (user, 2026-10-02; the executor's conformance C33, window
