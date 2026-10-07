@@ -268,7 +268,7 @@ def test_the_runner_hands_the_method_s_stage_to_the_workers_and_the_campaign(tmp
     monkeypatch.setattr(post_train, "git_state", lambda: {"head": "x", "dirty": False})
     monkeypatch.setattr(post_train, "require_conforming_closed_loop", lambda *a: (None, {"checks": {}}, None))
     monkeypatch.setattr(post_train, "checked_edges", lambda path: None)
-    context = SimpleNamespace(base=torch.nn.Linear(1, 1), device=CPU)
+    context = SimpleNamespace(base=torch.nn.Linear(1, 1), device=CPU, interval_s=4.0)
     monkeypatch.setattr(post_train, "open_context", lambda *a, **k: context)
     monkeypatch.setattr(post_train, "replace", lambda c, **k: c)
     monkeypatch.setattr(post_train, "Speakers", Workers)

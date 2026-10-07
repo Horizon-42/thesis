@@ -16,8 +16,9 @@ from ts_transformer.experiments.post_branches import branch_round, same_prefix
 from ts_transformer.experiments.post_window_loop import start_move_of
 from ts_transformer.instructions.words import COLUMNS
 from ts_transformer.post.branches import (
-    STATE_BOUND_M, branch_points, continuation_numbers, first_numbers, samples,
+    STATE_BOUND_M, Group, Sentence, branch_points, continuation_numbers, first_numbers, samples,
 )
+from ts_transformer.post.edges import TOKEN_FEATURES
 from ts_transformer.post.loss import one_pass
 from ts_transformer.post.scene import INSERTED, INSERTED_SUFFIX, MovedScene
 from ts_transformer.post.traffic_attention import parameter_groups
@@ -153,3 +154,34 @@ def test_a_windows_numbers_are_keyed_by_its_place_in_the_round(setup, monkeypatc
     assert set(drawn) == {7} and round_.spoken_again == [7] and [g.window for g in round_.groups] == [7]
     with pytest.raises(ValueError, match="place in the round"):
         _round(s, model, [_ahead(s["windows"][0])], places=(7, 8))
+
+
+def test_with_segments_each_row_of_a_first_sentence_is_in_one_group_and_a_continuation_counts_its_segment_only():
+    """D170 (b): with ``segment_rows`` a group counts only the rows from its branch point to the next one (or the
+    event): every said row of a first sentence is counted in exactly one of its groups, and a continuation's rows after
+    its segment in none; without it, each group counts from its point to the event (the code before D170)."""
+    from ts_transformer.tests.test_post_loss import FIRST, LENGTH, WORDS, _base, _spoken, _trained
+    from ts_transformer.tests.support import prior_sentence
+
+    rng = np.random.default_rng(4)
+    rows = [prior_sentence(rng, WORDS, candidates=2, rows=LENGTH, first_step=FIRST) for _ in range(3)]
+    _, permitted, _, _ = _spoken(_trained(_base()))
+    tokens = [np.zeros((0, len(TOKEN_FEATURES)), dtype=np.float32)] * LENGTH
+
+    def sentence(i, reward):
+        return Sentence(rows[i], permitted.select([i]), tokens, reward)
+
+    every = 5                                                       # rows: 20 s at Δ = 4 s
+    points = branch_points(FIRST, LENGTH, DELTA, every_s=every * DELTA)
+    assert points == [8, 13, 18, 23]
+    groups = [Group(0, b, sentence(0, 0.0), (sentence(1, 1.0), sentence(2, 0.0))) for b in points]
+    whole = [samples([g], CPU).counted for g in groups]
+    cut = [samples([g], CPU, segment_rows=every).counted for g in groups]
+    firsts = torch.stack([c[0] for c in cut]).sum(dim=0)
+    assert (firsts[FIRST:] == 1).all() and (firsts[:FIRST] == 0).all()                # each said row in one group
+    for b, c in zip(points, cut):
+        assert c[1, b:b + every].all() and not c[1, b + every:].any() and not c[1, :b].any()   # a continuation's segment
+    assert [int(w[0].sum()) for w in whole] == [LENGTH - b for b in points]            # without it: to the event
+    with pytest.raises(ValueError, match="whole number"):
+        branch_points(FIRST, LENGTH, DELTA, every_s=6.0)
+

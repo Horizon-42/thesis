@@ -29,6 +29,8 @@ EACH ROUND r:
    `Settings.clip_norm` before its step (D168; None, the default: not clipped), its norms and the share clipped in the
    round's record. `Settings.epochs` passes over the round's groups (D169; 1, the default: one pass), each in its own
    order, every pass's ratio against the model at the round's start; each pass's means in the round's record.
+   P55: `Settings.segment_only` counts a group's advantage only up to the next branch point, and
+   `Settings.branch_every_s` sets the branch points' interval (D37's 120 s by default).
 5. **The selection readout** (`selection_readout`): a fixed set of real windows of the select days (drawn once with the
    seed, D113 applied; the same numbers every round), the first pass only, by airport: the rewards, the outcomes (a loss
    of separation among them), the rows the speed-word mask acted (D101), the steps reading a faulty point and the losses
@@ -91,7 +93,7 @@ from flight_scenarios.procedure_final import DEFAULT_PROCEDURE_ROOT
 
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
 from ts_transformer.autopilot.start import NO_MOVE, Start
-from ts_transformer.experiments.post_branches import branch_round
+from ts_transformer.experiments.post_branches import branch_round, stage_c_rules
 from ts_transformer.experiments.post_window_loop import (
     WindowLoop, WindowResult, checked_edges, moved_commanded, start_move_of,
 )
@@ -102,7 +104,9 @@ from ts_transformer.instructions.artefact import closed_loop_sentences, load_spe
 from ts_transformer.instructions.faults import faulty_flights
 from ts_transformer.instructions.words import Words
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
-from ts_transformer.post.branches import CONTINUATIONS, Group, Landed, Sentence, landed_numbers, landed_samples, samples
+from ts_transformer.post.branches import (
+    BRANCH_EVERY_S, CONTINUATIONS, Group, Landed, Sentence, branch_rows, landed_numbers, landed_samples, samples,
+)
 from ts_transformer.post.fault_census import fault_rows
 from ts_transformer.post.loss import LossParts, PassStart, Samples, landed_step, passes, stacked
 from ts_transformer.post.reward import LANDED
@@ -171,6 +175,12 @@ class Settings:
     #: The passes over a round's groups (D169, `post.loss.passes`), each in its own order. A setting added after
     #: campaigns were recorded, as ``clip_norm``: its default, 1, is the code's behaviour before it.
     epochs: int = 1
+    #: P55 (the user, 2026-10-07): a branch group's advantage and pull only on the rows from its branch point to the next
+    #: one (`post.branches.samples`' ``segment_rows``); False: up to the sentence's event. Added as ``clip_norm``.
+    segment_only: bool = False
+    #: P55: the interval of the branch points (`post.branches.branch_points`), s; D37's 120 s by default. Added as
+    #: ``clip_norm``.
+    branch_every_s: float = BRANCH_EVERY_S
 
     def __post_init__(self) -> None:
         if set(self.per_kind) != set(KINDS) or min(self.per_kind.values()) < 0 or not any(self.per_kind.values()):
@@ -183,6 +193,11 @@ class Settings:
             raise ValueError(f"a start is its campaign, round and checkpoint_sha256, not {sorted(self.start)}")
         if self.method not in METHODS:
             raise ValueError(f"method {self.method!r} is none of {METHODS}")
+        if not self.branch_every_s > 0:
+            raise ValueError(f"branch_every_s {self.branch_every_s}: positive")
+        if self.method != BRANCH and (self.segment_only or self.branch_every_s != BRANCH_EVERY_S):
+            raise ValueError(f"segment_only and branch_every_s are branch training's (method {BRANCH!r}), not "
+                             f"{self.method!r}'s")
         if self.epochs < 1:
             raise ValueError(f"epochs {self.epochs}: at least one pass a round")
         if self.clip_norm is not None and not self.clip_norm > 0:
@@ -359,7 +374,8 @@ STAGE_C = Stage(start_model=lambda context, settings: start_model(context, setti
                 batches=lambda windows, settings: batches(windows, settings.batch_windows),
                 train=lambda model, context, optimizer, directory, settings, rng, *, part_width: train_pass(
                     model, context, optimizer, directory, settings, rng, part_width=part_width,
-                    clip_norm=settings.clip_norm, epochs=settings.epochs))
+                    clip_norm=settings.clip_norm, epochs=settings.epochs,
+                    segment_rows=segment_rows_of(settings, context.interval_s)))
 #: Stage C's campaign that trains on the landed sentences (P49, `Settings.method` `LANDED_SENTENCES`): stage C's parts,
 #: but its batches spoken `Settings.continuations` times with their best landed sentences kept (`speak_landed_batch`),
 #: and its pass on them (`landed_train_pass`, its memory `landed_pass_memory`).
@@ -448,7 +464,8 @@ def speak_batch(model: Prior, context: Context, windows: Sequence[Window], place
                          context.geometries, context.rosters, context.finals, context.words,
                          interval_s=context.interval_s, variant=context.variant,
                          edges_reference=context.edges_reference, faults=train["faults"], device=context.device,
-                         seed=settings.seed, round_=round_, split="train", continuations=settings.continuations)
+                         seed=settings.seed, round_=round_, split="train", continuations=settings.continuations,
+                         rules=stage_c_rules(settings.seed, round_, context.interval_s, settings.branch_every_s))
     informative = [g for g in found.groups if g.informative]
     torch.save(informative, directory / f"groups_{k}.pt")
     return {"groups": len(found.groups), "informative_groups": len(informative),
@@ -1017,7 +1034,8 @@ def name_fit(out: Path, fit: dict[str, Any] | None) -> None:
 
 # ---- the training pass
 def update_pairs(directory: Path, data: Sequence[Any], settings: Settings, rng: np.random.Generator,
-                 device: torch.device, *, part_width: int) -> Iterator[tuple[list[Samples], RowTensors]]:
+                 device: torch.device, *, part_width: int, segment_rows: int | None = None
+                 ) -> Iterator[tuple[list[Samples], RowTensors]]:
     """The updates of a round's pass (module docstring, step 4): its written groups, file by file in the order they were
     spoken, each file's groups in an order shuffled by ``rng`` (the round's numbers; D130: an update mixes branch points
     and windows), `Settings.update_groups` at a time (a file's last update may hold fewer; each group a piece of it,
@@ -1029,7 +1047,8 @@ def update_pairs(directory: Path, data: Sequence[Any], settings: Settings, rng: 
         groups = [loaded[int(i)] for i in rng.permutation(len(loaded))]
         for k in range(0, len(groups), settings.update_groups):
             chosen = rng.choice(len(data), size=min(settings.data_sentences, len(data)), replace=False)
-            yield ([samples([group], device, part_width) for group in groups[k:k + settings.update_groups]],  # a piece a group
+            yield ([samples([group], device, part_width, segment_rows)  # a piece a group
+                    for group in groups[k:k + settings.update_groups]],
                    collate([data[int(i)] for i in chosen], device))
 
 
@@ -1054,6 +1073,12 @@ def pass_seed(seed: int, round_: int) -> int:
     return int(np.random.default_rng([seed, round_, 2]).integers(1 << 62))
 
 
+def segment_rows_of(settings: Settings, interval_s: float) -> int | None:
+    """P55: the rows from a branch point to the next (`Settings.branch_every_s` in Δ rows) where the campaign counts
+    only them (`Settings.segment_only`); None: up to the event."""
+    return branch_rows(interval_s, settings.branch_every_s) if settings.segment_only else None
+
+
 def pass_orders(rng: np.random.Generator, epochs: int) -> list[np.random.Generator]:
     """The numbers of each of a round's ``epochs`` passes (D169): the first pass the round's own (``rng``, so one pass
     is the pass before D169); pass e ≥ 1 its own, from the round's seed words (the seed, the round, 1) with 1 << 31 and
@@ -1072,15 +1097,17 @@ def pass_means(each: Sequence[Sequence[LossParts]]) -> dict[str, Any]:
 
 
 def train_pass(model: Prior, context: Context, optimizer: torch.optim.Optimizer, directory: Path, settings: Settings,
-               rng: np.random.Generator, *, part_width: int, clip_norm: float | None = None, epochs: int = 1
-               ) -> dict[str, Any]:
+               rng: np.random.Generator, *, part_width: int, clip_norm: float | None = None, epochs: int = 1,
+               segment_rows: int | None = None) -> dict[str, Any]:
     """Step 4 of a round: ``epochs`` passes (`post.loss.passes`: the model at the first's start is the one that spoke
     the groups, every pass's ratio against it; D169) over `update_pairs` (``part_width``: the stage's token part), each
     in its own order (`pass_orders`), each update's gradient clipped to ``clip_norm`` (D168). Stage C's
     `Settings.clip_norm` and `Settings.epochs` (`STAGE_C`); None and 1 — not clipped, one pass — for a stage whose
-    settings do not name them. Its means (`pass_means`), or no update where the round has no informative group."""
+    settings do not name them. ``segment_rows``: each group's rows counted up to the next branch point (P55,
+    `segment_rows_of`); None: up to the event. Its means (`pass_means`), or no update where the round has no informative group."""
     each = passes(model, context.base, optimizer,
-                  [update_pairs(directory, context.data, settings, numbers, context.device, part_width=part_width)
+                  [update_pairs(directory, context.data, settings, numbers, context.device, part_width=part_width,
+                                segment_rows=segment_rows)
                    for numbers in pass_orders(rng, epochs)], clip_norm=clip_norm)
     return pass_means(each)
 
@@ -1213,7 +1240,7 @@ def inputs_here(inputs: Mapping[str, Any]) -> dict[str, Any]:
 
 #: The settings added after campaigns were recorded, each with its default: the code's behaviour before it (the user's
 #: standing permission, 2026-10-07): a record without one reads as its default, and no record is edited.
-SETTINGS_ADDED = ("clip_norm", "epochs")
+SETTINGS_ADDED = ("clip_norm", "epochs", "segment_only", "branch_every_s")
 
 
 def _but_rounds(inputs: Mapping[str, Any]) -> dict[str, Any]:
@@ -1460,6 +1487,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="D168: the norm each update's gradient is clipped to (default: not clipped)")
     parser.add_argument("--epochs", type=int, default=Settings.epochs,
                         help="D169: the passes over a round's groups, each in its own order (default: one)")
+    parser.add_argument("--segment-only", action="store_true",
+                        help="P55: a branch group's advantage only up to the next branch point (default: to the event)")
+    parser.add_argument("--branch-every-s", type=float, default=Settings.branch_every_s,
+                        help="P55: the interval of the branch points, s (default: D37's 120)")
     parser.add_argument("--start-campaign", type=Path,
                         help="start from a round of this campaign (with --start-round); the base when left out")
     parser.add_argument("--start-round", type=int, help="the round of --start-campaign whose weights the campaign starts from")
@@ -1492,7 +1523,7 @@ def main(argv: list[str] | None = None) -> int:
                         args.batch_windows, args.continuations, args.seed, args.prior_lr, args.traffic_lr,
                         args.weight_decay, args.update_groups, args.data_sentences, args.select_per_airport,
                         args.traffic_hidden, args.traffic_heads, start, args.method, args.select_seed, args.clip_norm,
-                        args.epochs)
+                        args.epochs, args.segment_only, args.branch_every_s)
     git = git_state()
     if git["dirty"] and not args.smoke:
         parser.error("a campaign that is not a smoke runs on a clean checkout")
@@ -1504,6 +1535,10 @@ def main(argv: list[str] | None = None) -> int:
     context = open_context(prior_dir, instructions, executor, edges_reference,
                            torch.device("cpu") if args.speak_workers > 1 else device, procedure_root,
                            formal=not args.smoke)                                  # D132
+    try:                                # D170: refused before the workers
+        branch_rows(context.interval_s, settings.branch_every_s)
+    except ValueError as refused:
+        parser.error(f"--branch-every-s: {refused}")
     if settings.start is not None:      # refused by name before the workers and campaign.json (D162)
         campaign_start(context, settings)
     stage = STAGES_C[settings.method]

@@ -62,13 +62,20 @@ def landed_numbers(seed: int, round_: int, window: int, draw: int) -> np.random.
                                                                                         draw])
 
 
-def branch_points(start: int, end_step: int, interval_s: float) -> list[int]:
-    """The branch points of a first sentence (module docstring), as Δ rows: the first predicted step ``start`` and every
-    `BRANCH_EVERY_S` after it, before its event at Δ row ``end_step``."""
-    every = BRANCH_EVERY_S / interval_s
+def branch_rows(interval_s: float, every_s: float = BRANCH_EVERY_S) -> int:
+    """The Δ rows between two branch points (``every_s``, D37's `BRANCH_EVERY_S` or a campaign's setting: D170), refused
+    by name unless a whole number of ``interval_s`` rows."""
+    every = every_s / interval_s
     if abs(every - round(every)) > 1e-9:
-        raise ValueError(f"{BRANCH_EVERY_S:g} s is not a whole number of {interval_s:g} s rows")
-    return list(range(start, end_step, int(round(every))))
+        raise ValueError(f"{every_s:g} s is not a whole number of {interval_s:g} s rows")
+    return int(round(every))
+
+
+def branch_points(start: int, end_step: int, interval_s: float, every_s: float = BRANCH_EVERY_S) -> list[int]:
+    """The branch points of a first sentence (module docstring), as Δ rows: the first predicted step ``start`` and every
+    ``every_s`` after it (D37's `BRANCH_EVERY_S`, or a campaign's setting: P55), before its event at Δ row
+    ``end_step``."""
+    return list(range(start, end_step, branch_rows(interval_s, every_s)))
 
 
 @dataclass(frozen=True)
@@ -113,11 +120,13 @@ class Group:
         return max(rewards) > min(rewards)
 
 
-def samples(groups: Sequence[Group], device: torch.device, part_width: int = 0) -> Samples:
+def samples(groups: Sequence[Group], device: torch.device, part_width: int = 0, segment_rows: int | None = None
+            ) -> Samples:
     """The loss's batch of the samples of ``groups`` (`post.loss.Samples`): every sentence of every informative group,
-    its advantage on the rows from its group's branch point on up to its event (``Sentence.until``; and only there), the
-    speaker's records joined and the tokens padded to the longest sentence (with a caller's token part of
-    ``part_width``, `traffic_attention.traffic_of`)."""
+    its advantage on the rows from its group's branch point on up to its event (``Sentence.until``; and only there) —
+    or, with ``segment_rows`` (P55), only up to ``segment_rows`` rows after the branch point (the next branch point; the
+    later words left to the later groups) —, the speaker's records joined and the tokens padded to the longest sentence
+    (with a caller's token part of ``part_width``, `traffic_attention.traffic_of`)."""
     items = [(sentence, advantage, group.branch) for group in groups if group.informative
              for sentence, advantage in zip(group.sentences, group.advantages())]
     if not items:
@@ -132,6 +141,9 @@ def samples(groups: Sequence[Group], device: torch.device, part_width: int = 0) 
     if any(s.until is not None for s, _, _ in items):
         until = torch.tensor([length if s.until is None else s.until for s, _, _ in items], device=device)[:, None]
         counted = counted & (steps < until)
+    if segment_rows is not None:
+        branch = torch.tensor([b for _, _, b in items], device=device)[:, None]
+        counted = counted & (steps < branch + segment_rows)
     advantage = torch.tensor([a for _, a, _ in items], dtype=torch.float32, device=device)[:, None] * counted
     return Samples(rows, Permitted.join([s.permitted for s, _, _ in items]), traffic_of(tokens, device, part_width),
                    advantage, counted)

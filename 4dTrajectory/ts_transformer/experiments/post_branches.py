@@ -41,7 +41,7 @@ from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import ClosedLoopSentence
 from ts_transformer.instructions.words import COLUMNS, Words
 from ts_transformer.post.branches import (
-    CONTINUATIONS, STATE_BOUND_M, Group, Sentence, branch_points, continuation_numbers, first_numbers,
+    BRANCH_EVERY_S, CONTINUATIONS, STATE_BOUND_M, Group, Sentence, branch_points, continuation_numbers, first_numbers,
 )
 from ts_transformer.post.scene import Window
 from ts_transformer.prior.landings import LandingIndex
@@ -82,13 +82,13 @@ class Rules:
     varied: Callable[[Window, WindowLoop, Sequence[int], Sequence[WindowResult]], list[tuple[int, list[int]]]]
 
 
-def stage_c_rules(seed: int, round_: int, interval_s: float) -> Rules:
+def stage_c_rules(seed: int, round_: int, interval_s: float, every_s: float = BRANCH_EVERY_S) -> Rules:
     """Stage C's rules (module docstring; D37, D94): one aircraft, its reward, spoken again below 1, its branch points from
-    its first predicted step to its event."""
+    its first predicted step to its event, every ``every_s`` (D37's, or the campaign's `Settings.branch_every_s`, P55)."""
     def varied(window: Window, loop: WindowLoop, rows: Sequence[int], results: Sequence[WindowResult]
                ) -> list[tuple[int, list[int]]]:
         (b,) = rows
-        return [(0, branch_points(loop.speaking.start, loop.end_step(b), interval_s))]
+        return [(0, branch_points(loop.speaking.start, loop.end_step(b), interval_s, every_s))]
 
     return Rules(first=lambda place, member: first_numbers(seed, round_, place),
                  continuation=lambda place, member, v, tick, k: continuation_numbers(seed, round_, place, tick, k),

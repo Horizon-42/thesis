@@ -1710,6 +1710,9 @@ checkpoint.
 - `--epochs` (D169, C20): the passes over a round's groups (default 1, the behaviour before it), each in its own order
   (the first the round's numbers, the others children of them), every pass's ratio against the model at the round's
   start; `round.json`'s pass gives the means over every pass and each pass's (`passes`).
+- `--branch-every-s` and `--segment-only` (D170, C21; branch training only): the branch points' interval (default
+  120 s, a whole number of Δ rows) and a group's advantage counted only up to the next branch point (default: to the
+  event).
 - A clean tree unless `--smoke`; formal runs from a detached run worktree (D163).
 - Writes `campaign.json` (`ts-post-train-v1`) and, for each round, `round.json` and `checkpoint.pt`
   (`ts-post-checkpoint-v1`).

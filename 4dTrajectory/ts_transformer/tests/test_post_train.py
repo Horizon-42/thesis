@@ -22,6 +22,7 @@ from ts_transformer.experiments.post_train import (
 )
 from ts_transformer.autopilot.start import Start, start_moved
 from ts_transformer.instructions.artefact import closed_loop_sentences
+from ts_transformer.post.branches import continuation_numbers, first_numbers
 from ts_transformer.post.scene import INSERTED, LEADER_MOVED, MOVED_START, NO_START_MOVE, REAL
 from ts_transformer.prior.checkpoint import claim_validation_read
 from ts_transformer.prior.source import ArtefactSource
@@ -151,7 +152,9 @@ def test_the_pass_shuffles_each_file_s_groups_by_the_round_s_numbers(tmp_path, m
     directory.mkdir()
     torch.save(list(range(8)), directory / "groups_0.pt")
     torch.save(list(range(10, 15)), directory / "groups_1.pt")
-    monkeypatch.setattr(post_train, "samples", lambda groups, device, part_width: list(groups))
+    segments = []
+    monkeypatch.setattr(post_train, "samples", lambda groups, device, part_width, segment_rows: (
+        segments.append(segment_rows), list(groups))[1])
     monkeypatch.setattr(post_train, "collate", lambda sentences, device: None)
     settings = _settings(update_groups=3)
 
@@ -161,6 +164,9 @@ def test_the_pass_shuffles_each_file_s_groups_by_the_round_s_numbers(tmp_path, m
                                               part_width=0)]
 
     chunks = updates([1337, 0, 1])
+    assert set(segments) == {None}                                           # to the event (D170's default)
+    list(update_pairs(directory, [0], settings, np.random.default_rng(0), CPU, part_width=0, segment_rows=7))
+    assert segments[-1] == 7                                                 # D170: the segment reaches `samples`
     first = [g for chunk in chunks for g in chunk]
     assert sorted(first[:8]) == list(range(8)) and sorted(first[8:]) == list(range(10, 15))
     assert first != sorted(first) and updates([1337, 0, 1]) == chunks and updates([1337, 1, 1]) != chunks
@@ -525,7 +531,7 @@ def test_a_launch_measures_once_and_a_resume_reads_the_recorded_measure(tmp_path
     monkeypatch.setattr(post_train, "require_conforming_closed_loop", lambda *a: (None, {"checks": {}}, None))
     monkeypatch.setattr(post_train, "checked_edges", lambda path: None)
     monkeypatch.setattr(post_train, "open_context", lambda *a, **k: SimpleNamespace(base=torch.nn.Linear(1, 1),
-                                                                                   device=CPU))
+                                                                                   device=CPU, interval_s=4.0))
     order = []
     monkeypatch.setattr(post_train, "replace", lambda c, **k: (order.append("moved"), c)[1])
     monkeypatch.setattr(post_train, "Speakers", Workers)
@@ -833,7 +839,8 @@ def test_a_setting_added_after_a_record_reads_as_its_default_and_a_resume_compar
         with pytest.raises(ValueError, match="clip_norm"):
             _settings(clip_norm=wrong)
     record = json.loads((out / "campaign.json").read_text())
-    del record["inputs"]["settings"]["epochs"]                              # and from before D169
+    for added in ("epochs", "segment_only", "branch_every_s"):              # and from before D169, D170
+        del record["inputs"]["settings"][added]
     (out / "campaign.json").write_text(json.dumps(record))
     assert post_train.settings_of(record) == _settings()
     assert len(open_campaign(out, _inputs(_settings(), tmp_path), git, {})["resumed"]) == 2
@@ -841,6 +848,11 @@ def test_a_setting_added_after_a_record_reads_as_its_default_and_a_resume_compar
         open_campaign(out, _inputs(_settings(epochs=2), tmp_path), git, {})
     with pytest.raises(ValueError, match="epochs"):
         _settings(epochs=0)
+    for branch_only in (dict(segment_only=True), dict(branch_every_s=60.0)):      # D170: the branch method's
+        with pytest.raises(ValueError, match="segment_only and branch_every_s are branch training's"):
+            _settings(method=post_train.LANDED_SENTENCES, **branch_only)
+    with pytest.raises(SystemExit, match="other inputs or settings"):
+        open_campaign(out, _inputs(_settings(segment_only=True), tmp_path), git, {})
 
 
 def test_stage_c_s_pass_clips_and_passes_as_its_settings_say(monkeypatch):
@@ -852,19 +864,67 @@ def test_stage_c_s_pass_clips_and_passes_as_its_settings_say(monkeypatch):
     seen, numbers = [], []
     monkeypatch.setattr(post_train, "passes", lambda model, base, optimizer, each, step=None, clip_norm=None: (
         seen.append((clip_norm, len(each))), [list(pairs) for pairs in each])[1])
+    segments = []
     monkeypatch.setattr(post_train, "update_pairs", lambda directory, data, settings, rng, device, **k: (
-        numbers.append(rng), [])[1])
+        numbers.append(rng), segments.append(k["segment_rows"]), [])[2])
     monkeypatch.setattr(post_train, "landed_pairs", lambda directory, data, settings, rng, device: (
         numbers.append(rng), [])[1])
-    context = SimpleNamespace(base=None, data=None, device=CPU)
-    settings = _settings(clip_norm=0.5, epochs=2)
+    context = SimpleNamespace(base=None, data=None, device=CPU, interval_s=4.0)
+    settings = _settings(clip_norm=0.5, epochs=2, segment_only=True, branch_every_s=60.0)
     for stage in (post_train.STAGE_C, post_train.STAGE_C_LANDED):
         rng = np.random.default_rng([1337, 0, 1])
-        assert stage.train(None, context, None, None, settings, rng, part_width=0) == {
+        landed = stage is post_train.STAGE_C_LANDED
+        here = replace(settings, method=post_train.LANDED_SENTENCES, segment_only=False,
+                       branch_every_s=120.0) if landed else settings
+        assert stage.train(None, context, None, None, here, rng, part_width=0) == {
             "updates": 0, "passes": [{"updates": 0}, {"updates": 0}]}
         assert numbers[-2] is rng and numbers[-1] is not rng
     stage_d().train(None, context, None, None, settings, np.random.default_rng(0), part_width=0)
     assert seen == [(0.5, 2), (0.5, 2), (None, 1)]
+    assert segments == [15, 15, None]          # D170: 60 s in 4 s rows, stage C's branch pass only; stage D's none
+
+
+def test_stage_c_speaks_at_its_branch_interval(monkeypatch):
+    """D170 (a): stage C's batch speaker hands `branch_round` its rules at the campaign's interval (60 s at Δ = 4 s:
+    every 15 rows from the first predicted step, before the event)."""
+    handed = {}
+
+    def branch_round(*a, rules, **k):
+        handed["rules"] = rules
+        raise RuntimeError("handed")
+
+    monkeypatch.setattr(post_train, "branch_round", branch_round)
+    context = SimpleNamespace(splits={"train": {"sentences": None, "flights": None, "faults": None}},
+                              start_loop=lambda split, batch: None, geometries=None, rosters=None, finals=None,
+                              words=None, interval_s=4.0, variant="full", edges_reference=None, device=CPU)
+    loop = SimpleNamespace(speaking=SimpleNamespace(start=8), end_step=lambda b: 40)
+    for every, points in ((60.0, [8, 23, 38]), (120.0, [8, 38])):          # 120 s: D37's, the default
+        with pytest.raises(RuntimeError, match="handed"):
+            post_train.speak_batch(None, context, [None], [0], _settings(branch_every_s=every), 3, None, 0)
+        assert handed["rules"].varied(None, loop, [0], None) == [(0, points)]
+    rules = handed["rules"]                       # the default rules' numbers (`stage_c_rules`, as `branch_round`'s)
+    assert rules.first(5, 0).random() == first_numbers(1337, 3, 5).random()
+    assert rules.continuation(5, 0, 0, 38, 2).random() == continuation_numbers(1337, 3, 5, 38, 2).random()
+
+
+def test_an_interval_of_no_whole_number_of_rows_is_refused_before_the_workers(tmp_path, monkeypatch, capsys):
+    """D170 (a): `--branch-every-s` is a whole number of Δ rows, refused by name once the context gives Δ."""
+    monkeypatch.setattr(post_train, "git_state", lambda: {"head": "x", "dirty": False})
+    monkeypatch.setattr(post_train, "require_conforming_closed_loop", lambda *a: (None, {"checks": {}}, None))
+    monkeypatch.setattr(post_train, "checked_edges", lambda path: None)
+    monkeypatch.setattr(post_train, "open_context", lambda *a, **k: SimpleNamespace(interval_s=4.0))
+    monkeypatch.setattr(post_train, "Speakers", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("forked")))
+    argv = ["--prior", str(tmp_path / "p"), "--instructions", str(tmp_path / "i"), "--executor", str(tmp_path / "e"),
+            "--windows", str(tmp_path / "w"), "--out", str(tmp_path / "campaign"), "--rounds", "1",
+            "--batch-windows", "1", "--seed", "1", "--prior-lr", "1e-4", "--traffic-lr", "1e-3", "--weight-decay", "0",
+            "--update-groups", "1", "--data-sentences", "1", "--select-per-airport", "1", "--traffic-hidden", "16",
+            "--traffic-heads", "4", "--method", "branch", "--select-seed", "1", "--device", "cpu",
+            "--speak-workers", "2", "--branch-every-s", "6"]
+    argv += [x for kind in KINDS for x in (f"--windows-{kind.lower()}", "1")]
+    with pytest.raises(SystemExit):
+        post_train.main(argv)
+    assert "is not a whole number of 4 s rows" in capsys.readouterr().err
+    assert not (tmp_path / "campaign").exists()
 
 
 def test_each_pass_has_numbers_of_its_own_and_the_first_is_the_round_s():
