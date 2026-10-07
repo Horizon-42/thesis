@@ -38,3 +38,77 @@ window segment v1, which only stage C uses, and no stage C set is published.
 selection, as built.
 
 Waiting: F3 after stage D's MC0 is on `dev-two-tier`; F4 after its MC4.
+
+## Handover (2026-10-07)
+
+The first fronter session ends here; the user hands the Training view to another agent. This section is that agent's
+starting point. Its orders are in `docs/two_tier/notes/fronter.md`; its design is `docs/two_tier/design/frontend.md`.
+
+**State.** F0, F1, F2 and D160's two changes are built, reviewed and merged into `dev-two-tier` (the last merge is a
+fast-forward to `43d2e992`). The commits and their reviews are in the table above. Nothing of fronter's is
+uncommitted. `requests_from_fronter_to_designer.md` holds one open item (the landed green beside the post-trained
+yellow-green, ΔE 9.5).
+
+**Where.**
+- Branch `dev-frontend`, worktree `.claude/worktrees/frontend`, level with `dev-two-tier`. Keep it for F3 and F4.
+- Its ignored data trees (`data`, `trajectory_data_process/outputs`, `4dTrajectory/outputs`,
+  `aeroviz-4d/node_modules`, `aeroviz-4d/public/data/airports`) are absolute links to the live data. Write nothing there.
+
+**The next milestones.**
+1. **F3, stage D's parts of the window view** (frontend §5.1–§5.6, §8 F3). Start once stage D's MC0 is on
+   `dev-two-tier`. Merge `dev-two-tier` into `dev-frontend` first. Things to carry in:
+   - Check again, against MC0's code, whether a silent aircraft can answer for a loss (D160 (7)). The window reader
+     today refuses an aircraft that answers two losses in a round, and one that is silent while answering none
+     (`data/trainingWindowSample.ts` `parseWindow`).
+   - The cursor across a change of the selected aircraft (§6.1). `WindowCursor` (`components/training/
+     TrainingWindowSession.tsx`) keeps an instant per window on ONE aircraft's flight clock. With several aircraft it
+     must convert through the window's clock: `atS − old.clockS + new.clockS` (`onAircraftClock` / `onWindowClock`).
+   - The fixtures come from stage C's export on a synthetic window of two commanded aircraft (§8 F3), through post-training
+     §9 items 1, 3 and 8. Stage C's export today writes one aircraft (`window_payload` in
+     `experiments/post_training_export.py`); the v4 format already holds a list, `c`, `joinS`, `shiftS`,
+     `silentFromRow`, and losses by pair with `answering` and `costsW`.
+   - Stage D's index is `index_multi_v1.json`, in the same format as stage C's (`post/training_files.py`: the set kind
+     `training-windows` is shared; stage D gets its own `TrainingFiles` with that index file).
+   - The window segment's request already names `aircraft` (`aeroviz_backend/autopilot_segment/window.py`, answer v2).
+2. **F4, stage D's export and sets** (§8 F4), after stage D's MC4.
+
+**How things are done here.**
+- Fixtures are written by the writers, never by hand. Stage C's are rewritten with `AEROVIZ_WRITE_FIXTURES=1` on
+  `tests/test_post_training_export.py -k frontend_fixtures`, then on `aeroviz_backend/tests/test_window_segment.py -k
+  frontend_fixtures`. Stage A's and B's have the same kind of test.
+- `tests/test_training_export.py::test_the_flown_block_of_every_stage_is_its_earlier_one_with_the_envelopes` reads
+  stage C's fixture; it reads the sentences under `commanded[*].rounds`.
+- While a campaign runs, use light tests: the changed Vitest files (`npx vitest run --maxWorkers 3 …`) and the changed
+  pytest files (`-n 3`, `OMP_NUM_THREADS=1`, `nice -n 19`). Each commit is reviewed by an opus reviewer that did not
+  write it, and the browser check goes to a one-shot sonnet agent.
+- Since 2026-10-07, ts campaigns run from a detached run worktree, so merges into `dev-two-tier` go on during a run
+  (root CLAUDE.md, outline D163).
+
+**The test stack** (still running, from the worktree; it reads a scratch tree):
+- vite 5186 (`http://192.168.1.103:5186`), backend 8796.
+- Scripts and PID files are in `/tmp/claude-1000/fronter-stack/` (`vite.sh`, `backend.sh`, `vite.config.mts`). The
+  scratch airports tree is `/tmp/claude-1000/fronter-stack/airports`: links to the live A and B sets, plus a v4 smoke
+  set `windows_smoke_v4` at KRDU.
+- That set was exported with `python run_ts.py post_training_export --campaign <C11's smoke campaign> --rounds start 0
+  --split select --per-airport 2 --kinds real A B --airports KRDU --set-id windows_smoke_v4 --root
+  /tmp/claude-1000/fronter-stack/airports --speed <the smoke speed readout of stage C> --smoke`. The two paths are in
+  `windows_smoke_v4/sample.json`'s `source`.
+- Stop it with `kill $(lsof -t -iTCP:5186 -sTCP:LISTEN) $(lsof -t -iTCP:8796 -sTCP:LISTEN)`. `/tmp` may be gone after a
+  reboot; then build the tree again in the same way.
+
+**The main checkout's backend** (8765) was not restarted after the merges. It still answers the window segment v1. Only
+stage C uses it, and no stage C set is published. Restart it (`./start_aeroviz_fullstack.sh`) when a stage C or D set
+is published.
+
+**Left as S3 by the reviews** (listed once, no action taken):
+- the slider: a cursor past the last row (a chart hover, the axis end) makes → and End step back to the last row;
+  jsdom-only guards in `CursorSlider.tsx` (`box.width > 0`, `setPointerCapture?.`); the first-step tick is teal for
+  every kind;
+- the reader's refusal "not in the order they join" has no test (a one-aircraft fixture cannot make it);
+- `data/trainingSetResults.ts` still parses the results route's sections the page no longer shows, so a malformed
+  unread section would refuse the whole answer;
+- `TRAINING_WINDOW_ROLE_COLOR` is exported but used only in its own module;
+- the 3D layers' kind colour and the tabs' swatch have no unit test (the browser check saw them);
+- `frontend.md`'s key code index still names `ResultSections.tsx`, which was removed (the designer's text);
+- `aeroviz-4d/CLAUDE.md`'s lines on the details page (AV33) and the colours describe the view before F0. Updating them
+  is for whoever keeps that file.
