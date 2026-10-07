@@ -104,10 +104,11 @@ describe("the page's cells", () => {
     const grid = screen.getByRole("table", { name: "The models' statistics" });
     expect(within(grid).getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual([
       "sentences", "this set", "the formal readout",
-      ...Array(2).fill(["landed", "go-arounds", "timed out", "lost separation", "mean reward"]).flat()]);
+      ...Array(2).fill(["landed", "go-arounds / sentence", "timed out", "lost separation", "mean reward"]).flat()]);
     const cells = within(within(grid).getAllByRole("row")[2]).getAllByRole("cell").map((cell) => cell.textContent);
     const { set } = table.rows[0];
     expect(cells[0]).toBe(`${((set.landed / set.sentences) * 100).toFixed(1)} %${set.landed}/${set.sentences}`);
+    expect(cells[1]).toBe(`${(set.goArounds! / set.sentences).toFixed(3)}${set.goArounds}/${set.sentences}`);   // per sentence
     expect(cells[4]).toBe(`${(set.rewardSum! / set.sentences).toFixed(3)}over ${set.sentences}`);
     expect(cells.slice(5)).toEqual(["—", "—", "—", "—", "—"]);
     expect(screen.getByText(/The formal readout: no set is on screen/)).toBeTruthy();

@@ -27,7 +27,12 @@ import { stageCSample } from "../../data/__tests__/stageC";
 import { trainingPriorFlightView } from "../../data/trainingPriorSample";
 import { trainingWindowFlightView } from "../../data/trainingWindowSample";
 import { flownSentenceColour, flownSentenceKind, roundKind } from "../../data/trainingSentenceKind";
-import { TRAINING_SENTENCE_COLOR } from "../../utils/trainingWordColors";
+import {
+  TRAINING_DECISION_PASS_COLOR,
+  TRAINING_FAILURE_COLOR,
+  TRAINING_SENTENCE_COLOR,
+  trainingOutcomeColour,
+} from "../../utils/trainingWordColors";
 
 const sample = stageASample();
 const [flight] = sample.flights;
@@ -134,5 +139,13 @@ describe("each kind of sentence has its colour (frontend §3 item 11, D159)", ()
     expect(TRAINING_SENTENCE_COLOR).toEqual({
       observed: "#e2e8f0", closedLoop: "#14b8a6", base: "#d946ef", postTrained: "#a3e635", multi: "#b82e7a" });
     expect(flownSentenceColour(trainingPriorFlightView(b, b.flights[0], 0))).toBe("#d946ef");
+  });
+
+  it("a landed outcome is the pass green, any other the failure red: teal means only the closed loop (D160 (12))", () => {
+    expect(trainingOutcomeColour("landed")).toBe(TRAINING_DECISION_PASS_COLOR);
+    expect(trainingOutcomeColour("landed")).not.toBe(TRAINING_SENTENCE_COLOR.closedLoop);
+    for (const outcome of ["timeout", "ground_contact", "lost_separation"] as const) {
+      expect(trainingOutcomeColour(outcome)).toBe(TRAINING_FAILURE_COLOR);
+    }
   });
 });
