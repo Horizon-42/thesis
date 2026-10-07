@@ -42,7 +42,7 @@ the evidence is in §9.
 | D143 | **Which aircraft are varied, and where.** A window whose W is less than its count of commanded aircraft is spoken again (post-training D94's second pass). The varied aircraft are each commanded aircraft with r_i < 1 and each commanded aircraft of a loss of separation that one of them answers for. The branch points of a varied aircraft v are v's own first predicted step and the points of the window's grid after it (the anchor's first predicted step and every 120 s after it), before v's event: the step of v's own end, or of the loss it is in, whichever is earlier. K = 8 (D94). Why the window's grid: the continuations of one point of all windows of a batch are at one row of the loop and speak as one batch, as in stage C | Decided | User, 2026-10-06, on Claude's proposal |
 | D144 | **An aircraft that answers for a loss of separation becomes silent.** Its reward is 0 from that step. It is not removed: it flies on its words in force until the executor is done with it, the other aircraft must keep their separation from it, and it never answers for a loss again. It is flown through the loop with a caller's mask that permits only "unchanged" in every column (prior §7 item 3), so its rows are said with probability 1 and carry no gradient. **A window ends when every commanded aircraft is done or silent**: an aircraft that has not joined yet, or is in its observed rows, keeps the window going. A silent aircraft's rows are not counted rows of any sample (post-training D115). Why: an aircraft that disappears gives the others free space, so a loss would pay the others; a window of one commanded aircraft then ends at its loss, as post-training D93 says (§2.4) | Decided | User, 2026-10-06, on Claude's proposal; the aircraft that stays in the scene: the user's rule of 2026-09-30 for the archived design (§9.1), proposed again |
 | D145 | **A loss with a recorded aircraft.** A commanded aircraft answers for a loss with a recorded aircraft where the rules make it responsible, as in stage C; and also where the rules make only the recorded aircraft responsible but the two records (moved, in a compressed window) kept their separation at that step: the loss is then made by the model's change, and the commanded aircraft is the only one that can be moved. A loss that only the recorded aircraft answers for and that the records also have at that step is counted in the readouts and earns nothing and costs nothing. Why: the model is the controller of its commanded aircraft (the user: a loss that the model makes and does not answer for "does not fit simultaneous command"); a recorded aircraft does not react; and the records lose separation by themselves (2.76 % of the flights of the archived census, §9.1), which the model must not pay for | Decided | User, 2026-10-06 (O17's alternative; O17 closed) |
-| D146 | **The window.** A window is an anchor flight and every flight of the same airport and split with a closed-loop sentence at the chosen Δ whose row 0 is in [the anchor's row 0, the anchor's row 0 + L): these are its commanded aircraft. Every other flight of the airport and the split in the air at a step is recorded and flies its record (post-training D93). L is a setting that the user chooses after the census (MC1, O16). With L = 0 the window is stage C's real window. Kinds: real windows and compressed windows (each commanded aircraft other than the anchor moved toward the anchor by a whole number of Δ: its offset from the anchor times c, c drawn uniformly in [c_min, 1]); their counts are settings (O16). The windows of a round share their flights as in post-training D124: a batch commands each flight once, so windows that share a commanded flight go to different batches. A window is left out of the draw when a commanded aircraft opens inside a loss of separation on the records at its first predicted step (post-training D113, for each commanded aircraft) | Decided | User, 2026-10-06, on Claude's proposal |
+| D146 | **The window.** A window is an anchor flight and every flight of the same airport and split with a closed-loop sentence at the chosen Δ whose row 0 is in [the anchor's row 0, the anchor's row 0 + L): these are its commanded aircraft. Every other flight of the airport and the split in the air at a step is recorded and flies its record (post-training D93). L is a setting of the training data only: the model reads no L, and a window ends when every commanded aircraft is done or silent, so any span can be flown. A campaign mixes the spans L = 5, 10 and 20 min (the user, 2026-10-07, after MC1's census, O16): each kind's 1,000 windows of a round in equal parts of the spans, the span of each window drawn with the round's numbers, a shortfall of a span recorded; the windows of one batch have one L, so that a batch's rows and ticks are alike and its speaking stays one call of the network a tick, and the batches of each L are spoken by the speaking workers as now (nothing serial beyond today's). With L = 0 the window is stage C's real window (not one of stage D's spans). Kinds: real windows and compressed windows (each commanded aircraft other than the anchor moved toward the anchor by a whole number of Δ: its offset from the anchor times c, c drawn uniformly in [c_min, 1], c_min = 0.8). The windows of a round share their flights as in post-training D124: a batch commands each flight once, so windows that share a commanded flight go to different batches. A window is left out of the draw when a commanded aircraft opens inside a loss of separation on the records at its first predicted step (post-training D113, for each commanded aircraft) | Decided | User, 2026-10-06, on Claude's proposal; the spans, the kinds, their counts and c_min: user, 2026-10-07 (O16, after MC1), the rest of the mix on Claude's readings |
 | D147 | **The landings that a window counts.** Two quantities count landings: the input of the landings on each candidate in the 30 min before a row (prior §7 item 2) and the present landing direction of the reward (post-training D112). In a window: (1) a commanded aircraft's landing in the data is not counted (it is that aircraft's future); (2) a commanded aircraft whose outcome in the loop is `landed` is counted for every other aircraft of its window, on its landed runway, from its crossing time; (3) a commanded aircraft with any other outcome is not counted; (4) a recorded aircraft is counted at its landing time in the data, as in stage C (post-training D105). Why: the inputs give only what a controller knows before the step (principle 7); with one commanded aircraft this is post-training D31 and D105 | Decided | User, 2026-10-06, on Claude's proposal |
 | D148 | **One row at a time for all aircraft.** At a Δ row, every commanded aircraft is spoken at once, from the state at the start of the row; no aircraft reads the words that another one says in the same row. The masks of a caller are computed once for the row from that state (post-training D110). The speed-word mask takes a commanded leader as it takes a recorded one: its speed target is its present speed along its course (post-training D117 P5). Why: the archived design ordered the aircraft of a step along the approach clock so that a later aircraft's mask read the earlier one's new words (§9.1); that needed an order, several passes of the speaker in each step and a rule for ties, for a mask that acted on 0.18 % of the labelled speed words | Decided | User, 2026-10-06, on Claude's proposal |
 | D149 | **Stage D's code depends on stage C's code, through a public interface.** The post-training document gets a public interface (a new §9, items in §6.1 here); stage D imports from `post/` and from stage C's runners only its names. Where one commanded aircraft becomes several (the window, the window loop, the loss of separation, the two passes of a round, the campaign's steps), stage C's code is generalised, not copied. A generalisation keeps stage C's behaviour: with one commanded aircraft in each window, the same words, states, rewards and branch groups, bit for bit, on fixed inputs (the CPU, one thread). The reference is stage C's code before the change: its outputs on fixed windows are kept and compared with the generalised code's, by a test on synthetic windows and by a check on real windows, before stage D uses it. Stage C's formal results stay valid | Decided | User, 2026-10-06, on Claude's proposal |
@@ -51,12 +51,12 @@ the evidence is in §9.
 | D152 | **The model, version 1: the states and the words in force of the other aircraft.** Stage D commands every arrival of a window's time span (§3). It starts from the round of stage C that the user chooses (post-training §9 item 12) and pulls to the base, as every stage of the post-training does. The prior runs on each commanded aircraft; the traffic attention reads every other aircraft of the step as a token (post-training D98): a recorded aircraft's from its record, a commanded one's from its states in the loop. The token of another commanded aircraft also carries what the model told it: a flag that it is commanded, a flag that it is silent (D144), and its words in force in the columns altitude, angle, speed and heading (none before its first said row). A recorded aircraft has the flags 0 and no words: its labelled words use later rows and are never an input (post-training D99). These features enter through a token part of stage D's own, beside stage C's token network, whose projection starts at zero, so the start says what stage C's chosen round says; stage C's token features and module stay as they are (post-training D149's generalisation, §6.1 item 10). Why: one model speaks for every aircraft at once and, for each one, knows where every other aircraft is and what it told each of them: a controller's knowledge. A word that one aircraft is told is read by the others one row (Δ) later (D148) | Decided | User, 2026-10-06 (the states and the words in force, Claude's option; the other aircraft's intent next, D153) |
 | D153 | **The model, version 2: the other aircraft's intent.** After version 1's campaign, a module of stage D at each layer lets a commanded aircraft's row read the hidden states, at that layer, of the other commanded aircraft of its window at the same tick (the aircraft that have joined; an absent one never). Only the same tick: a hidden state at tick t comes from the inputs at the start of row t and holds no word of that row, so D148 holds. Its output starts at zero; version 2 starts from version 1's chosen round and pulls to the base. A sample of its loss is a whole window: every commanded aircraft's rows on the window's ticks, encoded together; only the varied aircraft's rows after the branch point, up to its event, are counted (D142). What it changes in the earlier stages' code, and why no trained artefact becomes invalid: §6.4. Why: version 1 knows what each aircraft was told, not what the model is about to tell it; the user wants that too, trained on top of version 1 | Decided | User, 2026-10-06 ("first train version 1, then add version 2 to it") |
 | D164 | **Stage D's start follows stage C's rule of a start from a round** (post-training D162). Stage D's campaign starts from the round of stage C that the user chooses through the one function of post-training §9 item 12: its settings record the start as `{campaign, round, checkpoint_sha256}`; the start is refused by name unless the bytes are the recorded ones, the identity is of this base, today's masks, stage C's traffic shape and that round, a formal campaign starts from a formal one, and stage D's seed is not the source campaign's (stage D's draw takes the train's flights in a permutation of the seed and the round, D124 generalised, so the same seed would give its round r the flights of stage C's round r first); the optimizer starts afresh; the pull term pulls toward the base (D152). Version 2's start from version 1's chosen round follows the same rule. Why: one way to open a round as a start, with the same checks, for every stage | Decided | User, 2026-10-07 |
+| D166 | **Stage D's implementer's readings of MC0–MC4, accepted** (`requests_from_d_to_designer.md`, 2026-10-07; the numbers are that note's). (6) A loop landing on a sealed test day is left out and counted with the sealed landings, as stage C's window landings. (7) A commanded aircraft that ends `landed` is judged once, at the row after it, as over its threshold at its crossing state, so the wake minimum behind a commanded leader is judged. (19) A formal start of stage D refuses a smoke campaign and a campaign with rounds still to run (as `post_validation`). (21) The token part's ten features (`multi/tokens.py`, `multi-commanded-tokens-v1`): the flags commanded, silent and words in force; the heading word as the prior reads it (sine and cosine of its track less the course in force); the level over 1,000 m with a flag for no level-off; the angle word's nominal angle over 3°; the speed target over 100 m/s with a flag for unspecified; a recorded aircraft's part 0; the scales the edge features' (a mirror, pinned by a test). (22) With one commanded aircraft, stage D's rules give stage C's round only where no `records_kept` loss occurs (D145); D149 holds for stage C's own code. (25) The silent flag carries at most one bit of the records (a `records_kept` loss) once an aircraft: a stated limit of D144 × D145 × D152. (29) `Stage.start` and `Stage.start_model`; `Stage.read_batch` takes the draw (post-training D161). (30) The context records whether the campaign is formal (`Context.formal`); `round_start` refuses a smoke source under it, and `start_of` checks the source before anything is opened. (31) A landed leader past its plane is not established; at its threshold row only the wake minimum is judged (its state up to 2 s behind, up to about 140 m, 2.5 % of the least minimum): a stated limit. (32) A compressed window whose shifts all round to 0 is counted as real; a window without a later aircraft has no compressed form. (33) The select set: real windows of each span (§5 item 2). (34) The readout's numbers `[seed, 2^30, place, member]`, a later draw appended; the readouts of O18 read each aircraft's crossing (`WindowResult.crossing`). (35) A landed commanded aircraft counts as recorded in the readout's pairs; the census's baseline never judges one (a stated limit, below 0.1 % of steps). The names they give are in vocabulary §6 item 5, prior §7 items 2, 3, 7 and post-training §9 | Decided | User, 2026-10-07 ((6), (7), (21), (25) one by one; (19), (22), (29)–(35) together) |
 
 ### 0.2 Open items
 
 | # | Item | Proposal | § |
 |---|---|---|---|
-| O16 | The span L of a window, the kinds of window and their counts, c_min | Measured by the census (MC1) on the train days for L of 0, 5, 10 and 20 min; the user chooses before MC2's smoke (outline D55). Stage C's kinds A, D and B are not proposed for stage D | 3.1 |
 | O18 | The time that the aircraft take | D151: readout only (the delay of each landing against its record, the spacing at the threshold). A term only if the readouts show that the model spreads the aircraft out; the user decides with the numbers | 2.5 |
 
 ### 0.3 Implementation
@@ -70,21 +70,20 @@ rule 10); its readings and requests go to `requests_from_d_to_designer.md`. MC0�
 | MC0 | Built, reviewed, committed (9c98a8d6, d7bf55f5, 3a9b7153, 80fe774c, 648b6591, 5e456406, a1ea664f); D73's checks on the formal artefact passed and D149's real-window check passed, 200 of 200 windows bit for bit (2026-10-07) |
 | MC1 | Built, reviewed, committed (e6f0e564); its cost measured on a sample (about 6–7 h in one process); the full census running (2026-10-07) |
 | MC2, MC3 | Built, reviewed, committed (fd720c75): stage D's rule of who answers, its token part, its credit |
-| MC4 | The round's stage committed (054727db); the user's items 6 and 7 built (ac919f9c); C15 and C16 merged in (fc962015); the one start function (D164) and the runner `multi_train` committed (2b370d37); the O18 readouts and `multi_validation` committed (fccbab8d); the smoke waits for O16 |
-| MC5–MC10 | Not started |
+| MC4 | The round's stage committed (054727db); the user's items 6 and 7 built (ac919f9c); C15 and C16 merged in (fc962015); the one start function (D164) and the runner `multi_train` committed (2b370d37); the O18 readouts and `multi_validation` committed (fccbab8d); the windows of several spans, one L a batch (D146) and D166 item 19 committed (6cc49ad1); the smoke and its resume passed (2026-10-07) |
+| MC5 | The profile runner `multi_profile` committed (bd6dd1be); the profile at the formal size running (2026-10-07) |
+| MC6–MC10 | Not started |
 
 ### 0.4 Plan
 
-1. Done (2026-10-06): the user decided §0.1; Claude wrote the interfaces of §6 into the vocabulary, prior and
-   post-training documents (vocabulary §6 item 5, prior §7 items 2, 3, 7, post-training §9). O16 is decided after
-   MC1, O18 from the readouts.
-2. MC0 (the interfaces) and MC1 (the census) by stage D's implementer on `dev-multi-control` (outline §5 rule 1),
-   from `dev-two-tier-v4` with this document merged in. While C10 runs: the code and the tests on
-   synthetic inputs only, with few processes. After C10 ends and after the measurements of outline §4 items 5 and 6
-   on the host (outline §5 rule 13), in this order: the checks of MC0 on real data (vocabulary
-   D73's checks on the formal artefact, D149's check on real windows), then MC1's census. The user chooses O16.
-3. MC2–MC5 (version 1, D152). The formal campaign MC6 after C10's chosen round and the user's settings; the Training
-   view MC7.
+1. Done: the user decided §0.1 (2026-10-06); Claude wrote the interfaces of §6 into the vocabulary, prior and
+   post-training documents, with the names that MC0–MC4 gave (D166). MC0–MC4 built and merged into `dev-two-tier`
+   (`b967d2b1`); MC0's checks on real data passed; MC1's census read (stage D's log §10); O16 decided (D146, 2026-10-07).
+2. MC4's windows of several spans, one L a batch (D146), and MC5, the profile at the formal size for each span, by
+   stage D's implementer (outline §5 rule 1), with no other job on the host or the GPU while stage C's C17 runs
+   (outline §5 rule 13).
+3. The formal campaign MC6 from the round of stage C that the user chooses (D164), from a run worktree (outline D163),
+   with the user's settings; the Training view MC7 (fronter). O18 from the readouts.
 4. Version 2 (D153): MC8 (its code), MC9 (its profile, campaign from version 1's chosen round, validation readout);
    MC10 closes stage D.
 
@@ -262,16 +261,20 @@ D93 says.
 ### 3.1 The window (D146)
 
 - **The commanded aircraft**: the anchor and every flight of the same airport and split with a closed-loop sentence at
-  the chosen Δ (inside the base's selection or not, post-training D76) whose row 0 is in [the anchor's row 0, + L).
+  the chosen Δ (inside the base's selection or not, post-training D76) whose row 0 is in [the anchor's row 0, + L),
+  L the window's span (5, 10 or 20 min, D146).
   Each has its own row 0, first predicted step, start and time limit (the start of a closed loop, vocabulary §6 item
   5).
 - **The recorded aircraft**: every other flight of the airport and the split in the air at the step, from its entry
   into the arrival slice to its landing (post-training D93), with its R and G as in stage C (post-training D99, D117).
   This includes the aircraft already in the air at the anchor's row 0 and every aircraft that enters after the span.
 - **The draw of a round** (post-training D124, generalised): the train's flights in one permutation (the seed and the
-  round); each flight in turn is an anchor, until each kind's count is reached (O16). The windows of a round share
-  their flights; a batch commands each flight once (a loop holds each flight once), so windows that share a commanded
-  flight go to different batches. D146's rule of the windows left out is checked at the draw.
+  round); each flight in turn is an anchor with its span drawn by the round's numbers, until each kind's 1,000 windows
+  are reached in equal parts of the spans (D146; a shortfall of a span recorded). The windows of a round share their
+  flights; a batch holds windows of one L and commands each flight once (a loop holds each flight once), so windows
+  that share a commanded flight go to different batches. D146's rule of the windows left out is checked at the draw.
+  A compressed window whose shifts all round to 0 flies the real window and is counted as real in the readouts (the
+  draw counts it as drawn compressed); a window without a later aircraft has no compressed form (D166).
 - **Compressed windows**: each commanded aircraft other than the anchor is moved earlier, its offset from the anchor's
   row 0 multiplied by c (c uniform in [c_min, 1], the moved offset rounded to a whole Δ); the recorded aircraft do not
   move. A moved aircraft's record moves with it: its observed rows, its row 0, its first predicted step; its states
@@ -348,14 +351,15 @@ ratio's denominator is the model at the start of the pass; the traffic attention
 ## 5 Selection, validation and readouts
 
 1. **The start (round 0)** is stage C's chosen round, read in stage D's windows.
-2. **The selection readout** of each round: a fixed set of windows of the select days (drawn once with the seed,
-   D146's rule), spoken once with the same numbers every round. Its size is set so that the paired standard error of
+2. **The selection readout** of each round: a fixed set of real windows of the select days of each span (anchors in an
+   order drawn once with the seed, each kept unless D146 leaves it out, at most `select_per_airport` an airport and
+   span), spoken once with the same numbers every round (each aircraft's `[seed, 2^30, place, member]`, D166). Its size is set so that the paired standard error of
    W per aircraft between two rounds can resolve the change that the user wants to see: MC5 proposes it from round 0's
    spread. Why: the archived campaign's selection set could not resolve a change of 0.012, and its chosen round's
    gain (+0.025) came mostly from taking the best of 8 rounds (§9.1).
 3. **The validation readout**: the chosen round, read one time on the val days (outline D85), with a claim before the
    read (as post-training D132).
-4. **The readouts** of each window set (no criterion: D7): by airport and kind,
+4. **The readouts** of each window set (no criterion: D7): by airport, kind and span (the validation readout too),
    - W per commanded aircraft; each aircraft's outcome; landed; go-arounds; silent aircraft;
    - the losses of separation by pair (commanded–commanded; commanded–recorded, the commanded one answering by the
      rules or because the records kept their separation; recorded only, with the records also losing it: D145), by
@@ -525,7 +529,7 @@ The gate of this document is the multi-aircraft control. The user sets its crite
 |---|---|---|
 | 1 | The edge features | Stage C's conformance check (post-training §9 item 4), unchanged, run in every process that computes tokens |
 | 2 | A window readout | The checks of the code it uses, at its start: the edge features', the executor's and the closed loop's (vocabulary D71, D73), and D149's check of the generalised loop on fixed windows. The commit as information. No digest of code |
-| 3 | A checkpoint of stage D | Its format name (version 1: `ts-multi-checkpoint-v1`; version 2: `ts-multi-checkpoint-v2`); the identity of its start (version 1: the chosen round of stage C, whose identity holds the base's; version 2: version 1's chosen round); the set of procedure masks; the shape of the traffic attention and of stage D's token part (D152) and, in version 2, of its module (D153), each with its format name; the seed; L, the kinds and c_min; the windows of each round by their anchors, their commanded flights and their shifts |
+| 3 | A checkpoint of stage D | Its format name (version 1: `ts-multi-checkpoint-v1`; version 2: `ts-multi-checkpoint-v2`); the identity of its start (version 1: the chosen round of stage C, whose identity holds the base's; version 2: version 1's chosen round); the set of procedure masks; the shape of the traffic attention and of stage D's token part (D152) and, in version 2, of its module (D153), each with its format name; the seed; the spans and their counts, the kinds and c_min; the windows of each round by their anchors, their commanded flights and their shifts |
 | 4 | A campaign | `ts-multi-train-v1` (version 1), `ts-multi-train-v2` (version 2); its settings in the campaign's record; a resume requires them the same |
 
 ---
@@ -539,7 +543,7 @@ The gate of this document is the multi-aircraft control. The user sets its crite
 | Advantage | The window's reward less the mean of its group; on the varied aircraft's rows after the branch point | D142 |
 | Varied aircraft | Each aircraft with r < 1 and the commanded aircraft of the losses they answer for | D143 |
 | Branch points | The varied aircraft's first predicted step and the points of the window's grid after it (the anchor's first predicted step and every 120 s after it), before its event; K = 8 | D143, post-training D37, D94 |
-| Window | An anchor and every flight with a sentence whose row 0 is within L after it; L, the kinds, c_min: O16 | D146 |
+| Window | An anchor and every flight with a sentence whose row 0 is within L after it; L = 5, 10, 20 min mixed, one L a batch; real and compressed, c_min = 0.8; 1,000 windows of each kind a round, in equal parts of the spans | D146 |
 | Loss | Post-training §9 item 10: ε = 0.2; pull to the base 0.04; data term 1 | §4 |
 | Most go-arounds of an aircraft | 2 | Post-training D91 |
 | Speed-word mask | Post-training's; a commanded leader's target is its present speed along its course | D148 |
@@ -658,7 +662,9 @@ commanded aircraft and between a commanded and a recorded one (by who answers, a
 (the commanded aircraft flown on their closed-loop sentences in the windows). For compressed windows at c_min of 0.6
 and 0.8, the same counts. Report to the user, who chooses O16.
 
-**MC2. The window loop with several commanded aircraft** (§3). Tests: L = 0 equals stage C (D149); every input and
+**MC2. The window loop with several commanded aircraft** (§3). Tests: with one commanded aircraft and stage C's numbers, stage
+D's rules give stage C's round bit for bit where no `records_kept` loss occurs (D145 charges the commanded aircraft
+where stage C's rule does not; D166 item 22), and stage C's own code is unchanged (D149); every input and
 token of the scene at an aircraft's rows up to its first predicted step is unchanged by a change of its runway word
 (D23, D31); another commanded aircraft's token carries its flags and its words in force from the row after they are
 said, a recorded aircraft's none, and with stage D's token part at zero the words are stage C's chosen round's, bit
@@ -672,11 +678,12 @@ D143; in a continuation only the varied aircraft's numbers change; the advantage
 rows after the branch point only; with one commanded aircraft the groups are stage C's.
 
 **MC4. The runners**: the campaign, the selection readout, the validation readout
-(its claim, as post-training D132). Smoke: two rounds, a few windows of each airport, with the user's O16 (outline
+(its claim, as post-training D132). Smoke: two rounds, a few windows of each airport and span (D146) (outline
 §5 rule 7); `--resume` continues.
 
 **MC5. The profile at the formal size** (as post-training C8): the time of a batch and of a round with the two passes,
-the memory of the host and of the GPU for N speaking workers (post-training O15's check), the bytes of the groups; the
+the memory of the host and of the GPU for N speaking workers (post-training O15's check), each for every span (a batch
+sized by its rows, D166); the bytes of the groups; the
 spread of round 0's W per aircraft on the select windows, and from it the size of the selection set (§5 item 2).
 Claude proposes the campaign's settings; the user decides them and the criterion that chooses the round (D7).
 

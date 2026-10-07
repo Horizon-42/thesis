@@ -33,31 +33,50 @@ they start with `4dTrajectory/` or `.claude/`.
 
 ### 0.1 Where to resume (2026-10-07, before a compression of the context)
 
-- **Code**: MC0–MC4 of version 1 built and reviewed, merged into `dev-two-tier` at the user's word (b967d2b1; the
-  branch `dev-multi-control` and its worktree `.claude/worktrees/multi-control` kept for stage D's next steps — keep
-  them level with dev-two-tier by merging it in before new work). Full ts suite on it: 1,963 passed, 1 skipped.
-- **Running when this was written: MC1's census, a stated sample** (the user: "sample, and you may use more cpu, just
-  finish it as soon as possible"): 500 anchors of each airport and split, seed 1337, in 6 processes from the
-  multi-control worktree (`/tmp/claude-1000/mc1/run_part.sh`: one split each, spans {0, 5}, {10}, {20} min, every c_min);
-  each part writes `/tmp/claude-1000/mc1/s500/<split>.<spans>/census.json` and a line in `/tmp/claude-1000/mc1/s500/done`
-  (6 lines when all are done; the four parts of 0, 5 and 10 min took 6–7 min each). Then: join the six parts (same
-  anchors: the sample's seed is per split, not per span) into one table by split, span, kind and airport — the commanded
-  aircraft of a window (p50, p90, largest), the recorded aircraft at a first predicted step, the windows left out (by the
-  anchor, by a later aircraft), the losses by pair on the records and on the baseline (share of windows and of steps) —
-  report it to the user for O16 (L, the kinds and their counts, c_min), and write it into this log (a readout).
-- **Next, in order**: the user's O16 → MC4's smoke (`multi_train --smoke`, two rounds, a few windows of each airport,
-  from a chosen round of stage C: `--start-campaign 4dTrajectory/outputs/POOLED/post/post_train_20261006 --start-round
-  <the user's>`, a seed other than 1337) → MC5's profile at the formal size (time of a batch and a round, memory with N
-  speaking workers, the spread of round 0's W per aircraft for the select set's size) → the user's settings → MC6 from a
-  run worktree at the merged commit (outline D163) → MC7 by fronter → version 2 (MC8, MC9) → MC10.
-- **Waiting for the user**: O16; requests items 19, 22, 29–35 (decided: 6, 7, 21, 25).
+- **State**: MC0–MC4 of version 1 built, reviewed and merged into `dev-two-tier` (b967d2b1, the user's word; full ts
+  suite 1,963 passed); MC0's D73 checks and D149's real-window check (200/200 bit for bit) passed; MC1's census done as a
+  stated sample (500 anchors an airport and split; §10). The branch `dev-multi-control` and its worktree
+  `.claude/worktrees/multi-control` are kept for the next steps.
+- **The user decided everything asked (designer's commit 7decd7b9)**: O16 → D146 rewritten (spans L = 5, 10, 20 min
+  mixed; each kind's 1,000 windows of a round in equal parts of the spans, each window's span drawn with the round's
+  numbers, a shortfall of a span recorded; one L a batch; real and compressed windows, c_min 0.8; select set and
+  readouts by span, at most `select_per_airport` per airport and span; identity and campaign settings record the spans
+  and their counts); D166: requests items 6, 7, 19, 21, 22, 25, 29–35 accepted (31 and 35 as stated limits). The names
+  of MC0–MC4 are now in vocabulary §6 item 5, prior §7 items 2, 3, 7, post-training §9 (item 12: `round_start`,
+  `start_of`, `source_campaign`).
+- **The orders now (notes/stage_d.md of 2026-10-07, read it first)**:
+  1. **Code, on dev-multi-control after merging dev-two-tier in**: `experiments/multi_train.py` by D146 and §3.1 — the
+     draw by span (equal parts, the span drawn with the round's numbers, shortfalls recorded), batches by L (one L a
+     batch; each flight commanded once a batch), the select set / readouts / validation readout by span, the identity
+     and the settings with the spans and counts (`MultiSettings.span_s` becomes the spans). Also D166 item 19 (built
+     neither yet): a formal start of stage D refuses a source campaign with rounds still to run (as `post_validation`),
+     beside the smoke refusal `source_campaign` already makes. Tests: each kind's counts split equally by span with the
+     shortfall recorded; one L a batch; the select set by span and airport; the spans in the identity; MC2's bit-for-bit
+     check with stage C's numbers still passes (D166 item 22: `tests/test_multi_control.py`
+     `test_with_one_commanded_aircraft_stage_ds_rules_give_stage_cs_groups`). Then tests → independent review (D131's
+     depth) → explicit-path commit → a log line.
+  2. **MC4's smoke and MC5, only with the host and GPU free (rule 13) and never while stage C's C17 runs**: smoke =
+     `multi_train --smoke`, two rounds, a few windows of each airport and span, the start round 6 of
+     `4dTrajectory/outputs/POOLED/post/post_train_20261006` (smoke only; the formal start is the user's, D164), a seed
+     other than 1337. MC5 at the formal size, per span: the time of a batch and of a round, the memory with N speaking
+     workers (batch size set by a batch's rows), the bytes of the branch groups, the spread of round 0's W per aircraft
+     (the select set's size); report the proposed settings to the user.
+  3. After the user's settings: MC6 from a run worktree at the merged commit (outline D163).
+- **The requests note** (`design/requests_from_d_to_designer.md`): rewrite it whole, the decided items deleted (all
+  of 1–36 are decided now; keep only new readings).
 - **Left running from earlier**: the test stack of stage B's browser check from `.claude/worktrees/two-tier-v4`
   (vite 5185, backend 8795; stop: `kill $(lsof -t -iTCP:5185 -sTCP:LISTEN) $(lsof -t -iTCP:8795 -sTCP:LISTEN)`).
-- **Scratch results kept** (`/tmp/claude-1000/`): `d73/` (the D73 checks' records), `d149/` (the real-window check's
-  script `check.py`, `compare.py` and digests `old.json`, `new.json`), `mc1/sample20/` (the 20-anchor sample).
+- **Scratch results kept** (`/tmp/claude-1000/`): `d73/` (the D73 checks), `d149/` (the real-window check's
+  `check.py`, `compare.py`, digests `old.json`, `new.json`), `mc1/s500/` (the census parts, `join.py`, `table.txt`).
+- **Code to know**: `multi/{windows,census,separation,tokens,credit,timing}.py`; `experiments/multi_train.py`
+  (`MultiSettings`, `draw_windows`, `speak_batch`, `selection_windows`, `read_batch`, `window_losses_of`,
+  `window_timing`, `selection_readout`, `multi_settings_of`, `round_model`, `stage_d()`); `experiments/multi_validation.py`;
+  `post_train.Stage` (start, start_model, identity, draw, speak, selection(split), readout, record, speak_batch,
+  read_batch, part_width), `round_start`, `start_of`, `source_campaign`, `Context.formal`; tests
+  `tests/test_multi_{train,validation,control,windows}.py`.
 - **The working rules** (notes/stage_d.md): every step single-file tests → an independent review (code only, at D131's
   depth: review_guide §3 step 6, §6, checklist §5) → an explicit-path commit (`git diff --cached --stat` first) → one line
-  here. Real-data jobs only with the host and GPU free (rule 13), one thread each, outputs in scratch; tests on the CPU.
+  here. Real-data jobs only with the host and GPU free, one thread each, outputs in scratch; tests on the CPU.
 
 ## 1 The branches (2026-10-06)
 
@@ -229,3 +248,66 @@ thread, its outputs in a scratch directory (`/tmp/claude-1000/`), the code of `d
    1; 5 min: p50 2, p90 3; 10 min: p50 2, p90 4, largest 8; 20 min: p50 4, p90 7, largest 11. On the records
    `records_kept` is 0 (as it must be: on the records every loss is the records'). The full census's report goes to the
    user for O16.
+
+## 10 MC1's census (a stated sample, 2026-10-07)
+
+The user's choice ("sample, and you may use more cpu, just finish it as soon as possible"): 500 anchors of each airport
+and split (2,500 of 40,530 train anchors, 2,500 of 6,199 select anchors), seed 1337, every span and kind, in 6 processes
+(the longest 537 s), on dev-multi-control's code (fccbab8d); the records in `/tmp/claude-1000/mc1/s500/`. A compressed
+window needs a later aircraft (an anchor without one has no compressed form), so its windows are fewer. The pairs: cc
+commanded–commanded, ca a commanded aircraft responsible against a recorded one, rk only the recorded one responsible
+and the records kept their separation (D145: the loop charges the commanded one), ro the records lost it too. On the
+records rk is 0 by construction; the baseline is the commanded aircraft flown on their stored closed-loop sentences (the
+labelled words: not a model's result, §5 item 4).
+
+| Split | L | Kind | Windows | Left out (anchor, later) | Commanded p50 / p90 / largest | Recorded at a first step p50 / p90 | Records: cc / ca / rk / ro (% of windows) | Baseline: cc / ca / rk / ro |
+|---|---|---|---|---|---|---|---|---|
+| train | 0min | real | 2500 | 2 (anchor 2, later 0) | 1.0 / 1.0 / 1.0 | 1.0 / 3.0 | 0.0 / 3.2 / 0.0 / 2.2 | 0.0 / 4.0 / 0.9 / 1.5 |
+| train | 5min | compressed_0.6 | 1413 | 31 (anchor 0, later 31) | 2.0 / 3.0 / 5.0 | 1.0 / 2.0 | 16.5 / 11.9 / 0.0 / 3.0 | 13.7 / 13.5 / 1.7 / 2.7 |
+| train | 5min | compressed_0.8 | 1413 | 6 (anchor 0, later 6) | 2.0 / 3.0 / 5.0 | 1.0 / 2.0 | 7.9 / 9.7 / 0.0 / 2.8 | 8.0 / 11.0 / 1.4 / 2.1 |
+| train | 5min | real | 2500 | 5 (anchor 2, later 3) | 2.0 / 3.0 / 5.0 | 1.0 / 2.0 | 2.3 / 4.6 / 0.0 / 2.5 | 2.6 / 5.3 / 1.4 / 2.0 |
+| train | 10min | compressed_0.6 | 1974 | 88 (anchor 1, later 87) | 3.0 / 5.0 / 9.0 | 1.0 / 2.0 | 23.0 / 12.1 / 0.0 / 5.3 | 21.8 / 13.1 / 2.0 / 5.1 |
+| train | 10min | compressed_0.8 | 1974 | 32 (anchor 1, later 31) | 3.0 / 5.0 / 9.0 | 0.0 / 2.0 | 12.5 / 9.4 / 0.0 / 3.1 | 12.4 / 10.5 / 1.9 / 2.9 |
+| train | 10min | real | 2500 | 8 (anchor 2, later 6) | 2.0 / 5.0 / 9.0 | 0.0 / 2.0 | 4.7 / 4.5 / 0.0 / 3.2 | 5.5 / 5.6 / 1.7 / 2.6 |
+| train | 20min | compressed_0.6 | 2313 | 140 (anchor 2, later 138) | 4.0 / 7.0 / 14.0 | 0.0 / 2.0 | 30.0 / 12.5 / 0.0 / 6.8 | 28.2 / 13.3 / 3.2 / 6.6 |
+| train | 20min | compressed_0.8 | 2313 | 82 (anchor 2, later 80) | 4.0 / 7.0 / 14.0 | 0.0 / 2.0 | 17.9 / 11.5 / 0.0 / 5.0 | 17.7 / 12.4 / 2.6 / 4.9 |
+| train | 20min | real | 2500 | 15 (anchor 2, later 13) | 4.0 / 7.0 / 14.0 | 0.0 / 2.0 | 7.0 / 5.7 / 0.0 / 4.2 | 8.3 / 6.4 / 2.6 / 3.8 |
+| select | 0min | real | 2500 | 2 (anchor 2, later 0) | 1.0 / 1.0 / 1.0 | 1.0 / 3.0 | 0.0 / 3.6 / 0.0 / 2.0 | 0.0 / 4.7 / 1.4 / 1.4 |
+| select | 5min | compressed_0.6 | 1430 | 26 (anchor 2, later 24) | 2.0 / 3.0 / 5.0 | 1.0 / 3.0 | 15.5 / 10.2 / 0.0 / 2.1 | 15.8 / 11.8 / 0.9 / 1.9 |
+| select | 5min | compressed_0.8 | 1430 | 7 (anchor 2, later 5) | 2.0 / 3.0 / 5.0 | 1.0 / 3.0 | 8.3 / 8.0 / 0.0 / 2.2 | 9.4 / 9.1 / 0.8 / 1.8 |
+| select | 5min | real | 2500 | 4 (anchor 2, later 2) | 2.0 / 3.0 / 5.0 | 1.0 / 2.0 | 2.5 / 4.1 / 0.0 / 2.4 | 3.5 / 4.8 / 1.3 / 1.7 |
+| select | 10min | compressed_0.6 | 1992 | 72 (anchor 2, later 70) | 3.0 / 5.0 / 8.0 | 1.0 / 2.0 | 22.5 / 11.7 / 0.0 / 4.2 | 22.2 / 12.8 / 1.6 / 3.9 |
+| select | 10min | compressed_0.8 | 1992 | 29 (anchor 2, later 27) | 3.0 / 5.0 / 8.0 | 0.0 / 2.0 | 12.5 / 8.5 / 0.0 / 2.6 | 13.7 / 9.3 / 1.2 / 2.3 |
+| select | 10min | real | 2500 | 6 (anchor 2, later 4) | 3.0 / 5.0 / 8.0 | 0.0 / 2.0 | 4.5 / 4.4 / 0.0 / 2.9 | 6.1 / 4.9 / 1.8 / 2.3 |
+| select | 20min | compressed_0.6 | 2330 | 152 (anchor 2, later 150) | 4.0 / 8.0 / 13.0 | 0.0 / 2.0 | 30.2 / 12.0 / 0.0 / 5.7 | 30.1 / 12.9 / 2.3 / 5.2 |
+| select | 20min | compressed_0.8 | 2330 | 63 (anchor 2, later 61) | 4.0 / 8.0 / 13.0 | 0.0 / 2.0 | 18.2 / 10.5 / 0.0 / 5.6 | 20.2 / 11.4 / 2.7 / 4.9 |
+| select | 20min | real | 2500 | 11 (anchor 2, later 9) | 4.0 / 8.0 / 13.0 | 0.0 / 2.0 | 7.4 / 5.7 / 0.0 / 4.6 | 9.8 / 6.2 / 2.7 / 3.9 |
+
+## 11 MC4 · the windows of several spans (notes/stage_d.md 一; 2026-10-07)
+
+- dev-two-tier (8eeaf4bf) merged into `dev-multi-control` (a fast-forward). The windows of several spans (D146 after
+  O16) and D166 item 19 built, reviewed (opus, two rounds: S2 the memory measure of every span, fixed by
+  `post_train.measured_batches`; S2 the readout of two spans untested, tested; clean), committed **6cc49ad1**: each
+  kind's count in equal parts of the spans (1,000 → 334 / 333 / 333), each window's span drawn with the round's numbers,
+  the counts by kind and span; a batch of one span up to `batch_rows` commanded aircraft (`post_train.batches`, stage
+  C's batches unchanged, checked by the reviewer on 3,000 random inputs); the select set, the readouts and the
+  validation readout by span; the identity with `spans_s`, `per_kind`, `per_span`; `multi_train.require_finished`.
+  Tests: the post_* and multi_* files and `test_architecture` (D149's digests and MC2's check with stage C's numbers
+  among them) passed. Readings 37–43 in the requests note (rewritten, the decided items deleted).
+- MC4's smoke (notes/stage_d.md 二 1; scratch `/tmp/claude-1000/mc4/smoke`, from 6cc49ad1 with the token part's fix of
+  bd6dd1be in the tree for the resume): `multi_train --smoke`, start round 6 of `post_train_20261006`, seed 2027, 6
+  windows of each kind over the spans 300, 600 and 1200 s, `batch_rows` 64, 2 select windows an airport and span; two
+  rounds, exit 0 (round 0 about 5 min: 6 batches of one span each, 46 commanded aircraft, 31 landed, 14 lost separation,
+  1 timeout); the draw 2 of each kind and span, no shortfall, the windows without a later aircraft counted by span (2,
+  1, 1). The resume (`--rounds 3`, 2 speaking workers): the O15 measure on the first batch of each span (9, 13 and 18
+  rows; one worker's host peak 1.5 GB, GPU 2.0 GB; the pass 2.1 GB), round 2 spoken by the workers, exit 0; round 2's
+  identity holds three rounds, the spans and their counts, stage C's round as its start. The smoke's log warned of
+  `log1p` (invalid value) on every call: the token part read `Heard.inputs` at 0, so the unused times since went
+  negative (no value read changed); fixed in bd6dd1be.
+- MC5's runner `experiments/multi_profile.py` built, reviewed (opus, two rounds: S2 the workers not refused where they
+  do not fit, S2 the worker's measure spoken with the stage's start model and not the round's — the campaign's O15 check
+  too, fixed by `Speakers.measure(…, model)` and `post_train.campaign_model`, S2 the spread over all by window where an
+  anchor's windows of the spans are nested — now an anchor the unit; clean), committed **bd6dd1be**. MC5 at the formal
+  size started 2026-10-07 (scratch `/tmp/claude-1000/mc5/profile`): 1,000 windows of each kind, spans 300, 600, 1200 s,
+  `batch_rows` 64, 4 speaking workers, 100 select windows an airport and span read twice, start round 6, seed 2027.
+

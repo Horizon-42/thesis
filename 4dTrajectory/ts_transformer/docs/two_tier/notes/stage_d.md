@@ -4,41 +4,36 @@
 2026-10-07，Claude 写，用户转发。
 
 ```
-阶段 B 的收尾和清理都做完了。C 的新改动里有两处要带到 D（用户 2026-10-07 定）：
-- 起点（multi_control D164，post_training D162、§9 item 12）：D 从 C 选出的那一轮出发时，和 C 的"从某一轮出发"用同一个函数、
-  同样的规则：
-  - settings 里记 {campaign, round, checkpoint_sha256}；
-  - 字节、identity（base、mask、traffic 形状、轮号）不对就按名字拒绝，正式 campaign 不从 smoke campaign 出发；
-  - D 的种子必须和源 campaign 不同；
-  - 优化器重新开始，pull 项拉向 base。
-  现在这件事有两份代码：C16 的 campaign_start（dev-two-tier-v4-post，3c10e08f，等用户合并）和你的 open_round
-  （a1ea664f）。合成一个函数（§9 item 12），C 的 campaign_start 和 D 的起点都调用它。
-- 正式实验（MC6、MC9）从运行工作树启动（outline D163）：在用户合并后的提交上建一个分离的工作树，不用主检出；
-  intent 在发布前写，启动时不检查。
-C14（加轮数）、this_checkout 读路径、P47 都在共享的 open_campaign 里，你的分支已经有了，不用另做。
-C15 上限读数暂时不用于 D。
+你的 requests 用户都定了，设计已经写好（multi_control D146、D166、§3.1、§5、§7、§8、MC2、MC4、MC5、§0.4；
+接口名写进了 vocabulary §6 item 5、prior §7 items 2、3、7、post_training §9）：
+- O16（D146）：L 取 5、10、20 分钟，混在一起训练；每种窗口（真实、压缩，c_min = 0.8）每轮 1,000 个，按跨度平均分，
+  每个窗口的跨度用这一轮的随机数抽，某个跨度不够就记下缺口；一批只放同一个 L；选择集和验证读数按跨度分开报；
+  identity 记下用了哪几种跨度和各自的个数。
+- 第 19、22、29–35 条全部接受（D166），31、35 写成已知限制；第 33 条的选择集按 O16 改成每种跨度各一份
+  （每个机场、每种跨度最多 select_per_airport 个）。
 路径相对 4dTrajectory/ts_transformer/。
 
-一、现在
-继续多机控制。C 的上限读数正在 GPU 上跑（2–3 小时），这段时间只写代码、只在合成输入上测试（rule 13）。
+一、代码（在 dev-multi-control 上，先把 dev-two-tier 合进来）
+1. multi_train：按 D146 和 §3.1 抽窗口；按 L 分批（每批只放同一个 L，每批里每架飞机只被指挥一次）；
+   选择集、读数和验证读数按跨度；identity 和 campaign 的设置记下跨度和个数。
+2. 测试：
+   - 每种窗口的个数按跨度平均分，缺口有记录；
+   - 每批只有一个 L；
+   - 选择集按跨度、按机场的上限；
+   - identity 里有跨度；
+   - 用阶段 C 的随机数时，MC2 的逐位检查照样通过（D166 第 22 条）。
+3. 单文件测试 → 独立审查（只审代码，审查者不能是作者）→ 显式路径提交 → 日志写一行。
 
-二、用户把 dev-two-tier-v4-post（C15、C16）合进 dev-two-tier 之后
-1. 把 dev-two-tier 合进 dev-multi-control。experiments/post_train.py 会有冲突：
-   - C15 给 read_batch、Speakers.read、_read、readout_numbers 加了第几次抽样的参数（draw，第 0 次逐位不变）；
-     你的 Stage 骨架里的读数照样把 draw 传下去，默认 0；
-   - C16 加了 Settings.start、start_checkpoint、campaign_start，删掉了启动时的 intent 检查。
-   两边都保留。
-2. 按 §9 item 12 把 open_round 和 campaign_start 的检查合成一个函数，两处都调用它；D 的起点按 D164 写。
-3. 测试：
-   - C 的测试原样通过（C16 的每种拒绝、C15 第 0 次抽样逐位不变）；
-   - D 的起点：每种拒绝按名字（字节不对、另一个 base/mask/traffic 形状/轮号、smoke 源、种子相同）；
-   - D149 的逐位参照检查照样通过。
-4. 单文件测试 → 独立审查（只审代码，审查者不能是作者）→ 显式路径提交 → 日志写一行。
+二、MC4 的 smoke 和 MC5（主机和 GPU 上没有别的任务时才跑，rule 13；阶段 C 的 C17 运行期间不跑）
+1. smoke：multi_train --smoke，两轮，每个机场、每种跨度各几个窗口；起点用 post_train_20261006 的第 6 轮
+   （只是 smoke；正式起点由用户选，D164），种子不能是 1337。
+2. MC5：在正式规模上按每种跨度测一批和一轮的时间、N 个说话 worker 的内存（按一批的行数定批大小）、分支组的字节数，
+   以及第 0 轮每架飞机 W 的离散度（用来定选择集的大小）。把建议的设置报告给用户。
 
-三、上限读数跑完以后
-做多机控制在真实数据上的部分（MC0 的 D73 检查、D149 真实窗口逐位比对、MC1 普查），然后报告 dev-multi-control 能否合并。
+三、之后
+用户定了设置以后，MC6 从运行工作树启动（outline D163）。
 
 每一步的做法：单文件测试 → 独立审查 → 用显式路径提交（不用 git add -A，提交前看 git diff --cached --stat）→ 日志写一行。
 你只能写这些设计文本：各文档 §0.3 的状态行、multi_control §0.3、你的日志。设计没说到的地方写成读法，
-放进 docs/two_tier/design/requests_from_d_to_designer.md（整份重写），等用户定。
+放进 docs/two_tier/design/requests_from_d_to_designer.md（整份重写，已经定了的条目删掉），等用户定。
 ```
