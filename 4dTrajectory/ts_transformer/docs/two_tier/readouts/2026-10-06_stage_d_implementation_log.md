@@ -126,7 +126,7 @@ stage C's campaigns should read a profile too (D172 covers stage D only; stage C
 **Code to know**: `multi/{windows,census,separation,tokens,credit,timing}.py`; `experiments/multi_train.py`
 (`MultiSettings`, `span_counts`, `span_batches`, `draw_windows`, `speak_batch`, `selection_windows`, `read_batch`,
 `selection_readout`, `profiled_fit`, `require_finished`, `round_model`, `stage_d()`, `add_arguments`, `settings_from`);
-`experiments/multi_profile.py` (`profile`, `spread`, `ratio_se`, `units_for`); `experiments/multi_validation.py`;
+`experiments/multi_profile.py` (`profile`, `spread`, `ratio_se`, `windows_for`); `experiments/multi_validation.py`;
 `experiments/post_train.py` (`Stage` with `batches`, `train`, `pass_memory`; `batches`, `measured_batches`,
 `Speakers(…, gpu_budget=)`, `_measure`, `workers_fit(held_now=)`, `campaign_model`, `round_start`, `start_of`,
 `source_campaign`); tests `tests/test_multi_{train,profile,validation,control,windows}.py`.
