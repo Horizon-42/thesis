@@ -1286,3 +1286,36 @@ interval and a group's segment as D170 says; `post.branches.branch_rows` is the 
 (the changed modules, stage D's and the generalisation digest). Review (opus): S1 (a test's `samples` stub took three
 arguments) fixed; S2 (`update_pairs` passing the segment untested) tested; S3 the refusal message, the default rules'
 points and numbers tested.
+
+**C22 (D171), `6a0e45fe`** on `dev-two-tier-v4-post` (fast-forwards `dev-two-tier`; the user merges).
+- `post/value.py`: V (a copy of the start model, its own token part from zero, a head d + 1 → 64 → 1 on
+  `Prior.encode`'s last layer and the time left), V's reading beyond the model (`value_part`: each recorded aircraft's
+  `EDGE_FEATURES` at +30/60/120 s against the commanded state at the row, an in-air flag each, the time to its landing;
+  `time_left`), `ValueSample`, `value_batch`, `advantages` (GAE, γ 1, λ 0.95), `value_loss`.
+- `WindowLoop(value_reader=)`: the reading at each kept row, apart from the tokens (`values`); copied with the loop.
+- `post_train`: `Settings.method` `value`, `value_lr`, `value_warmup` (required with it, refused otherwise; a record
+  without them reads as None); `speak_value_batch` (one sentence a window, `sentences_<k>.pt`); `ValueRun` (V and its
+  AdamW, from a seed of the campaign's own; on a resume read from the last `value.pt`, its identity checked against the
+  checkpoint's); `value_train_pass` (V at the round's start reads every sample once; each update a model step and a V
+  step, both clipped; warm-up: V only); `close_value_round` (after the record, before the checkpoint: `value.pt` with
+  the round's identity; the warm-up's readout check); `value_pass_memory` (O15). The skeleton gains `Stage.companion`
+  and `Stage.close_round`; stage D takes the defaults (its digest unchanged).
+- Tests: 178 passed (the changed modules, stage D's, the generalisation digest, the ceiling and validation readouts).
+  The value tests: GAE on hand values (λ 1, λ 0); the model's log-probabilities unchanged when V's reading changes; V
+  shares no weight; V refuses training mode; V's loss = the mean of A_t² at the round's start; V's part read against
+  the recorded future; a campaign of 2 rounds (warm-up then training, two passes, a clip): the model and its optimizer
+  unmoved in warm-up, `value.pt` before each checkpoint with its identity, a run killed in round 1 resumed as one run,
+  the readout the same without `value.pt`, a start from a value round reads no V; the workers give the same samples as
+  one process; the warm-up check (a source round, other select windows, the base); speaking unchanged by V's reader;
+  the time left 4 s a row and 896 s at a go-around.
+- Review (opus, independent): no S1. S2 fixed: V's inputs kept their embedded tokens through an update (the GPU
+  memory grew with the update); `value.pt` lacked the round's identity (now written after the record, checked on a
+  resume). S3 fixed: the advantages computed once a round, the start copy's gradients, the memory measure with the
+  start copy, the reader past a window's end, the warm-up check with other select windows, a test that could not catch
+  shared weights, a parser error for a refused setting.
+- Readings (requests item 1): the update size, `continuations` 1, V's features, the time left, the head, the warm-up
+  check. The first value campaign's settings: requests item 4, the user's to choose.
+
+**P55's first campaign (`post_seg60_20261007`)** launched 20:32 local after C21's merge; round 0 ended 21:04: landed
+84.6 % (the start 85.7 %), 451 updates (1,711 informative groups of 3,678, segments of 60 s). Results: the experiment
+log, experiment 5.
