@@ -8,7 +8,8 @@ census's sample: 18), item 23 (it asked for 6 and 7), item 20 (built: item 40) a
 into the interfaces).
 
 State: 2026-10-07: MC0–MC4 merged into `dev-two-tier` (b967d2b1); the windows of several spans (D146) and D166
-item 19 built and reviewed on `dev-multi-control` (6cc49ad1, items 37–43); next MC4's smoke and MC5.
+item 19 built and reviewed on `dev-multi-control` (6cc49ad1, items 37–43); MC4's smoke passed; MC5's runner
+committed (bd6dd1be, items 44–45), its profile at the formal size running.
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -140,3 +141,16 @@ item 19 built and reviewed on `dev-multi-control` (6cc49ad1, items 37–43); nex
     D's start under a formal context; `post_train.source_campaign` (stage C's start from a round, C16) is unchanged.
 43. **The identity** (§7 row 3): `spans_s`, `per_kind` and `per_span` (each kind's count of each span) in place of
     one L, and each round's windows with their spans; the campaign's settings hold `spans_s` and `batch_rows`.
+
+## MC5 · the profile (bd6dd1be)
+
+44. **The worker's memory measure speaks with the round's model** (post-training O15; the review of MC5): before,
+    `Speakers.measure` spoke with the stage's start model (the base with zero-output traffic modules), so a campaign
+    started from a round of another (C16, stage D's D164) measured other words than its own. Now the round's model goes
+    to the worker (`Speakers.measure(round, directory, model)`, `post_train.campaign_model`); a new stage C campaign
+    without a start measures as before.
+45. **The size of the select set** (§5 item 2) is read from round 0's spread on two draws of the same windows with
+    independent numbers: an upper bound of the noise of comparing two rounds, which share their numbers. Over all spans
+    the unit is an anchor (its windows of the spans are nested and share their aircraft); within a span, windows of
+    other anchors may still share flights in a dense select set (stated).
+

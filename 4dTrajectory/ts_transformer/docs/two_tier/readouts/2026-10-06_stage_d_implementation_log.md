@@ -294,4 +294,20 @@ labelled words: not a model's result, §5 item 4).
   validation readout by span; the identity with `spans_s`, `per_kind`, `per_span`; `multi_train.require_finished`.
   Tests: the post_* and multi_* files and `test_architecture` (D149's digests and MC2's check with stage C's numbers
   among them) passed. Readings 37–43 in the requests note (rewritten, the decided items deleted).
+- MC4's smoke (notes/stage_d.md 二 1; scratch `/tmp/claude-1000/mc4/smoke`, from 6cc49ad1 with the token part's fix of
+  bd6dd1be in the tree for the resume): `multi_train --smoke`, start round 6 of `post_train_20261006`, seed 2027, 6
+  windows of each kind over the spans 300, 600 and 1200 s, `batch_rows` 64, 2 select windows an airport and span; two
+  rounds, exit 0 (round 0 about 5 min: 6 batches of one span each, 46 commanded aircraft, 31 landed, 14 lost separation,
+  1 timeout); the draw 2 of each kind and span, no shortfall, the windows without a later aircraft counted by span (2,
+  1, 1). The resume (`--rounds 3`, 2 speaking workers): the O15 measure on the first batch of each span (9, 13 and 18
+  rows; one worker's host peak 1.5 GB, GPU 2.0 GB; the pass 2.1 GB), round 2 spoken by the workers, exit 0; round 2's
+  identity holds three rounds, the spans and their counts, stage C's round as its start. The smoke's log warned of
+  `log1p` (invalid value) on every call: the token part read `Heard.inputs` at 0, so the unused times since went
+  negative (no value read changed); fixed in bd6dd1be.
+- MC5's runner `experiments/multi_profile.py` built, reviewed (opus, two rounds: S2 the workers not refused where they
+  do not fit, S2 the worker's measure spoken with the stage's start model and not the round's — the campaign's O15 check
+  too, fixed by `Speakers.measure(…, model)` and `post_train.campaign_model`, S2 the spread over all by window where an
+  anchor's windows of the spans are nested — now an anchor the unit; clean), committed **bd6dd1be**. MC5 at the formal
+  size started 2026-10-07 (scratch `/tmp/claude-1000/mc5/profile`): 1,000 windows of each kind, spans 300, 600, 1200 s,
+  `batch_rows` 64, 4 speaking workers, 100 select windows an airport and span read twice, start round 6, seed 2027.
 
