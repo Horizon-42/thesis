@@ -6,7 +6,7 @@ until the user decides. Paths are relative to `4dTrajectory/ts_transformer/`.
 
 State: 2026-10-07: MC0 (stages A, B, C), MC1, MC2 and MC3 built on `dev-multi-control` (fd720c75), MC4's first part in
 review; nothing run on real data yet. Decided by the user 2026-10-07: items 6, 7, 21, 25 (built: ac919f9c; 21 and 25 as
-written). Items 19, 22 and 29–34 wait for the user.
+written). Items 19, 22 and 29–35 wait for the user.
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -168,7 +168,7 @@ written). Items 19, 22 and 29–34 wait for the user.
     of the window's commanded aircraft with the census's machinery (`multi.census.window_losses`, positions from the
     loop's states and words), the same rule as the census's baseline. Stage C's loop is not changed for it.
 
-## After the merge of C15 and C16 (notes/stage_d.md 二; in review)
+## After the merge of C15 and C16 (notes/stage_d.md 二; built 2b370d37)
 
 29. **The merge keeps both sides by giving `Stage` a start** (post-training §9 item 11): `Stage.start` is what a new
     campaign starts from (stage C's `campaign_start`: the base with zero-output traffic modules, or a round of another
@@ -189,5 +189,12 @@ written). Items 19, 22 and 29–34 wait for the user.
     anchors in an order drawn once with the seed, each kept unless it is left out (D146). Its size is MC5's proposal.
 34. **The readout's numbers** of stage D: `default_rng([seed, 2^30, place, member])` for each aircraft (draw 0; a later
     draw appends its number, as C15's). The readouts of the time the aircraft take (O18: each landing's delay against its
-    record, the spacing at the threshold, the landing order) need each aircraft's crossing in the window loop's result;
-    not built yet (stated in `multi_train`'s docstring).
+    record, the spacing at the threshold, the landing order) read each aircraft's crossing, now in the window loop's
+    result (`WindowResult.crossing`); not built yet (stated in `multi_train`'s docstring).
+35. **A landed commanded aircraft in the readout's pairs** (the review of MC4): judged once over its threshold only in
+    a window of several commanded aircraft (the loop's rule), and counted as a recorded aircraft in the pairs (it
+    answers for nothing, as an aircraft in its observed rows): a loss with a recorded aircraft is not counted (the loop
+    charges nobody), its commanded follower's is `commanded_answers` (the follower answers). The census's baseline has
+    no landed runway, so it never judges one (a stated limit). A loss in which the landed aircraft itself is the
+    responsible one (only where the other is at or past its own threshold) could still read `records_kept` (S3, far
+    below 0.1 % of steps).

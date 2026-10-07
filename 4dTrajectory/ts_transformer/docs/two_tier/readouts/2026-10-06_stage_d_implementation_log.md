@@ -21,8 +21,8 @@ they start with `4dTrajectory/` or `.claude/`.
 | MC2, MC3 · stage D's rules (`multi/separation`, `tokens`, `credit`) | dev-multi-control | Built, reviewed, committed (fd720c75); synthetic tests only (C14 runs) |
 | MC4 · the round's stage (first part) | dev-multi-control | Built, reviewed (three rounds), committed (054727db) |
 | Items 6 and 7 (the user's decisions of 2026-10-07) | dev-multi-control | Built, reviewed, committed (ac919f9c) |
-| dev-two-tier (C15, C16) into dev-multi-control (notes 二 1) | dev-multi-control | Merged (fc962015), one conflict resolved; in review |
-| One start function (notes 二 2, §9 item 12, D164) and MC4 · stage D's runner `multi_train` | dev-multi-control | Built, touched tests 140 passed, in review |
+| dev-two-tier (C15, C16) into dev-multi-control (notes 二 1) | dev-multi-control | Merged (fc962015), one conflict resolved; reviewed with the next row |
+| One start function (notes 二 2, §9 item 12, D164) and MC4 · stage D's runner `multi_train` | dev-multi-control | Built, reviewed (three rounds), committed (2b370d37); touched tests 162 passed |
 | Cleanup (notes 三) | — | Done 2026-10-07 (§7): seven worktrees removed, their data links unlinked first; ten branches deleted with `-d` |
 | MC0's checks and MC1's census on real data | dev-multi-control | After C14's rounds (outline §4 item 7) |
 
@@ -166,6 +166,8 @@ afterwards: all there.
 | ac919f9c | Items 6 and 7 (the user): a loop landing on a sealed test day left out and counted (`LandingIndex.with_landing`, its other checks first); a commanded leader judged once more over its threshold at the row after it lands (`WindowLoop._judged`) | No S1; S2 fixed (tests of the judged set's order with a recorded aircraft, of what the loop gives the rule of who answers, of `_landed`'s rows) |
 | fc962015 | dev-two-tier (C15, C16; 67cd9bc8) merged into dev-multi-control: the conflict in `post_train.py` resolved with both kept — `Stage.start` (a new campaign's start: stage C's `campaign_start`) beside `Stage.start_model` (the shape a resume and a worker load into), `Stage.read_batch` with C15's draw, `counted_ends` kept; the stubs of C15's and C16's tests take the stage | Stage C's tests with C15's and C16's: 37 passed; the review with the next step's |
 
-Next (in review): the one start function (`round_start`, `source_campaign`, `start_of`; `campaign_start` and stage D's start
+| 2b370d37 | Notes 二 2–3 and MC4: `round_start` (one start function: bytes, the source's rules via `source_campaign`, identity, formal from formal via `Context.formal`, the seed), `campaign_start` and stage D's start call it, `start_of`, `open_round` removed; `experiments/multi_train.py` (stage D's campaign); `WindowResult.crossing`; the readout's landed aircraft judged as the loop judges it, as a recorded one in the pairs (`classify(…, over)`) | The merge, this step and the runner in one review: no S1; S2 fixed in three rounds (the readout's landed leader where and as the loop judges it, faulty steps once a window, the measure's series, tests of the readout with several aircraft and of main's wiring), then clean. Tests: stage C's (C15, C16 and D149's digests) and stage D's, 162 passed |
+
+Before (in review, now committed above): the one start function (`round_start`, `source_campaign`, `start_of`; `campaign_start` and stage D's start
 call it; `open_round` removed; `Context.formal`) and stage D's runner `experiments/multi_train.py` (requests items
 29–34).
