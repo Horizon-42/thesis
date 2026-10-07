@@ -33,7 +33,7 @@ PER_KIND = {REAL: 1, INSERTED: 1, LEADER_MOVED: 1, MOVED_START: 1}
 def _settings(**changed):
     values = dict(rounds=2, per_kind=PER_KIND, batch_windows=2, continuations=2, seed=1337, prior_lr=1e-4,
                   traffic_lr=1e-3, weight_decay=0.0, update_groups=1, data_sentences=1, select_per_airport=1,
-                  traffic_hidden=16, traffic_heads=4)
+                  traffic_hidden=16, traffic_heads=4, start=None)
     return Settings(**{**values, **changed})
 
 
@@ -324,9 +324,38 @@ def test_the_selection_readout_through_two_workers_is_the_one_process_readout(se
                 == post_train.selection_readout(model, context, select, settings))
         wrong = [{**window_record(select[0]), "row0_s": real.row0_s + 4.0}]
         with pytest.raises(ValueError, match="other readout windows"):
-            speakers.pool.submit(post_train._read, 99, str(tmp_path / "x.pt"), "select", [0], wrong).result()
+            speakers.pool.submit(post_train._read, 99, str(tmp_path / "x.pt"), "select", [0], wrong, 0).result()
     finally:
         speakers.close()
+
+
+def test_a_draw_reaches_each_window_s_numbers_here_and_through_the_workers(setup, tmp_path, monkeypatch):
+    """P48 (D161): the ceiling readout's draw d reads each window with `readout_numbers(seed, place, d)`, in one process
+    and through the workers (forked after the numbers are recorded to a file, so they record too)."""
+    s = setup
+    context = _context(s)
+    settings = _settings()
+    model, _ = start_model(context, settings)
+    (real,) = post_train.selection_windows(context, settings)
+    select = [_ahead(real)] * 2
+    monkeypatch.setattr(post_train, "selection_windows", lambda context, settings, split="select": select)
+    log = tmp_path / "numbers.txt"
+    numbers = post_train.readout_numbers
+
+    def recorded(seed, place, draw=0):
+        with open(log, "a", encoding="utf-8") as f:
+            f.write(f"{seed} {place} {draw}\n")
+        return numbers(seed, place, draw)
+
+    monkeypatch.setattr(post_train, "readout_numbers", recorded)
+    places = batches(select, settings.batch_windows)
+    post_train.read_batch(model, context, select, places[0], settings, "select", 2)
+    speakers = Speakers(context, settings, 2, CPU)
+    try:
+        speakers.read(model, select, places, "select", 3)
+    finally:
+        speakers.close()
+    assert sorted(log.read_text().splitlines()) == ["1337 0 2", "1337 0 3", "1337 1 3"]
 
 
 def test_the_memory_sampler_sees_a_peak_freed_before_the_end_and_raises_its_failure(monkeypatch):
@@ -568,6 +597,77 @@ def test_a_campaign_raised_to_more_rounds_is_the_campaign_of_that_count_from_its
     assert entry["checks"] == {"stub": True} and entry["inputs"] == {k: _inputs(three, tmp_path)[k] for k in INPUT_PATHS}
 
 
+def test_a_campaign_starts_from_a_round_of_another_campaign_with_a_new_optimizer(setup, tmp_path, monkeypatch):
+    """The user, 2026-10-07: a campaign started from round 0 of another campaign starts from that checkpoint's weights
+    (`round_model(None)`), with a new optimizer (its state after one round counts that round's updates only); a start
+    whose bytes or identity are not the recorded ones is refused by name; a resume with another start is refused."""
+    from ts_transformer.io_utils import file_sha256
+
+    s = setup
+    context = _context(s)
+    settings = _settings(rounds=1, per_kind={**dict.fromkeys(KINDS, 0), REAL: 1}, update_groups=1)
+    model, _ = start_model(context, settings)
+    (group,) = _round(s, model, [_ahead(s["windows"][0])]).groups
+    rewarded = replace(group, continuations=(replace(group.continuations[0], reward=1.0), group.continuations[1]))
+    monkeypatch.setattr(post_train, "speak_round", lambda model, context, windows, settings, round_, directory, speakers: (
+        torch.save([rewarded, rewarded], directory / "groups_0.pt"), {"windows": 1, "weights": _digest(model)})[1])
+    monkeypatch.setattr(post_train, "selection_readout", lambda model, *a, **k: {"KXXX": {"reward_mean": _digest(model)}})
+    source, out = tmp_path / "source", tmp_path / "from_round_0"
+    open_campaign(source, _inputs(settings, tmp_path), {"head": "x", "dirty": False}, {})
+    run_campaign(source, settings, context)
+    held = torch.load(source / "round_0" / "checkpoint.pt", weights_only=False)
+    start = {"campaign": str(source), "round": 0, "checkpoint_sha256": file_sha256(source / "round_0" / "checkpoint.pt")}
+    started = replace(settings, start=start, seed=2024)                     # D162: another seed than the source's
+    first = post_train.round_model(context, started, out, None).state_dict()
+    assert all(torch.equal(first[k], held["model"][k]) for k in held["model"])
+    assert any(not torch.equal(first[k], v) for k, v in model.state_dict().items())          # not the base's start
+    open_campaign(out, _inputs(started, tmp_path), {"head": "x", "dirty": False}, {})
+    run_campaign(out, started, context)
+    after = torch.load(out / "round_0" / "checkpoint.pt", weights_only=False)
+    spoken = json.loads((out / "round_0" / "round.json").read_text())
+    updates = spoken["pass"]["updates"]
+    probe = post_train.start_model(context, settings)[0]
+    probe.load_state_dict(held["model"])
+    assert spoken["speaking"]["weights"] == _digest(probe)                       # round 0 spoke with the start's weights
+    steps = {float(v["step"]) for v in after["optimizer"]["state"].values()}
+    assert steps == {float(updates)} and {float(v["step"]) for v in held["optimizer"]["state"].values()} == {2.0}
+    with pytest.raises(SystemExit, match="other inputs"):
+        open_campaign(out, _inputs(settings, tmp_path), {"head": "x", "dirty": False}, {})
+    with pytest.raises(ValueError, match="not the checkpoint the campaign started from"):
+        post_train.campaign_start(context, replace(started, start={**start, "checkpoint_sha256": "0" * 64}))
+    with pytest.raises(ValueError, match="another base, masks, traffic shape or round"):
+        post_train.campaign_start(context, replace(started, traffic_hidden=32))
+    with pytest.raises(ValueError, match=r"takes another seed.*\(D162\)"):
+        post_train.campaign_start(context, replace(started, seed=settings.seed))
+    with pytest.raises(ValueError, match="a start is its campaign, round and checkpoint_sha256"):
+        replace(settings, start={"campaign": str(source)})
+
+
+def test_a_start_is_named_by_both_options_and_a_formal_campaign_takes_no_smoke_start(tmp_path, monkeypatch, capsys):
+    """`post_train --start-campaign --start-round`: refused by name before anything is opened when one is missing, the
+    round is not done or the source is a smoke campaign under a formal one."""
+    source = tmp_path / "source"
+    (source / "round_0").mkdir(parents=True)
+    (source / "round_0" / "checkpoint.pt").write_bytes(b"weights")
+    (source / "campaign.json").write_text(json.dumps({"schema": post_train.CAMPAIGN_SCHEMA, "inputs": {"smoke": True}}))
+    argv = ["--prior", str(tmp_path / "p"), "--instructions", str(tmp_path / "i"), "--executor", str(tmp_path / "e"),
+            "--windows", str(tmp_path / "w"), "--out", str(tmp_path / "campaign"), "--rounds", "1",
+            "--batch-windows", "1", "--seed", "1", "--prior-lr", "1e-4", "--traffic-lr", "1e-3", "--weight-decay", "0",
+            "--update-groups", "1", "--data-sentences", "1", "--select-per-airport", "1", "--traffic-hidden", "16",
+            "--traffic-heads", "4"]
+    argv += [x for kind in KINDS for x in (f"--windows-{kind.lower()}", "1")]
+    monkeypatch.setattr(post_train, "git_state", lambda: (_ for _ in ()).throw(RuntimeError("past the options")))
+    for more, says in ((["--start-campaign", str(source)], "go together"),
+                       (["--start-campaign", str(source), "--start-round", "0"], "smoke campaign"),
+                       (["--start-campaign", str(source), "--start-round", "1", "--smoke"], "not 1")):
+        with pytest.raises(SystemExit):
+            post_train.main(argv + more)
+        assert says in capsys.readouterr().err
+    with pytest.raises(RuntimeError, match="past the options"):                  # a smoke may start from a smoke
+        post_train.main(argv + ["--start-campaign", str(source), "--start-round", "0", "--smoke"])
+    assert not (tmp_path / "campaign").exists()
+
+
 def test_a_resume_may_raise_the_rounds_and_change_nothing_else(tmp_path):
     """D157: fewer rounds, or more rounds with another setting or input changed, are refused by name, and the record is
     left as it was; P47: once the val read is claimed (spent or not), the rounds are not raised, a resume of the same
@@ -615,8 +715,9 @@ def test_a_campaign_recorded_in_a_worktree_resumes_from_another_checkout(tmp_pat
                       git, {})
 
 
-def test_a_formal_campaign_needs_a_clean_tree_and_its_intent(tmp_path, monkeypatch):
-    """Refused before anything is opened: a tree with changes (unless a smoke), a campaign without an intent."""
+def test_a_formal_campaign_needs_a_clean_tree(tmp_path, monkeypatch):
+    """Refused before anything is opened: a tree with changes (unless a smoke). Its intent is not checked here (the
+    user, 2026-10-07): a clean tree goes on to the checks."""
     argv = ["--prior", str(tmp_path / "p"), "--instructions", str(tmp_path / "i"), "--executor", str(tmp_path / "e"),
             "--windows", str(tmp_path / "w"), "--procedure-root", str(tmp_path / "cifp"),
             "--out", str(tmp_path / "no_such_campaign_20991231"), "--rounds", "1", "--batch-windows", "1",
@@ -627,7 +728,9 @@ def test_a_formal_campaign_needs_a_clean_tree_and_its_intent(tmp_path, monkeypat
     with pytest.raises(SystemExit):
         post_train.main(argv)
     monkeypatch.setattr(post_train, "git_state", lambda: {"head": "x", "dirty": False})
-    with pytest.raises(SystemExit):
+    monkeypatch.setattr(post_train, "require_conforming_closed_loop",
+                        lambda *a: (_ for _ in ()).throw(RuntimeError("checked")))
+    with pytest.raises(RuntimeError, match="checked"):                 # no intent asked for: on to the checks
         post_train.main(argv)
     assert not (tmp_path / "no_such_campaign_20991231").exists()
 
@@ -662,9 +765,6 @@ def test_a_formal_context_refuses_a_fold_or_a_smoke_prior(monkeypatch, tmp_path)
 def test_a_formal_campaign_checks_its_base_and_a_smoke_does_not(tmp_path, monkeypatch):
     """`post_train` opens the context with ``formal`` true for a formal campaign, false for a smoke (D132)."""
     asked = []
-    intents = tmp_path / "intents.json"
-    intents.write_text(json.dumps({"campaigns": {"campaign_20991231": {}}}))
-    monkeypatch.setattr(post_train, "INTENTS", intents)
     monkeypatch.setattr(post_train, "git_state", lambda: {"head": "x", "dirty": False})
     monkeypatch.setattr(post_train, "require_conforming_closed_loop", lambda *a: (None, {"checks": {}}, None))
     monkeypatch.setattr(post_train, "checked_edges", lambda path: None)
