@@ -5,59 +5,15 @@ names a public interface must give, and the questions that only the user can dec
 it is rewritten in full each time, never appended to, and an item leaves when it is done. The evidence and the commits
 are in the implementation log (`readouts/2026-10-05_stage_c_implementation_log.md`, cited by §).
 
-**State: 2026-10-07, 06:00.**
-- C15 is done: `outputs/POOLED/post/ceiling_20261007` (log §28).
-- C16 is built and merged into `dev-two-tier` (`67cd9bc8`).
+**State: 2026-10-07, 07:10.**
+- C17's code is `6afa3c0b` (reviewed).
+- The run waits for stage D's `multi_profile` to end (log §29).
 
-**The evidence behind both proposals** (C15, the 1,000 select windows, 32 draws each):
-- With one draw, the models land 79.5 % (the start), 85.1 % (round 6) and 85.7 % (round 8).
-- With 32 draws, at least one landing comes in 99.3 / 99.3 / 99.4 % of the windows.
-- Only 4 windows are never landed by any of the three models.
-- The three curves meet at large n. The 14 rounds raised the one-draw share and did not widen the set of windows a
-  model can land. The selection readout has been flat since round 6.
-- My reading: the policy can say a landing sentence in nearly every window but gives it too little probability, and
-  the clipped surrogate of D94 stopped raising it. The proposal below trains on the landings that sampling finds.
-
-**Resolved:** P50 (choosing the best of k sentences at speaking time, judged by the executor) — not wanted (the user,
-2026-10-07: "我们只要训练出的能力"): only what the model is trained to say counts, no choice at speaking time.
+**Resolved:** P49 (D165, the user), P50 (not wanted).
 
 | # | Request | For | Log |
 |---|---|---|---|
-| 1 | **P49, training on the landed sentences** (closed-loop supervised training, "expert iteration"; the user asked for the proposal on 2026-10-07). See *P49 in full* below the table. | The user, the designer | §28 |
-
-## P49 in full: training on the landed sentences
-
-**A campaign of rounds.** It is a new campaign, with D162's start (round 6 or round 8 of `post_train_20261006`, or the
-base) and a seed other than C10's. Each round r:
-1. Draw the windows of the train days as C10 does (`draw_round`: real, A, D and B, from the seed and r).
-2. Speak each window N times from the round's model. This is the first pass with no branch, the draws' numbers as in
-   C15, read by the workers.
-3. Keep, for each window, the landed sentence with the highest reward (ties: the lowest draw). A window with no landing
-   in N gives nothing.
-4. One pass over the kept sentences, with the loss below.
-5. The selection readout (the same 1,000 select windows and numbers as C10) and the checkpoint.
-
-**The loss.** The commanded aircraft's words of each kept sentence, teacher-forced under its traffic as the surrogate
-reads them (`post/loss.py` `Samples`), negative log-likelihood. The data term (D36) and the pull toward the base (D29)
-are kept as in C10. No clipped surrogate and no advantage.
-
-**What C10's code already gives.** The windows, the workers, the draws (C15), `Samples`, the data term, the pull,
-`one_pass`, the selection readout, resume, the start (C16) and the validation readout (D132: one read for this
-campaign).
-
-**New code.** About 120 lines: the kept-sentence step and the loss. About 100 lines of tests: a kept sentence is the
-best landed one; the loss of a sentence is its words' log-likelihood; a resume is the campaign run through.
-
-**Cost.** With N = 8, a round flies 4,000 × 8 = 32,000 windows. On the CPU with 16 workers (C15: about 50 s for 1,000
-windows), that is about 27 min of speaking, plus the pass and the readout: about 35 min a round.
-
-**Decisions for the user:**
-- the start: round 6, round 8 or the base;
-- N: 8 is proposed; C15 shows 97.5–98.2 % of select windows with a landing within 8;
-- what is kept: one best landed sentence per window (proposed), or every landed sentence;
-- the learning rates, weight decay and loss weights: C10's are proposed (1e-5 / 1e-4, 0.01, pull 0.04, data term 1);
-- the rounds: 6 are proposed, then D7 over them.
-
-**Open for the designer:** whether a window where all N land is kept. Keeping it teaches what the model already says;
-leaving it out trains only on the windows it sometimes fails, which shrinks the data. I propose keeping it, as the
-plain form.
+| 1 | **D165's form, as the user chose it (2026-10-07), replaces "its own runner with its own campaign schema name".** It is the same runner, `post_train --method landed`, with a required `Settings.method` (`branch` / `landed`; a resume compares it) and the same campaign schema (`ts-post-train-v1`). The checkpoint identity is unchanged: it does not name the method; the campaign's settings hold it. C10's `campaign.json` gains `"method": "branch"` in the same step as the merge. `post_validation`, the Training export, `post_ceiling` and `model_speed` read a landed campaign as they read C10. D165 and §8 C17 need the designer's text | The designer | §29 |
+| 2 | **`Settings.select_seed` (the user, 2026-10-07).** The selection readout's windows and numbers come from a seed of their own, so a campaign started from a round (D162: another seed) reads its source's select windows; so does its val read (`selection_windows` with "val"). C10's record gains `"select_seed": 1337` (its seed) with `method`, and C10 is unchanged. D161, D162 and D165 need a line | The designer | §29 |
+| 3 | **Two readings of mine (told to the user):** 16 kept sentences an update (about 250 updates a round, against C10's 244–391); a landing the reward scores 0 (D105) is not kept, since only rewarded sentences are learned | The designer | §29 |
+| 4 | **Stage D and C10's record.** After the edit, any code without C17 that reads C10's settings (`settings_of`) stops by name (`unexpected keyword 'method'`). That includes stage D's runners on `dev-multi-control` (start, worker rounds, `multi_profile`). Stage D has to merge `dev-two-tier` before its next run that starts from C10. The edit waits for the running `multi_profile` | The designer, stage D | §29 |
