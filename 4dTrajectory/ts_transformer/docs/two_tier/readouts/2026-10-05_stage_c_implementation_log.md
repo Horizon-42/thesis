@@ -1274,3 +1274,15 @@ with K = 16.
 84.9 / 85.6 / 85.4 / 84.4 % against the start's 85.7 %; KL 0.040 → 0.051; the ratio's clip 1.2–1.45 % of the words;
 29–43 % of the updates clipped at the gradient norm 1.0. Sealed (`logs/`, `SHA256SUMS` 15 files, read-only); the run
 worktree removed. C18's first measure is in its `campaign.json`. Table and my reading: the experiment log, experiment 3.
+
+**The campaign with K = 16 and the larger rates (`post_k16lr3_20261007`) ended 20:20 local**, 4 rounds, exit 0:
+landed 85.1 / 84.7 / 85.6 / 84.5 % against the start's 85.7 %, no gain; sealed (`logs/`, `SHA256SUMS` 11 files,
+read-only), its run worktree removed. While it spoke, the host's free memory fell to 1–2 GB with the swap full; I
+stopped my own test runs twice (rule 13). Table and reading: the experiment log, experiment 4.
+
+**C21 (D170), `1ce26b63`** on `dev-two-tier-v4-post` (built after the note of 2026-10-07 evening; stage D's merge
+`246eca69` taken in before the commit, my uncommitted work set aside and re-applied without a conflict): the branch
+interval and a group's segment as D170 says; `post.branches.branch_rows` is the one whole-rows rule. Tests: 138 passed
+(the changed modules, stage D's and the generalisation digest). Review (opus): S1 (a test's `samples` stub took three
+arguments) fixed; S2 (`update_pairs` passing the segment untested) tested; S3 the refusal message, the default rules'
+points and numbers tested.
