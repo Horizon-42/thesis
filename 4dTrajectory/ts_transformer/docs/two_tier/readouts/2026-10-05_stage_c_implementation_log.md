@@ -1156,3 +1156,16 @@ reads C10 as its start.
 - C10's record edit would make its older code fail by name when it reads C10's settings.
 - When it ends: C10's record edit, `dev-two-tier` fast-forwarded, the run worktree, the launch.
 
+**C17's run (2026-10-07).**
+- Launched 08:18 from `run-post-landed` (`61e718ba`), CPU, 16 workers; O15 measured one worker at 0.70 GB.
+- Round 0 ended 09:07: speaking 22 min, the pass on one CPU thread about 23 min. Landed 84.2 %, lost separation 12.9 %,
+  mean reward 0.835. 3,646 windows kept; 78.4 % of the draws landed.
+- Round 1 ended 09:48: 84.5 %, 12.2 %, 0.838. 3,701 windows kept; 80.8 % of the draws landed.
+- Round 2's speaking ended 10:07. The process was then killed in round 2's pass, with no error and no out-of-memory
+  kill. The shells ran inside the GNOME Terminal tab's systemd scope (`vte-spawn-….scope`), and when the previous
+  Claude Code session's terminal closed, systemd stopped the scope and every process in it; `nohup setsid` changes the
+  session, not the cgroup.
+- Resumed at 11:52 with the same command, now in a systemd user unit of its own (`systemd-run --user`, unit
+  `post-landed-115211`, its cgroup checked). The half round is moved aside by `open_campaign`. The first run's log is
+  kept as `campaign_1.log`.
+
