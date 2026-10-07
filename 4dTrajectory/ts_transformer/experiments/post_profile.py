@@ -48,8 +48,8 @@ from flight_scenarios.procedure_final import DEFAULT_PROCEDURE_ROOT
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
 from ts_transformer.experiments.post_branches import branch_round
 from ts_transformer.experiments.post_train import (
-    KINDS, Context, Settings, batches, draw_round, open_context, selection_readout, selection_windows, speak_round,
-    start_model, train_pass,
+    KINDS, STAGE_C, Context, Settings, batches, draw_round, open_context, selection_readout, selection_windows,
+    speak_round, start_model, train_pass,
 )
 from ts_transformer.experiments.post_window_loop import checked_edges
 from ts_transformer.io_utils import utc_now, write_json_atomic
@@ -125,7 +125,7 @@ def group_size(group: Any) -> tuple[int, int]:
 
 
 def pass_memory(model: Any, context: Context, directory: Path, settings: Settings, counts: Sequence[int],
-                saved: Callable[[dict[str, Any]], None] = lambda part: None) -> dict[str, Any]:
+                saved: Callable[[dict[str, Any]], None] = lambda part: None, *, part_width: int) -> dict[str, Any]:
     """Part 3 of the module docstring: for each k of ``counts`` (ascending), one update's forward and backward on k
     branch groups written in ``directory``, in pieces of a group each as the campaign runs it (`update_step`): its
     peak is its largest piece's (a piece padded to its own longest sentence and widest traffic, `group_size`, D116) and
@@ -139,7 +139,8 @@ def pass_memory(model: Any, context: Context, directory: Path, settings: Setting
     is recorded and stops the rest. ``saved`` gets the record after each one measured. APPROXIMATIONS, stated: the data
     term's sentences are one draw, not a bound (the pass draws them again for each update; they carry no traffic); an
     update of the pass holds the groups of one file (`update_pairs`), so a k past a file's groups is measured but never
-    formed; the first update's time includes the process's first backward."""
+    formed; the first update's time includes the process's first backward. ``part_width``: the stage's token part
+    (`post_train.Stage.part_width`), which the groups' samples read."""
     device = context.device
     wanted = max(counts)
     longest: list[Any] = []
@@ -175,7 +176,7 @@ def pass_memory(model: Any, context: Context, directory: Path, settings: Setting
             out["updates"][label] = "fewer groups held"
             continue
         try:
-            batch = [samples([group], device) for group in groups]           # the campaign's pieces (`update_step`)
+            batch = [samples([group], device, part_width) for group in groups]   # the campaign's pieces (`update_step`)
             rows = collate(data, device)
             shape = {"sentences": sum(int(p.rows.asked.shape[0]) for p in batch),
                      "rows": max(int(p.rows.asked.shape[1]) for p in batch),
@@ -228,10 +229,12 @@ def profile(context: Context, settings: Settings, out: Path, counts: Sequence[in
                        "groups_bytes": sum(p.stat().st_size for p in directory.glob("groups_*.pt"))}
     save(record)
     record["pass_memory"] = pass_memory(model, context, directory, settings, counts,
-                                        lambda part: save({**record, "pass_memory": part}))
+                                        lambda part: save({**record, "pass_memory": part}),
+                                        part_width=STAGE_C.part_width)
     save(record)
     passed, pass_s = timed(device, lambda: train_pass(model, context, optimizer, directory, settings,
-                                                      np.random.default_rng([settings.seed, 0, 1])))
+                                                      np.random.default_rng([settings.seed, 0, 1]),
+                                                      part_width=STAGE_C.part_width))
     record["round"].update(pass_s=pass_s, passed=passed, memory_after_pass=memory(device))
     save(record)
     select = selection_windows(context, settings)

@@ -32,6 +32,15 @@ executor recorded, no observed words read (`Loop.outcome`, `judge.outcome_of`).
 
 The start state is the observed row's, by the executor spec's start rule (`flights.start_state`, D77): it reads no sample
 after the first predicted step; the observed rows a sentence stores before it are `flights.observed_rows`, by that rule.
+
+**Join ticks** (multi-aircraft control D150, §6.3 item 1; vocabulary §6 item 5). The flights of one loop may join it at
+their own ticks, a tick a Δ row of the loop's clock: flight b's join tick j_b is its row 0, so its first predicted step
+is the loop's tick j_b + s (s the Δ rows of the observation, `start_row`). The loop's first step (`Loop.steps` 0) is tick
+s, the first predicted step of a flight that joins at tick 0, so flight b starts at the loop's step j_b: the executor's
+multi-aircraft batch (`Executor`'s ``start_cycle`` j_b × the cycles of a Δ row; each flight's time and time limit from its
+own cycle 0) and the words said a step at a time to it (`Spoken`'s ``start_step`` j_b). A flight that has not started is
+not heard: its words of a step are not read (neither the grammar, nor the bound of go-arounds, nor the column values),
+and the executor holds it where it starts. With every join tick 0 the loop is the loop without join ticks, bit for bit.
 """
 
 from __future__ import annotations
@@ -146,29 +155,42 @@ class Loop:
 
     def __init__(self, inputs: FlightInputs, geometries: Sequence[AirportGeometry], approach_ias_mps: Sequence[float],
                  time_limits_s: Sequence[float], params: ExecutorParams, words: Words, *, interval_s: float,
-                 most_go_arounds: int, device: torch.device) -> None:
+                 most_go_arounds: int, device: torch.device, join_ticks: Sequence[int] | None = None) -> None:
+        """``join_ticks``: each flight's join tick (module docstring, D150), every flight's 0 when not given."""
         if most_go_arounds < 0:
             raise ValueError("the most go-arounds of a flight is negative")
         f64 = torch.float64
         self.params, self.words, self.interval_s = params, words, interval_s
         self.geometries = list(geometries)
         self.most_go_arounds = most_go_arounds
+        self.step_cycles = int(round(interval_s / params.cycle_s))
+        self.row_cycles = int(round(words.spec.step_s / params.cycle_s))      # the cycles of one 2 s row
+        if self.step_cycles % self.row_cycles:
+            raise ValueError(f"a row interval of {interval_s:g} s is no whole number of {words.spec.step_s:g} s rows")
+        #: each flight's join tick: the loop's step at which it starts (module docstring)
+        ticks = np.zeros(len(self.geometries), dtype=np.int64) if join_ticks is None else np.asarray(join_ticks)
+        if ticks.shape != (len(self.geometries),) or ticks.dtype.kind not in "iu" or (ticks < 0).any():
+            raise ValueError(f"a join tick is a whole number >= 0 for each of the {len(self.geometries)} flights, got "
+                             f"{join_ticks!r}")
+        self.join_ticks = ticks.astype(np.int64)
         self.executor = Executor(
             inputs, Runways.of(self.geometries, words.spec, dtype=f64, device=device),
             AirportCharts.of(self.geometries, dtype=f64, device=device),
             torch.tensor(list(approach_ias_mps), dtype=f64, device=device), params, words, step_s=interval_s,
             time_limit_s=torch.tensor(list(time_limits_s), dtype=f64, device=device),
+            start_cycle=torch.as_tensor(self.join_ticks * self.step_cycles, device=device),
             reserve_s=GO_AROUND_EXTRA_S * most_go_arounds)
-        self.spoken = Spoken(len(self.geometries), words, step_s=interval_s, device=device)
+        self.spoken = Spoken(len(self.geometries), words, step_s=interval_s, device=device, start_step=self.join_ticks)
         self.go_arounds = np.zeros(len(self.geometries), dtype=np.int64)
         #: each flight's words in force by the grammar (None before its first row, D80)
         self.grammar: list[InForce | None] = [None] * len(self.geometries)
-        self.step_cycles = int(round(interval_s / params.cycle_s))
-        self.row_cycles = int(round(words.spec.step_s / params.cycle_s))      # the cycles of one 2 s row
-        if self.step_cycles % self.row_cycles:
-            raise ValueError(f"a row interval of {interval_s:g} s is no whole number of {words.spec.step_s:g} s rows")
         self.steps = 0
         self._flown = None
+
+    def started(self) -> np.ndarray:
+        """``[B]`` bool: the flights whose first predicted step the loop has reached: their words of the next step are
+        heard (module docstring)."""
+        return self.join_ticks <= self.steps
 
     def rows(self) -> np.ndarray:
         """Every flight's state now (at the start of the next row) as `STATE_COLUMNS` rows, ``[B, 6]``."""
@@ -183,13 +205,14 @@ class Loop:
         executor, cycle_s = self.executor, self.params.cycle_s
         if row.shape != (len(self.geometries), len(COLUMNS)):
             raise ValueError(f"a step is [{len(self.geometries)}, {len(COLUMNS)}] words, got {list(row.shape)}")
-        flying = ~(executor.done | executor.halted).cpu().numpy()     # a done or halted flight's words are not heard
+        started = self.started()                        # a flight that has not started is not heard (D150)
+        flying = ~(executor.done | executor.halted).cpu().numpy() & started   # nor a done or halted flight's words
         go_around = (row[:, RUNWAY] == RUNWAY_GO_AROUND) & flying
         beyond = np.flatnonzero(go_around & (self.go_arounds >= self.most_go_arounds))
         if len(beyond):
             raise GoAroundBeyondMost(f"flight(s) {beyond.tolist()} said a go-around beyond the most "
                                      f"{self.most_go_arounds} at row {self.steps}")
-        for f in range(len(row)):                       # every flight's row, a done or halted one's too (D80)
+        for f in np.flatnonzero(started):               # every started flight's row, a done or halted one's too (D80)
             try:
                 require_values(row[f], self.words, len(self.geometries[f].candidates))
             except ValueError as error:
@@ -206,11 +229,12 @@ class Loop:
         self.spoken.say(row)                              # validates the row before it changes anything
         self.grammar = grammar
         self.go_arounds += go_around
-        heard = torch.full((len(row),), self.steps * self.interval_s, dtype=torch.float64,
-                           device=executor.state.device)
+        # each flight's own sentence time: its own step, from its join tick (a flight not started: 0, not read)
+        heard = torch.as_tensor(np.maximum(self.steps - self.join_ticks, 0) * self.interval_s, dtype=torch.float64,
+                                device=executor.state.device)
         flown = []
         for cycle in range(1, self.step_cycles + 1):
-            executor.cycle(self.spoken.at(heard), torch.full_like(heard, executor.count * cycle_s))
+            executor.cycle(self.spoken.at(heard), executor.own_cycle().clamp(min=0).to(torch.float64) * cycle_s)
             if cycle % self.row_cycles == 0:
                 flown.append(self.rows())
         self.steps += 1
@@ -227,8 +251,8 @@ class Loop:
         """A loop of copies of the flights ``flights`` (repeats permitted; vocabulary §6 item 5, D97 (2)): everything the
         loop holds of them — the executor's state and its record for the judge (`Executor.take`), the words said
         (`Spoken.take`), the grammar's words in force, the go-arounds heard, and the time limits, which stay the loop's
-        (D90). Flown on with the same words, a copy flies what its original flies and gets the same outcome; the loop
-        copied is unchanged."""
+        (D90), and the join ticks (D150). Flown on with the same words, a copy flies what its original flies and gets the
+        same outcome; the loop copied is unchanged."""
         index = np.asarray(flights)
         if index.ndim != 1 or not len(index) or index.dtype.kind not in "iu":     # no bool mask, as `halt` takes
             raise ValueError(f"a copy takes one or more of the loop's flights by index, got {flights!r}")
@@ -237,6 +261,7 @@ class Loop:
         out.spoken = self.spoken.take(index)
         out.geometries = [self.geometries[i] for i in index]
         out.go_arounds = self.go_arounds[index].copy()
+        out.join_ticks = self.join_ticks[index].copy()
         out.grammar = [self.grammar[i] for i in index]          # InForce is frozen: shared, never changed in place
         out._flown = None
         return out
@@ -329,11 +354,17 @@ class Start:
         self.series.clear()
 
     def moved(self, sentences: Mapping[int, ClosedLoopSentence], moves: Mapping[int, Move], *, most_go_arounds: int,
-              device: torch.device) -> tuple[Loop, list[int], dict[int, np.ndarray]]:
+              device: torch.device, join_ticks: Mapping[int, int] | None = None
+              ) -> tuple[Loop, list[int], dict[int, np.ndarray]]:
         """`start_moved` of ``sentences`` and ``moves`` (keyed by their place in the split's signals) on what this start
-        holds: the loop, the order, and each flight's moved observed rows before its first predicted step."""
+        holds: the loop, the order, and each flight's moved observed rows before its first predicted step.
+        ``join_ticks``: each flight's join tick by the same keys (module docstring, D150), every flight's 0 when not
+        given."""
         if set(moves) != set(sentences):
             raise ValueError(f"a move for each flight: moves for {sorted(moves)[:5]}, "
+                             f"sentences of {sorted(sentences)[:5]}")
+        if join_ticks is not None and set(join_ticks) != set(sentences):
+            raise ValueError(f"a join tick for each flight: join ticks for {sorted(join_ticks)[:5]}, "
                              f"sentences of {sorted(sentences)[:5]}")
         params, words, interval_s = self.params, self.words, self.interval_s
         first = start_row(interval_s)
@@ -358,7 +389,8 @@ class Start:
                     [replay.flight_approach_ias_mps(s, g) for s, g in zip(series, groups)],
                     [replay.time_limit_s(int(self.lengths[i]), anchor, params, words.spec.step_s)
                      for i, anchor in zip(order, anchors)],
-                    params, words, interval_s=interval_s, most_go_arounds=most_go_arounds, device=device)
+                    params, words, interval_s=interval_s, most_go_arounds=most_go_arounds, device=device,
+                    join_ticks=None if join_ticks is None else [join_ticks[i] for i in order])
         return loop, order, observed
 
 

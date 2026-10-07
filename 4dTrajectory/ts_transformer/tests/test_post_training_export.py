@@ -124,7 +124,7 @@ def test_the_rounds_stand_side_by_side_and_a_foreign_checkpoint_is_refused(setup
     model, _ = post_train.start_model(context, settings)
     (group,) = _round(s, model, [_ahead(s["windows"][0])]).groups
     rewarded = replace(group, continuations=(replace(group.continuations[0], reward=1.0), group.continuations[1]))
-    monkeypatch.setattr(post_train, "speak_round", lambda model, context, windows, settings, round_, directory, speakers: (
+    monkeypatch.setattr(post_train, "speak_round", lambda model, context, windows, settings, round_, directory, speakers, *, stage: (
         torch.save([rewarded], directory / "groups_0.pt"), {"windows": 1})[1])
     monkeypatch.setattr(post_train, "selection_readout", lambda *a, **k: {})
     campaign = tmp_path / "campaign"

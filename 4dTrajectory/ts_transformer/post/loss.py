@@ -71,7 +71,7 @@ class Samples:
         """The samples ``indices``, in that order (each tensor's first axis), padded as here."""
         chosen = torch.as_tensor(list(indices), device=self.advantage.device)
         return Samples(RowTensors(*(tensor[chosen] for tensor in self.rows)), self.permitted.select(indices),
-                       Traffic(self.traffic.tokens[chosen], self.traffic.present[chosen]), self.advantage[chosen],
+                       self.traffic.select(chosen), self.advantage[chosen],
                        self.counted[chosen])
 
     def __post_init__(self) -> None:

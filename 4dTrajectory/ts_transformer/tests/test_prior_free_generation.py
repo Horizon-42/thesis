@@ -181,6 +181,7 @@ class FakeLoop:
         self.state = np.array(starts, dtype=np.float64)
         self.ends, self.every, self.most_go_arounds, self.row_cycles = np.array(ends), every, most, 2
         self.steps, self.halted = 0, np.zeros(len(starts), dtype=bool)
+        self.join_ticks = np.zeros(len(starts), dtype=np.int64)        # every flight from the first tick (D150)
         cycles = 2 * every * self.ends - 1
         self.executor = type("E", (), {"time_limit_s": torch.tensor([600.0] * len(starts)),
                                        "done_cycle": torch.as_tensor(cycles)})()

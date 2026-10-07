@@ -91,7 +91,7 @@ def test_the_settings_take_a_count_of_every_kind_and_positive_sizes():
 
 
 def test_a_batch_commands_each_flight_once_in_signal_order():
-    windows = [SimpleNamespace(signal_index=i) for i in (3, 3, 1, 2, 3, 1)]
+    windows = [SimpleNamespace(signal_index=i, signal_indices=(i,)) for i in (3, 3, 1, 2, 3, 1)]   # stage C: one aircraft
     out = batches(windows, 2)
     assert sorted(p for b in out for p in b) == list(range(6))
     for b in out:
@@ -126,16 +126,16 @@ def test_the_pass_reads_the_groups_file_by_file_a_few_at_a_time(setup, tmp_path)
     torch.save([rewarded] * 3, directory / "groups_0.pt")          # 3 groups: an update of 2, then of 1
     torch.save([], directory / "groups_1.pt")                      # a batch without an informative group
     torch.save([rewarded], directory / "groups_10.pt")             # read after groups_1 (by number, not by name)
-    updates = list(update_pairs(directory, context.data, settings, np.random.default_rng(0), CPU))
+    updates = list(update_pairs(directory, context.data, settings, np.random.default_rng(0), CPU, part_width=0))
     sizes = [[piece.rows.asked.shape[0] for piece in pieces] for pieces, _ in updates]
     assert sizes == [[3, 3], [3], [3]]                             # a piece a group, 3 sentences each
     before = [p.detach().clone() for p in model.parameters()]
-    passed = train_pass(model, context, optimizer, directory, settings, np.random.default_rng(0))
+    passed = train_pass(model, context, optimizer, directory, settings, np.random.default_rng(0), part_width=0)
     assert passed["updates"] == 3 and np.isfinite(passed["loss"]) and not model.training
     assert any(not torch.equal(a, p) for a, p in zip(before, model.parameters()))
     empty = tmp_path / "empty"
     empty.mkdir()
-    assert train_pass(model, context, optimizer, empty, settings, np.random.default_rng(0)) == {"updates": 0}
+    assert train_pass(model, context, optimizer, empty, settings, np.random.default_rng(0), part_width=0) == {"updates": 0}
 
 
 def test_the_pass_shuffles_each_file_s_groups_by_the_round_s_numbers(tmp_path, monkeypatch):
@@ -145,13 +145,14 @@ def test_the_pass_shuffles_each_file_s_groups_by_the_round_s_numbers(tmp_path, m
     directory.mkdir()
     torch.save(list(range(8)), directory / "groups_0.pt")
     torch.save(list(range(10, 15)), directory / "groups_1.pt")
-    monkeypatch.setattr(post_train, "samples", lambda groups, device: list(groups))
+    monkeypatch.setattr(post_train, "samples", lambda groups, device, part_width: list(groups))
     monkeypatch.setattr(post_train, "collate", lambda sentences, device: None)
     settings = _settings(update_groups=3)
 
     def updates(seed):
         return [[g for piece in pieces for g in piece]           # each piece one group (`samples` returns it)
-                for pieces, _ in update_pairs(directory, list(range(4)), settings, np.random.default_rng(seed), CPU)]
+                for pieces, _ in update_pairs(directory, list(range(4)), settings, np.random.default_rng(seed), CPU,
+                                              part_width=0)]
 
     chunks = updates([1337, 0, 1])
     first = [g for chunk in chunks for g in chunk]
@@ -394,8 +395,9 @@ def test_the_pass_memory_measures_one_group_alone_and_takes_the_largest_peak(mon
 
     asked = []
 
-    def measure(model, context, directory, settings, counts):
+    def measure(model, context, directory, settings, counts, *, part_width):
         asked.append(list(counts))
+        assert part_width == 0
         return {"groups_written": 9, "updates": {"1": {"gpu_peak_reserved_gib": 1.0},
                                                  "1_densest": {"gpu_peak_reserved_gib": 3.0},
                                                  "4": {"gpu_peak_reserved_gib": 2.0}}}
@@ -497,7 +499,7 @@ def test_a_resumed_campaign_is_the_campaign_run_through(setup, tmp_path, monkeyp
     (group,) = _round(s, model, [_ahead(s["windows"][0])]).groups
     rewarded = replace(group, continuations=(replace(group.continuations[0], reward=1.0), group.continuations[1]))
 
-    def speak(model, context, windows, settings, round_, directory, speakers):
+    def speak(model, context, windows, settings, round_, directory, speakers, *, stage):
         torch.save([rewarded, rewarded], directory / "groups_0.pt")
         return {"windows": len(windows)}
 
@@ -565,7 +567,7 @@ def test_a_campaign_raised_to_more_rounds_is_the_campaign_of_that_count_from_its
     (group,) = _round(s, model, [_ahead(s["windows"][0])]).groups
     rewarded = replace(group, continuations=(replace(group.continuations[0], reward=1.0), group.continuations[1]))
 
-    def speak(model, context, windows, settings, round_, directory, speakers):
+    def speak(model, context, windows, settings, round_, directory, speakers, *, stage):
         torch.save([rewarded, rewarded], directory / "groups_0.pt")
         return {"windows": len(windows), "weights": _digest(model)}
 
@@ -609,7 +611,7 @@ def test_a_campaign_starts_from_a_round_of_another_campaign_with_a_new_optimizer
     model, _ = start_model(context, settings)
     (group,) = _round(s, model, [_ahead(s["windows"][0])]).groups
     rewarded = replace(group, continuations=(replace(group.continuations[0], reward=1.0), group.continuations[1]))
-    monkeypatch.setattr(post_train, "speak_round", lambda model, context, windows, settings, round_, directory, speakers: (
+    monkeypatch.setattr(post_train, "speak_round", lambda model, context, windows, settings, round_, directory, speakers, *, stage: (
         torch.save([rewarded, rewarded], directory / "groups_0.pt"), {"windows": 1, "weights": _digest(model)})[1])
     monkeypatch.setattr(post_train, "selection_readout", lambda model, *a, **k: {"KXXX": {"reward_mean": _digest(model)}})
     source, out = tmp_path / "source", tmp_path / "from_round_0"
@@ -784,3 +786,198 @@ def test_a_formal_campaign_checks_its_base_and_a_smoke_does_not(tmp_path, monkey
         with pytest.raises(RuntimeError, match="opened"):
             post_train.main(argv + extra)
     assert asked == [True, False] and not (tmp_path / "campaign_20991231").exists()
+
+
+def test_a_stage_gives_the_campaigns_round_its_parts_and_stage_cs_is_the_campaign_as_before(setup, tmp_path, monkeypatch):
+    """Post-training §9 item 11 (multi-aircraft control D149): `run_campaign` is the round's skeleton; a stage gives it
+    its parts — the campaign's start, the selection set, the draw, the speaking (its batch speaker), the readout (its
+    batch reader), the checkpoint's identity — in that order; stage C's stage (`STAGE_C`, the default) runs the campaign it ran: a campaign run through a
+    stage that wraps `STAGE_C`'s parts leaves the same checkpoint, bit for bit."""
+    from dataclasses import fields as dataclass_fields
+
+    s = setup
+    short_round(monkeypatch, s)
+    settings = _settings(rounds=1, continuations=2)
+    called = []
+
+    def wrapped(name, part):
+        def call(*args, **kwargs):
+            called.append(name)
+            return part(*args, **kwargs)
+        return call
+
+    spy = post_train.Stage(**{f.name: wrapped(f.name, getattr(post_train.STAGE_C, f.name))
+                              if callable(getattr(post_train.STAGE_C, f.name)) else getattr(post_train.STAGE_C, f.name)
+                              for f in dataclass_fields(post_train.Stage)})
+    states = []
+    for name, stage in (("plain", post_train.STAGE_C), ("spied", spy)):
+        out = tmp_path / name
+        open_campaign(out, {"settings": asdict(settings)}, {"head": "x", "dirty": False}, {})
+        run_campaign(out, settings, _context(s), stage=stage)
+        states.append(torch.load(out / "round_0" / "checkpoint.pt", weights_only=False))
+    # the speaking and the readout run the stage's own batch speaker and reader (the campaign hands them the stage)
+    assert called == ["start", "selection", "draw", "speak", "speak_batch", "readout", "read_batch", "record",
+                      "identity"]
+    assert states[0]["model"].keys() == states[1]["model"].keys()
+    assert all(torch.equal(states[0]["model"][k], states[1]["model"][k]) for k in states[0]["model"])
+    assert states[0]["identity"] == states[1]["identity"]
+    assert post_train.run_campaign.__defaults__[-1] is post_train.STAGE_C
+
+
+def test_the_speaking_workers_run_the_stages_parts(setup, tmp_path):
+    """Post-training §9 item 11 (multi-aircraft control MC4): workers given a stage run its parts of a batch — its model
+    at the start, its draw, its record of a window and its batch speaker; of a readout, its selection and its batch
+    reader; of the measure (O15), its model, draw and batch speaker — not stage C's; one process speaks and reads with
+    the same stage's parts; workers of another stage are refused by the speaking, the readout and the campaign; stage C's
+    stage is the default."""
+    from dataclasses import replace as dc_replace
+
+    s = setup
+    context = _context(s)
+    settings = _settings(continuations=2)
+    windows = [_ahead(s["windows"][0])] * 2                     # window A: stage C's draw of these settings has none
+    marks, here_pid = tmp_path / "marks", os.getpid()
+    marks.mkdir()
+
+    def started(context, settings):
+        (marks / f"started_{os.getpid()}").write_text("stage")
+        return post_train.STAGE_C.start_model(context, settings)
+
+    def spoken(model, context, windows, places, settings, round_, directory, k):
+        (directory / f"spoken_{k}").write_text("stage")
+        if directory.name == "measured":                          # the measure: a real batch, whose series it weighs
+            assert [windows[i].kind for i in places] == [INSERTED]  # of the stage's draw
+            return post_train.speak_batch(model, context, windows, places, settings, round_, directory, k)
+        return {"k": k, "windows": len(places), "groups": 0, "informative_groups": 0, "spoken_again": 0, "differed": [],
+                "reward_sum": 0.0, "faulty_steps": 0, "losses_reading_fault": 0, "outcomes": {}}
+
+    class Read(Exception):
+        pass
+
+    def read(model, context, windows, places, settings, split, draw=0):
+        if os.getpid() == here_pid:
+            raise Read(split)
+        return [("read", split, len(places))]
+
+    stage = dc_replace(post_train.STAGE_C, start_model=started, draw=lambda context, settings, round_: (windows, {}),
+                       record=lambda window: {**window_record(window), "mine": True}, speak_batch=spoken,
+                       read_batch=read, selection=lambda context, settings, split: windows)
+    model, _ = start_model(context, settings)
+    places = batches(windows, settings.batch_windows)
+    here = tmp_path / "here"
+    here.mkdir()
+    assert post_train.speak_round(model, context, windows, settings, 0, here, stage=stage)["batches"] == 2
+    assert sorted(p.name for p in here.glob("spoken_*")) == ["spoken_0", "spoken_1"]          # one process: the stage's
+    with pytest.raises(Read, match="select"):                                                # its reader too
+        post_train.selection_readout(model, context, windows, settings, stage=stage)
+    speakers = Speakers(context, settings, 2, CPU, stage=stage)
+    measured = tmp_path / "measured"
+    measured.mkdir()
+    try:
+        assert [(x["k"], x["windows"]) for x in speakers.speak(model, windows, places, 0, tmp_path)] == [(0, 1), (1, 1)]
+        assert list(marks.glob("started_*"))                     # the speaking workers' model: the stage's
+        assert speakers.read(model, windows, places, "select") == [[("read", "select", 1)]] * 2
+        assert speakers.measure(0, measured)["windows"] == 1
+        with pytest.raises(ValueError, match="another stage"):
+            post_train.speak_round(model, context, windows, settings, 0, tmp_path, speakers)
+        with pytest.raises(ValueError, match="another stage"):
+            post_train.selection_readout(model, context, windows, settings, speakers=speakers)
+        with pytest.raises(ValueError, match="another stage"):
+            run_campaign(tmp_path / "campaign", settings, context, speakers)
+    finally:
+        speakers.close()
+    assert sorted(p.name for p in tmp_path.glob("spoken_*")) == ["spoken_0", "spoken_1"]
+    assert (measured / "spoken_0").exists()                       # the measure spoke the stage's batch
+    assert len(list(marks.glob("started_*"))) >= 1 and not (marks / f"started_{os.getpid()}").exists()
+    assert Speakers.__init__.__defaults__[-1] is post_train.STAGE_C
+
+
+def test_a_stage_made_from_stage_cs_runs_its_own_batches_through_the_campaign(setup, tmp_path, monkeypatch):
+    """Post-training §9 item 11 (the review of MC4, round 2): a stage that keeps stage C's speaking and readout and gives
+    its own batch speaker runs that batch speaker through `run_campaign` in one process and with workers alike (the
+    campaign hands the stage to its speaking and readout), with the same speaking record."""
+    from dataclasses import replace as dc_replace
+
+    s = setup
+    short_round(monkeypatch, s)
+    settings = _settings(rounds=1, continuations=2)
+
+    def mine(model, context, windows, places, settings, round_, directory, k):
+        (directory / f"mine_{k}").write_text("stage")
+        return post_train.speak_batch(model, context, windows, places, settings, round_, directory, k)
+
+    stage = dc_replace(post_train.STAGE_C, speak_batch=mine)
+    records = []
+    for name, workers in (("here", 0), ("there", 2)):
+        out = tmp_path / name
+        open_campaign(out, {"settings": asdict(settings)}, {"head": "x", "dirty": False}, {})
+        context = _context(s)
+        speakers = Speakers(context, settings, workers, CPU, stage=stage) if workers else None
+        try:
+            run_campaign(out, settings, context, speakers, stage=stage)
+        finally:
+            if speakers is not None:
+                speakers.close()
+        assert (out / "round_0" / "mine_0").exists(), name
+        records.append(json.loads((out / "round_0" / "round.json").read_text())["speaking"])
+    assert records[0] == records[1]
+
+
+def test_a_round_opens_as_a_start_through_one_function(setup, tmp_path, monkeypatch):
+    """Post-training §9 item 12 (D162, multi-aircraft control D164): `round_start` opens a campaign's round as a start —
+    its checkpoint's model in eval mode and its identity — and refuses by name: other bytes than the recorded ones, a
+    round not done, a smoke source under a formal campaign, a checkpoint of another base or of another round, the
+    source's seed; `start_of` names the start as the setting records it."""
+    import shutil
+
+    from ts_transformer.io_utils import file_sha256
+
+    s = setup
+    short_round(monkeypatch, s)
+    settings = _settings(rounds=2, continuations=2)
+    out = tmp_path / "campaign"
+    open_campaign(out, {"settings": asdict(settings), "smoke": False}, {"head": "x", "dirty": False}, {})
+    context = _context(s)
+    run_campaign(out, settings, context)
+    start = post_train.start_of(out, 0, formal=True)
+    assert start == {"campaign": str(out), "round": 0, "checkpoint_sha256": file_sha256(out / "round_0" / "checkpoint.pt")}
+    formal = replace(context, formal=True)
+    model, identity = post_train.round_start(formal, start, seed=2024)
+    state = torch.load(out / "round_0" / "checkpoint.pt", weights_only=False)
+    assert identity == state["identity"] and not model.training
+    assert all(torch.equal(value, state["model"][name]) for name, value in model.state_dict().items())
+    with pytest.raises(ValueError, match="not the checkpoint the campaign started from"):
+        post_train.round_start(formal, {**start, "checkpoint_sha256": "0" * 64}, seed=2024)
+    with pytest.raises(ValueError, match="holds the checkpoints of rounds 0–1, not 2"):
+        post_train.start_of(out, 2, formal=True)
+    with pytest.raises(ValueError, match=r"takes another seed.*\(D162\)"):
+        post_train.round_start(formal, start, seed=settings.seed)
+    with pytest.raises(ValueError, match="another base, masks, traffic shape or round"):
+        post_train.round_start(replace(formal, base_identity={"base": "another"}), start, seed=2024)
+    later = tmp_path / "later"                                     # round 0's place holding round 1's checkpoint
+    shutil.copytree(out, later)
+    shutil.copy(later / "round_1" / "checkpoint.pt", later / "round_0" / "checkpoint.pt")
+    with pytest.raises(ValueError, match="another base, masks, traffic shape or round"):
+        post_train.round_start(formal, post_train.start_of(later, 0, formal=True), seed=2024)
+    smoke = tmp_path / "smoke"
+    open_campaign(smoke, {"settings": asdict(settings), "smoke": True}, {"head": "x", "dirty": True}, {})
+    run_campaign(smoke, settings, context)
+    with pytest.raises(ValueError, match="is a smoke campaign: a formal campaign does not start from it"):
+        post_train.start_of(smoke, 0, formal=True)
+    smoke_start = post_train.start_of(smoke, 0, formal=False)
+    with pytest.raises(ValueError, match="is a smoke campaign"):
+        post_train.round_start(formal, smoke_start, seed=2024)
+    post_train.round_start(context, smoke_start, seed=2024)              # a smoke campaign's context opens it
+
+
+def test_a_batch_commands_each_flight_once_with_windows_of_several_aircraft():
+    """Multi-aircraft control D146: windows that share any commanded flight (an anchor or a later aircraft) go to
+    different batches; stage C's windows of one aircraft as before."""
+    window = lambda indices: SimpleNamespace(signal_index=indices[0], signal_indices=tuple(indices))  # noqa: E731
+    windows = [window((1, 4)), window((2,)), window((4, 6)), window((3, 5)), window((5,))]
+    out = batches(windows, 10)
+    for batch in out:
+        held = [i for p in batch for i in windows[p].signal_indices]
+        assert len(held) == len(set(held))
+        assert [windows[p].signal_index for p in batch] == sorted(windows[p].signal_index for p in batch)
+    assert out == [[0, 1, 3], [2, 4]]

@@ -266,11 +266,11 @@ def _schedules(tmp_path, monkeypatch, interval_s=2.0):
             row[HEADING] = turned[k]
         return row
 
-    def loop_of(ways: str) -> Loop:
+    def loop_of(ways: str, **join) -> Loop:
         many = FlightInputs(**{f.name: getattr(inputs, f.name).expand(len(ways), *getattr(inputs, f.name).shape[1:])
                                .clone() for f in fields(FlightInputs)})
         return Loop(many, [geometry] * len(ways), [A320_IAS] * len(ways), [limit] * len(ways), _params(), words,
-                    interval_s=interval_s, most_go_arounds=1, device=CPU)
+                    interval_s=interval_s, most_go_arounds=1, device=CPU, **join)
 
     return loop_of, row_of
 
@@ -291,13 +291,16 @@ def _fly(loop: Loop, ways: str, row_of, k: int, *, until_done: bool = False, ste
     return flown, k
 
 
-def _same_flight(a_rows, a_loop, a, b_rows, b_loop, b):
+def _same_flight(a_rows, a_loop, a, b_rows, b_loop, b, *, layouts_differ: bool = False):
     """Flight ``a`` of one loop and ``b`` of another flew alike: states within STATE_BOUND_M; done, halted, end cycle,
-    time limit, go-arounds and outcome exact."""
+    time limit, go-arounds and outcome exact. ``layouts_differ``: the two executors lay out other cycles (a loop with
+    join ticks against a flight alone), so a flight never done has no end cycle to compare (`Executor.done_cycle`'s
+    "never" is the batch's last cycle less the flight's start)."""
     for x, y in zip(a_rows, b_rows):
         assert np.abs(x[a] - y[b]).max() <= STATE_BOUND_M
     one, other = a_loop.executor, b_loop.executor
-    for name in ("done", "halted", "done_cycle", "time_limit_s"):
+    compared = ("done", "halted", "time_limit_s") + (("done_cycle",) if bool(one.done[a]) or not layouts_differ else ())
+    for name in compared:
         assert getattr(one, name)[a].item() == getattr(other, name)[b].item(), name
     assert a_loop.go_arounds[a] == b_loop.go_arounds[b]
     assert bool(one.done[a]) != bool(one.halted[a])             # each flight ends, or is held
@@ -305,11 +308,12 @@ def _same_flight(a_rows, a_loop, a, b_rows, b_loop, b):
         assert a_loop.outcome(a) == b_loop.outcome(b)
 
 
-def _same_record(original: Loop, i: int, copy: Loop, j: int) -> None:
+def _same_record(original: Loop, i: int, copy: Loop, j: int, *, layouts_differ: bool = False) -> None:
     """The flown record of flight ``i`` and of its copy ``j`` (`Executor.flown`), over the cycles both flew: every field,
-    states and commands within STATE_BOUND_M, the rest exact."""
+    states and commands within STATE_BOUND_M, the rest exact (``layouts_differ``: `_same_flight`'s)."""
     one, other = original.executor.flown(), copy.executor.flown()
-    assert int(one.done_cycle[i]) == int(other.done_cycle[j])
+    if bool(original.executor.done[i]) or not layouts_differ:
+        assert int(one.done_cycle[i]) == int(other.done_cycle[j])
     for name in ("states", "commands", "wanted", "runway", "sentence_s", "limits", "modes"):
         x, y = getattr(one, name), getattr(other, name)
         pairs = [(x[k], y[k]) for k in x] if isinstance(x, dict) else [(x, y)]
@@ -370,6 +374,113 @@ def test_a_flights_states_do_not_depend_on_the_other_flights_of_its_loop(tmp_pat
         own, _ = _fly(alone, way, row_of, 0, until_done=True)
         assert len(own) <= len(rows)
         _same_flight(own, alone, 0, rows, together, i)
+
+
+# ---- join ticks (multi-aircraft control D150, §6.3 item 1; vocabulary §6 item 5): each flight from its own tick
+#: The join ticks of the four ways: B and C join while A flies, D after B's go-around has begun.
+JOIN_TICKS = np.array([0, 3, 7, 5])
+
+
+def _not_heard(words: Words) -> np.ndarray:
+    """A row no started flight may say (a heading word outside its column, and a go-around): what a caller gives a flight
+    that has not started, which the loop must not read."""
+    row = np.full(5, UNCHANGED, dtype=np.int64)
+    row[[RUNWAY, HEADING]] = RUNWAY_GO_AROUND, words.n_heading
+    return row
+
+
+def _fly_joined(loop: Loop, ways: str, row_of, ticks: np.ndarray, words: Words, k: int = 0, *, steps: int = 0
+                ) -> tuple[list[np.ndarray], int]:
+    """`_fly` of a loop with join ticks: each flight said its way's words of its own step (the loop's step less its join
+    tick) and `_not_heard` before it, D halted at its own `HALT_ROW`; ``steps`` steps, or until every flight is done or
+    halted."""
+    flown = []
+    executor = loop.executor
+    while (not steps and not bool((executor.done | executor.halted).all())) or len(flown) < steps:
+        assert k < 5000, "never done"
+        own = k - ticks
+        halt = np.array([way == "D" for way in ways]) & (own == HALT_ROW)
+        if halt.any():
+            loop.halt(halt)
+        rows, _ = loop.step(np.stack([row_of(way, int(o)) if o >= 0 else _not_heard(words)
+                                      for way, o in zip(ways, own)]))
+        flown.append(rows)
+        k += 1
+    return flown, k
+
+
+def test_every_join_tick_zero_is_the_loop_without_join_ticks_bit_for_bit(tmp_path, monkeypatch):
+    """D150: a loop given every join tick 0 flies what the loop without join ticks flies — the states, done, the end
+    cycles, the words said, the record and the outcomes, bit for bit."""
+    loop_of, row_of = _schedules(tmp_path, monkeypatch)
+    plain, ticked = loop_of("ABCD"), loop_of("ABCD", join_ticks=[0, 0, 0, 0])
+    assert not ticked.executor.staggered and not ticked.spoken.staggered
+    rows_plain, _ = _fly(plain, "ABCD", row_of, 0, until_done=True)
+    rows_ticked, _ = _fly(ticked, "ABCD", row_of, 0, until_done=True)
+    assert len(rows_plain) == len(rows_ticked)
+    assert all(np.array_equal(a, b) for a, b in zip(rows_plain, rows_ticked))
+    assert np.array_equal(plain.spoken.sentences(), ticked.spoken.sentences())
+    one, other = plain.executor.flown(), ticked.executor.flown()
+    for name in ("states", "commands", "wanted", "runway", "sentence_s", "done_cycle"):
+        assert torch.equal(getattr(one, name), getattr(other, name)), name
+    for b in range(4):
+        if bool(plain.executor.done[b]):
+            assert plain.outcome(b) == ticked.outcome(b)
+
+
+def test_a_flight_that_joins_at_its_tick_flies_what_it_flies_alone(tmp_path, monkeypatch):
+    """D150: flights that join one loop at their own ticks, each said its words of its own steps (and before its tick
+    words it may not say, which are not heard), fly what each flies alone from its own first step — states within
+    STATE_BOUND_M, done, halted, end cycle, time limit, go-arounds, the record and the outcome exact; a flight that
+    has not started is not started, and its words of a step are neither checked nor counted."""
+    loop_of, row_of = _schedules(tmp_path, monkeypatch)
+    together = loop_of("ABCD", join_ticks=JOIN_TICKS)
+    words = together.words
+    assert together.executor.staggered and np.array_equal(together.started(), [True, False, False, False])
+    rows, _ = _fly_joined(together, "ABCD", row_of, JOIN_TICKS, words)
+    for i, way in enumerate("ABCD"):
+        alone = loop_of(way)
+        own, _ = _fly(alone, way, row_of, 0, until_done=True)
+        tick = int(JOIN_TICKS[i])
+        assert len(own) <= len(rows) - tick
+        _same_flight(own, alone, 0, rows[tick:], together, i, layouts_differ=True)
+        _same_record(alone, 0, together, i, layouts_differ=True)
+    assert together.go_arounds[1] == 1                       # B's go-around counted once, from its own step
+
+
+def test_a_copy_of_a_loop_with_join_ticks_keeps_them_and_flies_as_its_originals(tmp_path, monkeypatch):
+    """D150: a copy taken while a flight has not started yet keeps each flight's join tick; flown on with the same
+    words, each copy flies what its original flies and ends with its outcome."""
+    loop_of, row_of = _schedules(tmp_path, monkeypatch)
+    ways, taken = "ABCD", [2, 0, 3, 1, 1]
+    loop = loop_of(ways, join_ticks=JOIN_TICKS)
+    words = loop.words
+    rows, k = _fly_joined(loop, ways, row_of, JOIN_TICKS, words, steps=4)
+    assert np.array_equal(loop.started(), [True, True, False, False])
+    copy = loop.copy(taken)
+    assert np.array_equal(copy.join_ticks, JOIN_TICKS[taken])
+    after, _ = _fly_joined(loop, ways, row_of, JOIN_TICKS, words, k)
+    copied, _ = _fly_joined(copy, "".join(ways[i] for i in taken), row_of, JOIN_TICKS[taken], words, k)
+    for j, i in enumerate(taken):
+        _same_flight(after, loop, i, copied, copy, j)
+        _same_record(loop, i, copy, j)
+
+
+def test_join_ticks_are_refused_unless_one_whole_tick_at_or_after_zero_for_each_flight(tmp_path, monkeypatch):
+    """D150: `Loop` takes one join tick for each flight, a whole number at or after 0; `Start.moved` one for each
+    sentence, by the same keys, and gives them to its loop in its order."""
+    from ts_transformer.autopilot.start import Start
+
+    loop_of, _ = _schedules(tmp_path, monkeypatch)
+    for wrong in ([0, 1, 2], [0, -1, 0, 0], [0.0, 1.0, 2.0, 3.0], [[0, 1], [2, 3]]):
+        with pytest.raises(ValueError, match="a join tick is a whole number"):
+            loop_of("ABCD", join_ticks=wrong)
+    directory, _, _, stored, _ = _moved_artefact(tmp_path / "moved", monkeypatch)
+    opened = Start(directory, "train", 4.0, tmp_path / "moved" / "executor")
+    loop, _, _ = opened.moved({0: stored}, {0: NO_MOVE}, most_go_arounds=0, device=CPU, join_ticks={0: 2})
+    assert np.array_equal(loop.join_ticks, [2]) and int(loop.executor.start[0]) == 2 * loop.step_cycles
+    with pytest.raises(ValueError, match="a join tick for each flight"):
+        opened.moved({0: stored}, {0: NO_MOVE}, most_go_arounds=0, device=CPU, join_ticks={1: 2})
 
 
 # ---- moved starts (D97 (4)): the user's readings (2026-10-05) — positions and heights stretched about the first predicted

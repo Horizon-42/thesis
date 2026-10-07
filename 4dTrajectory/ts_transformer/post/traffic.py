@@ -40,6 +40,13 @@ def joined(own: AircraftAt, others: AircraftAt) -> AircraftAt:
     """The commanded aircraft (one) and the other aircraft of a step as one set, the commanded aircraft first."""
     if len(own) != 1:
         raise ValueError(f"one commanded aircraft, not {len(own)}")
+    return scene_aircraft(own, others)
+
+
+def scene_aircraft(commanded: AircraftAt, others: AircraftAt) -> AircraftAt:
+    """The commanded aircraft (one or more, multi-aircraft control D149) and the other aircraft of a step as one set,
+    the commanded aircraft first, in their order."""
+    own = commanded
     return AircraftAt(keys=own.keys + others.keys, at=np.concatenate((own.at, others.at)),
                       before=np.concatenate((own.before, others.before)),
                       known=np.concatenate((own.known, others.known)),
@@ -71,17 +78,28 @@ def traffic(aircraft: AircraftAt, geometry: AirportGeometry, separation: Separat
                    established=established(aircraft, geometry, finals, step_s), category=aircraft.category)
 
 
+def step_losses(scene: Traffic, over_threshold: np.ndarray, separation: Separation) -> list[Loss]:
+    """Every loss of separation at this step, each with its two aircraft and the ones the rules make responsible
+    (multi-aircraft control D149, post-training §9 item 3; a caller applies its own rule of who answers): the pairs
+    lost (`separation.losses`), then, for each aircraft over its threshold now (``over_threshold`` ``[N]`` bool), the
+    on-approach wake minimum behind it (`separation.wake_at_threshold`)."""
+    out = list(losses(scene, separation, READING))
+    for leader in np.flatnonzero(over_threshold):
+        loss = wake_at_threshold(scene, int(leader), separation)
+        if loss is not None:
+            out.append(loss)
+    return out
+
+
+def answered_loss(found: list[Loss], aircraft: int) -> Loss | None:
+    """The first of the losses ``found`` (`step_losses`) for which aircraft ``aircraft`` answers, None without one."""
+    return next((loss for loss in found if aircraft in loss.responsible), None)
+
+
 def commanded_loss(scene: Traffic, over_threshold: np.ndarray, separation: Separation) -> Loss | None:
     """The first loss of separation at this step for which the commanded aircraft (aircraft 0) answers (module
     docstring), None without one; ``over_threshold`` ``[N]`` bool, the aircraft over their thresholds now."""
-    for loss in losses(scene, separation, READING):
-        if 0 in loss.responsible:
-            return loss
-    for leader in np.flatnonzero(over_threshold):
-        loss = wake_at_threshold(scene, int(leader), separation)
-        if loss is not None and 0 in loss.responsible:
-            return loss
-    return None
+    return answered_loss(step_losses(scene, over_threshold, separation), 0)
 
 
 def loss_at_first_step(window: Window, separation: Separation, finals: Sequence[Final], step_s: float, *,

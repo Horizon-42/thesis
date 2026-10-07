@@ -73,14 +73,14 @@ from collections import Counter
 from concurrent.futures import ProcessPoolExecutor, wait
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Any, Iterator, Mapping, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
 import numpy as np
 import torch
 from flight_scenarios.procedure_final import DEFAULT_PROCEDURE_ROOT
 
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
-from ts_transformer.autopilot.start import Start
+from ts_transformer.autopilot.start import NO_MOVE, Start
 from ts_transformer.experiments.post_branches import branch_round
 from ts_transformer.experiments.post_window_loop import (
     WindowLoop, WindowResult, checked_edges, moved_commanded, start_move_of,
@@ -173,6 +173,8 @@ class Context:
     finals: Mapping[str, Any]
     splits: Mapping[str, Mapping[str, Any]]
     data: Sequence[Any]
+    #: a formal campaign's context (`open_context`'s ``formal``, D132): a start from a smoke campaign is refused (D162)
+    formal: bool = False
 
     @property
     def variant(self) -> str:
@@ -184,14 +186,19 @@ class Context:
 
     def start_loop(self, split: str, windows: Sequence[Window]):
         """The ``start_loop`` of `branch_round`: the flights of ``windows`` started with their windows' moves (C9), through
-        the split's opened `Start` (C13, vocabulary A44: what `start_moved` gives, read once)."""
+        the split's opened `Start` (C13, vocabulary A44: what `start_moved` gives, read once); a window's other commanded
+        aircraft (multi-aircraft control D150) start unmoved at their join steps."""
         data = self.splits[split]
         sentences = data["sentences"]
         moves = {w.signal_index: start_move_of(w) for w in windows}
+        moves.update({i: NO_MOVE for w in windows for i in w.signal_indices[1:]})
+        joins = {i: int(step) for w in windows for i, step in zip(w.signal_indices, w.join_steps())}
+        several = any(w.joined for w in windows)
 
         def started(flights: Sequence[int]):
+            ticks = {"join_ticks": {i: joins[i] for i in flights}} if several else {}
             return data["start"].moved({i: sentences[i] for i in flights}, {i: moves[i] for i in flights},
-                                       most_go_arounds=MOST_GO_AROUNDS, device=self.device)
+                                       most_go_arounds=MOST_GO_AROUNDS, device=self.device, **ticks)
 
         return started
 
@@ -236,7 +243,7 @@ def open_context(prior_dir: Path, instructions: Path, executor: Path, edges_refe
                    {code: airport_finals(g, root=procedure_root) for code, g in prior.geometries.items()},
                    {split: split_data(instructions, split, words, prior.interval_s, prior.geometries, executor)
                     for split in splits},
-                   sentences)
+                   sentences, formal)
 
 
 def require_formal_base(prior: OpenedPrior) -> None:
@@ -249,6 +256,62 @@ def require_formal_base(prior: OpenedPrior) -> None:
     if sample is not None:
         raise SystemExit(f"{prior.directory} is a smoke prior ({sample['per_airport_and_split']} sentences of each "
                          f"airport and split), not stage B's formal base (D132)")
+
+
+# ---- the stage
+@dataclass(frozen=True)
+class Stage:
+    """A stage's parts of a campaign's round (post-training §9 item 11; multi-aircraft control D149): the model at the
+    start and its optimizer, the identity of a round's checkpoint, the draw of a round's windows (and what it counted),
+    the speaking of a round (its two passes, its groups written; its record), the selection readout's windows and its
+    readout, the record of a window in the round's record (which the identity holds: a later stage's names its
+    commanded aircraft and their shifts, multi-aircraft control §7 row 3), what a speaking worker runs of a batch, and
+    the width of its token part. `run_campaign` is the round's skeleton; `STAGE_C` is stage C's campaign."""
+
+    #: the model of the stage's shape and a new optimizer (what a resume and a speaking worker load a state into), and
+    #: the model a new campaign starts from with a new optimizer (stage C's: `campaign_start`, the base with zero-output
+    #: traffic modules or a round of another campaign, D162)
+    start_model: Callable[[Context, Settings], tuple[Prior, torch.optim.Optimizer]]
+    start: Callable[[Context, Settings], tuple[Prior, torch.optim.Optimizer]]
+    identity: Callable[[Context, Settings, Path, int], dict[str, Any]]
+    draw: Callable[[Context, Settings, int], tuple[list[Window], dict[str, Any]]]
+    #: the speaking and the readout of a round, each given the stage itself (``stage=``: its batch speaker and reader
+    #: drive the one-process mode, and its workers are refused unless they run it)
+    speak: Callable[..., dict[str, Any]]
+    selection: Callable[[Context, Settings, str], list[Window]]
+    readout: Callable[..., dict[str, Any]]
+    record: Callable[[Window], dict[str, Any]]
+    #: a batch of a round spoken (its two passes, its groups written: ``(model, context, windows, places, settings,
+    #: round, directory, k)``, `speak_batch`'s) and a batch of a readout read (``(model, context, windows, places,
+    #: settings, split, draw)``, `read_batch`'s, draw 0 by default; C15): what a speaking worker runs (`Speakers`)
+    speak_batch: Callable[[Prior, Context, Sequence[Window], Sequence[int], Settings, int, Path, int], dict[str, Any]]
+    read_batch: Callable[[Prior, Context, Sequence[Window], Sequence[int], Settings, str, int], list[WindowResult]]
+    #: the width of the stage's token part beside the edge features (post-training §9 item 7; stage C's: none, 0), which
+    #: the pass's samples read
+    part_width: int
+
+
+def _stage_c_draw(context: Context, settings: Settings, round_: int) -> tuple[list[Window], dict[str, Any]]:
+    return draw_round(context, settings.per_kind, np.random.default_rng([settings.seed, round_]))
+
+
+def _stage_c_readout(model: Prior, context: Context, windows: Sequence[Window], settings: Settings,
+                     speakers: Speakers | None, *, stage: Stage) -> dict[str, Any]:
+    return selection_readout(model, context, windows, settings, speakers=speakers, stage=stage)
+
+
+#: Stage C's campaign (module docstring): its parts of a round, each read from this module when it is called (as the
+#: campaign read them before the stage existed: a caller or a test that replaces one replaces it here too).
+STAGE_C = Stage(start_model=lambda context, settings: start_model(context, settings),
+                start=lambda context, settings: campaign_start(context, settings),
+                identity=lambda context, settings, out, rounds: identity(context, settings, out, rounds),
+                draw=lambda context, settings, round_: _stage_c_draw(context, settings, round_),
+                speak=lambda *args, stage: speak_round(*args, stage=stage),
+                selection=lambda context, settings, split: selection_windows(context, settings, split),
+                readout=lambda *args, stage: _stage_c_readout(*args, stage=stage),
+                record=lambda window: window_record(window),
+                speak_batch=lambda *args: speak_batch(*args), read_batch=lambda *args: read_batch(*args), part_width=0)
+
 
 
 # ---- the draw
@@ -296,10 +359,12 @@ def draw_round(context: Context, per_kind: Mapping[str, int], rng: np.random.Gen
 
 def batches(windows: Sequence[Window], size: int) -> list[list[int]]:
     """The windows' places in batches of at most ``size`` that command each flight once (the first batch with room and
-    without the flight), each in the order of its flights' places in the signals (`branch_round`'s rule)."""
+    without any of the window's commanded flights; multi-aircraft control D146), each in the order of its anchors'
+    places in the signals (`branch_round`'s rule)."""
     out: list[list[int]] = []
     for place, window in enumerate(windows):
-        home = next((b for b in out if len(b) < size and all(windows[p].signal_index != window.signal_index for p in b)),
+        mine = set(window.signal_indices)
+        home = next((b for b in out if len(b) < size and all(not mine & set(windows[p].signal_indices) for p in b)),
                     None)
         if home is None:
             out.append([place])
@@ -330,13 +395,16 @@ def speak_batch(model: Prior, context: Context, windows: Sequence[Window], place
 
 
 def speak_round(model: Prior, context: Context, windows: Sequence[Window], settings: Settings, round_: int,
-                directory: Path, speakers: Speakers | None = None) -> dict[str, Any]:
-    """Step 3 of a round (module docstring): every batch's two passes (`speak_batch`), here or by ``speakers`` (the
-    same groups and records: a batch reads only its windows' own random numbers), its informative groups written, its
-    first pass's ends counted; the batches' records summed in batch order."""
+                directory: Path, speakers: Speakers | None = None, *, stage: Stage = STAGE_C) -> dict[str, Any]:
+    """Step 3 of a round (module docstring): every batch's two passes (``stage``'s `Stage.speak_batch`, stage C's
+    `speak_batch`), here or by ``speakers`` (the same groups and records: a batch reads only its windows' own random
+    numbers; refused unless they run ``stage``), its informative groups written, its first pass's ends counted; the
+    batches' records summed in batch order."""
+    _require_stage(speakers, stage)
     places = batches(windows, settings.batch_windows)
     parts = (speakers.speak(model, windows, places, round_, directory) if speakers is not None else
-             [speak_batch(model, context, windows, p, settings, round_, directory, k) for k, p in enumerate(places)])
+             [stage.speak_batch(model, context, windows, p, settings, round_, directory, k)
+              for k, p in enumerate(places)])
     record: dict[str, Any] = {"batches": 0, "groups": 0, "informative_groups": 0, "spoken_again": 0, "differed": [],
                               "reward_sum": 0.0, "faulty_steps": 0, "losses_reading_fault": 0}
     outcomes: Counter = Counter()
@@ -347,6 +415,12 @@ def speak_round(model: Prior, context: Context, windows: Sequence[Window], setti
             record[key] += part[key]
         outcomes.update(part["outcomes"])
     return {**record, "windows": len(windows), "outcomes": dict(outcomes)}
+
+
+def _require_stage(speakers: Speakers | None, stage: Stage) -> None:
+    """Speakers run one stage's parts (`Speakers`): refused by name for another stage's speaking or reading."""
+    if speakers is not None and speakers.stage is not stage:
+        raise ValueError("the speaking workers run another stage's parts than the one given (Speakers(..., stage=))")
 
 
 #: How often a worker's own host memory is sampled while it speaks the measured batch (O15, `_PeakSampler`), s.
@@ -369,14 +443,16 @@ class Speakers:
     information. They read the selection readout's batches too (`read`, C13; one process is the reference mode). Before
     a campaign, one worker speaks a batch at the formal size and its memory is measured (`measure`, O15)."""
 
-    def __init__(self, context: Context, settings: Settings, workers: int, device: torch.device) -> None:
+    def __init__(self, context: Context, settings: Settings, workers: int, device: torch.device,
+                 stage: Stage = STAGE_C) -> None:
         if workers < 2:
             raise ValueError(f"{workers} worker(s): speakers are 2 or more processes (one speaks without them)")
         if context.device.type != "cpu" or torch.cuda.is_initialized():
             raise ValueError("speakers are forked before the campaign's process uses the GPU: open the context on the "
                              "CPU, fork them, then move it")
         _SPEAKER.clear()
-        _SPEAKER.update(context=context, settings=settings, device=device)
+        _SPEAKER.update(context=context, settings=settings, device=device, stage=stage)
+        self.stage = stage
         self.pool = ProcessPoolExecutor(workers, mp_context=multiprocessing.get_context("fork"),
                                         initializer=_initialise_speaker)
         list(self.pool.map(_started, range(workers)))         # every worker forked now, before the GPU is used
@@ -389,7 +465,7 @@ class Speakers:
         state = directory / "speaking_model.pt"
         torch.save(model.state_dict(), state)
         return self._results(state, [self.pool.submit(_speak, round_, str(state), str(directory), k, list(p),
-                                                      [window_record(windows[i]) for i in p])
+                                                      [self.stage.record(windows[i]) for i in p])
                                      for k, p in enumerate(places)])
 
     def read(self, model: Prior, windows: Sequence[Window], places: Sequence[Sequence[int]], split: str,
@@ -401,7 +477,7 @@ class Speakers:
             state = Path(scratch) / "reading_model.pt"
             torch.save(model.state_dict(), state)
             return self._results(state, [self.pool.submit(_read, self.readings, str(state), split, list(p),
-                                                          [window_record(windows[i]) for i in p], draw)
+                                                          [self.stage.record(windows[i]) for i in p], draw)
                                          for p in places])
 
     def measure(self, round_: int, directory: Path) -> dict[str, Any]:
@@ -442,31 +518,33 @@ def _started(_: int) -> int:
     return os.getpid()
 
 
-def _worker_context() -> tuple[Context, Settings]:
-    """A worker's context, on its own device from its first task on (`Speakers`), and the campaign's settings."""
+def _worker_context() -> tuple[Context, Settings, Stage]:
+    """A worker's context, on its own device from its first task on (`Speakers`), the campaign's settings and its
+    stage."""
     held = _SPEAKER
     if held["context"].device != held["device"]:                         # the worker's first task: its own GPU
         context = held["context"]
         held["context"] = replace(context, device=held["device"], base=context.base.to(held["device"]).eval())
-    return held["context"], held["settings"]
+    return held["context"], held["settings"], held["stage"]
 
 
 def _speak(round_: int, state: str, directory: str, k: int, places: list[int], records: list[dict[str, Any]]
            ) -> dict[str, Any]:
-    """A worker's batch (`Speakers`): the round's model and windows made once a round, then `speak_batch`."""
+    """A worker's batch (`Speakers`): the round's model and windows made once a round (the stage's), then the stage's
+    `Stage.speak_batch`."""
     held = _SPEAKER
-    context, settings = _worker_context()
+    context, settings, stage = _worker_context()
     if held.get("round") != round_:
         context.splits["train"]["start"].release()        # a round's flights kept, not the campaign's (C13)
-        model, _ = start_model(context, settings)
+        model, _ = stage.start_model(context, settings)
         model.load_state_dict(torch.load(state, map_location=context.device, weights_only=True))
-        windows, _ = draw_round(context, settings.per_kind, np.random.default_rng([settings.seed, round_]))
+        windows, _ = stage.draw(context, settings, round_)
         held.update(round=round_, model=model.eval(), windows=windows)
     windows = held["windows"]
-    if [window_record(windows[i]) for i in places] != records:
+    if [stage.record(windows[i]) for i in places] != records:
         raise ValueError(f"round {round_}, batch {k}: the worker drew other windows than the campaign")
     try:
-        return speak_batch(held["model"], context, windows, places, settings, round_, Path(directory), k)
+        return stage.speak_batch(held["model"], context, windows, places, settings, round_, Path(directory), k)
     finally:
         if context.device.type == "cuda":
             torch.cuda.empty_cache()
@@ -475,21 +553,21 @@ def _speak(round_: int, state: str, directory: str, k: int, places: list[int], r
 def _read(reading: int, state: str, split: str, places: list[int], records: list[dict[str, Any]], draw: int
           ) -> list[WindowResult]:
     """A worker's batch of the selection readout (`Speakers.read`): the reading's model made once a reading, the split's
-    readout windows once (`selection_windows`, the same draw), then `read_batch`."""
+    readout windows once (the stage's `Stage.selection`, the same draw), then the stage's `Stage.read_batch`."""
     held = _SPEAKER
-    context, settings = _worker_context()
+    context, settings, stage = _worker_context()
     selection = held.setdefault("selection", {})
     if split not in selection:
-        selection[split] = selection_windows(context, settings, split)
+        selection[split] = stage.selection(context, settings, split)
     windows = selection[split]
-    if [window_record(windows[i]) for i in places] != records:
+    if [stage.record(windows[i]) for i in places] != records:
         raise ValueError(f"reading {reading}: the worker drew other readout windows than the campaign")
     if held.get("reading") != reading:
-        model, _ = start_model(context, settings)
+        model, _ = stage.start_model(context, settings)
         model.load_state_dict(torch.load(state, map_location=context.device, weights_only=True))
         held.update(reading=reading, reader=model.eval())
     try:
-        return read_batch(held["reader"], context, windows, places, settings, split, draw)
+        return stage.read_batch(held["reader"], context, windows, places, settings, split, draw)
     finally:
         if context.device.type == "cuda":
             torch.cuda.empty_cache()
@@ -506,15 +584,15 @@ def _measure(round_: int, directory: str) -> dict[str, Any]:
     page among the processes holding it, so it falls with each fork); a later move of the shared swap moves it too (an
     estimate)."""
     swapped_here = _own_memory()["swapped"]
-    context, settings = _worker_context()
+    context, settings, stage = _worker_context()
     start = context.splits["train"]["start"]
-    model, _ = start_model(context, settings)
-    windows, _ = draw_round(context, settings.per_kind, np.random.default_rng([settings.seed, round_]))
+    model, _ = stage.start_model(context, settings)
+    windows, _ = stage.draw(context, settings, round_)
     first = batches(windows, settings.batch_windows)[0]
     with _PeakSampler(swapped_here) as sampled:
-        speak_batch(model, context, windows, first, settings, round_, Path(directory), 0)
+        stage.speak_batch(model, context, windows, first, settings, round_, Path(directory), 0)
     kept = [len(pickle.dumps(series)) for series in start.series.values()]
-    flights = len({w.signal_index for w in windows})
+    flights = len({i for w in windows for i in w.signal_indices})      # every commanded flight's series
     held = {"reader_model": sum(t.numel() * t.element_size() for t in (*model.parameters(), *model.buffers())),
             "series": flights * sum(kept) // len(kept), "round_flights": flights}
     return {"round": round_, "windows": len(first), **_memory_after_batch(context.device, sampled.peak), "held": held}
@@ -592,7 +670,8 @@ def _gpu_used() -> int:
     return mine[0] * (1 << 20)
 
 
-def pass_memory_of(context: Context, settings: Settings, directory: Path) -> dict[str, Any] | None:
+def pass_memory_of(context: Context, settings: Settings, directory: Path, stage: Stage = STAGE_C
+                   ) -> dict[str, Any] | None:
     """O15: this process's GPU memory in one update of the pass (`post_profile.pass_memory`: forward and backward on
     the `Settings.update_groups` longest groups written in ``directory`` with the data term's sentences, and on one
     group — the longest, the widest and the densest alone: an update runs in pieces of a group each, post-training §2
@@ -600,14 +679,16 @@ def pass_memory_of(context: Context, settings: Settings, directory: Path) -> dic
     update measured) and what it holds after; None on the CPU.
     Refused by name when the update did not form (fewer groups written than an update takes) or ran out of memory.
     APPROXIMATION, stated: the groups of one batch (a round's longest may need more: `post_profile` measures that
-    bound); the optimizer's state (twice the parameters) is not in it."""
+    bound); the optimizer's state (twice the parameters) is not in it. ``stage``: its model at the start and its token
+    part (the stage's speakers measured the groups)."""
     if context.device.type != "cuda":
         return None
     from ts_transformer.experiments.post_profile import pass_memory          # post_profile imports this module
 
     device = context.device
-    model, optimizer = start_model(context, settings)
-    measured = pass_memory(model, context, directory, settings, sorted({1, settings.update_groups}))
+    model, optimizer = stage.start_model(context, settings)
+    measured = pass_memory(model, context, directory, settings, sorted({1, settings.update_groups}),
+                           part_width=stage.part_width)
     update = measured["updates"][str(settings.update_groups)]
     if update == "fewer groups held":
         raise SystemExit(f"the pass's memory is not measured (O15): the measured batch wrote "
@@ -673,7 +754,7 @@ def require_workers_fit(speakers: Speakers, context: Context, settings: Settings
     and returned."""
     with tempfile.TemporaryDirectory(prefix="post_measure_") as scratch:
         measured = speakers.measure(round_, Path(scratch))
-        passed = pass_memory_of(context, settings, Path(scratch))
+        passed = pass_memory_of(context, settings, Path(scratch), speakers.stage)
     available = available_memory(context.device)
     out = {"speak_workers": speakers.workers, "measured": measured, "pass": passed, "available": available}
     print(json.dumps(out), flush=True)
@@ -686,18 +767,19 @@ def require_workers_fit(speakers: Speakers, context: Context, settings: Settings
 
 # ---- the training pass
 def update_pairs(directory: Path, data: Sequence[Any], settings: Settings, rng: np.random.Generator,
-                 device: torch.device) -> Iterator[tuple[list[Samples], RowTensors]]:
+                 device: torch.device, *, part_width: int) -> Iterator[tuple[list[Samples], RowTensors]]:
     """The updates of a round's pass (module docstring, step 4): its written groups, file by file in the order they were
     spoken, each file's groups in an order shuffled by ``rng`` (the round's numbers; D130: an update mixes branch points
     and windows), `Settings.update_groups` at a time (a file's last update may hold fewer; each group a piece of it,
     `post.loss.update_step`: its memory a group's), each paired with
-    `Settings.data_sentences` sentences of ``data`` drawn by ``rng``. A file is read when its first update is drawn."""
+    `Settings.data_sentences` sentences of ``data`` drawn by ``rng``. A file is read when its first update is drawn.
+    ``part_width``: the stage's token part (`Stage.part_width`)."""
     for path in sorted(directory.glob("groups_*.pt"), key=lambda p: int(p.stem.split("_")[1])):
         loaded: list[Group] = torch.load(path, weights_only=False)
         groups = [loaded[int(i)] for i in rng.permutation(len(loaded))]
         for k in range(0, len(groups), settings.update_groups):
             chosen = rng.choice(len(data), size=min(settings.data_sentences, len(data)), replace=False)
-            yield ([samples([group], device) for group in groups[k:k + settings.update_groups]],   # a piece a group
+            yield ([samples([group], device, part_width) for group in groups[k:k + settings.update_groups]],  # a piece a group
                    collate([data[int(i)] for i in chosen], device))
 
 
@@ -708,10 +790,12 @@ def pass_seed(seed: int, round_: int) -> int:
 
 
 def train_pass(model: Prior, context: Context, optimizer: torch.optim.Optimizer, directory: Path, settings: Settings,
-               rng: np.random.Generator) -> dict[str, Any]:
+               rng: np.random.Generator, *, part_width: int) -> dict[str, Any]:
     """Step 4 of a round: one pass (`post.loss.one_pass`: the model at its start is the one that spoke the groups) over
-    `update_pairs`; its means, or no update where the round has no informative group."""
-    parts = one_pass(model, context.base, optimizer, update_pairs(directory, context.data, settings, rng, context.device))
+    `update_pairs` (``part_width``: the stage's token part); its means, or no update where the round has no informative
+    group."""
+    parts = one_pass(model, context.base, optimizer, update_pairs(directory, context.data, settings, rng, context.device,
+                                                                  part_width=part_width))
     return {"updates": len(parts), **(stacked(parts) if parts else {})}
 
 
@@ -758,13 +842,16 @@ def read_batch(model: Prior, context: Context, windows: Sequence[Window], places
 
 
 def selection_readout(model: Prior, context: Context, windows: Sequence[Window], settings: Settings,
-                      split: str = "select", speakers: Speakers | None = None) -> dict[str, Any]:
+                      split: str = "select", speakers: Speakers | None = None, *, stage: Stage = STAGE_C
+                      ) -> dict[str, Any]:
     """Step 5 of a round: the select windows' first pass (no branch), its ends by airport (module docstring); the
-    same readout of ``split``'s windows (`post_validation`: the val days). Its batches read here (`read_batch`), or by
-    ``speakers`` (C13: the same ends, summed here in batch order; one process is the reference mode)."""
+    same readout of ``split``'s windows (`post_validation`: the val days). Its batches read here (``stage``'s
+    `Stage.read_batch`, stage C's `read_batch`), or by ``speakers`` (C13: the same ends, summed here in batch order;
+    one process is the reference mode; refused unless they run ``stage``)."""
+    _require_stage(speakers, stage)
     places = batches(windows, settings.batch_windows)
     read = (speakers.read(model, windows, places, split) if speakers is not None else
-            [read_batch(model, context, windows, p, settings, split) for p in places])
+            [stage.read_batch(model, context, windows, p, settings, split) for p in places])
     return counted_ends(windows, places, read)
 
 
@@ -825,18 +912,21 @@ def _but_rounds(inputs: Mapping[str, Any]) -> dict[str, Any]:
     return {**inputs, "settings": {k: v for k, v in inputs["settings"].items() if k != "rounds"}}
 
 
-def open_campaign(out: Path, inputs: dict[str, Any], git: dict[str, Any], checks: Any) -> dict[str, Any]:
+def open_campaign(out: Path, inputs: dict[str, Any], git: dict[str, Any], checks: Any, *,
+                  schema: str = CAMPAIGN_SCHEMA, reader: str = CLAIM_READER) -> dict[str, Any]:
     """``campaign.json``: a new campaign's, or a resume's. A resume is refused unless its inputs are the record's — the
     recorded paths as this checkout reads them (`inputs_here`), the rounds left out — and its rounds at least the
     record's; more rounds raise the record's count (D157), its paths kept as recorded, and are refused once the
     campaign's val read is claimed (`post_validation`, P47), spent or not. Each resume adds its entry: the
     time, the commit, the checks, the paths it read and the rounds before and after it. A round left half done (its
-    directory without its checkpoint) is moved aside as ``round_<r>.aborted-<UTC>``."""
+    directory without its checkpoint) is moved aside as ``round_<r>.aborted-<UTC>``. A stage's own campaign gives its
+    format (``schema``) and the reader of its val read's claim (``reader``); stage C's by default (post-training §9 item
+    11)."""
     path = out / "campaign.json"
     if path.exists():
         record = json.loads(path.read_text(encoding="utf-8"))
-        if record["schema"] != CAMPAIGN_SCHEMA:
-            raise SystemExit(f"{out}: a {record['schema']} campaign, not {CAMPAIGN_SCHEMA}")
+        if record["schema"] != schema:
+            raise SystemExit(f"{out}: a {record['schema']} campaign, not {schema}")
         recorded, asked = inputs_here(record["inputs"]), inputs_here(inputs)
         if _but_rounds(recorded) != _but_rounds(asked):
             raise SystemExit(f"{out}: a campaign of other inputs or settings; a resume takes the same, its rounds or more")
@@ -844,8 +934,8 @@ def open_campaign(out: Path, inputs: dict[str, Any], git: dict[str, Any], checks
         if after < before:
             raise SystemExit(f"{out}: a campaign of {before} rounds; a resume may raise the rounds, not lower them to "
                              f"{after}")
-        if after > before and validation_claim(out, CLAIM_READER) is not None:
-            raise SystemExit(f"{out}: its val read is claimed ({validation_claim(out, CLAIM_READER)}); its rounds are not "
+        if after > before and validation_claim(out, reader) is not None:
+            raise SystemExit(f"{out}: its val read is claimed ({validation_claim(out, reader)}); its rounds are not "
                              f"raised after it (P47)")
         left = out / f"round_{done_rounds(out)}"
         if left.exists():
@@ -861,7 +951,7 @@ def open_campaign(out: Path, inputs: dict[str, Any], git: dict[str, Any], checks
     if out.exists():
         raise SystemExit(f"{out} exists and holds no campaign")
     out.mkdir(parents=True)
-    record = {"schema": CAMPAIGN_SCHEMA, "started_utc": utc_now(), "inputs": inputs, "git": git, "checks": checks,
+    record = {"schema": schema, "started_utc": utc_now(), "inputs": inputs, "git": git, "checks": checks,
               "aborted": [], "resumed": []}
     write_json_atomic(path, record)
     return record
@@ -883,28 +973,69 @@ def start_checkpoint(start: Mapping[str, Any]) -> Path:
     return REPO_ROOT / start["campaign"] / f"round_{start['round']}" / "checkpoint.pt"
 
 
-def campaign_start(context: Context, settings: Settings) -> tuple[Prior, torch.optim.Optimizer]:
-    """The model a campaign starts from and a new optimizer (the user, 2026-10-07): the base with zero-output traffic
-    modules (D29, ``settings.start`` None), or the weights of a round of another campaign (``settings.start``), refused
-    by name unless its checkpoint's bytes are the recorded ones and its identity is of this base, under today's
-    procedure masks, with this traffic shape, after that round, and unless its seed differs from the start's campaign's
-    (D162). The optimizer starts afresh, and the pull term pulls toward the base either way (the user, 2026-10-07)."""
-    model, optimizer = start_model(context, settings)
-    if settings.start is None:
-        return model, optimizer
-    path = start_checkpoint(settings.start)
-    if file_sha256(path) != settings.start["checkpoint_sha256"]:
+def source_campaign(campaign: Path, round_: int, *, formal: bool) -> dict[str, Any]:
+    """The record of the campaign a start comes from (post-training §9 item 12, D162, multi-aircraft control D164),
+    refused by name unless it is a campaign of stage C (`CAMPAIGN_SCHEMA`) with round ``round_`` done and, for a formal
+    campaign (``formal``), not a smoke one."""
+    record = json.loads((campaign / "campaign.json").read_text(encoding="utf-8"))
+    if record["schema"] != CAMPAIGN_SCHEMA:
+        raise ValueError(f"{campaign} is a {record['schema']} campaign, not {CAMPAIGN_SCHEMA}")
+    if formal and record["inputs"]["smoke"]:
+        raise ValueError(f"{campaign} is a smoke campaign: a formal campaign does not start from it")
+    if not 0 <= round_ < done_rounds(campaign):
+        raise ValueError(f"{campaign} holds the checkpoints of rounds 0–{done_rounds(campaign) - 1}, not {round_}")
+    return record
+
+
+def start_of(campaign: Path, round_: int, *, formal: bool) -> dict[str, Any]:
+    """The setting of a start from round ``round_`` of ``campaign`` (`Settings.start`, D162): the campaign as this
+    checkout names it (repository-relative), the round and its checkpoint's sha256; the source's rules
+    (`source_campaign`) refused by name first."""
+    from ts_transformer.experiments.training_export import this_checkout
+
+    source_campaign(campaign, round_, formal=formal)
+    return {"campaign": repo_relative(this_checkout(campaign)), "round": round_,
+            "checkpoint_sha256": file_sha256(campaign / f"round_{round_}" / "checkpoint.pt")}
+
+
+def round_start(context: Context, start: Mapping[str, Any], seed: int) -> tuple[Prior, dict[str, Any]]:
+    """Post-training §9 item 12 (D162, multi-aircraft control D164): round ``start["round"]`` of the campaign
+    ``start["campaign"]`` opened as a start, in eval mode, with its identity — refused by name unless the checkpoint's
+    bytes are the recorded ones, the source's rules hold (`source_campaign`: a formal campaign, ``context.formal``,
+    from a formal one), its identity is of this base, under today's procedure masks, with its campaign's traffic shape,
+    after that round, and the new campaign's ``seed`` is not its source's (so that its rounds draw new windows). Stage C's
+    start of a campaign (`campaign_start`) and stage D's start call it."""
+    path = start_checkpoint(start)
+    if file_sha256(path) != start["checkpoint_sha256"]:
         raise ValueError(f"{path}: not the checkpoint the campaign started from (its sha256 is not the recorded one)")
+    source = settings_of(source_campaign(REPO_ROOT / start["campaign"], start["round"], formal=context.formal))
     state = torch.load(path, weights_only=False, map_location=context.device)
     held = state["identity"]
     expected = {"schema": POST_CHECKPOINT_SCHEMA, "base": context.base_identity, "procedure_masks": PROCEDURE_MASKS,
-                "traffic": TrafficConfig(settings.traffic_hidden, settings.traffic_heads).to_dict()}
-    if {k: held[k] for k in expected} != expected or len(held["rounds"]) != settings.start["round"] + 1:
+                "traffic": TrafficConfig(source.traffic_hidden, source.traffic_heads).to_dict()}
+    if {k: held[k] for k in expected} != expected or len(held["rounds"]) != start["round"] + 1:
         raise ValueError(f"{path}: a checkpoint of another base, masks, traffic shape or round than the start's")
-    if held["seed"] == settings.seed:
-        raise ValueError(f"{path}: its campaign's seed is {settings.seed}; a campaign from a round takes another seed, so "
-                         f"that its rounds draw new windows (D162)")
-    model.load_state_dict(state["model"])        # in place: the optimizer holds these parameters, with no state yet
+    if held["seed"] == seed:
+        raise ValueError(f"{path}: its campaign's seed is {seed}; a campaign from a round takes another seed, so that its "
+                         f"rounds draw new windows (D162)")
+    model, _ = start_model(context, source)
+    model.load_state_dict(state["model"])
+    return model.eval(), held
+
+
+def campaign_start(context: Context, settings: Settings) -> tuple[Prior, torch.optim.Optimizer]:
+    """The model a campaign starts from and a new optimizer (the user, 2026-10-07): the base with zero-output traffic
+    modules (D29, ``settings.start`` None), or the weights of a round of another campaign (``settings.start``,
+    `round_start`), refused by name besides unless its traffic shape is this campaign's (D162). The optimizer starts
+    afresh, and the pull term pulls toward the base either way (the user, 2026-10-07)."""
+    model, optimizer = start_model(context, settings)
+    if settings.start is None:
+        return model, optimizer
+    source, held = round_start(context, settings.start, settings.seed)
+    if held["traffic"] != TrafficConfig(settings.traffic_hidden, settings.traffic_heads).to_dict():
+        raise ValueError(f"{start_checkpoint(settings.start)}: a checkpoint of another base, masks, traffic shape or round "
+                         f"than the start's (its traffic shape is not this campaign's)")
+    model.load_state_dict(source.state_dict())     # in place: the optimizer holds these parameters, with no state yet
     return model, optimizer
 
 
@@ -931,38 +1062,42 @@ def round_model(context: Context, settings: Settings, out: Path, round_: int | N
     return model.eval()
 
 
-def run_campaign(out: Path, settings: Settings, context: Context, speakers: Speakers | None = None) -> None:
+def run_campaign(out: Path, settings: Settings, context: Context, speakers: Speakers | None = None,
+                 stage: Stage = STAGE_C) -> None:
     """The rounds not yet done (module docstring), each closed by its checkpoint; the speaking by ``speakers`` when
-    given (`Speakers`)."""
+    given (`Speakers`, refused unless they run ``stage``); ``stage``'s parts of a round (stage C's, `STAGE_C`): a new
+    campaign starts from the stage's start (`Stage.start`), a resumed one loads its last checkpoint into the stage's
+    model (`Stage.start_model`)."""
+    _require_stage(speakers, stage)
     first = done_rounds(out)
-    model, optimizer = start_model(context, settings) if first else campaign_start(context, settings)
+    model, optimizer = stage.start_model(context, settings) if first else stage.start(context, settings)
     if first:
         state = torch.load(out / f"round_{first - 1}" / "checkpoint.pt", weights_only=False, map_location=context.device)
         model.load_state_dict(state["model"])
         optimizer.load_state_dict(state["optimizer"])
-    select = selection_windows(context, settings)
+    select = stage.selection(context, settings, "select")
     for round_ in range(first, settings.rounds):
         directory = out / f"round_{round_}"
         directory.mkdir()
-        windows, drawn = draw_round(context, settings.per_kind, np.random.default_rng([settings.seed, round_]))
+        windows, drawn = stage.draw(context, settings, round_)
         context.splits["train"]["start"].release()        # a round's flights kept, not the campaign's (C13)
         if speakers is not None and context.device.type == "cuda":
             torch.cuda.empty_cache()     # the speakers share the GPU: the memory this process cached in the last pass
-        spoken = speak_round(model, context, windows, settings, round_, directory, speakers)
+        spoken = stage.speak(model, context, windows, settings, round_, directory, speakers, stage=stage)
         torch.manual_seed(pass_seed(settings.seed, round_))                    # the data term's dropout
         passed = train_pass(model, context, optimizer, directory, settings,
-                            np.random.default_rng([settings.seed, round_, 1]))
+                            np.random.default_rng([settings.seed, round_, 1]), part_width=stage.part_width)
         if speakers is not None and context.device.type == "cuda":
             torch.cuda.empty_cache()     # the memory of the pass, before the speakers read
-        readout = selection_readout(model, context, select, settings, speakers=speakers)
+        readout = stage.readout(model, context, select, settings, speakers, stage=stage)
         written = sorted(directory.glob("groups_*.pt"))
         write_json_atomic(directory / "round.json", {
             "round": round_, "git": git_state(), "finished_utc": utc_now(), "draw": drawn,
             "speak_workers": speakers.workers if speakers is not None else 1,         # information (`Speakers`)
-            "windows": [window_record(w) for w in windows], "speaking": spoken,
+            "windows": [stage.record(w) for w in windows], "speaking": spoken,
             "groups_bytes": sum(p.stat().st_size for p in written), "pass": passed, "selection_readout": readout})
         torch.save({"model": model.state_dict(), "optimizer": optimizer.state_dict(),
-                    "identity": identity(context, settings, out, round_ + 1)}, directory / "checkpoint.pt")
+                    "identity": stage.identity(context, settings, out, round_ + 1)}, directory / "checkpoint.pt")
         for path in written:                                # read by this round's pass only; their size is recorded
             path.unlink()
         print(json.dumps({"round": round_, "pass": passed,
@@ -1009,17 +1144,10 @@ def main(argv: list[str] | None = None) -> int:
     start = None
     if args.start_campaign is not None:
         source = args.start_campaign if args.start_campaign.is_absolute() else REPO_ROOT / args.start_campaign
-        held = json.loads((source / "campaign.json").read_text(encoding="utf-8"))
-        if held["schema"] != CAMPAIGN_SCHEMA:
-            parser.error(f"{source} is a {held['schema']} campaign, not {CAMPAIGN_SCHEMA}")
-        if held["inputs"]["smoke"] and not args.smoke:
-            parser.error(f"{source} is a smoke campaign: a formal campaign does not start from it")
-        if not 0 <= args.start_round < done_rounds(source):
-            parser.error(f"{source} holds the checkpoints of rounds 0–{done_rounds(source) - 1}, not {args.start_round}")
-        from ts_transformer.experiments.training_export import this_checkout
-
-        start = {"campaign": repo_relative(this_checkout(source)), "round": args.start_round,
-                 "checkpoint_sha256": file_sha256(source / f"round_{args.start_round}" / "checkpoint.pt")}
+        try:
+            start = start_of(source, args.start_round, formal=not args.smoke)
+        except ValueError as refused:
+            parser.error(str(refused))
     prior_dir, instructions, executor, census, procedure_root, out = (p if p.is_absolute() else REPO_ROOT / p for p in (
         args.prior, args.instructions, args.executor, args.windows, args.procedure_root, args.out))
     settings = Settings(args.rounds, {kind: getattr(args, f"windows_{kind.lower()}") for kind in KINDS},

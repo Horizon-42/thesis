@@ -694,7 +694,7 @@ def test_only_the_runners_the_executor_and_the_prior_reach_the_instructions_pack
             continue
         rel = path.relative_to(TS_DIR).as_posix()
         if any(name.split(".")[0] == "instructions" for name in _imported_names(path)):
-            assert rel.startswith(("experiments/", "autopilot/", "prior/", "post/")), \
+            assert rel.startswith(("experiments/", "autopilot/", "prior/", "post/", "multi/")), \
                 f"{rel} imports the instructions package"
 
 
@@ -764,7 +764,7 @@ def test_only_the_runners_and_the_post_training_reach_the_prior():
             continue
         rel = path.relative_to(TS_DIR).as_posix()
         if any(name.split(".")[0] == "prior" for name in _imported_names(path)):
-            assert rel.startswith(("experiments/", "post/")), f"{rel} imports the prior"
+            assert rel.startswith(("experiments/", "post/", "multi/")), f"{rel} imports the prior"
 
 
 #: What the runners of the prior may take from `autopilot/` (vocabulary §6 items 3, 5, 6; D67, D69; prior §12 B4): the
@@ -927,7 +927,7 @@ def test_only_the_runners_reach_the_post_training():
             continue
         rel = path.relative_to(TS_DIR).as_posix()
         if any(name.split(".")[0] == "post" for name in _imported_names(path)):
-            assert rel.startswith("experiments/"), f"{rel} imports the post-training"
+            assert rel.startswith(("experiments/", "multi/")), f"{rel} imports the post-training"
 
 
 #: Prior §7 item 7: the module of the step of a speaker's closed loop (D106), and the names stage C's runners take from
@@ -948,10 +948,11 @@ TRAINING_EXPORT_NAMES = {
 }
 
 
-def _experiments_imports_refused(source: str) -> list[str]:
-    """Each import of ``source`` from `experiments/` that is neither a stage C module (`post_*`), a name of prior §7
-    item 7's module nor a name of the Training export (`TRAINING_EXPORT_NAMES`), by the names imported; a relative import is refused outright (a runner's imports are qualified,
-    L1)."""
+def _experiments_imports_refused(source: str, own: tuple[str, ...] = ("post_",)) -> list[str]:
+    """Each import of ``source`` from `experiments/` that is neither a stage C module (`post_*`; ``own``: the prefixes of
+    the runners' own stage too), a name of prior §7 item 7's module nor a name of the Training export
+    (`TRAINING_EXPORT_NAMES`), by the names imported; a relative import is refused outright (a runner's imports are
+    qualified, L1)."""
     refused = []
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.ImportFrom) and node.level:
@@ -961,18 +962,18 @@ def _experiments_imports_refused(source: str) -> list[str]:
             if module.split(".")[0] != "experiments":
                 continue
             if module == "experiments":
-                refused += [f"from experiments import {a.name}" for a in node.names if not a.name.startswith("post_")]
+                refused += [f"from experiments import {a.name}" for a in node.names if not a.name.startswith(own)]
             elif module in TRAINING_EXPORT_NAMES:
                 refused += [f"from {module} import {a.name}" for a in node.names
                             if a.name not in TRAINING_EXPORT_NAMES[module]]
             elif module == SPEAKING_LOOP:
                 refused += [f"from {module} import {a.name}" for a in node.names if a.name not in SPEAKING_LOOP_NAMES]
-            elif not module.split(".")[1].startswith("post_"):
+            elif not module.split(".")[1].startswith(own):
                 refused += [f"from {module} import {a.name}" for a in node.names]
         elif isinstance(node, ast.Import):
             refused += [f"import {_package_relative(a.name)}" for a in node.names
                         if _package_relative(a.name).split(".")[0] == "experiments"
-                        and not _package_relative(a.name).startswith("experiments.post_")]
+                        and not _package_relative(a.name).split(".", 1)[-1].startswith(own)]
     return refused
 
 
@@ -1008,7 +1009,7 @@ def test_the_stage_c_runners_take_from_autopilot_only_what_its_interface_lists()
 
 #: D73 (no code fingerprint): the trees where a check of the labeller, the executor or the closed loop runs, and the
 #: package's own helpers they import.
-NO_CODE_DIGEST_TREES = ("instructions", "autopilot", "prior", "post", "experiments")
+NO_CODE_DIGEST_TREES = ("instructions", "autopilot", "prior", "post", "multi", "experiments")
 NO_CODE_DIGEST_FILES = ("io_utils.py", "repo_layout.py")
 #: Names of the retired code digests and their helpers, as identifiers or as text (a payload key is text).
 CODE_DIGEST_NAMES = ("logic", "logic_sha256", "executor_source_files", "executor_source_sha256", "labeller_code_files",
@@ -1086,3 +1087,107 @@ def test_the_digest_scan_finds_every_way_of_reading_source(tmp_path):
             or (isinstance(n, ast.alias) and n.name in CODE_DIGEST_NAMES) for n in ast.walk(tree))
     assert all(found.values()), found
     assert not any(_reads_code(n) for n in ast.walk(ast.parse("Path('data.json').read_text()\nx = 'run_ts.py'\n")))
+
+
+
+# ---- stage D, the multi-aircraft control (multi-aircraft control §10)
+MULTI = TS_DIR / "multi"
+#: What `multi/` may import: itself, the instruction language, and the separation judge's types and rules (as `post/`
+#: does); `post/` and `prior/` through the names of their public interfaces only (below).
+MULTI_MAY_IMPORT = ("multi.", "instructions.", "inference.separation", "inference.runway_schedule")
+#: Post-training §9, the column "Code": the names stage D may import from `post/`, with the names that MC0 added (the
+#: implementer's report gives them to the designer: `requests_from_d_to_designer.md`).
+POST_INTERFACE = {
+    "post.scene": {"Recorded", "AircraftAt", "Scene", "MovedScene", "Window", "StartMove", "real_windows",
+                   "inserted_window", "leader_moved_window", "moved_start_window", "census", "Joined", "REAL",
+                   "airport_scenes"},
+    "post.landings": {"window_landings", "commanded_landings"},
+    "post.traffic": {"traffic", "commanded_loss", "loss_at_first_step", "opens_inside_loss", "joined", "scene_aircraft",
+                     "step_losses", "answered_loss"},
+    "post.established": {"established"},
+    "post.runways": {"airport_separation", "approach_clock_m"},
+    "post.edges": {"tokens", "TOKEN_FEATURES"},
+    "post.conformance": {"require_conforming_edges"},
+    "post.speed_mask": {"speed_check", "along_course_speeds"},
+    "post.reward": {"reward", "present_runways"},
+    "post.traffic_attention": {"TrafficConfig", "Traffic", "traffic_of", "TrafficTokens", "TrafficAttention",
+                               "add_traffic_attention", "parameter_groups", "TokenPart", "add_token_part"},
+    "post.branches": {"first_numbers", "continuation_numbers", "branch_points", "Group", "Sentence", "samples",
+                      "BRANCH_EVERY_S", "CONTINUATIONS"},
+    "post.loss": {"Samples", "surrogate", "pull_to_base", "data_term", "update_step", "update_loss", "one_pass"},
+}
+
+
+def _post_imports_refused(source: str) -> list[str]:
+    """Each import of ``source`` that takes from `post/` a name `POST_INTERFACE` does not list (a whole module of
+    `post/` is never imported)."""
+    refused = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.ImportFrom) and node.module and _package_relative(node.module).split(".")[0] == "post":
+            module = _package_relative(node.module)
+            refused += [f"from {module} import {a.name}" for a in node.names
+                        if a.name not in POST_INTERFACE.get(module, set())]
+        elif isinstance(node, ast.Import):
+            refused += [f"import {_package_relative(a.name)}" for a in node.names
+                        if _package_relative(a.name).split(".")[0] == "post"]
+    return refused
+
+
+def test_the_post_trainings_interface_names_exist():
+    import importlib
+
+    missing = [f"{module}.{name}" for module, names in POST_INTERFACE.items()
+               for name in names if not hasattr(importlib.import_module(f"ts_transformer.{module}"), name)]
+    assert not missing, missing
+
+
+def test_the_multi_aircraft_control_reads_only_its_layers_and_the_interfaces():
+    """Multi-aircraft control §10: `multi/` imports `instructions/`, the names of `post/` in post-training §9 and those
+    of `prior/` in prior §7; neither `autopilot/` nor any runner."""
+    groups = {p.name for p in TS_DIR.iterdir() if (p / "__init__.py").is_file()} | {p.stem for p in TS_DIR.glob("*.py")}
+    files = [path for path in MULTI.rglob("*.py") if "__pycache__" not in path.parts]
+    assert files, "the multi-aircraft package is empty; this test would pass vacuously"
+    for path in files:
+        rel = path.relative_to(TS_DIR).as_posix()
+        source = path.read_text(encoding="utf-8")
+        assert not _post_imports_refused(source), f"{rel}: {_post_imports_refused(source)}"
+        assert not _prior_imports_refused(source), f"{rel}: {_prior_imports_refused(source)}"
+        for name in _imported_names(path):
+            top = name.split(".")[0]
+            if top not in groups or top in ("post", "prior") or name == "multi":
+                continue
+            allowed = any((name == item[:-1] or name.startswith(item)) if item.endswith(".") else
+                          (name == item or name.startswith(item + ".")) for item in MULTI_MAY_IMPORT)
+            assert allowed, f"{rel} imports {name}"
+    assert _post_imports_refused("from ts_transformer.post.scene import Window, recorded\n") == [
+        "from post.scene import recorded"]
+
+
+def test_only_the_runners_reach_the_multi_aircraft_control():
+    """Multi-aircraft control §10: `post/` never imports `multi/`; nothing but its own package and a runner does."""
+    for path in _module_files():
+        if path.is_relative_to(MULTI):
+            continue
+        rel = path.relative_to(TS_DIR).as_posix()
+        if any(name.split(".")[0] == "multi" for name in _imported_names(path)):
+            assert rel.startswith("experiments/"), f"{rel} imports the multi-aircraft control"
+
+
+def _multi_runners() -> list[Path]:
+    """The runners of stage D (multi-aircraft control §10)."""
+    return sorted((TS_DIR / "experiments").glob("multi_*.py"))
+
+
+def test_the_stage_d_runners_take_only_the_names_of_the_interfaces():
+    """Multi-aircraft control §10: stage D's runners import from `autopilot/` only the names of vocabulary §6, from
+    `prior/` only those of prior §7, from `post/` only those of post-training §9, and from `experiments/` only stage C's
+    runners (their names in §9), stage D's own runners (`multi_validation` reads `multi_train`'s stage, as stage C's
+    validation reads `post_train`'s: stage D's requests item 36) and the shared step of the loop."""
+    assert _multi_runners(), "no runner of stage D; this test would pass vacuously"
+    for path in _multi_runners():
+        source = path.read_text(encoding="utf-8")
+        for refused in (_autopilot_imports_refused(source), _prior_imports_refused(source), _post_imports_refused(source),
+                        _experiments_imports_refused(source, ("post_", "multi_"))):
+            assert not refused, f"{path.name}: {refused}"
+    assert _experiments_imports_refused("from ts_transformer.experiments.multi_train import stage_d\n") == [
+        "from experiments.multi_train import stage_d"]                   # stage C's runners do not reach stage D's

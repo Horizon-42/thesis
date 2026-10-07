@@ -333,3 +333,35 @@ def test_window_b_moves_the_commanded_aircrafts_start_within_its_ranges(built):
         Window(MOVED_START, window.commanded, window.signal_index, window.scene)
     with pytest.raises(ValueError, match="window B, and only it"):
         replace(window, start_move=moves[0].start_move)
+
+
+def test_a_window_of_several_commanded_aircraft_leaves_them_all_out_of_its_others(built):
+    """Multi-aircraft control D146, D149 (post-training §9 item 1): a window may hold commanded aircraft after its anchor,
+    each joining at its own row 0 on the window's steps; the others of a step are every flight in the air but the
+    commanded ones; a stage C window (none joined) gives what it gave. Refused: an aircraft commanded twice, one that
+    joins before the anchor or off the Δ grid, and a labelled G."""
+    from ts_transformer.post.scene import Joined
+
+    directory, spec, scenes, signals, _ = built
+    windows = real_windows(directory, "train", spec, DELTA, scenes, signals)
+    a, b, c = windows[:3]
+    joined = replace(a, joined=(Joined(b.commanded, b.signal_index), Joined(c.commanded, c.signal_index)))
+    assert joined.signal_indices == (a.signal_index, b.signal_index, c.signal_index)
+    assert [r.key for r in joined.commanded_all] == ["KXXX:a", "KXXX:b", "KXXX:c"]
+    steps = joined.join_steps()
+    assert steps[0] == 0 and np.allclose(steps[1:] * DELTA, [b.row0_s - a.row0_s, c.row0_s - a.row0_s])
+    assert a.join_steps().tolist() == [0]
+    for step in range(0, 200, 7):
+        assert set(joined.others_at(step).keys) == set(a.others_at(step).keys) - {"KXXX:b", "KXXX:c"}
+        assert list(joined.others_at(step).keys) == [k for k in a.others_at(step).keys if k not in ("KXXX:b", "KXXX:c")]
+    with pytest.raises(ValueError, match="commands each flight once"):
+        replace(a, joined=(Joined(b.commanded, b.signal_index), Joined(b.commanded, b.signal_index)))
+    with pytest.raises(ValueError, match="joins at a whole step at or after"):
+        replace(b, joined=(Joined(a.commanded, a.signal_index),))
+    with pytest.raises(ValueError, match="joins at a whole step at or after"):
+        replace(a, joined=(Joined(b.commanded.shifted(-DELTA, DELTA), b.signal_index, shift_s=-DELTA / 2),))
+    with pytest.raises(ValueError, match="moved toward the anchor"):
+        replace(a, joined=(Joined(b.commanded.shifted(DELTA, DELTA), b.signal_index, shift_s=DELTA),))
+    labelled = replace(b.commanded, go_around=np.ones_like(b.commanded.go_around))
+    with pytest.raises(ValueError, match="words in force"):
+        replace(a, joined=(Joined(labelled, b.signal_index),))
