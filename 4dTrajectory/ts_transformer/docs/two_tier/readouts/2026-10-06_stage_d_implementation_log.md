@@ -33,35 +33,50 @@ they start with `4dTrajectory/` or `.claude/`.
 
 ### 0.1 Where to resume (2026-10-07, before a compression of the context)
 
-- **Code**: MC0–MC4 of version 1 built and reviewed, merged into `dev-two-tier` at the user's word (b967d2b1; the
-  branch `dev-multi-control` and its worktree `.claude/worktrees/multi-control` kept for stage D's next steps — keep
-  them level with dev-two-tier by merging it in before new work). Full ts suite on it: 1,963 passed, 1 skipped.
-- **Running when this was written: MC1's census, a stated sample** (the user: "sample, and you may use more cpu, just
-  finish it as soon as possible"): 500 anchors of each airport and split, seed 1337, in 6 processes from the
-  multi-control worktree (`/tmp/claude-1000/mc1/run_part.sh`: one split each, spans {0, 5}, {10}, {20} min, every c_min);
-  each part writes `/tmp/claude-1000/mc1/s500/<split>.<spans>/census.json` and a line in `/tmp/claude-1000/mc1/s500/done`
-  (6 lines when all are done; the four parts of 0, 5 and 10 min took 6–7 min each). Then: join the six parts (same
-  anchors: the sample's seed is per split, not per span) into one table by split, span, kind and airport — the commanded
-  aircraft of a window (p50, p90, largest), the recorded aircraft at a first predicted step, the windows left out (by the
-  anchor, by a later aircraft), the losses by pair on the records and on the baseline (share of windows and of steps) —
-  report it to the user for O16 (L, the kinds and their counts, c_min), and write it into this log (a readout).
-- **Next, in order**: the user's O16 → MC4's smoke (`multi_train --smoke`, two rounds, a few windows of each airport,
-  from a chosen round of stage C: `--start-campaign 4dTrajectory/outputs/POOLED/post/post_train_20261006 --start-round
-  <the user's>`, a seed other than 1337) → MC5's profile at the formal size (time of a batch and a round, memory with N
-  speaking workers, the spread of round 0's W per aircraft for the select set's size) → the user's settings → MC6 from a
-  run worktree at the merged commit (outline D163) → MC7 by fronter → version 2 (MC8, MC9) → MC10.
-- **O16 decided by the user (2026-10-07)**: several spans L mixed, the windows of one L in one batch (no serial speaking);
-  real and compressed (c_min 0.8) windows; 1000 of each kind a round (requests item 36). D146 changes: the designer
-  writes it first; then stage D builds it (multi_train's draw, batches by L, select set and identity by span), then
-  MC4's smoke.
-- **Waiting for the user**: requests items 19, 22, 29–35 (decided: 6, 7, 21, 25, O16).
+- **State**: MC0–MC4 of version 1 built, reviewed and merged into `dev-two-tier` (b967d2b1, the user's word; full ts
+  suite 1,963 passed); MC0's D73 checks and D149's real-window check (200/200 bit for bit) passed; MC1's census done as a
+  stated sample (500 anchors an airport and split; §10). The branch `dev-multi-control` and its worktree
+  `.claude/worktrees/multi-control` are kept for the next steps.
+- **The user decided everything asked (designer's commit 7decd7b9)**: O16 → D146 rewritten (spans L = 5, 10, 20 min
+  mixed; each kind's 1,000 windows of a round in equal parts of the spans, each window's span drawn with the round's
+  numbers, a shortfall of a span recorded; one L a batch; real and compressed windows, c_min 0.8; select set and
+  readouts by span, at most `select_per_airport` per airport and span; identity and campaign settings record the spans
+  and their counts); D166: requests items 6, 7, 19, 21, 22, 25, 29–35 accepted (31 and 35 as stated limits). The names
+  of MC0–MC4 are now in vocabulary §6 item 5, prior §7 items 2, 3, 7, post-training §9 (item 12: `round_start`,
+  `start_of`, `source_campaign`).
+- **The orders now (notes/stage_d.md of 2026-10-07, read it first)**:
+  1. **Code, on dev-multi-control after merging dev-two-tier in**: `experiments/multi_train.py` by D146 and §3.1 — the
+     draw by span (equal parts, the span drawn with the round's numbers, shortfalls recorded), batches by L (one L a
+     batch; each flight commanded once a batch), the select set / readouts / validation readout by span, the identity
+     and the settings with the spans and counts (`MultiSettings.span_s` becomes the spans). Also D166 item 19 (built
+     neither yet): a formal start of stage D refuses a source campaign with rounds still to run (as `post_validation`),
+     beside the smoke refusal `source_campaign` already makes. Tests: each kind's counts split equally by span with the
+     shortfall recorded; one L a batch; the select set by span and airport; the spans in the identity; MC2's bit-for-bit
+     check with stage C's numbers still passes (D166 item 22: `tests/test_multi_control.py`
+     `test_with_one_commanded_aircraft_stage_ds_rules_give_stage_cs_groups`). Then tests → independent review (D131's
+     depth) → explicit-path commit → a log line.
+  2. **MC4's smoke and MC5, only with the host and GPU free (rule 13) and never while stage C's C17 runs**: smoke =
+     `multi_train --smoke`, two rounds, a few windows of each airport and span, the start round 6 of
+     `4dTrajectory/outputs/POOLED/post/post_train_20261006` (smoke only; the formal start is the user's, D164), a seed
+     other than 1337. MC5 at the formal size, per span: the time of a batch and of a round, the memory with N speaking
+     workers (batch size set by a batch's rows), the bytes of the branch groups, the spread of round 0's W per aircraft
+     (the select set's size); report the proposed settings to the user.
+  3. After the user's settings: MC6 from a run worktree at the merged commit (outline D163).
+- **The requests note** (`design/requests_from_d_to_designer.md`): rewrite it whole, the decided items deleted (all
+  of 1–36 are decided now; keep only new readings).
 - **Left running from earlier**: the test stack of stage B's browser check from `.claude/worktrees/two-tier-v4`
   (vite 5185, backend 8795; stop: `kill $(lsof -t -iTCP:5185 -sTCP:LISTEN) $(lsof -t -iTCP:8795 -sTCP:LISTEN)`).
-- **Scratch results kept** (`/tmp/claude-1000/`): `d73/` (the D73 checks' records), `d149/` (the real-window check's
-  script `check.py`, `compare.py` and digests `old.json`, `new.json`), `mc1/sample20/` (the 20-anchor sample).
+- **Scratch results kept** (`/tmp/claude-1000/`): `d73/` (the D73 checks), `d149/` (the real-window check's
+  `check.py`, `compare.py`, digests `old.json`, `new.json`), `mc1/s500/` (the census parts, `join.py`, `table.txt`).
+- **Code to know**: `multi/{windows,census,separation,tokens,credit,timing}.py`; `experiments/multi_train.py`
+  (`MultiSettings`, `draw_windows`, `speak_batch`, `selection_windows`, `read_batch`, `window_losses_of`,
+  `window_timing`, `selection_readout`, `multi_settings_of`, `round_model`, `stage_d()`); `experiments/multi_validation.py`;
+  `post_train.Stage` (start, start_model, identity, draw, speak, selection(split), readout, record, speak_batch,
+  read_batch, part_width), `round_start`, `start_of`, `source_campaign`, `Context.formal`; tests
+  `tests/test_multi_{train,validation,control,windows}.py`.
 - **The working rules** (notes/stage_d.md): every step single-file tests → an independent review (code only, at D131's
   depth: review_guide §3 step 6, §6, checklist §5) → an explicit-path commit (`git diff --cached --stat` first) → one line
-  here. Real-data jobs only with the host and GPU free (rule 13), one thread each, outputs in scratch; tests on the CPU.
+  here. Real-data jobs only with the host and GPU free, one thread each, outputs in scratch; tests on the CPU.
 
 ## 1 The branches (2026-10-06)
 
