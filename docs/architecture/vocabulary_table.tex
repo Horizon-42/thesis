@@ -1,0 +1,108 @@
+% Instruction vocabulary of the two-tier model (source: 4dTrajectory/ts_transformer/docs/two_tier/design/vocabulary.md §3, §8).
+% Requires: \usepackage{booktabs,tabularx,array,multirow}
+% Each row of a sentence (one row = 4 s) says five words, one per column, in this order.
+
+% ---- Summary table (compact; the detailed tables follow) ----
+\begin{table}[t]
+\centering
+\caption{Instruction vocabulary at a glance: five columns, one word per column in each 4\,s row.}
+\label{tab:vocab-summary}
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}l l l r@{}}
+\toprule
+Column & Says & Words & Classes \\
+\midrule
+Runway   & expected runway, go-around & candidate runways, \emph{go-around}           & $N_{\mathrm{cand}}+2$ \\
+Heading  & track to fly               & relative to runway course, $5^\circ$ grid       & 73 \\
+Altitude & level to hold              & 40 levels above airport, \emph{no level-off}   & 42 \\
+Angle    & steepness of the change    & level, descent 1--4, climb                      & 7 \\
+Speed    & ground speed to hold       & $5\,\mathrm{m/s}$ grid, \emph{unspecified}     & 49 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\centering
+\caption{Instruction vocabulary: one row of a sentence says five words, one per column, in the order shown.
+A word may also be ``unchanged'' (the column says nothing new), which counts as one class in every column.}
+\label{tab:vocabulary}
+\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\textwidth}{@{}c l >{\raggedright\arraybackslash}p{3.9cm} c >{\raggedright\arraybackslash}X@{}}
+\toprule
+\# & Column & Words & Classes & Meaning and reference frame \\
+\midrule
+1 & Runway
+  & candidate runway $k$; \emph{go-around}
+  & $N_{\mathrm{cand}}+2$
+  & ``Expect runway $k$''; fixes the runway in force $R$. \emph{Go-around} abandons the approach and
+    leaves $R$ unchanged; the next runway word ends it. The first predicted step must name a candidate. \\
+2 & Heading
+  & relative heading, $5^\circ$ grid ($72$ values)
+  & 73
+  & ``Fly track $\theta=\mathrm{course}(R)+5k^\circ$ and keep it''. Relative to the course of $R$, so the same
+    manoeuvre has the same word at every airport; class $0$ is the final, class $36$ the downwind. A turn is a series of words, one per $5^\circ$. \\
+3 & Altitude
+  & target level $T$ (40 levels, three segments, Table~\ref{tab:grids}); \emph{no level-off}
+  & 42
+  & ``Descend (climb) to $T$ and keep it''; $T$ is a geometric height above the airport elevation $E$
+    (flown at $T{+}E$ MSL). \emph{No level-off}: descend at the angle in force to the threshold; not permitted while the go-around state is true. \\
+4 & Angle
+  & level; descent 1--4; climb (Table~\ref{tab:grids})
+  & 7
+  & How steep the vertical change to the altitude target is. A climb word carries no angle: the executor
+    climbs at $1.25^\circ$, or at $1.885^\circ$--$3^\circ$ after a go-around. \\
+5 & Speed
+  & target ground speed, $5\,\mathrm{m/s}$ grid, $20$--$250\,\mathrm{m/s}$ ($47$ values); \emph{unspecified}
+  & 49
+  & ``Hold ground speed $V$''. A change of speed is said in $5\,\mathrm{m/s}$ steps, flown at $a_{\max}=1.4\,\mathrm{m/s^2}$,
+    so the rate comes from the words. \emph{Unspecified}: the pilot flies the approach speed of the type; it starts at the capture row. \\
+\bottomrule
+\end{tabularx}
+
+\vspace{0.4em}
+\begin{minipage}{\textwidth}
+\footnotesize
+\textbf{Grammar} (checked by the labeller, applied as masks when the prior decodes).
+(1) The first predicted step says a value in every column. (2) A runway word ends the go-around state $G$; \emph{go-around} needs $G$ false.
+(3) A level more than $\varepsilon$ below the aircraft needs a descent class; more than $\varepsilon$ above it needs the climb class.
+(4) \emph{No level-off} needs a descent class. (5) \emph{No level-off} is not permitted while $G$ is true.
+(6) A \emph{go-around} row with \emph{no level-off} in force also says a level above the aircraft.
+\end{minipage}
+\end{table}
+
+\begin{table}[t]
+\centering
+\caption{Grids of the altitude and angle columns.}
+\label{tab:grids}
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}l l r r r@{}}
+\toprule
+\multicolumn{5}{@{}l}{\textbf{Altitude levels} (height above airport elevation $E$; 40 levels)} \\
+\midrule
+Segment & Levels (m) & Step (m) & Max.\ rounding (m) & Band $\varepsilon$ (m) \\
+\midrule
+1 & $0,60,\dots,1260$      & 60  & 30  & 40  \\
+2 & $1380,\dots,2700$      & 120 & 60  & 70  \\
+3 & $3150,\dots,5400$      & 450 & 225 & 235 \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.8em}
+\begin{tabular}{@{}l r l@{}}
+\toprule
+\multicolumn{3}{@{}l}{\textbf{Angle classes}} \\
+\midrule
+Class & Nominal angle & Range \\
+\midrule
+Level      & $0^\circ$    & holds a reached level \\
+Descent 1  & $1.5^\circ$  & $-0.5^\circ$ to $2.0^\circ$ \\
+Descent 2  & $2.5^\circ$  & $2.0^\circ$ to $2.75^\circ$ \\
+Descent 3  & $3.0^\circ$  & $2.75^\circ$ to $3.75^\circ$ \\
+Descent 4  & $4.5^\circ$  & $3.75^\circ$ to $10^\circ$ \\
+Climb      & $1.25^\circ$ (go-around: $1.885^\circ$--$3^\circ$) & $0.5^\circ$ to $15^\circ$ (labelled pieces) \\
+\bottomrule
+\end{tabular}
+\end{table}
