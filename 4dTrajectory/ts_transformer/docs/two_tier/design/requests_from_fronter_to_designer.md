@@ -63,7 +63,8 @@ State: 2026-10-07. F0, F1 and F2 are built, reviewed and browser-checked on `dev
       the sides (`prior_training_export.chosen_flights`), so the two columns count the same population. B5's report
       (`readouts/2026-10-06_b5_campaign.zh.md` §3.2) quotes the "inside" side as its headline. On the folds' select days
       the two differ by about 1 point of landed: KSTL 71.4 % inside vs 70.5 % over every side, KMSY 91.7 vs 90.5, KRDU
-      83.4 vs 84.3. If the page should show the headline instead, it is a one-line change.
+      83.4 vs 84.3. **Decided by the user, 2026-10-07: every side** (as built), so that the two columns count the
+      same flights.
     - B's closed loop row and C's start row: "—", because the route answers no count of them.
     - C's rounds: the round's selection readout at the set's airport.
 11. **The columns.**

@@ -29,4 +29,11 @@ of C11 into the scratch tree only). 13 of 15 items passed:
 Two items were not seen in this set: a loss tick (no window of the smoke set lost separation; covered by the unit tests),
 and a formal readout in C (the smoke campaign lies outside `4dTrajectory/outputs`, and the page names it).
 
+**Merged** into `dev-two-tier` by the user's word, 2026-10-07: a fast-forward to `c4def61b`. C14 was running from the
+main checkout; it imports neither changed Python module. The main backend was not restarted: it still answers the
+window segment v1, which only stage C uses, and no stage C set is published.
+
+**The user's decision on requests item 10** (2026-10-07): stage B's formal readout counts every side of the prior's
+selection, as built.
+
 Waiting: F3 after stage D's MC0 is on `dev-two-tier`; F4 after its MC4.
