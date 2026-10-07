@@ -33,7 +33,7 @@ the measurements behind it are in §6 or in the readout named.
 | D30 | The post-training reward comes only from the outcome: 1 for `landed` without a go-around; 0.9ⁿ for `landed` after n go-arounds; 0 for every other outcome and for every loss of separation. No payment for a go-around without a landing. No mask on where "go-around" can be said (D10) (§2) | Decided | User, 2026-10-03 |
 | D31 | Multi-aircraft inputs and judgements (§3): the landing context of an aircraft of a scene counts the landings of the closed loop (with one commanded aircraft, only that aircraft has inputs: D98, D105); D23 holds for every aircraft of a scene, with a test; "established on the final" is a function of one row, the same for every aircraft (its rule: D92). (The part of the prior: D31 there) | Decided | User, 2026-10-03 |
 | D36 | The teacher-forced data term of the post-training uses single-aircraft samples of the closed-loop sentences, not scene samples. The flown states keep the observed path, not the observed time (vocabulary D42), so two aircraft of one scene do not keep their observed spacing (§2, §3) | Decided | User, 2026-10-04 |
-| D37 | Branch training. Each training aircraft is spoken one time. When its reward is less than 1, it is spoken again from its state at its first predicted step and every 120 s after it, before the event that ended it. Each branch group compares only the words after its branch point (§2 item 9). How the state at a branch point is made, and the test of item 4: D94 | Decided | User, 2026-10-04 |
+| D37 | Branch training. Each training aircraft is spoken one time. When its reward is less than 1, it is spoken again from its state at its first predicted step and every 120 s after it (the interval: a setting, D170), before the event that ended it. Each branch group compares only the words after its branch point (§2 item 9). How the state at a branch point is made, and the test of item 4: D94 | Decided | User, 2026-10-04 |
 | D76 | The flights outside the base's selection (prior D75) come back in the post-training only as starts of the closed loops, rewarded by their outcome (D30). The teacher-forced data term (D36) uses the same selection `landed`, so a sentence whose own words do not land is never imitated | Decided | User, 2026-10-04 |
 | D91 | The most go-arounds of a flight in a loop of the post-training is 2, as in the prior's free generation (prior D68): the start of a closed loop gets 2, and after a flight's second go-around the loop forbids "go-around" (a mask of a caller, prior §7 item 3). Why: a window without other aircraft must say and fly what free generation says and flies (§2 item 1, a test of C4), and that needs the same bound; no closed-loop sentence of the artefact has more than one go-around (prior D68); D30 already makes a chain of go-arounds cost reward | Decided | User, 2026-10-05 (O9) |
 | D92 | "Established on the final" (D31) is a function of one row: G is false; the aircraft is inside the region of the final of R (inside the FAF and the LPV cone: the region of the prior's procedure masks and of its readout of the go-around probability, prior D64, D72, §7 item 6); and its track is within 20° of the course of R (7110.65BB 5-9-2 a, TBL 5-9-1: the row for an interception less than 2 NM from the approach gate, which holds inside the FAF). After "go-around", the aircraft is not established until a runway word ends G. The judge's "lined up" (vocabulary §5.8) and the turned-in rule of the visual reading (7-4-4 c) keep 30°. This stage has no mask for the spacing on the final: the reward teaches it (D30: 0 for a loss of separation); the speed-word mask stays (§3). The regulation text also lets an aircraft be established on the final approach course outside the FAF (FIG 5-9-1 Example 4; 5-5-4 j, "within 10 NM"); the region stays narrower, so that the masks, the judge and the readout read one region. The rule is Claude's reading of the text, which `docs/literature/arrival_separation/README.md` §8 quotes to its paragraph | Decided | User, 2026-10-05 (O6), on Claude's proposal; 20° and the region: user, 2026-10-05, on the regulation text |
@@ -65,9 +65,11 @@ the measurements behind it are in §6 or in the readout named.
 | D161 | **The ceiling readout** (C15; stage C's P48). A runner, `experiments/post_ceiling.py` (`runners.md` R64), reads a campaign's select windows (`selection_windows`) N times for each model it names. Draw 0 takes the readout's own numbers (`readout_numbers`, unchanged bit for bit) and must give that round's `round.json` readout again, which checks the runner; draw d ≥ 1 takes `readout_numbers(select_seed, place, d)`. For each window it records every draw's outcome and reward; for each model, in all and by airport, the share of windows with at least one landing among the first n draws (n = 1, 2, 4, … N), the windows never landed and their overlap between the models. Select days only, never val; the data read-only after a run. Reading: where the curve flattens is the most that sampling the model reaches, a lower bound of the setting's ceiling. Why: whether a plateau of the selection readout is the setting's ceiling or a limit of the training decides what comes next | Decided | User, 2026-10-07 |
 | D162 | **A campaign starts from the base or from a round of another campaign** (C16; the user, 2026-10-07). The start is a setting, `Settings.start`: `null` (the base with zero-output traffic modules, D29) or `{campaign (repository-relative), round, checkpoint_sha256}` of a campaign on the same base. The start's checkpoint is refused by name unless its bytes are the recorded ones and its identity names this base, the same masks, the same traffic shape and that round; a formal campaign never starts from a smoke one. The pull term pulls toward the base; the optimizer starts afresh; each campaign has its own one val read (D132). A campaign from a round takes a seed other than its source's, refused by name otherwise, so that its rounds draw new windows. A resume compares the start with the other settings. A campaign's select windows and readout numbers come from a seed of their own, `Settings.select_seed` (required), not from its seed: a campaign from a round takes its source's, so that its selection readout reads the same windows with the same numbers, and so does its val read (the user, 2026-10-07). Stage D's start from stage C's chosen round follows the same rules through one function (§9 item 12; multi-aircraft control D164). A checkpoint's identity is unchanged; C10's `campaign.json` holds `"start": null`, `"method": "branch"` and `"select_seed": 1337` (written into its settings by stage C at the merges of C16 and C17). Why: a later method (D161's reading) may start from a post-trained round | Decided | User, 2026-10-07 ((a)–(e) and the seed); the form: stage C's readings |
 | D165 | **Training on the landed sentences** (C17; stage C's P49, "expert iteration"). A campaign's method is a required setting, `Settings.method`: `branch` (D94) or `landed`, in the same runner (`post_train --method`) and the same campaign schema (`ts-post-train-v1`); a resume compares it; the checkpoint's identity does not name the method (the campaign's settings hold it); `post_validation`, the Training export, `post_ceiling` and `model_speed` read a landed campaign as they read a branch one. A landed round r: the train windows drawn as a branch round draws them (`draw_round`, the seed and r); each window spoken `continuations` times by the round's model, the first pass with no branch (`landed_numbers`: draw 0 is the window's first sentence), by the speaking workers; for each window the landed sentence of the highest reward above 0 kept (a tie: the lowest draw; a landing that the reward scores 0, D105, is not kept; a window with no landing gives nothing); one pass over the kept sentences, 16 an update: the negative log-likelihood of the commanded aircraft's words of each, teacher-forced under its traffic, with the data term (D36) and the pull toward the base (D29), in pieces and normalised per counted row (`landed_step`, as §2 item 5); no clipped surrogate and no advantage; then the selection readout and the checkpoint. The start by D162. Why: the ceiling readout (D161; stage C's log §28) found that the model can say a landing sentence in almost every window but gives it too little probability, and that D94's surrogate stopped raising it; choosing at speaking time is not wanted (P50: only what the model is trained to say counts) | Decided | User, 2026-10-07 (the method; the same runner with `Settings.method` and `Settings.select_seed`); 16 sentences an update and the rule of a reward of 0: stage C's readings, told to the user |
-| D167 | **A resume reuses the first launch's memory measure** (C18; stage C's P51; the user, 2026-10-07: written now, built after C17). The first launch of a campaign writes O15's measure into `campaign.json`: one worker's host and GPU peaks, what a worker holds in a round, the pass's peak. A resume reads it, checks only the host's and the GPU's free memory against its N workers, and refuses by name where they do not fit; a new measure runs only when the record holds none, or when `--speak-workers` asks for more workers than the measure allows; the record names the measure that each launch read. Why: the measure speaks a batch at the formal size at every launch (minutes), and a resume repeats it on the same settings and host; stage D reads its workers' measure from its profile the same way (multi-aircraft control D166, `multi_train.profiled_fit`) | Decided | User, 2026-10-07 |
+| D167 | **A resume reuses the first launch's memory measure** (C18; stage C's P51; the user, 2026-10-07: written now, built after C17). The first launch of a campaign writes O15's measure into `campaign.json`: one worker's host and GPU peaks, what a worker holds in a round, the pass's peak. A resume reads it, checks only the host's and the GPU's free memory against its N workers, and refuses by name where they do not fit; a new measure runs only when the record holds none, or when `--speak-workers` asks for more workers than the measure allows; the record names the measure that each launch read. Why: the measure speaks a batch at the formal size at every launch (minutes), and a resume repeats it on the same settings and host; stage D reads its workers' measure from its profile the same way (multi-aircraft control D172, `multi_train.profiled_fit`). "More workers than the measure allows" is more workers than the measure was checked for and admitted (its `speak_workers`); a measure holds for one pair of devices (the pass's and the workers'), and a launch on other devices measures | Decided | User, 2026-10-07; the last sentence: stage C's reading |
 | D168 | **Gradient-norm clipping in the pass** (C19; stage C's P52). A campaign setting, `Settings.clip_norm`: each update's gradient is clipped to that norm before the optimizer's step (`update_step` and `landed_step`, through `one_pass`); `round.json` records the share of updates clipped. Its default is `None`, no clipping, the behaviour of the code before it; a record without the field reads as that default and no record is edited (the user's standing permission, root `CLAUDE.md`, 2026-10-07). The value of a campaign is its setting (stage B's training clips at 1.0, prior §5). Why: the pass took its steps unclipped while the prior's training clips; at larger learning rates one large gradient could take one bad step | Decided | User, 2026-10-07 (the setting and its default); the proposal: stage C's |
 | D169 | **Passes per round** (C20; stage C's P53). A campaign setting, `Settings.epochs`: E passes over the same round's groups, each in a new order drawn from the seed, the round and the pass (D130 for each pass); the ratio of the surrogate always against the model at the round's start (`PassStart`), the clip of D94 unchanged; `round.json` records each pass's means. Its default is 1, the behaviour of the code before it, as D168's. Why: a round's groups were read once, so most of a round's speaking taught one step | Decided | User, 2026-10-07 (written now, built after the campaign with K = 16); the proposal: stage C's |
+| D170 | **The branch interval and a group's segment** (C21; stage C's P55). Two settings of the branch method, each with the behaviour before it as its default (the user's standing permission, root `CLAUDE.md`, 2026-10-07): (a) `Settings.branch_every_s` (default 120 s, D37's interval): the branch points are the first predicted step and every `branch_every_s` after it, before the event; it is a whole number of Δ rows, refused by name otherwise; a window's continuations grow with its branch points. (b) `Settings.segment_only` (default False): the group of branch point b counts only the rows from b to the next branch point (b + `branch_every_s`) or to the event, whichever is earlier; the surrogate and the pull read those rows only, and the update's sum is still divided by its counted rows (D115). With it, each row of a first sentence is counted in one group (without it, in every group whose point is before the row, D117 P14), and the rows of a continuation after its segment are counted in no group. Each is refused by name, other than its default, under another method. Stage D's rules and pass use the defaults until its settings name them (multi-aircraft control O19). Why: a group's advantage goes to every word from its branch point to the event (§2 item 9), while the outcome often comes from a few rows; denser points and shorter segments give those rows a group of their own. A stated limit: the reward is still the whole sentence's, so a segment's advantage holds the noise of the free continuation after it | Decided | User, 2026-10-07; the form: stage C's proposal |
+| D171 | **Training with a value function** (C22; stage C's P54). A third method, `Settings.method` = `value`, in the same runner and campaign schema as the others (D165). Each window of a round is spoken one time; there is no second pass and no branch group. A value network V gives, from the state at each said row, the reward expected at the sentence's end; each said row's advantage is GAE's (γ = 1, λ = 0.95); the model's loss is §2 item 5's, every said row up to the event counted. V is used only in training: beside what the model reads, it reads the recorded aircraft's future and the time left before the judge's time limit, the one exception to outline principle 7 (vocabulary D90); the model reads no future and speaks without V, and no readout reads V. The first `value_warmup` rounds train V alone; the model does not move. V is kept in a file of its own beside each round's checkpoint (`ts-post-value-v1`); the checkpoint's format and identity do not change, so every reader of a round reads a value round as any other, and a start from a round (D162; multi-aircraft control D164) reads no V. The rules: §2 item 10. Why: a branch group gives the same advantage to every row after its branch point (§2 item 9); a value of each row's state gives each row its own, and one sentence a window frees most of a round's speaking. V's future comes from aircraft that do not react to the words, so the advantages stay unbiased (Claude's reading; close to the input-dependent baselines of Mao et al., 2019, and the asymmetric critic of Pinto et al., 2018; the texts were not read for this design) | Decided | User, 2026-10-07 (the method; V asymmetric, reading the recorded aircraft's future and the time left; one sentence a window; V warmed up alone, 2 rounds); the rest: Claude |
 
 ### 0.2 Open items
 
@@ -100,10 +102,9 @@ commits, the tests and the readings are in the implementation log.
 
 1. C10, C13 and C14 are done: `post_train_20261006` has 14 rounds (log §26, §27; stage B's log §6 for C13's check).
 2. C15 (D161, the ceiling readout: `outputs/POOLED/post/ceiling_20261007`, log §28) and C16 (D162) are done.
-3. C17 (D165) is built; its campaigns and the next ones are experiments within the design: their settings and intents
+3. C17–C20 (D165, D167–D169) are built. The campaigns are experiments within the design: their settings and intents
    in `docs/experiments/intents.json`, their results in stage C's log, each run from a run worktree (outline D163) with
-   no other job on the host or the GPU. C18 (D167) after C17's campaign; C19 (D168) before the campaigns at larger
-   learning rates; C20 (D169) after the campaign with K = 16.
+   no other job on the host or the GPU. C21 (D170), then C22 (D171); the campaigns with them are the user's choice.
 4. The validation readout of the round that the user chooses, then its speed (frontend §3 item 10, `model_speed`), with
    no other job on the host or the GPU.
 5. C12.
@@ -115,14 +116,14 @@ commits, the tests and the readings are in the implementation log.
    nothing of them goes into C10's worktree.
 
 Every other milestone from now on is built by stage D's implementer (it takes over stage B's) on `dev-two-tier-v4`, in the worktree
-`.claude/worktrees/two-tier-v4` (outline §5 rule 1); C18 by stage C's implementer on `dev-two-tier-v4-post` (worktree
+`.claude/worktrees/two-tier-v4` (outline §5 rule 1); C21 and C22 by stage C's implementer on `dev-two-tier-v4-post` (worktree
 `.claude/worktrees/two-tier-v4-post`), first brought level with `dev-two-tier`.
 
 ---
 
 ## 1 Scope
 
-- **This document owns** the window loop, the reward, the branch training, the traffic attention, the edge features,
+- **This document owns** the window loop, the reward, the branch training, the training with a value function, the traffic attention, the edge features,
   the separation judge and the separation masks, their runners, and the Training view of stage C.
 - **It reads** the outline; the vocabulary's public interface (vocabulary §6): the grammar, the sentence artefact and the
   stored signals of every flight of a split (item 3), the candidates, the executor and the start of a closed loop with a
@@ -194,7 +195,7 @@ Every other milestone from now on is built by stage D's implementer (it takes ov
    The masked distribution is the one that the speaker drew from: the training reads it from the speaker's records of
    the permitted words (prior §7 items 3 and 4). Every counted row weighs the same (D115); the groups of a file are taken in a shuffled order (D130). The surrogate and the pull
    with dropout off, the data term with the base's dropout (D107). The ratio's denominator is the model at the start of
-   the pass (D117). The traffic attention has its own learning rate (O13). One pass over the samples of a round.
+   the pass (D117). The traffic attention has its own learning rate (O13). `Settings.epochs` passes over the samples of a round (D169; one by default).
 
    **An update in pieces** (the user, 2026-10-06, after C10's round 4 ran out of the GPU's memory twice): the
    surrogate and the pull of an update are computed piece by piece, one branch group a piece, each summed over its
@@ -220,14 +221,15 @@ Every other milestone from now on is built by stage D's implementer (it takes ov
       gives no gradient.
    3. If the reward is less than 1, the event time t_E is the step where the first sentence ended: the step of the loss
       of separation that ended it, the step of its judged outcome, or the time limit. The branch points are the first
-      predicted step and every 120 s after it, before t_E.
+      predicted step and every `branch_every_s` after it (D170; 120 s by default), before t_E.
    4. A second pass speaks these windows again with the random numbers of their first sentences, and copies the state
       of each window K = 8 times at each branch point (D94). The other aircraft fly their records, so their states come
       from the time. The branch points are at the same times after every window's first predicted step, so the
       continuations of one branch point of all windows are at the same row and speak as one batch.
    5. A branch group is the first sentence and the K continuations of one branch point; they differ only after the
       branch point. The advantage is the reward minus the mean of the group. It applies only to the words after the
-      branch point; a group whose rewards are all the same gives no sample.
+      branch point (with `segment_only`, only up to the next branch point, D170); a group whose rewards are all the same
+      gives no sample.
    6. The executor flies without gradients while it speaks (inference mode); the states are the same as with gradients
       (a test). The training scores the prior only.
 
@@ -242,6 +244,59 @@ Every other milestone from now on is built by stage D's implementer (it takes ov
      puts the branch points at the start and at fixed times, not some tens of seconds before the event.
    - A window whose first sentence lands gives no sample in this round. Its chance to fail comes again in a later
      round, as the windows are drawn again.
+10. **Training with a value function (D171).** `Settings.method` = `value`. A round:
+    1. **Speaking.** The round's windows are drawn as a branch round draws them (`draw_round`: D100, D113, D124) and
+       spoken one time by the round's model with their own random numbers (`first_numbers`), by the speaking workers.
+       Every sentence is a sample, a landing too. A sample counts its said rows, from the first predicted step up to its
+       event (the row of its end or of its loss).
+    2. **The value network V.** At a campaign's start, V is a copy of the start model's network (the prior with its
+       traffic attention) with a head: a small network from the last layer's output at a row (`Prior.encode`, prior §7
+       item 1) and the time left at that row (item 3) to one number. After the copy, V shares no weight with the model.
+       V reads its inputs with dropout off (as the surrogate, D107). It has its own AdamW, with the learning rate
+       `Settings.value_lr`, the campaign's weight decay and the campaign's gradient clip (D168).
+    3. **What V reads beyond the model** (the user, 2026-10-07). (a) Each recorded aircraft of a row's tokens, through
+       a token part of V's own (§9 item 7: its projection starts at zero): its edge features (§9 item 4) at the row
+       + 30, 60 and 120 s, each against the commanded aircraft's state at the row, each with a flag that it is in the air
+       then; and the time to its roster landing (D105) over 120 s, 0 without one. (b) The time left at the row before the
+       judge's time limit (vocabulary §6 item 6: the remaining observed time × 1.5, and 900 s for each go-around said),
+       over 900 s, to the head. Nothing else: not the commanded aircraft's own record after its first predicted step,
+       which is not its future in the loop. An aircraft that enters the scene after the row is read from the row where
+       it enters (a stated limit). This is the one exception to outline principle 7 and vocabulary D90: V never speaks,
+       no readout reads it, and the model's inputs never hold V's features (a test, as D90's).
+    4. **The advantages.** After the speaking, V at the round's start reads every sample one time: v_t at each counted
+       row t, and 0 after the event. δ_t = v_{t+1} − v_t, plus the reward (D30) at the event row; the advantage
+       A_t = Σ_l λ^l δ_{t+l}, with λ = 0.95 and no discount (γ = 1: a discount would pay an early landing, a term for
+       the time that D30 does not have); V's target R_t = A_t + v_t. Both stay fixed for the round's passes. Each word of
+       a row takes the row's advantage (D117 P11). The advantages are not normalised.
+    5. **The pass.** An update takes a fixed count of samples (stage C's reading, told to the user, as D165's). The
+       model's terms are item 5's (the surrogate with A_t, the pull, the data term), in pieces, with one step of its
+       optimizer; V's loss is the mean over the update's counted rows of (V − R_t)², with one step of V's optimizer.
+       `Settings.epochs` passes (D169), each in its own order, the ratio against `PassStart`.
+    6. **Warm-up.** Rounds 0 to `value_warmup` − 1 draw and speak their windows as every round does and train V only:
+       the model and its optimizer do not move. The selection readout is read as in every round; it reads the start's
+       model, so it gives the start's readout again (for a start from a round, that round's readout: a check of the run,
+       as D161's draw 0), and the round's record says so.
+    7. **The round's record** (`round.json`): V's loss before and after the passes, the share of the targets' variance
+       that V explains, the mean and the spread of the advantages; the model's terms as a branch round records them
+       (none in a warm-up round).
+    8. **V's file.** `round_r/value.pt` (`ts-post-value-v1`): V's weights, its optimizer, its shape (the copy's
+       configuration, the token part's width, the head) and the round's identity (§4 item 3). It is written before the
+       checkpoint, which stays the last file of a round. A resume reads V from the last round's file. A start (D162)
+       reads the checkpoint only: a campaign's V is always a copy of its own start model, warmed up.
+    9. **Settings.** `value_lr` and `value_warmup` are required with `value` and refused by name with another method;
+       D170's settings are refused with `value` where they are not their defaults (the branch method's `continuations`:
+       stage C's reading).
+
+    **Why.**
+    - Credit: in a branch group every row after the branch point takes the same advantage (item 9). With V, a row that
+      changes the expected outcome takes a large advantage, a routine row one near 0, and so does a row whose outcome is
+      already decided.
+    - Cost: one sentence a window, with no second pass and no continuations.
+    - V's future: the recorded aircraft fly their records whatever is said, so a value that reads their future does
+      not depend on the words; it keeps the advantages unbiased and removes the part of the outcome's spread that the
+      traffic causes. The time left decides the outcome `timeout`. The commanded aircraft's own record is left out: in
+      the loop it flies its own words.
+    - Warm-up: the reward comes only at the end, so the advantages of an untrained V are noise.
 
 ---
 
@@ -340,7 +395,7 @@ identities follow D21 (outline §3):
 | Window A | A flight landing more than 3,600 s from the commanded flight's landing, shifted to land within ±180 s of it (whole Δ, uniform) | D103 |
 | Window D | The aircraft next ahead moved by a whole Δ in [−120 s, +120 s], never 0 (uniform) | D103 |
 | Window B | A turn within ±15°, a height change within ±300 m, a speed scale within 1 ± 0.1 (uniform) | D123 |
-| Branch points | The first predicted step and every 120 s after it, before the event; K = 8 continuations, copied in a second pass with the first sentence's random numbers | D37, D94 |
+| Branch points | The first predicted step and every `branch_every_s` (120 s by default) after it, before the event; K = 8 continuations, copied in a second pass with the first sentence's random numbers; with `segment_only`, a group counts its rows up to the next branch point | D37, D94, D170 |
 | Established on the final | G false (a recorded aircraft's from its labelled sentence), inside the FAF and the LPV cone of R, track within 20° of the course of R | D92, D99 |
 | A token of the traffic attention | The other aircraft's edge features to the commanded aircraft and its own motion, from its recorded state | D98, D117 |
 | Token scales | 5,556 m (asinh) for horizontal distances; 1,000 m; 100 m/s; 10 m/s; 120 s | D117 |
@@ -348,6 +403,7 @@ identities follow D21 (outline §3):
 | Present landing direction | A runway within 90° of a runway with a landing in the 30 min before the first predicted step; every runway with no such landing | §2 item 2, D112 |
 | Speed-word mask | Between 9,260 m from the threshold and the FAF, both aircraft established | §3, D101 |
 | Temperature of the speaker | 1 | D125 |
+| Training with a value function | γ = 1, λ = 0.95; a recorded aircraft's future at +30, 60 and 120 s; scales 120 s (the time to a landing) and 900 s (the time left) | D171 |
 
 ---
 
@@ -439,7 +495,7 @@ directory; log §3, §13, §15):
 - The separation judge is `inference/separation.py`, with the rules of `inference/runway_schedule.py`.
 
 **Formats.** `post-edges-v1`, `post-edges-reference-v1`, `post-traffic-attention-v2`, `ts-post-train-v1` (a
-campaign), `ts-post-checkpoint-v1`, `post-windows-census-v1`, `aeroviz-training-window-index-v1` (the index
+campaign), `ts-post-checkpoint-v1`, `ts-post-value-v1` (V's file, D171), `post-windows-census-v1`, `aeroviz-training-window-index-v1` (the index
 `index_post_v1.json`), `aeroviz-training-window-sample-v2`.
 
 **Key code index.**
@@ -458,6 +514,7 @@ campaign), `ts-post-checkpoint-v1`, `post-windows-census-v1`, `aeroviz-training-
 | The traffic attention | `post/traffic_attention.py` `TrafficConfig`, `TrafficTokens`, `TrafficAttention`, `add_traffic_attention`, `parameter_groups` |
 | Branch training's numbers, branch points and groups | `post/branches.py` `first_numbers`, `continuation_numbers`, `branch_points`, `Group`, `samples` |
 | The loss | `post/loss.py` `surrogate`, `pull_to_base`, `data_term`, `update_loss`, `one_pass` |
+| The value network and the advantages of a value round (D171, to be built) | `post/value.py` |
 | The window sets' files | `post/training_files.py` |
 | The window loop | `experiments/post_window_loop.py` `WindowLoop`, `WindowResult`, `checked_edges`, `moved_commanded` |
 | The two passes of a round | `experiments/post_branches.py` `branch_round` |
@@ -473,9 +530,9 @@ campaign), `ts-post-checkpoint-v1`, `post-windows-census-v1`, `aeroviz-training-
 
 ## 8 Milestones not done
 
-C0–C7, C9, C10, C11 and C13–C17 are done; their specifications are in the implementation log (§22, §26–§29; C13's check in stage B's log §6). The rules of outline §5 apply:
+C0–C7, C9, C10, C11 and C13–C20 are done; their specifications are in the implementation log (§22, §26–§30; C13's check in stage B's log §6). The rules of outline §5 apply:
 from 2026-10-06 one implementer builds every milestone of every stage (outline §5 rule 1: stage D's, which takes over
-stage B's remaining steps); stage C's implementer builds C18 and runs the campaigns of its experiments.
+stage B's remaining steps); stage C's implementer builds C21 and C22 and runs the campaigns of its experiments.
 
 **C8. Profile and the go-around probability** (§2 item 6). After B5's base and Claude's check of stage B.
 
@@ -499,21 +556,22 @@ stage B's remaining steps); stage C's implementer builds C18 and runs the campai
   as §4 item 2. Tests: it refuses a second read; it reads no train or select window.
 - A formal campaign and its validation readout refuse a base that is not stage B's formal base (D132).
 
-**C18. A resume reuses the first launch's memory measure** (D167). `post_train`: the first launch writes O15's measure
-into `campaign.json`; a launch with a measure in the record checks the free memory against it and measures again only as
-D167 says; each launch's entry names the measure it read. Tests: a resume reads the recorded measure and measures
-nothing; more workers than the measure allows measure again; workers that do not fit are refused by name; a record
-without a measure measures. After C17's campaign.
+**C21. The branch interval and a group's segment** (D170). `Settings.branch_every_s` (default 120) and
+`Settings.segment_only` (default False); `branch_points` and `stage_c_rules` take the interval, with D37's as the
+default; `post.branches.samples` takes the rows of a segment, passed by stage C's pass only. Tests: with the defaults
+the round's groups and pass are the code's before, bit for bit; an interval that is not a whole number of Δ rows is
+refused; with `segment_only` each counted row of a first sentence is in one group and a continuation's rows after its
+segment are counted in none; either setting other than its default is refused under another method; a record without
+the fields opens with the defaults; a resume compares them; stage D's tests pass unchanged.
 
-**C19. Gradient-norm clipping** (D168). `Settings.clip_norm` (default `None`); the clip in `update_step` and
-`landed_step` before the optimizer's step; the share clipped in `round.json`. Tests: with `None` the pass is the code's
-before, bit for bit; with a norm, no update's gradient norm exceeds it and the share is counted; a record without the
-field opens with the default; a resume compares it.
-
-**C20. Passes per round** (D169). `Settings.epochs` (default 1); E passes over the round's groups, each in its own order
-(the seed, the round, the pass), the ratio against `PassStart`; each pass's means in `round.json`. Tests: with 1 the pass
-is the code's before, bit for bit; with 2 the second pass reads the same groups in another order against the same
-`PassStart`; a record without the field opens with the default; a resume compares it.
+**C22. Training with a value function** (D171, §2 item 10). `post/value.py`: V, its token part's features, the
+advantages; the method `value` in `post_train` (its round, its pass, its pass's memory for O15 and D167); the speaking
+workers give each sentence V's features at each row; `value.pt`. Tests: the advantages on hand-computed values
+(λ = 1: the reward less v_t; λ = 0: δ_t); the model's log-probabilities of a sample do not change when V's features
+change; no readout opens `value.pt` (a value round's selection readout is the same with the file removed); a warm-up
+round leaves the model's weights and its optimizer unchanged; `value.pt` is written before the checkpoint, and a resume
+after round r gives round r + 1 as a run without a stop; `value_lr` and `value_warmup` are required with `value` and
+refused with another method; a start from a value round reads no V. After C21.
 
 **C12. Close of stage C.** The full ts suite passes. The implementation log and `docs/reference/runners.md` are
 updated; the report gives the code index for §7 (outline §5 rule 10). Report to the user: the commits, the rounds and
@@ -542,8 +600,8 @@ implementer's report gives the names that change, and Claude writes them here.
 | 6 | The reward | D30's reward of an aircraft; the present landing direction (D112) | `post/reward.py` `reward`, `present_runways` |
 | 7 | The traffic attention | The module at each layer, its input, its learning rate (`post-traffic-attention-v2`). Built (multi-aircraft control D149, MC0): a token part that a caller adds (its own token inputs beside the edge features, through its own projection that starts at zero, under its own format name); without it, today's module and tokens, bit for bit | `post/traffic_attention.py` `TrafficConfig`, `Traffic`, `traffic_of`, `TrafficTokens`, `TrafficAttention`, `add_traffic_attention`, `parameter_groups`; stage D's: `Traffic.part`, `Traffic.select`, `traffic_of(…, part_width=…)`, `TokenPart`, `add_token_part` |
 | 8 | The window loop | The commanded aircraft of a batch of windows through the speaker's closed loop (prior §7 item 7), the scene at each step, the judge, the masks of a caller, the copy of a window at a branch point. Built (multi-aircraft control D149, MC0): a window is one or more rows of the batch, each joining at its own tick (prior §7 item 7); an aircraft made silent (a caller's mask that permits only "unchanged" in every column); a window ends when every commanded aircraft is done or silent; each aircraft's result; a landing in the loop added to the other aircraft's landings; the copy copies every aircraft of the window | `experiments/post_window_loop.py` `WindowLoop`, `WindowResult`, `moved_commanded`; stage D's: `WindowLoop(…, answering=…, token_part=…, part_width=…)`, `responsible`, `Answering`, `TokenPartOf`, `WindowLoop.members`, `window_of`, `member_of`, `records`, `silent`, `landings` |
-| 9 | Branch training | The random numbers of a round, the branch points, the groups and their samples (D37, D94). Built (multi-aircraft control D149, MC0): the numbers of each aircraft, the varied aircraft and their branch points, and a window's reward are rules that the caller gives (stage C's: D94's streams, its one aircraft with a reward below 1, its reward); a group names its varied aircraft | `post/branches.py` `first_numbers`, `continuation_numbers`, `branch_points`, `Group`, `samples`, `BRANCH_EVERY_S`, `CONTINUATIONS`; `experiments/post_branches.py` `branch_round`; stage D's: `post_branches.Rules` (`Rules.varied(window, loop, rows, results)`), `stage_c_rules`, `Group.branch`, `Sentence.until` |
-| 10 | The loss | The surrogate, the pull to the base and the data term of an update (§2 item 5, D107, D115); a campaign's gradient clipping (`Settings.clip_norm`, D168) and passes a round (`Settings.epochs`, D169), each with its default the behaviour before it (no clipping, one pass); stage D's campaign takes the defaults until its settings name them | `post/loss.py` `Samples`, `surrogate`, `pull_to_base`, `data_term`, `update_step` (an update in pieces, §2 item 5), `update_loss` (the whole update, the reference), `one_pass`, `landed_step` (D165) |
-| 11 | The campaign's steps | The draw of a round, the batches, the speaking workers, the pass, the selection readout, the checks at the start, the resume. Built (multi-aircraft control D149, MC0): the round's skeleton given a stage's draw, window loop and readouts; stage C's campaign is that skeleton with its own; a campaign's method (`Settings.method`, D165) and its readout seed (`Settings.select_seed`, D162); the speaking workers on a device of their own (`--speak-device`, by default the campaign's: workers on the CPU beside the pass on the GPU; refused without two or more workers, or for workers on CUDA beside a campaign on the CPU; O15 counts no GPU for a worker on the CPU; `round.json` records the device) | `experiments/post_train.py` `draw_round`, `batches`, `Speakers`, `speak_round`, `train_pass`, `selection_readout`, `open_context`, `run_campaign`; stage D's: `Stage` (`start`, `start_model`, `speak_batch`, `read_batch`, `part_width`, `selection(context, settings, split)`), `STAGE_C`, `Speakers(…, stage=)`, `train_pass(…, part_width=)`, `update_pairs(…, part_width=)`; `STAGE_C_LANDED`, `Stage.train`, `Stage.pass_memory`, `best_landed`, `landed_numbers`, `landed_train_pass`, `landed_pass_memory` |
-| 12 | The checkpoint and a start from it | A post-trained round (`ts-post-checkpoint-v1`) and its identity (§4 item 3). One function opens a chosen round as a start (D162): from `{campaign, round, checkpoint_sha256}`, refused by name unless the checkpoint's bytes are the recorded ones, its identity is of this base, today's procedure masks, this traffic shape and that round, a formal start comes from a formal campaign, and the new campaign's seed is not its source's; it gives the round's weights and identity. Stage C's start of a campaign (`campaign_start`) and stage D's start (multi-aircraft control D164) both call it; built as `round_start` (`2b370d37`) | `experiments/post_train.py` `POST_CHECKPOINT_SCHEMA`, `source_campaign`, `start_of`, `round_start` (the one function), `campaign_start`, `Context.formal` |
+| 9 | Branch training | The random numbers of a round, the branch points, the groups and their samples (D37, D94). Built (multi-aircraft control D149, MC0): the numbers of each aircraft, the varied aircraft and their branch points, and a window's reward are rules that the caller gives (stage C's: D94's streams, its one aircraft with a reward below 1, its reward); a group names its varied aircraft. The branch interval and a group's segment (D170) are arguments with D37's defaults; stage D's rules and pass give none | `post/branches.py` `first_numbers`, `continuation_numbers`, `branch_points`, `Group`, `samples`, `BRANCH_EVERY_S`, `CONTINUATIONS`; `experiments/post_branches.py` `branch_round`; stage D's: `post_branches.Rules` (`Rules.varied(window, loop, rows, results)`), `stage_c_rules`, `Group.branch`, `Sentence.until`; D170: `branch_points(…, every_s=)`, `stage_c_rules` with the interval, `samples(…, segment_rows=)` |
+| 10 | The loss | The surrogate, the pull to the base and the data term of an update (§2 item 5, D107, D115); a campaign's gradient clipping (`Settings.clip_norm`, D168) and passes a round (`Settings.epochs`, D169), each with its default the behaviour before it (no clipping, one pass); stage D's campaign takes the defaults until its settings name them; the training with a value function (D171, to be built) | `post/loss.py` `Samples`, `surrogate`, `pull_to_base`, `data_term`, `update_step` (an update in pieces, §2 item 5), `update_loss` (the whole update, the reference), `one_pass`, `landed_step` (D165); to be built: `post/value.py` (D171) |
+| 11 | The campaign's steps | The draw of a round, the batches, the speaking workers, the pass, the selection readout, the checks at the start, the resume. Built (multi-aircraft control D149, MC0): the round's skeleton given a stage's draw, window loop and readouts; stage C's campaign is that skeleton with its own; a campaign's method (`Settings.method`, D165) and its readout seed (`Settings.select_seed`, D162); the speaking workers on a device of their own (`--speak-device`, by default the campaign's: workers on the CPU beside the pass on the GPU; refused without two or more workers, or for workers on CUDA beside a campaign on the CPU; O15 counts no GPU for a worker on the CPU; `round.json` records the device); the stage's settings class through which a resume compares the recorded settings (a setting added with a default matches an old record; stage D's: `MultiSettings`); the method `value` (D171, to be built) | `experiments/post_train.py` `draw_round`, `batches`, `Speakers`, `speak_round`, `train_pass`, `selection_readout`, `open_context`, `open_campaign(…, settings_type=)`, `run_campaign`; stage D's: `Stage` (`start`, `start_model`, `speak_batch`, `read_batch`, `part_width`, `selection(context, settings, split)`), `STAGE_C`, `Speakers(…, stage=)`, `train_pass(…, part_width=)`, `update_pairs(…, part_width=)`; `STAGE_C_LANDED`, `Stage.train`, `Stage.pass_memory`, `best_landed`, `landed_numbers`, `landed_train_pass`, `landed_pass_memory` |
+| 12 | The checkpoint and a start from it | A post-trained round (`ts-post-checkpoint-v1`) and its identity (§4 item 3). One function opens a chosen round as a start (D162): from `{campaign, round, checkpoint_sha256}`, refused by name unless the checkpoint's bytes are the recorded ones, its identity is of this base, today's procedure masks, this traffic shape and that round, a formal start comes from a formal campaign, and the new campaign's seed is not its source's; it gives the round's weights and identity. Stage C's start of a campaign (`campaign_start`) and stage D's start (multi-aircraft control D164) both call it; built as `round_start` (`2b370d37`). A start reads the checkpoint only, never a value round's V (D171) | `experiments/post_train.py` `POST_CHECKPOINT_SCHEMA`, `source_campaign`, `start_of`, `round_start` (the one function), `campaign_start`, `Context.formal` |
 | 13 | The window sets | The files of a window set and its Training export (for stage D's Training view) | `post/training_files.py`; `experiments/post_training_export.py` |
