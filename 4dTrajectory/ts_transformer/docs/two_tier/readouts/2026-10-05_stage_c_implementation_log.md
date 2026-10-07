@@ -937,8 +937,52 @@ rounds and keeps the worktree paths.
   a record that is already mapped.
 - `post_profile` and `prior_behaviour` write records of their own and do not read one.
 
-**Next:**
-- The user merges `dev-two-tier-v4-post`; `dev-two-tier` can fast-forward to it.
-- Then rounds 10–13 from the main checkout. They wait for stage D's report that C13's GPU check, the speed readout and
-  the re-exports are done.
+**The run of rounds 10–13 (2026-10-07).**
+- The user merged `dev-two-tier-v4-post` (`bd7929a5`), and stage D reported its GPU and timing steps done (`1c6146bb`).
+- Before the launch, the host was checked: 17 GB of memory free, no experiment running. The GPU held 1.9 GB, all of
+  it the desktop's (Xorg, Chrome, VS Code).
+- Launch: from the main checkout, clean, at 00:09. The command was C10's last resume with `--rounds 14`, repository-
+  relative paths, and 3 workers. Three rather than four, because the desktop's 1.9 GB left four workers at about
+  7.0 of the GPU's 8.2 GB. The C10 directory was made writable for the run.
+- The resume was accepted: `rounds {before: 10, after: 14}`, the main checkout's paths in its entry, the checks equal
+  (0 m up to 2.2e-06 m). O15 measured one worker at 1.11 GB of GPU and 1.43 GB of host memory, and the pass at
+  1.89 GB.
+- The rounds ended 00:50, 01:28, 02:05 and 02:41 (about 37 min each, 3 workers); exit 0.
+- **The main checkout moved under the run.** Other sessions fast-forwarded it eight times (00:12–02:21,
+  `bd7929a5` → `cddf0c7f`), so the rounds' `git` records three heads. The only Python among the changes is
+  `post_training_export.py` and `post/training_files.py`, which the campaign does not import, and all of its
+  modules were imported at 00:09. The rounds are not affected.
+- **Sealed:**
+  - `"start": null` added to `campaign.json`'s settings (the user's choice of 2026-10-07, for the start of a campaign;
+    nothing else changed, checked);
+  - the run's log and launch script copied into `logs/` (`campaign_c14.log.copy`, `launch_c14.sh.copy`);
+  - the 218 earlier files checked against `SHA256SUMS`, all matching (only `campaign.json` differed, from the raise);
+  - `SHA256SUMS` rewritten with 229 files and checked; the directory read-only again.
+
+**The selection readout of the 14 rounds** (the same 1,000 select windows and numbers every round; no criterion, D7):
+
+| Round | Workers | Landed | Lost separation | Mean reward | KMSY | KRDU | KSJC | KSMF | KSTL | Informative groups | Updates | Pull (KL) | Data term |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | 3 | 80.2 % | 14.9 % | 0.793 | 0.820 | 0.750 | 0.835 | 0.785 | 0.775 | 1,477 | 391 | 0.0117 | 1.0860 |
+| 1 | 4 | 82.6 % | 13.9 % | 0.819 | 0.875 | 0.800 | 0.845 | 0.780 | 0.794 | 1,253 | 331 | 0.0184 | 1.0807 |
+| 2 | 4 | 81.0 % | 15.7 % | 0.802 | 0.835 | 0.770 | 0.830 | 0.790 | 0.785 | 1,237 | 332 | 0.0216 | 1.0773 |
+| 3 | 4 | 83.2 % | 13.7 % | 0.824 | 0.875 | 0.800 | 0.855 | 0.775 | 0.815 | 1,144 | 307 | 0.0235 | 1.0728 |
+| 4 | 5 | 83.7 % | 13.2 % | 0.826 | 0.865 | 0.805 | 0.865 | 0.785 | 0.810 | 1,205 | 324 | 0.0262 | 1.0713 |
+| 5 | 4 | 83.8 % | 13.2 % | 0.830 | 0.894 | 0.800 | 0.850 | 0.785 | 0.820 | 1,231 | 331 | 0.0287 | 1.0783 |
+| 6 | 4 | 85.1 % | 11.3 % | 0.842 | 0.870 | 0.830 | 0.850 | 0.795 | 0.865 | 1,106 | 303 | 0.0321 | 1.0763 |
+| 7 | 4 | 84.8 % | 11.8 % | 0.840 | 0.895 | 0.830 | 0.840 | 0.780 | 0.855 | 1,201 | 326 | 0.0330 | 1.0744 |
+| 8 | 4 | 85.7 % | 11.7 % | 0.849 | 0.890 | 0.805 | 0.855 | 0.815 | 0.880 | 870 | 244 | 0.0348 | 1.0687 |
+| 9 | 4 | 85.0 % | 12.0 % | 0.840 | 0.885 | 0.810 | 0.865 | 0.820 | 0.820 | 1,161 | 315 | 0.0344 | 1.0759 |
+| 10 | 3 | 85.0 % | 11.7 % | 0.842 | 0.880 | 0.820 | 0.850 | 0.785 | 0.875 | 1,058 | 290 | 0.0371 | 1.0720 |
+| 11 | 3 | 83.7 % | 13.4 % | 0.831 | 0.870 | 0.810 | 0.845 | 0.775 | 0.855 | 1,036 | 284 | 0.0369 | 1.0644 |
+| 12 | 3 | 84.1 % | 12.2 % | 0.833 | 0.880 | 0.815 | 0.850 | 0.794 | 0.825 | 986 | 270 | 0.0395 | 1.0679 |
+| 13 | 3 | 84.8 % | 12.0 % | 0.839 | 0.900 | 0.830 | 0.835 | 0.800 | 0.830 | 1,051 | 287 | 0.0387 | 1.0715 |
+
+**What the table shows:**
+- Rounds 10–13 did not go past rounds 6–9. A landing share over 1,000 windows carries about ±1.2 points of noise, and
+  every round from 6 on lies within it of the best (round 8, 85.7 %, 0.849).
+- The training windows show the same picture. Lost separation stays at 17–19 %, about half of the branch groups have
+  K equal rewards, and the clipped share is 0.4 % from round 1 on. The pull to the base keeps rising, 0.034 → 0.039.
+- The user's criterion (D7) chooses the round. The ceiling readout (requests P48) comes first, on the user's word of
+  2026-10-07.
 

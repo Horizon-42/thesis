@@ -100,8 +100,9 @@ export const TRAINING_FAILURE_COLOR = "#ff2d2d";
 export const TRAINING_DECISION_PASS_COLOR = "#4ade80";
 export const TRAINING_DECISION_FAIL_COLOR = TRAINING_FAILURE_COLOR;
 
-/** How a flown flight ended, in one colour where it is said (the flight list's tag, the bar's chip): the replay's teal
- *  when it landed, the failure red for any other outcome. */
+/** How a flown flight ended, in one colour where it is said (the bar's chip, tab dots and end mark, the read-back's
+ *  outcome line and "Flown flight" label, the other sentences and rounds drawn beside the one on screen): the pass green
+ *  when it landed, the failure red for any other outcome — so that teal means only the closed loop (frontend D160 (12)). */
 export function trainingOutcomeColour(outcome: TrainingFlownEnd): string {
-  return outcome === "landed" ? TRAINING_EXECUTOR_COLOR : TRAINING_FAILURE_COLOR;
+  return outcome === "landed" ? TRAINING_DECISION_PASS_COLOR : TRAINING_FAILURE_COLOR;
 }

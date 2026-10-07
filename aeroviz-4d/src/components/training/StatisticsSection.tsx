@@ -4,13 +4,20 @@
  * The details page's "The models' statistics" (frontend §3 item 3, D159): one table, a row for each sentence kind of the
  * set with its colour's swatch beside its name (the name in the body text's colour, §3 item 11), and two groups of
  * columns — this set, the formal readout (`data/trainingStatistics.ts`). Each cell is a share with its count beneath; a
- * count the readout does not hold is "—". The mean reward of a window stage is a mean with its count beneath.
+ * count the readout does not hold is "—". The go-arounds are the go-arounds said per sentence and the mean reward of a
+ * window stage a mean, each with its count beneath (frontend D160 (11)).
  */
 
 import type { ReactNode } from "react";
 import { TRAINING_SENTENCE_COLOR } from "../../utils/trainingWordColors";
 import type { TrainingSetResultsState } from "../../data/trainingSetResults";
 import type { TrainingStatsCells, TrainingStatsTable } from "../../data/trainingStatistics";
+
+/** A number per sentence and its count beneath, or "—". */
+function PerSentence({ count, of }: { count: number | null; of: number }) {
+  if (count === null || of === 0) return <>—</>;
+  return <><span className="training-stats-share">{(count / of).toFixed(3)}</span><span className="training-stats-count">{count}/{of}</span></>;
+}
 
 /** A share and its count beneath, or "—". */
 function Share({ count, of }: { count: number | null; of: number }) {
@@ -21,7 +28,7 @@ function Share({ count, of }: { count: number | null; of: number }) {
 function cells(group: TrainingStatsCells | null, windows: boolean): ReactNode[] {
   const columns: ReactNode[] = [
     <Share count={group?.landed ?? null} of={group?.sentences ?? 0} />,
-    <Share count={group?.goArounds ?? null} of={group?.sentences ?? 0} />,
+    <PerSentence count={group?.goArounds ?? null} of={group?.sentences ?? 0} />,
     <Share count={group?.timedOut ?? null} of={group?.sentences ?? 0} />,
   ];
   if (!windows) return columns;
@@ -33,15 +40,15 @@ function cells(group: TrainingStatsCells | null, windows: boolean): ReactNode[] 
 }
 
 export default function StatisticsSection({ table, results }: { table: TrainingStatsTable; results: TrainingSetResultsState }) {
-  const columns = ["landed", "go-arounds", "timed out", ...(table.windows ? ["lost separation", "mean reward"] : [])];
+  const columns = ["landed", "go-arounds / sentence", "timed out", ...(table.windows ? ["lost separation", "mean reward"] : [])];
   const readoutNote = results.status === "ready" ? table.readoutProblem : results.status === "absent" ? results.problem
     : results.status === "loading" ? "the formal readout is loading" : "no set is on screen";
   return (
     <>
       <p className="training-details-lede">
         Each kind of sentence of the set, in the order of the bar's tabs: on the set's own sentences, and on the formal readout
-        the set was made from. A share with its count beneath; "—" where the readout holds no count. Go-arounds are the
-        go-arounds said, over the sentences.
+        the set was made from. A share with its count beneath; "—" where the readout holds no count. The go-arounds are
+        the go-arounds said, per sentence.
       </p>
       {readoutNote === null ? null : <p className="experiment-details-missing">The formal readout: {readoutNote}</p>}
       <table className="training-flown-table training-stats-table" aria-label="The models' statistics">
