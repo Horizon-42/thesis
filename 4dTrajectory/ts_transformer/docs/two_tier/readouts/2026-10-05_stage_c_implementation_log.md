@@ -1179,3 +1179,60 @@ reads C10 as its start.
   `readouts/2026-10-07_stage_c_experiments.zh.md`, which also holds the next experiment: branch training with K = 16
   (the user's priority, 2026-10-07; an experiment within the design, not a design change).
 
+## 30 C19 and C18: gradient clipping, the measure reused (2026-10-07)
+
+Built on `dev-two-tier-v4-post` after fast-forwarding it to `dev-two-tier` (`b849340f`), while the campaign with K = 16
+runs from its own run worktree (only the changed modules' tests, 2–3 processes, rule 13).
+
+**C19 (D168), `f3ce543f`.**
+- `Settings.clip_norm`, default None: not clipped, the code's behaviour before it. A record without the field reads as
+  None (the user's standing permission); no record is edited. `SETTINGS_ADDED` lists the settings with a default, and a
+  test pins it to the dataclass.
+- `post.loss.one_pass(..., clip_norm=)`: after an update's backward, the gradient's norm over the optimizer's parameters
+  (`torch.nn.utils.get_total_norm`, read-only); with a clip, `clip_grads_with_norm_` before the step (what
+  `clip_grad_norm_` does). Each update keeps its norm before the clip and whether it was clipped.
+- `round.json`'s `pass` gains `grad_norm_mean`, `grad_norm_max` and `grad_clipped_share`. They are recorded with no
+  clip too (share 0), so the norms of a campaign at the old setting show where a clip would act.
+- Stage C's pass reads the setting through its stage (`STAGE_C`, `STAGE_C_LANDED`). The skeleton's default pass, which
+  stage D's campaign uses, clips nothing: its `MultiSettings` has no such field (D168: stage D takes the defaults).
+- `open_campaign` compares the recorded settings as the stage's settings class reads them (`settings_type`). Without
+  this, an old record (no `clip_norm`) would differ from a resume's settings (`clip_norm: None`). Stage D's runner and
+  its tests pass `MultiSettings` (a one-word change in `multi_train.py` and its tests).
+- Tests: with None the pass is the loop before D168 bit for bit; below every norm each stepped gradient has the clip's
+  norm and every update is counted clipped; above every norm the pass is the unclipped one bit for bit; an old record
+  opens with the default and resumes with it, another value refused by name, and the reverse; stage C hands its setting
+  to `one_pass`, stage D's pass hands None.
+- Review (opus, independent): no S1. S2: `test_multi_validation` opened a stage D campaign without `settings_type`
+  (safe only because it never resumed) — fixed. S3: the stage D test now calls `stage_d()`. S3 noted: a record that
+  lacks an older required field now stops with a TypeError rather than "other settings" (no live record does: the four
+  records under `POOLED/post` were checked by the reviewer; only `post_train_20261006.aborted-…` lacks fields).
+
+**C18 (D167), `364c2f4c`.**
+- The first launch with speaking workers measures (O15, `require_workers_fit`) and adds the measure to
+  `campaign.json`'s `measures`: the devices (the pass's and the workers'), the round, the time, the workers it admitted,
+  the worker's and the pass's measures, the memory free then.
+- A later launch takes the newest measure on its devices. When that measure admitted at least as many workers, it is
+  read before this process uses the GPU, and only the memory free now is checked (`workers_fit(held_now=False)`, the
+  form of stage D's branch: the workers' and the pass's whole peaks, the workers on the GPU beside what this process
+  holds after a pass). Workers that do not fit are refused by name, naming the measure. Otherwise it measures again.
+- My reading of D167's "more workers than the measure allows": more than the measure was checked for and admitted. A
+  record without `measures` (every campaign so far, the one with K = 16 included) measures at its next launch.
+- Each launch's entry (the record itself for the first launch, `resumed[-1]` for a resume) names the measure it read:
+  `fit` = its place in `measures`, whether it measured, the workers, the memory read; None without workers or with no
+  round left.
+- `main` now moves the context to the GPU after the recorded fit is read (inside `try`, so the workers are closed on a
+  refusal).
+- APPROXIMATION, stated in `workers_fit`: with nothing held yet, the host's free memory is read before this process
+  starts CUDA, so its own host memory for CUDA (a few hundred MB, not measured) is not taken out.
+- Tests: the arithmetic with nothing held (the speaking line on the GPU deciding too); the newest measure on the
+  devices, more workers, other devices, a record from before D167, a refusal naming the measure; through the runner:
+  measured once, read on a resume, measured again for more workers, none without workers, a record without measures
+  measures, the free memory read before the move.
+- Review (opus, independent): S2, fixed: on a resume the workers on the GPU were checked without what this process
+  holds after a pass. S3: the host approximation now stated; the order in `main` pinned by a test.
+- Merge note for stage D: `dev-multi-control` changes `workers_fit` the same way (`held_now`), but its pass line has no
+  guard for workers on the CPU (`--speak-device`, `ac455d2e`). The merge keeps the guard; its `profiled_fit` already
+  takes `passed["now"]` out of the GPU share.
+
+`dev-two-tier-v4-post` (`364c2f4c`) fast-forwards `dev-two-tier`; the user merges. C20 (D169) follows the campaign
+with K = 16.
