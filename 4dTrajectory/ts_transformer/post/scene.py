@@ -303,10 +303,15 @@ class Window:
     start_move: StartMove = field(default_factory=lambda: NO_START_MOVE)
     #: the commanded aircraft after the anchor (module docstring; stage C's windows: none)
     joined: tuple[Joined, ...] = field(default=())
+    #: the span L of a window of several commanded aircraft (multi-aircraft control D146: its commanded aircraft are the
+    #: flights whose row 0 is in [the anchor's row 0, + L)), s; stage C's windows: 0
+    span_s: float = 0.0
 
     def __post_init__(self) -> None:
         if self.kind not in WINDOW_KINDS:
             raise ValueError(f"a window is one of {WINDOW_KINDS}, not {self.kind!r}")
+        if self.span_s < 0.0:
+            raise ValueError(f"a window's span is not negative, got {self.span_s:g} s")
         if (self.kind == MOVED_START) != (self.start_move != NO_START_MOVE):
             raise ValueError("window B, and only it, moves its commanded aircraft's start")
         if self.commanded.go_around.any() or any(j.record.go_around.any() for j in self.joined):

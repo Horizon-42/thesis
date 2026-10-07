@@ -4,11 +4,11 @@ readouts of the selection readout.
 
 THE READ: the chosen round's checkpoint of a campaign of stage D (`multi_train.round_model`, refused for another start,
 base, masks, token part, settings or round), its first pass (no branch) on at most the campaign's ``select_per_airport``
-real windows of span L of each airport of the val days, drawn as the selection readout draws the select days'
-(`multi_train.selection_windows`: the seed, D146's rule) with the same random numbers; by airport and kind: W per
+real windows of each span of each airport of the val days, drawn as the selection readout draws the select days'
+(`multi_train.selection_windows`: the seed, D146's rule) with the same random numbers; by airport, span and kind: W per
 aircraft and per window, the outcomes, the go-arounds, the silent aircraft, the rows of the speed-word mask, the faulty
 points, the losses of separation by pair, the time the aircraft take (`multi_train.selection_readout`); and each
-airport's anchors and windows read (the coverage stated). No criterion is applied (D7). Only the val days are opened.
+airport's anchors and its windows read of each span (the coverage stated). No criterion is applied (D7). Only the val days are opened.
 
 ONCE (D85, as stage C's `post_validation`): the campaign's directory holds the claim of the val read (its reader
 `multi_train.MULTI_CLAIM_READER`, prior D119): the read's lock, the runner's own options checked (the campaign, the
@@ -35,7 +35,8 @@ import torch
 
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
 from ts_transformer.experiments.multi_train import (
-    MULTI_CLAIM_READER, multi_settings_of, round_model, selection_readout, selection_windows, stage_d, window_record,
+    MULTI_CLAIM_READER, multi_settings_of, round_model, selection_readout, selection_windows, span_key, stage_d,
+    window_record,
 )
 from ts_transformer.experiments.post_train import done_rounds, inputs_here, open_context, split_data
 from ts_transformer.experiments.post_window_loop import checked_edges
@@ -103,8 +104,9 @@ def main(argv: list[str] | None = None) -> int:
     windows = selection_windows(context, settings, split)
     readout = selection_readout(model, context, windows, settings, None, stage=stage_d(), split=split)
     anchors = Counter(w.scene.geometry.code for w in context.splits[split]["windows"])
-    read = Counter(w.scene.geometry.code for w in windows)
-    coverage = {code: {"anchors": anchors[code], "read": read[code]} for code in sorted(anchors)}
+    read = Counter((w.scene.geometry.code, span_key(w.span_s)) for w in windows)
+    coverage = {code: {"anchors": anchors[code], "read": {span_key(span): read[code, span_key(span)]
+                                                          for span in settings.spans_s}} for code in sorted(anchors)}
     checkpoint = campaign / f"round_{args.round}" / "checkpoint.pt"
     out.mkdir(parents=True)
     write_json_atomic(out / "config.json", {

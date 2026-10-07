@@ -15,7 +15,7 @@ import torch
 from ts_transformer.experiments import multi_train, post_train
 from ts_transformer.experiments.multi_train import (
     MULTI_CAMPAIGN_SCHEMA, MULTI_CHECKPOINT_SCHEMA, MULTI_CLAIM_READER, MultiSettings, draw_windows,
-    kind_of, selection_windows, stage_d, window_record,
+    kind_of, require_finished, selection_windows, span_counts, stage_d, window_record,
 )
 from ts_transformer.multi.separation import PAIRS
 from ts_transformer.multi.tokens import PART_FEATURES, TOKENS_SCHEMA
@@ -28,7 +28,9 @@ from ts_transformer.tests.test_post_window_loop import setup  # noqa: F401
 
 
 def _multi_settings(**changed):
-    values = dict(rounds=1, per_kind={REAL_KIND: 1, COMPRESSED: 0}, span_s=0.0, c_min=0.6, batch_windows=2,
+    """Stage D's settings of the tests: by default one span so short (1 s) that no other flight of the synthetic
+    artefacts joins a window."""
+    values = dict(rounds=1, per_kind={REAL_KIND: 1, COMPRESSED: 0}, spans_s=[1.0], c_min=0.6, batch_rows=2,
                   continuations=2, seed=2024, prior_lr=1e-4, traffic_lr=1e-3, weight_decay=0.0, update_groups=1,
                   data_sentences=1, select_per_airport=1,
                   start={"campaign": "c", "round": 0, "checkpoint_sha256": "0" * 64})
@@ -46,47 +48,136 @@ def _stream_context(built):
 
 
 def test_the_settings_refuse_what_is_not_a_campaign_of_stage_d():
-    for wrong in ({"per_kind": {REAL_KIND: 1}}, {"per_kind": {REAL_KIND: 0, COMPRESSED: 0}}, {"span_s": -1.0},
-                  {"c_min": 1.0}, {"rounds": 0}, {"start": {"campaign": "c"}}):
+    for wrong in ({"per_kind": {REAL_KIND: 1}}, {"per_kind": {REAL_KIND: 0, COMPRESSED: 0}}, {"spans_s": []},
+                  {"spans_s": [0.0, 300.0]}, {"spans_s": [600.0, 300.0]}, {"spans_s": [300.0, 300.0]},
+                  {"c_min": 1.0}, {"rounds": 0}, {"batch_rows": 0}, {"start": {"campaign": "c"}}):
         with pytest.raises(ValueError):
             _multi_settings(**wrong)
 
 
+def test_each_kinds_count_is_split_equally_by_span():
+    """D146: each kind's windows of a round in equal parts of the spans, the remainder one each to the first spans."""
+    settings = _multi_settings(per_kind={REAL_KIND: 1000, COMPRESSED: 1000}, spans_s=[300.0, 600.0, 1200.0])
+    assert span_counts(settings) == {kind: {"300": 334, "600": 333, "1200": 333} for kind in (REAL_KIND, COMPRESSED)}
+    assert span_counts(_multi_settings(per_kind={REAL_KIND: 4, COMPRESSED: 0}, spans_s=[130.0, 300.0])) == {
+        REAL_KIND: {"130": 2, "300": 2}, COMPRESSED: {"130": 0, "300": 0}}
+
+
 def test_a_rounds_draw_of_stage_d_windows(built):
-    """D146: anchors in the round's permutation, each one's window of span L; a compressed window moves its later
-    aircraft (a window without one has no compressed form, counted); a window left out is counted, never drawn; a
-    shortfall is recorded; the same seed and round draw the same windows."""
+    """D146: anchors in the round's permutation, each one's span drawn among the spans its kind still needs and its
+    window of that span; each kind's count reached in equal parts of the spans; a compressed window moves its later
+    aircraft (a window without one has no compressed form, counted by span); a window left out is counted, never
+    drawn; a shortfall is recorded by span; the same seed and round draw the same windows."""
     context = _stream_context(built)
-    settings = _multi_settings(per_kind={REAL_KIND: 4, COMPRESSED: 4}, span_s=300.0)
+    settings = _multi_settings(per_kind={REAL_KIND: 4, COMPRESSED: 4}, spans_s=[130.0, 300.0])
     windows, drawn = draw_windows(context, settings, np.random.default_rng([1337, 0]))
     again, _ = draw_windows(context, settings, np.random.default_rng([1337, 0]))
     assert [window_record(w) for w in windows] == [window_record(w) for w in again]
-    real = [w for w in windows if kind_of(w) == REAL_KIND]
-    moved = [w for w in windows if kind_of(w) == COMPRESSED]
-    assert drawn["drawn"][REAL_KIND] == 4 and len(real) >= 4 - drawn["drawn"][COMPRESSED]
+    assert drawn["drawn"][REAL_KIND] == {"130": 2, "300": 2}                # 4 anchors, none left out: equal parts
+    assert [w.span_s for w in windows[:4]] == [130.0, 130.0, 300.0, 300.0]   # by kind, then span
     assert {w.commanded.key for w in windows[:4]} == {"KXXX:a", "KXXX:b", "KXXX:c", "KXXX:far"}
-    assert drawn["no_later_aircraft"][COMPRESSED] >= 2                     # c and far: none after them within 300 s
-    assert drawn["shortfall"] == {COMPRESSED: 4 - drawn["drawn"][COMPRESSED]}
+    compressed_drawn = drawn["drawn"][COMPRESSED]
+    assert sum(compressed_drawn.values()) == 2                              # only a and b have a later aircraft
+    assert sum(drawn["no_later_aircraft"][COMPRESSED].values()) >= 2        # c and far: none within 300 s
+    assert drawn["shortfall"] == {COMPRESSED: {key: 2 - n for key, n in compressed_drawn.items() if n < 2}}
+    assert sum(drawn["shortfall"][COMPRESSED].values()) == 2 and REAL_KIND not in drawn["shortfall"]
+    assert sorted(w.span_s for w in windows[4:]) == sorted(float(key) for key, n in compressed_drawn.items()
+                                                           for _ in range(n))
+    for w in windows:
+        anchor = next(a for a in built[0] if a.commanded.key == w.commanded.key)
+        assert {r.key for r in w.commanded_all} == {r.key for r in
+                                                    multi_train.Anchors(built[0]).window_of(anchor, w.span_s).commanded_all}
     _, separation, fin = built
     for w in windows:
         assert not left_out(w, separation, fin, INSTRUCTION_STEP_S)
-    for w in moved:
-        assert w.joined and all(item.shift_s <= 0.0 for item in w.joined) and any(item.shift_s for item in w.joined)
+    for w in windows[4:]:
+        assert w.joined and all(item.shift_s <= 0.0 for item in w.joined)
     record = window_record(windows[0])
-    assert set(record) == {"anchor", "row0_s", "commanded", "shifts_s", "kind"}
+    assert set(record) == {"anchor", "row0_s", "span_s", "commanded", "shifts_s", "kind"} and record["span_s"] == 130.0
     assert record["commanded"][0] == record["anchor"] and len(record["shifts_s"]) == len(record["commanded"])
 
 
-def test_the_select_windows_are_drawn_once_per_airport_and_never_left_out(built):
-    """§5 item 2: at most ``select_per_airport`` real windows of span L of each airport, drawn with the seed, in the
-    order of their anchors, none left out; the same every time."""
+def test_a_batch_holds_windows_of_one_span_up_to_its_rows_each_flight_once():
+    """D146: a batch holds windows of one span L, at most ``size`` rows (commanded aircraft), each flight commanded
+    once; a window of more rows than ``size`` is a batch alone; each batch in the order of its anchors."""
+    def window(span_s, *flights):
+        return SimpleNamespace(span_s=span_s, signal_indices=flights, signal_index=flights[0])
+
+    windows = [window(300.0, 0, 1), window(600.0, 2, 3, 4), window(300.0, 5), window(300.0, 1, 6),
+               window(600.0, 7, 8, 9, 10), window(300.0, 11)]
+    found = post_train.batches(windows, 3)
+    assert found == [[0, 2], [1], [3, 5], [4]]
+    for batch in found:
+        assert len({windows[p].span_s for p in batch}) == 1
+        flights = [i for p in batch for i in windows[p].signal_indices]
+        assert len(flights) == len(set(flights)) and (len(flights) <= 3 or len(batch) == 1)
+    stage_c = [window(0.0, k) for k in range(5)]                          # stage C's windows: one row each
+    assert post_train.batches(stage_c, 2) == [[0, 1], [2, 3], [4]]
+
+
+def test_the_select_windows_are_drawn_once_per_airport_and_span_and_never_left_out(built):
+    """§5 item 2 (D166 item 33, by span): at most ``select_per_airport`` real windows of each span of each airport,
+    their anchors in one order drawn with the seed, by span in the order of their anchors, none left out; the same
+    every time."""
     context = _stream_context(built)
-    settings = _multi_settings(span_s=300.0, select_per_airport=2)
+    settings = _multi_settings(spans_s=[130.0, 300.0], select_per_airport=2)
     first, second = selection_windows(context, settings), selection_windows(context, settings)
-    assert [window_record(w) for w in first] == [window_record(w) for w in second] and len(first) == 2
-    assert [w.row0_s for w in first] == sorted(w.row0_s for w in first)
+    assert [window_record(w) for w in first] == [window_record(w) for w in second] and len(first) == 4
+    assert [w.span_s for w in first] == [130.0, 130.0, 300.0, 300.0]
+    for span in (130.0, 300.0):
+        mine = [w for w in first if w.span_s == span]
+        assert [w.row0_s for w in mine] == sorted(w.row0_s for w in mine)
+    assert {w.commanded.key for w in first[:2]} == {w.commanded.key for w in first[2:]}     # one order of the anchors
     assert all(kind_of(w) == REAL_KIND for w in first)
-    assert len(selection_windows(context, _multi_settings(span_s=300.0, select_per_airport=10))) == 4
+    assert [w.span_s for w in selection_windows(context, _multi_settings(spans_s=[130.0, 300.0],
+                                                                         select_per_airport=10))] == [130.0] * 4 + [300.0] * 4
+
+
+def test_the_readout_sums_each_span_and_kind_with_their_all(built):
+    """§5 item 4 (the review of the spans, S2-2): windows of two spans read by a stub reader; each span's cells hold its
+    own windows and aircraft only, and ``all`` is their sum; an airport's ``reward_mean`` is its ``all`` of both."""
+    from dataclasses import replace as replaced
+
+    windows, _, _ = built
+    anchors = multi_train.Anchors(windows)
+    read = [anchors.window_of(windows[0], 130.0), anchors.window_of(windows[0], 300.0), anchors.window_of(windows[3], 300.0)]
+    reward = {130.0: 1.0, 300.0: 0.5}
+
+    def part(window):
+        ends = [SimpleNamespace(reward=reward[window.span_s], outcome="landed", go_arounds=0, speed_mask_rows=0,
+                                faulty_steps=0, loss_reads_fault=0) for _ in window.commanded_all]
+        timing = {"delays_s": [], "spacing_s": [], "record_spacing_s": [], "order": [0, 0]}
+        return ends, dict.fromkeys(PAIRS, 0), 10, timing
+
+    stage = replaced(stage_d(), read_batch=lambda model, context, ws, places, settings, split, draw=0:
+                     [part(ws[p]) for p in places])
+    settings = _multi_settings(spans_s=[130.0, 300.0], batch_rows=8)
+    (airport,) = multi_train.selection_readout(None, None, read, settings, None, stage=stage).values()
+    assert set(airport) == {"130", "300", "all", "reward_mean"}
+    assert (airport["130"]["all"]["windows"], airport["130"]["all"]["aircraft"]) == (1, 2)       # a, b
+    assert (airport["300"]["all"]["windows"], airport["300"]["all"]["aircraft"]) == (2, 4)       # a, b, c; far
+    assert airport["130"]["all"]["reward_mean"] == 1.0 and airport["300"]["all"]["reward_mean"] == 0.5
+    assert (airport["all"]["all"]["windows"], airport["all"]["all"]["aircraft"]) == (3, 6)
+    assert airport["all"]["all"]["reward_sum"] == airport["130"]["all"]["reward_sum"] + airport["300"]["all"]["reward_sum"]
+    assert airport["reward_mean"] == airport["all"]["all"]["reward_mean"] == 4.0 / 6.0
+    assert airport["all"][REAL_KIND] == airport["all"]["all"] and airport["300"][REAL_KIND]["steps_judged"] == 20
+
+
+def test_the_memory_measure_speaks_each_spans_first_batch_and_the_largest():
+    """O15 for stage D (the review of the spans, S2-1): `measured_batches` gives the first batch of each span and the
+    batch of the most rows; for stage C's windows (one span, one row each) its first batch alone."""
+    def window(span_s, *flights):
+        return SimpleNamespace(span_s=span_s, signal_indices=flights, signal_index=flights[0])
+
+    windows = [window(300.0, 0), window(300.0, 1), window(600.0, 2, 3), window(1200.0, 4, 5, 6, 7, 8)]
+    found = post_train.batches(windows, 3)
+    assert found == [[0, 1], [2], [3]]
+    assert post_train.measured_batches(windows, found) == [0, 1, 2]
+    bigger = windows + [window(300.0, 9, 10, 11, 12, 13, 14)]                # a window of more rows than the size
+    found = post_train.batches(bigger, 3)
+    assert post_train.measured_batches(bigger, found) == [0, 1, 2, 3]
+    stage_c = [window(0.0, k % 3) for k in range(7)]
+    assert post_train.measured_batches(stage_c, post_train.batches(stage_c, 2)) == [0]
 
 
 def _stage_c(s, tmp_path, context, *, smoke=False):
@@ -133,14 +224,18 @@ def test_a_round_of_stage_d_from_a_round_of_stage_c_end_to_end(setup, tmp_path, 
     assert record["windows"] == [window_record(window)]
     assert record["speaking"]["windows"] == 1 and record["speaking"]["outcomes"] == {"lost_separation": 1}
     readout = record["selection_readout"][s["geometry"].code]
-    assert readout["all"]["windows"] == 1 and readout["all"]["aircraft"] == 1
-    assert set(readout["all"]["loss_steps"]) == set(PAIRS)
-    assert readout["reward_mean"] == readout["all"]["reward_mean"] == readout[REAL_KIND]["reward_mean"]
-    assert {"delays_s", "spacing_s", "record_spacing_s", "order"} <= set(readout["all"])        # O18's readouts
+    assert set(readout) == {"1", "all", "reward_mean"}                    # by span (its ``all``), then kind
+    assert readout["all"]["all"]["windows"] == 1 and readout["all"]["all"]["aircraft"] == 1
+    assert set(readout["all"]["all"]["loss_steps"]) == set(PAIRS)
+    assert readout["reward_mean"] == readout["all"]["all"]["reward_mean"] == readout["1"][REAL_KIND]["reward_mean"] \
+        == readout["all"][REAL_KIND]["reward_mean"] == readout["1"]["all"]["reward_mean"]
+    assert {"delays_s", "spacing_s", "record_spacing_s", "order"} <= set(readout["all"]["all"])  # O18's readouts
     identity = torch.load(out / "round_0" / "checkpoint.pt", weights_only=False)["identity"]
     assert identity["schema"] == MULTI_CHECKPOINT_SCHEMA and identity["start"] == identity_c
     assert identity["token_part"] == {"schema": TOKENS_SCHEMA, "features": list(PART_FEATURES)}
-    assert identity["rounds"] == [record["windows"]] and identity["span_s"] == 0.0
+    assert identity["rounds"] == [record["windows"]] and identity["spans_s"] == [1.0]
+    assert identity["per_kind"] == {REAL_KIND: 1, COMPRESSED: 0}
+    assert identity["per_span"] == {REAL_KIND: {"1": 1}, COMPRESSED: {"1": 0}}
     assert json.loads((out / "campaign.json").read_text())["schema"] == MULTI_CAMPAIGN_SCHEMA
     post_train.open_campaign(out, inputs(2), {"head": "y", "dirty": False}, {},
                              **options)                                   # raised to two rounds: the resume goes on
@@ -179,6 +274,15 @@ def test_stage_ds_start_is_refused_by_name_through_the_one_function(setup, tmp_p
     shutil.copy(later / "round_1" / "checkpoint.pt", later / "round_0" / "checkpoint.pt")
     with pytest.raises(ValueError, match="another base, masks, traffic shape or round"):
         stage.start(context, _multi_settings(start=post_train.start_of(later, 0, formal=False)))
+    unfinished = tmp_path / "unfinished"                           # D166 item 19: one of its two rounds done
+    post_train.open_campaign(unfinished, {"settings": asdict(_settings(rounds=2, continuations=2)), "smoke": False},
+                             {"head": "x", "dirty": False}, {})
+    post_train.run_campaign(unfinished, _settings(rounds=1, continuations=2), context)
+    early = _multi_settings(start=post_train.start_of(unfinished, 0, formal=False))
+    with pytest.raises(ValueError, match=r"has done 1 of its 2 rounds.*\(D166 item 19\)"):
+        stage.start(replace(context, formal=True), early)
+    stage.start(context, early)                                    # a smoke campaign may start from it
+    require_finished(later)
 
 
 def test_stage_ds_round_with_speaking_workers_is_the_round_of_one_process(setup, tmp_path, monkeypatch):
@@ -264,15 +368,22 @@ def test_a_landed_aircraft_is_judged_once_over_its_threshold_on_the_states_flown
 
 
 def test_the_runner_refuses_a_smoke_source_under_a_formal_campaign_before_anything_opens(tmp_path, capsys):
-    """D164 (the review of MC4, S2-4): `multi_train --start-campaign --start-round` refuses by name, before anything is
-    opened, a smoke source under a formal campaign and a round not done."""
+    """D164 (the review of MC4, S2-4), D166 item 19: `multi_train --start-campaign --start-round` refuses by name, before
+    anything is opened, a smoke source under a formal campaign, a round not done, and under a formal campaign a source
+    with rounds still to run."""
     source = tmp_path / "source"
     (source / "round_0").mkdir(parents=True)
     (source / "round_0" / "checkpoint.pt").write_bytes(b"weights")
-    (source / "campaign.json").write_text(json.dumps({"schema": post_train.CAMPAIGN_SCHEMA, "inputs": {"smoke": True}}))
+    settings = asdict(_settings(rounds=2))
+
+    def record(smoke):
+        (source / "campaign.json").write_text(json.dumps({"schema": post_train.CAMPAIGN_SCHEMA,
+                                                          "inputs": {"smoke": smoke, "settings": settings}}))
+
+    record(True)
     argv = ["--prior", str(tmp_path / "p"), "--instructions", str(tmp_path / "i"), "--executor", str(tmp_path / "e"),
-            "--windows", str(tmp_path / "w"), "--out", str(tmp_path / "campaign"), "--rounds", "1", "--span-s", "0",
-            "--c-min", "0.6", "--batch-windows", "1", "--seed", "2024", "--prior-lr", "1e-4", "--traffic-lr", "1e-3",
+            "--windows", str(tmp_path / "w"), "--out", str(tmp_path / "campaign"), "--rounds", "1", "--spans-s", "300",
+            "--c-min", "0.6", "--batch-rows", "1", "--seed", "2024", "--prior-lr", "1e-4", "--traffic-lr", "1e-3",
             "--weight-decay", "0", "--update-groups", "1", "--data-sentences", "1", "--select-per-airport", "1",
             "--windows-real", "1", "--windows-compressed", "0", "--start-campaign", str(source)]
     with pytest.raises(SystemExit):
@@ -281,6 +392,11 @@ def test_the_runner_refuses_a_smoke_source_under_a_formal_campaign_before_anythi
     with pytest.raises(SystemExit):
         multi_train.main(argv + ["--start-round", "1", "--smoke"])
     assert "holds the checkpoints of rounds 0–0, not 1" in capsys.readouterr().err
+    record(False)
+    with pytest.raises(SystemExit):
+        multi_train.main(argv + ["--start-round", "0"])
+    assert "has done 1 of its 2 rounds" in capsys.readouterr().err
+    assert not (tmp_path / "campaign").exists()
 
 
 def test_a_landed_aircraft_counts_in_the_readout_only_where_the_loop_judges_it(built):
@@ -331,6 +447,7 @@ def test_the_runner_records_stage_ds_campaign_and_opens_its_context_formal_or_sm
     fake_stage = SimpleNamespace(start=lambda context, settings: calls.append(("start", settings.start)))
     monkeypatch.setattr(multi_train, "start_of", lambda source, round_, formal: (calls.append(("start_of", formal)),
                                                                                     start)[1])
+    monkeypatch.setattr(multi_train, "require_finished", lambda source: calls.append(("finished", source)))
     monkeypatch.setattr(multi_train, "git_state", lambda: {"head": "x", "dirty": False})
     monkeypatch.setattr(multi_train, "require_conforming_closed_loop", lambda i, e: (None, {"checks": {}}, None))
     monkeypatch.setattr(multi_train, "checked_edges", lambda reference: None)
@@ -342,16 +459,19 @@ def test_the_runner_records_stage_ds_campaign_and_opens_its_context_formal_or_sm
     monkeypatch.setattr(multi_train, "run_campaign", lambda out, settings, context, speakers, stage:
                         calls.append(("run", stage is fake_stage)))
     argv = ["--prior", str(tmp_path / "p"), "--instructions", str(tmp_path / "i"), "--executor", str(tmp_path / "e"),
-            "--windows", str(tmp_path / "w"), "--out", str(tmp_path / "campaign"), "--rounds", "1", "--span-s", "0",
-            "--c-min", "0.6", "--batch-windows", "1", "--seed", "2024", "--prior-lr", "1e-4", "--traffic-lr", "1e-3",
-            "--weight-decay", "0", "--update-groups", "1", "--data-sentences", "1", "--select-per-airport", "1",
+            "--windows", str(tmp_path / "w"), "--out", str(tmp_path / "campaign"), "--rounds", "1", "--spans-s", "300",
+            "600", "--c-min", "0.6", "--batch-rows", "1", "--seed", "2024", "--prior-lr", "1e-4", "--traffic-lr",
+            "1e-3", "--weight-decay", "0", "--update-groups", "1", "--data-sentences", "1", "--select-per-airport", "1",
             "--windows-real", "1", "--windows-compressed", "0", "--start-campaign", str(tmp_path / "c"),
             "--start-round", "0", "--device", "cpu"]
+    monkeypatch.setattr(multi_train, "MultiSettings", lambda *values: (calls.append(("spans", values[2])),
+                                                                        MultiSettings(*values))[1])
     for extra, formal in (([], True), (["--smoke"], False)):
         calls.clear()
         assert multi_train.main(argv + extra) == 0
-        assert calls == [("start_of", formal), ("context", formal), ("start", start),
-                         ("campaign", {"schema": MULTI_CAMPAIGN_SCHEMA, "reader": MULTI_CLAIM_READER}), ("run", True)]
+        assert calls == [("start_of", formal)] + [("finished", tmp_path / "c")] * formal + [
+            ("spans", [300.0, 600.0]), ("context", formal), ("start", start),
+            ("campaign", {"schema": MULTI_CAMPAIGN_SCHEMA, "reader": MULTI_CLAIM_READER}), ("run", True)]
 
 
 def test_the_time_the_aircraft_take(built):
@@ -418,7 +538,7 @@ def test_the_loops_crossing_time_is_the_timing_readouts(setup, monkeypatch):
 
 def test_a_round_of_stage_d_is_refused_unless_its_identity_is_the_campaigns(setup, tmp_path, monkeypatch):
     """§7 row 3 (the review of MC4's timing, S2-3): `round_model` refuses a round whose identity is not the campaign's
-    — another seed, span, c_min, base — and a round not of that count; the campaign's own round opens."""
+    — another seed, spans, c_min, base — and a round not of that count; the campaign's own round opens."""
     s = setup
     short_round(monkeypatch, s)
     context = _context(s)
@@ -431,7 +551,8 @@ def test_a_round_of_stage_d_is_refused_unless_its_identity_is_the_campaigns(setu
                              schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER)
     post_train.run_campaign(out, settings, context, stage=stage_d())
     assert not multi_train.round_model(context, settings, out, 0).training
-    for wrong in (replace(settings, seed=7), replace(settings, span_s=60.0), replace(settings, c_min=0.8)):
+    for wrong in (replace(settings, seed=7), replace(settings, spans_s=[60.0]), replace(settings, spans_s=[1.0, 60.0]),
+                  replace(settings, c_min=0.8)):
         with pytest.raises(ValueError, match="another start, base, masks, token part, settings or round"):
             multi_train.round_model(context, wrong, out, 0)
     with pytest.raises(ValueError, match="another start, base"):

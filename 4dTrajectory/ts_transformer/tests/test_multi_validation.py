@@ -36,7 +36,7 @@ def campaign(setup, tmp_path, monkeypatch):  # noqa: F811
     window = _ahead(s["windows"][0])
     with monkeypatch.context() as patch:
         patch.setattr(multi_train, "draw_windows", lambda context, settings, rng: ([window], {"drawn": {REAL_KIND: 1}}))
-        settings = _multi_settings(start=start)
+        settings = _multi_settings(start=start, spans_s=[1.0, 2.0])            # two spans: the coverage by span
         out = tmp_path / "multi"
         inputs = {"prior": str(tmp_path / "prior"), "instructions": str(s["directory"]),
                   "executor": str(tmp_path / "executor"), "windows": str(tmp_path / "census"),
@@ -79,11 +79,12 @@ def test_stage_ds_chosen_round_reads_the_val_days_once(campaign, tmp_path):
     assert asked == [("context", (), False, True, False), ("recount", "val", True), ("split", "val", True)]
     readout = json.loads((readout_dir / "readout.json").read_text())
     assert readout["schema"] == validation.MULTI_VALIDATION_SCHEMA and readout["split"] == "val"
-    assert readout["round"] == 0 and len(readout["windows"]) == 1
+    assert readout["round"] == 0 and [w["span_s"] for w in readout["windows"]] == [1.0, 2.0]
     (coverage,) = readout["coverage"].values()
-    assert coverage == {"anchors": 1, "read": 1}
+    assert coverage == {"anchors": 1, "read": {"1": 1, "2": 1}}           # by span
     (airport,) = readout["readout"].values()
-    assert airport["all"]["windows"] == 1 and airport["all"]["aircraft"] == 1 and "reward_mean" in airport
+    assert airport["all"]["all"]["windows"] == 2 and airport["1"]["all"]["aircraft"] == 1 and "reward_mean" in airport
+    assert airport["2"]["all"]["windows"] == 1
     held = json.loads(claim.read_text())
     assert "spent_utc" in held and held["options"] == {"round": 0, "device": "cpu"}
     config = json.loads((readout_dir / "config.json").read_text())

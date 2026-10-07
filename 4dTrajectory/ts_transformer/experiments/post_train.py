@@ -289,6 +289,9 @@ class Stage:
     #: the width of the stage's token part beside the edge features (post-training §9 item 7; stage C's: none, 0), which
     #: the pass's samples read
     part_width: int
+    #: a round's windows in batches (`batches` of the stage's batch size: stage C's ``batch_windows``, stage D's rows,
+    #: multi-aircraft control D146)
+    batches: Callable[[Sequence[Window], Settings], list[list[int]]]
 
 
 def _stage_c_draw(context: Context, settings: Settings, round_: int) -> tuple[list[Window], dict[str, Any]]:
@@ -310,7 +313,8 @@ STAGE_C = Stage(start_model=lambda context, settings: start_model(context, setti
                 selection=lambda context, settings, split: selection_windows(context, settings, split),
                 readout=lambda *args, stage: _stage_c_readout(*args, stage=stage),
                 record=lambda window: window_record(window),
-                speak_batch=lambda *args: speak_batch(*args), read_batch=lambda *args: read_batch(*args), part_width=0)
+                speak_batch=lambda *args: speak_batch(*args), read_batch=lambda *args: read_batch(*args), part_width=0,
+                batches=lambda windows, settings: batches(windows, settings.batch_windows))
 
 
 
@@ -358,18 +362,24 @@ def draw_round(context: Context, per_kind: Mapping[str, int], rng: np.random.Gen
 
 
 def batches(windows: Sequence[Window], size: int) -> list[list[int]]:
-    """The windows' places in batches of at most ``size`` that command each flight once (the first batch with room and
-    without any of the window's commanded flights; multi-aircraft control D146), each in the order of its anchors'
-    places in the signals (`branch_round`'s rule)."""
+    """The windows' places in batches of at most ``size`` rows (a window's rows are its commanded aircraft: stage C's
+    window one, so ``size`` windows), each of one span L, that command each flight once (the first batch of the
+    window's span with room for its rows and without any of its commanded flights; multi-aircraft control D146: a
+    batch's rows and ticks alike), each in the order of its anchors' places in the signals (`branch_round`'s rule). A
+    window of more rows than ``size`` is a batch alone."""
     out: list[list[int]] = []
+    rows: list[int] = []
     for place, window in enumerate(windows):
         mine = set(window.signal_indices)
-        home = next((b for b in out if len(b) < size and all(not mine & set(windows[p].signal_indices) for p in b)),
-                    None)
+        home = next((k for k, b in enumerate(out)
+                     if windows[b[0]].span_s == window.span_s and rows[k] + len(mine) <= size
+                     and all(not mine & set(windows[p].signal_indices) for p in b)), None)
         if home is None:
             out.append([place])
+            rows.append(len(mine))
         else:
-            home.append(place)
+            out[home].append(place)
+            rows[home] += len(mine)
     return [sorted(b, key=lambda p: windows[p].signal_index) for b in out]
 
 
@@ -401,7 +411,7 @@ def speak_round(model: Prior, context: Context, windows: Sequence[Window], setti
     numbers; refused unless they run ``stage``), its informative groups written, its first pass's ends counted; the
     batches' records summed in batch order."""
     _require_stage(speakers, stage)
-    places = batches(windows, settings.batch_windows)
+    places = stage.batches(windows, settings)
     parts = (speakers.speak(model, windows, places, round_, directory) if speakers is not None else
              [stage.speak_batch(model, context, windows, p, settings, round_, directory, k)
               for k, p in enumerate(places)])
@@ -481,8 +491,8 @@ class Speakers:
                                          for p in places])
 
     def measure(self, round_: int, directory: Path) -> dict[str, Any]:
-        """O15: one worker's memory at the formal size — the first batch of round ``round_`` spoken by one worker with the
-        model at the start (APPROXIMATION, stated: a resumed campaign's model says other words, so other groups and
+        """O15: one worker's memory at the formal size — the measured batches of round ``round_`` (`measured_batches`: stage
+        C's first batch) spoken by one worker with the model at the start (APPROXIMATION, stated: a resumed campaign's model says other words, so other groups and
         lengths), its groups written to ``directory`` — its own peak host memory (sampled, not shared with the campaign's
         process), and on the GPU its peak (the CUDA context and the most the allocator held), each with what it still
         holds after the batch, and what a worker holds besides in a round (`_measure`)."""
@@ -574,8 +584,9 @@ def _read(reading: int, state: str, split: str, places: list[int], records: list
 
 
 def _measure(round_: int, directory: str) -> dict[str, Any]:
-    """A worker's measure (`Speakers.measure`): the first batch of round ``round_`` spoken, its own host memory sampled
-    meanwhile (`_PeakSampler`), then its memory after the batch (`_memory_after_batch`) and what a worker holds besides
+    """A worker's measure (`Speakers.measure`): the measured batches of round ``round_`` spoken one after another
+    (`measured_batches`), its own host memory sampled meanwhile (`_PeakSampler`: the most of any), then its memory after
+    them (`_memory_after_batch`: the GPU's peak the most of any) and what a worker holds besides
     in a round (``held``): the selection readout's model (as large as the round's: `_read`) and the round's kept series
     (`Start.release` at each round) — at most the round's flights, at the mean pickled size of the series this batch
     kept (an estimate: a series in memory is not its pickle). Not counted: the selection readout's windows and the
@@ -588,14 +599,32 @@ def _measure(round_: int, directory: str) -> dict[str, Any]:
     start = context.splits["train"]["start"]
     model, _ = stage.start_model(context, settings)
     windows, _ = stage.draw(context, settings, round_)
-    first = batches(windows, settings.batch_windows)[0]
+    found = stage.batches(windows, settings)
+    measured = measured_batches(windows, found)
     with _PeakSampler(swapped_here) as sampled:
-        stage.speak_batch(model, context, windows, first, settings, round_, Path(directory), 0)
+        for k in measured:
+            stage.speak_batch(model, context, windows, found[k], settings, round_, Path(directory), k)
     kept = [len(pickle.dumps(series)) for series in start.series.values()]
     flights = len({i for w in windows for i in w.signal_indices})      # every commanded flight's series
     held = {"reader_model": sum(t.numel() * t.element_size() for t in (*model.parameters(), *model.buffers())),
             "series": flights * sum(kept) // len(kept), "round_flights": flights}
-    return {"round": round_, "windows": len(first), **_memory_after_batch(context.device, sampled.peak), "held": held}
+    return {"round": round_, "windows": sum(len(found[k]) for k in measured),
+            "batches": [{"batch": k, "span_s": windows[found[k][0]].span_s, "windows": len(found[k]),
+                         "rows": sum(len(windows[p].signal_indices) for p in found[k])} for k in measured],
+            **_memory_after_batch(context.device, sampled.peak), "held": held}
+
+
+def measured_batches(windows: Sequence[Window], found: Sequence[Sequence[int]]) -> list[int]:
+    """The batches (their places in ``found``) that O15's measure speaks: the first batch of each span L and the batch
+    of the most rows (multi-aircraft control D146: a batch's ticks grow with its span, and a window of more rows than the
+    batch size is a batch alone); stage C's windows, of one span, give its first batch (the batches are full in order,
+    so no later one has more rows)."""
+    rows = [sum(len(windows[p].signal_indices) for p in batch) for batch in found]
+    firsts = {}
+    for k, batch in enumerate(found):
+        firsts.setdefault(windows[batch[0]].span_s, k)
+    most = max(range(len(found)), key=lambda k: (rows[k], -k))
+    return sorted({*firsts.values(), most})
 
 
 def _own_memory() -> dict[str, int]:
@@ -748,8 +777,9 @@ def available_memory(device: torch.device) -> dict[str, int | None]:
 
 
 def require_workers_fit(speakers: Speakers, context: Context, settings: Settings, round_: int) -> dict[str, Any]:
-    """O15, before a campaign's rounds: one worker's memory measured on the first batch of round ``round_``
-    (`Speakers.measure`) and this process's in one update of the pass on that batch's groups (`pass_memory_of`), and
+    """O15, before a campaign's rounds: one worker's memory measured on the measured batches of round ``round_``
+    (`Speakers.measure`, `measured_batches`) and this process's in one update of the pass on their groups
+    (`pass_memory_of`), and
     the workers refused by name where they do not fit (`workers_fit`). The measures are printed (the campaign's log)
     and returned."""
     with tempfile.TemporaryDirectory(prefix="post_measure_") as scratch:
@@ -849,7 +879,7 @@ def selection_readout(model: Prior, context: Context, windows: Sequence[Window],
     `Stage.read_batch`, stage C's `read_batch`), or by ``speakers`` (C13: the same ends, summed here in batch order;
     one process is the reference mode; refused unless they run ``stage``)."""
     _require_stage(speakers, stage)
-    places = batches(windows, settings.batch_windows)
+    places = stage.batches(windows, settings)
     read = (speakers.read(model, windows, places, split) if speakers is not None else
             [stage.read_batch(model, context, windows, p, settings, split) for p in places])
     return counted_ends(windows, places, read)

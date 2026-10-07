@@ -91,7 +91,8 @@ def test_the_settings_take_a_count_of_every_kind_and_positive_sizes():
 
 
 def test_a_batch_commands_each_flight_once_in_signal_order():
-    windows = [SimpleNamespace(signal_index=i, signal_indices=(i,)) for i in (3, 3, 1, 2, 3, 1)]   # stage C: one aircraft
+    windows = [SimpleNamespace(signal_index=i, signal_indices=(i,), span_s=0.0)                  # stage C: one aircraft
+               for i in (3, 3, 1, 2, 3, 1)]
     out = batches(windows, 2)
     assert sorted(p for b in out for p in b) == list(range(6))
     for b in out:
@@ -816,8 +817,8 @@ def test_a_stage_gives_the_campaigns_round_its_parts_and_stage_cs_is_the_campaig
         run_campaign(out, settings, _context(s), stage=stage)
         states.append(torch.load(out / "round_0" / "checkpoint.pt", weights_only=False))
     # the speaking and the readout run the stage's own batch speaker and reader (the campaign hands them the stage)
-    assert called == ["start", "selection", "draw", "speak", "speak_batch", "readout", "read_batch", "record",
-                      "identity"]
+    assert called == ["start", "selection", "draw", "speak", "batches", "speak_batch", "readout", "batches",
+                      "read_batch", "record", "identity"]
     assert states[0]["model"].keys() == states[1]["model"].keys()
     assert all(torch.equal(states[0]["model"][k], states[1]["model"][k]) for k in states[0]["model"])
     assert states[0]["identity"] == states[1]["identity"]
@@ -973,7 +974,8 @@ def test_a_round_opens_as_a_start_through_one_function(setup, tmp_path, monkeypa
 def test_a_batch_commands_each_flight_once_with_windows_of_several_aircraft():
     """Multi-aircraft control D146: windows that share any commanded flight (an anchor or a later aircraft) go to
     different batches; stage C's windows of one aircraft as before."""
-    window = lambda indices: SimpleNamespace(signal_index=indices[0], signal_indices=tuple(indices))  # noqa: E731
+    window = lambda indices: SimpleNamespace(signal_index=indices[0], signal_indices=tuple(indices),  # noqa: E731
+                                             span_s=300.0)
     windows = [window((1, 4)), window((2,)), window((4, 6)), window((3, 5)), window((5,))]
     out = batches(windows, 10)
     for batch in out:

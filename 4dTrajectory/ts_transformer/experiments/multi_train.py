@@ -8,30 +8,34 @@ parts (`stage_d`):
   ``--start-round``), recorded in the settings as ``{campaign, round, checkpoint_sha256}`` (`post_train.start_of`) and
   opened by post-training §9 item 12's one function (`post_train.round_start`: the bytes, the identity of this base,
   masks, stage C's traffic shape and that round, a formal campaign from a formal one, a seed other than the source's,
-  each refused by name), with stage D's token part added to its traffic attention (`multi.tokens`,
+  each refused by name; a formal start also from a campaign that has done every round, `require_finished`, D166
+  item 19), with stage D's token part added to its traffic attention (`multi.tokens`,
   `multi-commanded-tokens-v1`, its projection at zero: the start says what the round says) and a new optimizer. The pull
   is to the base, as in every stage of the post-training. A resume and a speaking worker load a state into the model of
   that shape (stage C's start model of the source campaign's settings, with the token part).
-- **The draw of a round** (D146, `draw_windows`): the train days' real windows in a permutation by the seed and the
-  round, each in turn an anchor (`multi.windows.Anchors`): its window of span L (`--span-s`), and for a compressed one
-  its later aircraft moved toward the anchor by c in [c_min, 1) (`multi.windows.compressed`; a window without a later
-  aircraft has no compressed form); a window left out when one of its commanded aircraft opens inside a loss it answers
-  for (`multi.windows.left_out`), until each kind's count is reached; a shortfall is recorded, never silent. The
-  batches command each flight once (`post_train.batches`).
+- **The draw of a round** (D146, `draw_windows`): each kind's count in equal parts of the spans L (``--spans-s``,
+  `span_counts`); the train days' real windows in a permutation by the seed and the round, each in turn an anchor
+  (`multi.windows.Anchors`) of each kind still short: its span drawn with the round's numbers among the spans of that
+  kind still short, its window of that span, and for a compressed one its later aircraft moved toward the anchor by c
+  in [c_min, 1) (`multi.windows.compressed`; a window without a later aircraft has no compressed form); a window left
+  out when one of its commanded aircraft opens inside a loss it answers for (`multi.windows.left_out`), until each
+  kind's count of each span is reached; a shortfall of a span is recorded, never silent. The batches hold at most
+  ``--batch-rows`` commanded aircraft of windows of one span and command each flight once (`post_train.batches`).
 - **The speaking** (`speak_batch`, `post_branches.branch_round`): stage D's rules (`multi.credit.rules`: W the sum,
   spoken again below the count, the varied aircraft and their branch points, each aircraft's own numbers, D141–D143)
   and its loop (`loop_options`: the rule of who answers, D145; the token part, D152). Its record is stage C's
   (`post_train.speak_round`'s sums), its rewards and outcomes those of each commanded aircraft.
 - **The selection readout** (§5 item 2, `selection_windows`, `read_batch`, `selection_readout`): at most
-  ``select_per_airport`` real windows of span L of each airport of the select days, drawn once with the seed (D146's
-  rule), the first pass only, each aircraft with its own numbers (the same every round). By airport and kind: the
+  ``select_per_airport`` real windows of each span of each airport of the select days, their anchors in an order drawn
+  once with the seed (D146's rule), the first pass only, each aircraft with its own numbers (the same every round). By
+  airport, span and kind (each with its ``all``): the
   windows, the commanded aircraft, W per aircraft (``reward_mean``) and per window, the outcomes, the go-arounds, the
   silent aircraft, the rows of the speed-word mask, the faulty points (post-training D114), and the losses of
   separation by pair (`multi.separation.PAIRS`; judged again on the states flown, `multi.census.flown_positions`, the
   census's rule). No criterion is applied (D7).
 - **The identity** (§7 row 3): `MULTI_CHECKPOINT_SCHEMA`, the start's identity, the procedure masks, the token part's
-  format and features, the seed, L, the kinds and c_min, and each round's windows by their anchors, commanded flights
-  and shifts (`window_record`).
+  format and features, the seed, the spans and their counts (`span_counts`), the kinds and c_min, and each round's
+  windows by their anchors, spans, commanded flights and shifts (`window_record`).
 
 THE CHECKS, as stage C's: the closed loop's (D69, with the labeller's and the executor's) and the edge features' (D104).
 A formal campaign (not ``--smoke``) runs from a clean checkout (a run worktree at the merged commit, outline D163; its
@@ -41,12 +45,12 @@ D's format and reader).
 
     python run_ts.py multi_train --prior <the base> --instructions <A34's artefact> --executor <its spec> \\
         --windows <stage C's census: its edge reference> --start-campaign <stage C's campaign> --start-round <r> \\
-        --out 4dTrajectory/outputs/POOLED/multi/<campaign id> --rounds … --span-s … --c-min … (every count given)
+        --out 4dTrajectory/outputs/POOLED/multi/<campaign id> --rounds … --spans-s 300 600 1200 --c-min … \
+        --batch-rows … (every count given)
 
 The readout also gives the time the aircraft take (§5 item 4, O18; `multi.timing`): each landing's delay against its
 record (p50, p90), the spacing at the threshold of successive landings on one runway (p1, p5, p50) beside the records' of
-the same windows, and the pairs landed in the recorded order. Not yet here (stated): the validation readout
-(`multi_validation`).
+the same windows, and the pairs landed in the recorded order. The validation readout is `multi_validation`.
 """
 
 from __future__ import annotations
@@ -54,6 +58,7 @@ from __future__ import annotations
 import argparse
 import json
 from collections import Counter
+from itertools import product
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Sequence
@@ -97,9 +102,11 @@ class MultiSettings:
 
     rounds: int
     per_kind: dict[str, int]
-    span_s: float
+    #: the spans L of the windows, s, increasing (D146; each kind's count in equal parts of them, `span_counts`)
+    spans_s: list[float]
     c_min: float
-    batch_windows: int
+    #: the most commanded aircraft (rows) of a batch (`post_train.batches`)
+    batch_rows: int
     continuations: int
     seed: int
     prior_lr: float
@@ -115,14 +122,29 @@ class MultiSettings:
     def __post_init__(self) -> None:
         if set(self.per_kind) != set(KINDS) or min(self.per_kind.values()) < 0 or not any(self.per_kind.values()):
             raise ValueError(f"a count of each kind of window {KINDS}, none negative, not all zero")
-        if self.span_s < 0.0 or not 0.0 < self.c_min < 1.0:
-            raise ValueError(f"a span L of 0 s or more and c_min in (0, 1), not {self.span_s:g} s and {self.c_min:g}")
-        if min(self.rounds, self.batch_windows, self.continuations, self.update_groups, self.data_sentences,
+        if (not self.spans_s or list(self.spans_s) != sorted(set(self.spans_s)) or self.spans_s[0] <= 0.0
+                or not 0.0 < self.c_min < 1.0):
+            raise ValueError(f"spans L above 0 s, increasing, and c_min in (0, 1), not {self.spans_s} s and "
+                             f"{self.c_min:g} (L = 0 is stage C's window, not one of stage D's spans)")
+        if min(self.rounds, self.batch_rows, self.continuations, self.update_groups, self.data_sentences,
                self.select_per_airport) <= 0:
-            raise ValueError("rounds, batch windows, continuations, groups an update, data sentences and select windows "
+            raise ValueError("rounds, batch rows, continuations, groups an update, data sentences and select windows "
                              "are positive")
         if set(self.start) != {"campaign", "round", "checkpoint_sha256"}:
             raise ValueError(f"a start is its campaign, round and checkpoint_sha256, not {sorted(self.start)}")
+
+
+def span_key(span_s: float) -> str:
+    """A span's name in the records (its seconds, ``"600"``)."""
+    return f"{span_s:g}"
+
+
+def span_counts(settings: MultiSettings) -> dict[str, dict[str, int]]:
+    """Each kind's windows of a round in equal parts of the spans (D146), by kind and span (`span_key`): its count
+    divided by the spans, the remainder one each to the first spans."""
+    n = len(settings.spans_s)
+    return {kind: {span_key(span): count // n + (k < count % n) for k, span in enumerate(settings.spans_s)}
+            for kind, count in settings.per_kind.items()}
 
 
 def kind_of(window: Window) -> str:
@@ -132,8 +154,9 @@ def kind_of(window: Window) -> str:
 
 
 def window_record(window: Window) -> dict[str, Any]:
-    """A window of stage D (§7 row 3): its anchor, its row 0, its commanded flights, each one's shift and its kind."""
-    return {"anchor": window.commanded.key, "row0_s": window.row0_s,
+    """A window of stage D (§7 row 3): its anchor, its row 0, its span, its commanded flights, each one's shift and its
+    kind."""
+    return {"anchor": window.commanded.key, "row0_s": window.row0_s, "span_s": window.span_s,
             "commanded": [record.key for record in window.commanded_all],
             "shifts_s": [0.0] + [item.shift_s for item in window.joined], "kind": kind_of(window)}
 
@@ -148,36 +171,41 @@ def loop_options(context: Context) -> dict[str, Any]:
 # ---- the draw
 def draw_windows(context: Context, settings: MultiSettings, rng: np.random.Generator
                  ) -> tuple[list[Window], dict[str, Any]]:
-    """A round's windows (module docstring), kind after kind in `KINDS` order, and what the draw counted: the windows
-    drawn of each kind, those left out (D146) and those without a compressed form, and a shortfall."""
+    """A round's windows (module docstring), kind after kind in `KINDS` order and span after span, and what the draw
+    counted, by kind and span: the windows drawn, those left out (D146) and those without a compressed form, and a
+    shortfall."""
     train = context.splits["train"]
     anchors = Anchors(train["windows"])
     separations, step_s = context.separations, context.words.spec.step_s
-    out: dict[str, list[Window]] = {kind: [] for kind in KINDS if settings.per_kind[kind] > 0}
-    left: Counter = Counter()
-    alone: Counter = Counter()
+    wanted = span_counts(settings)
+    out = {kind: {span_key(span): [] for span in settings.spans_s} for kind in KINDS if settings.per_kind[kind] > 0}
+    left = {kind: dict.fromkeys(spans, 0) for kind, spans in out.items()}
+    alone = {kind: dict.fromkeys(spans, 0) for kind, spans in out.items()}
     for i in rng.permutation(len(train["windows"])):
         anchor = train["windows"][int(i)]
         code = anchor.scene.geometry.code
-        window = anchors.window_of(anchor, settings.span_s)
-        for kind, drawn in out.items():
-            if len(drawn) == settings.per_kind[kind]:
+        for kind, by_span in out.items():
+            short = [span for span in settings.spans_s if len(by_span[span_key(span)]) < wanted[kind][span_key(span)]]
+            if not short:
                 continue
+            span = short[int(rng.integers(len(short)))]                  # the window's span: the round's numbers
+            window = anchors.window_of(anchor, span)
             if kind == COMPRESSED and not window.joined:
-                alone[kind] += 1
+                alone[kind][span_key(span)] += 1
                 continue
             chosen = (Drawn(window, REAL_KIND) if kind == REAL_KIND else compressed(window, rng, settings.c_min)).window
             if left_out(chosen, separations[code], context.finals[code], step_s):
-                left[kind] += 1
+                left[kind][span_key(span)] += 1
             else:
-                drawn.append(chosen)
-        if all(len(drawn) == settings.per_kind[kind] for kind, drawn in out.items()):
+                by_span[span_key(span)].append(chosen)
+        if all(len(drawn) == wanted[kind][key] for kind, by_span in out.items() for key, drawn in by_span.items()):
             break
-    return [w for drawn in out.values() for w in drawn], {
-        "drawn": {kind: len(drawn) for kind, drawn in out.items()}, "left_out": dict(left),
-        "no_later_aircraft": dict(alone),
-        "shortfall": {kind: settings.per_kind[kind] - len(drawn) for kind, drawn in out.items()
-                      if len(drawn) < settings.per_kind[kind]}}
+    return [w for by_span in out.values() for drawn in by_span.values() for w in drawn], {
+        "drawn": {kind: {key: len(drawn) for key, drawn in by_span.items()} for kind, by_span in out.items()},
+        "left_out": left, "no_later_aircraft": alone,
+        "shortfall": {kind: short for kind, by_span in out.items()
+                      if (short := {key: wanted[kind][key] - len(drawn) for key, drawn in by_span.items()
+                                    if len(drawn) < wanted[kind][key]})}}
 
 
 # ---- the speaking
@@ -215,21 +243,23 @@ def readout_numbers(seed: int, place: int, member: int, draw: int = 0) -> np.ran
 
 def selection_windows(context: Context, settings: MultiSettings, split: str = "select") -> list[Window]:
     """The readout's windows (module docstring): of each airport, its anchors of ``split`` in an order drawn once with
-    the seed, each one's real window of span L kept unless it is left out (D146), up to ``select_per_airport``; in
-    the order of the anchors."""
+    the seed; of each span, each anchor's real window of that span in that order kept unless it is left out (D146), up
+    to ``select_per_airport``; by airport, then span, in the order of the anchors."""
     anchors = Anchors(context.splits[split]["windows"])
     rng = np.random.default_rng([settings.seed, 1 << 31])
     separations, step_s = context.separations, context.words.spec.step_s
     out = []
     for code in sorted(anchors.by_airport):
-        items, kept = anchors.by_airport[code], []
-        for i in rng.permutation(len(items)):
-            window = anchors.window_of(items[int(i)], settings.span_s)
-            if not left_out(window, separations[code], context.finals[code], step_s):
-                kept.append(int(i))
-            if len(kept) == settings.select_per_airport:
-                break
-        out += [anchors.window_of(items[i], settings.span_s) for i in sorted(kept)]
+        items, order = anchors.by_airport[code], rng.permutation(len(anchors.by_airport[code]))
+        for span in settings.spans_s:
+            kept = []
+            for i in order:
+                if not left_out(anchors.window_of(items[int(i)], span), separations[code], context.finals[code],
+                                step_s):
+                    kept.append(int(i))
+                if len(kept) == settings.select_per_airport:
+                    break
+            out += [anchors.window_of(items[i], span) for i in sorted(kept)]
     return out
 
 
@@ -290,18 +320,18 @@ def window_losses_of(window: Window, ends: Sequence[Any], start: int, context: A
 def selection_readout(model: Prior, context: Context, windows: Sequence[Window], settings: MultiSettings,
                       speakers: Speakers | None, *, stage: Stage, split: str = "select") -> dict[str, Any]:
     """The readout of ``windows`` of ``split`` (module docstring; `multi_validation`: the val days): its batches read
-    here (``stage``'s `Stage.read_batch`) or by ``speakers`` (refused unless they run ``stage``), summed by airport and
-    kind."""
+    here (``stage``'s `Stage.read_batch`) or by ``speakers`` (refused unless they run ``stage``), summed by airport,
+    span (`span_key`) and kind, each with its ``all``; an airport's ``reward_mean`` is its ``all`` of both."""
     if speakers is not None and speakers.stage is not stage:
         raise ValueError("the speaking workers run another stage's parts than the one given (Speakers(..., stage=))")
-    places = batches(windows, settings.batch_windows)
+    places = stage.batches(windows, settings)
     read = (speakers.read(model, windows, places, split) if speakers is not None else
             [stage.read_batch(model, context, windows, p, settings, split) for p in places])
-    counted: dict[str, dict[str, dict[str, Any]]] = {}
+    counted: dict[str, dict[str, dict[str, dict[str, Any]]]] = {}
     for batch, parts in zip(places, read, strict=True):
         for window, (ends, losses, steps, timing) in zip((windows[p] for p in batch), parts, strict=True):
-            for kind in (kind_of(window), "all"):
-                c = counted.setdefault(window.scene.geometry.code, {}).setdefault(kind, _empty())
+            for span, kind in product((span_key(window.span_s), "all"), (kind_of(window), "all")):
+                c = counted.setdefault(window.scene.geometry.code, {}).setdefault(span, {}).setdefault(kind, _empty())
                 c["windows"] += 1
                 c["aircraft"] += len(ends)
                 c["reward_sum"] += sum(e.reward for e in ends)
@@ -318,16 +348,20 @@ def selection_readout(model: Prior, context: Context, windows: Sequence[Window],
                 for key in ("delays_s", "spacing_s", "record_spacing_s"):
                     c[key] += timing[key]
                 c["order"] = [c["order"][0] + timing["order"][0], c["order"][1] + timing["order"][1]]
-    out = {}
-    for code, kinds in sorted(counted.items()):
-        out[code] = {kind: {**c, "outcomes": dict(c["outcomes"]), "reward_mean": c["reward_sum"] / c["aircraft"],
-                            "window_reward_mean": c["reward_sum"] / c["windows"],
-                            "delays_s": quantiles(c["delays_s"], (50, 90)),
-                            "spacing_s": quantiles(c["spacing_s"], (1, 5, 50)),
-                            "record_spacing_s": quantiles(c["record_spacing_s"], (1, 5, 50)),
-                            "order": {"same": c["order"][0], "pairs": c["order"][1]}} for kind, c in kinds.items()}
-        out[code]["reward_mean"] = out[code]["all"]["reward_mean"]          # what the campaign's log prints
+    out: dict[str, Any] = {}
+    for code, spans in sorted(counted.items()):
+        out[code] = {span: {kind: _summed(c) for kind, c in kinds.items()} for span, kinds in spans.items()}
+        out[code]["reward_mean"] = out[code]["all"]["all"]["reward_mean"]    # what the campaign's log prints
     return out
+
+
+def _summed(c: dict[str, Any]) -> dict[str, Any]:
+    """A cell of the readout (`selection_readout`) with its means and quantiles."""
+    return {**c, "outcomes": dict(c["outcomes"]), "reward_mean": c["reward_sum"] / c["aircraft"],
+            "window_reward_mean": c["reward_sum"] / c["windows"], "delays_s": quantiles(c["delays_s"], (50, 90)),
+            "spacing_s": quantiles(c["spacing_s"], (1, 5, 50)),
+            "record_spacing_s": quantiles(c["record_spacing_s"], (1, 5, 50)),
+            "order": {"same": c["order"][0], "pairs": c["order"][1]}}
 
 
 def _empty() -> dict[str, Any]:
@@ -347,13 +381,14 @@ def multi_settings_of(record: dict[str, Any]) -> MultiSettings:
 def round_model(context: Context, settings: MultiSettings, out: Path, round_: int) -> Prior:
     """The model of stage D's campaign ``out`` after round ``round_`` (its checkpoint), in eval mode, refused by name
     unless its identity is this campaign's (§7 row 3): stage D's format, the start's identity on this base, today's
-    procedure masks, the token part, the seed, L, the kinds, c_min and that round."""
+    procedure masks, the token part, the seed, the spans and their counts, the kinds, c_min and that round."""
     model, _ = stage_d().start_model(context, settings)
     state = torch.load(out / f"round_{round_}" / "checkpoint.pt", weights_only=False, map_location=context.device)
     held = state["identity"]
     expected = {"schema": MULTI_CHECKPOINT_SCHEMA, "procedure_masks": PROCEDURE_MASKS,
                 "token_part": {"schema": TOKENS_SCHEMA, "features": list(PART_FEATURES)}, "seed": settings.seed,
-                "span_s": settings.span_s, "per_kind": settings.per_kind, "c_min": settings.c_min}
+                "spans_s": list(settings.spans_s), "per_kind": settings.per_kind, "per_span": span_counts(settings),
+                "c_min": settings.c_min}
     start = torch.load(start_checkpoint(settings.start), weights_only=False, map_location="cpu")["identity"]
     if ({k: held[k] for k in expected} != expected or held["start"] != start
             or held["start"]["base"] != context.base_identity or len(held["rounds"]) != round_ + 1):
@@ -361,6 +396,16 @@ def round_model(context: Context, settings: MultiSettings, out: Path, round_: in
                          f"round than this campaign's")
     model.load_state_dict(state["model"])
     return model.eval()
+
+
+def require_finished(campaign: Path) -> None:
+    """D166 item 19: a formal start of stage D comes from a campaign of stage C that has done every round (as
+    `post_validation`'s formal read: its round is chosen on every round's selection readout, D7), refused by name
+    otherwise."""
+    rounds = settings_of(json.loads((campaign / "campaign.json").read_text(encoding="utf-8"))).rounds
+    if done_rounds(campaign) < rounds:
+        raise ValueError(f"{campaign} has done {done_rounds(campaign)} of its {rounds} rounds: a formal campaign of "
+                         f"stage D starts from a campaign that has done every round (D166 item 19)")
 
 
 # ---- the stage
@@ -388,6 +433,8 @@ def stage_d() -> Stage:
 
     def start(context: Context, settings: MultiSettings) -> tuple[Prior, torch.optim.Optimizer]:
         source, identity = round_start(context, settings.start, settings.seed)        # D164: refused by name
+        if context.formal:
+            require_finished(REPO_ROOT / settings.start["campaign"])
         model = shaped(context, settings)
         model.load_state_dict({**model.state_dict(), **source.state_dict()})       # the round's, the token part at 0
         started["identity"] = identity
@@ -399,7 +446,8 @@ def stage_d() -> Stage:
                                              map_location="cpu")["identity"]
         return {"schema": MULTI_CHECKPOINT_SCHEMA, "start": started["identity"], "procedure_masks": PROCEDURE_MASKS,
                 "token_part": {"schema": TOKENS_SCHEMA, "features": list(PART_FEATURES)}, "seed": settings.seed,
-                "span_s": settings.span_s, "per_kind": settings.per_kind, "c_min": settings.c_min,
+                "spans_s": list(settings.spans_s), "per_kind": settings.per_kind, "per_span": span_counts(settings),
+                "c_min": settings.c_min,
                 "rounds": [json.loads((out / f"round_{r}" / "round.json").read_text(encoding="utf-8"))["windows"]
                            for r in range(rounds)]}
 
@@ -409,7 +457,7 @@ def stage_d() -> Stage:
                  speak=lambda *args, stage: speak_round(*args, stage=stage),
                  selection=lambda context, settings, split: selection_windows(context, settings, split),
                  readout=selection_readout, record=window_record, speak_batch=speak_batch, read_batch=read_batch,
-                 part_width=TokenPart.width)
+                 part_width=TokenPart.width, batches=lambda windows, settings: batches(windows, settings.batch_rows))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -426,9 +474,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--rounds", type=int, required=True)
     for kind in KINDS:
         parser.add_argument(f"--windows-{kind}", type=int, required=True, help=f"the {kind} windows of a round (O16)")
-    parser.add_argument("--span-s", type=float, required=True, help="L, s (O16)")
+    parser.add_argument("--spans-s", type=float, nargs="+", required=True, help="the spans L, s, increasing (D146)")
     parser.add_argument("--c-min", type=float, required=True, help="the least c of a compressed window (O16)")
-    parser.add_argument("--batch-windows", type=int, required=True, help="the windows flown in one batch")
+    parser.add_argument("--batch-rows", type=int, required=True,
+                        help="the most commanded aircraft flown in one batch (its windows of one span)")
     parser.add_argument("--continuations", type=int, default=CONTINUATIONS, help="D94, D143: K")
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--prior-lr", type=float, required=True)
@@ -446,13 +495,15 @@ def main(argv: list[str] | None = None) -> int:
     source = args.start_campaign if args.start_campaign.is_absolute() else REPO_ROOT / args.start_campaign
     try:
         start = start_of(source, args.start_round, formal=not args.smoke)            # D164: the start's setting
+        if not args.smoke:
+            require_finished(source)                                                  # D166 item 19
     except ValueError as refused:
         parser.error(str(refused))
     prior_dir, instructions, executor, census, procedure_root, out = (
         p if p.is_absolute() else REPO_ROOT / p for p in (args.prior, args.instructions, args.executor, args.windows,
                                                           args.procedure_root, args.out))
-    settings = MultiSettings(args.rounds, {kind: getattr(args, f"windows_{kind}") for kind in KINDS}, args.span_s,
-                             args.c_min, args.batch_windows, args.continuations, args.seed, args.prior_lr,
+    settings = MultiSettings(args.rounds, {kind: getattr(args, f"windows_{kind}") for kind in KINDS}, args.spans_s,
+                             args.c_min, args.batch_rows, args.continuations, args.seed, args.prior_lr,
                              args.traffic_lr, args.weight_decay, args.update_groups, args.data_sentences,
                              args.select_per_airport, start)
     git = git_state()
