@@ -64,6 +64,7 @@ the measurements behind it are in §6 or in the readout named.
 | D157 | **C10 continues to 14 rounds as the same campaign** (C14). The campaign `post_train_20261006` keeps its inputs and every setting except the number of rounds: 10 becomes 14. A resume may raise the rounds of a campaign and change nothing else (`open_campaign`: the inputs equal with the rounds left out, the new count larger than the old); `campaign.json` keeps each change of the count in the entry of that resume (its time, its commit, its checks, the paths it read and the rounds before and after it; a raise is an entry whose two counts differ); the record's settings hold the current count and its paths stay as recorded; the format stays `ts-post-train-v1`, since the campaign is the same and no reader reads a resume's entry (P46). A raise is refused once the campaign's val read is claimed (`post_validation`'s claim, spent or not), because the round would then be chosen after the val days were read (P47). A resume and the validation readout read each recorded input path as this checkout reads it (`this_checkout`, the rule of the Training exports, outline §5 rule 1): C10 recorded its inputs by the paths of the worktree `.claude/worktrees/two-tier-v4-post`, and every input is in a linked data tree, so the same data have this checkout's path. Rounds 10–13 continue from round 9's checkpoint, which holds the model and the optimizer; each round draws its windows and numbers from the seed and its own number only (D94, D124), so the campaign is the one that 14 rounds from its start give, and the selection readouts of the 14 rounds read the same select windows with the same numbers. Rounds 10–13 run on the merged code (vocabulary A44, prior B14, C13, the update in pieces of §2 item 5), from the main checkout after the user's merge (outline §5 rule 1), after C13's check on the GPU (outline D138: a faster form is used only after its check). They write into the same directory: it is made writable for the run, read-only after it, and `SHA256SUMS` gets the new files; rounds 0–9 are not changed. After round 13, the user's criterion (D7: the earliest round within the selection readout's noise of the best) is applied to the 14 rounds, and the validation readout (D132) reads the round that it chooses. Why: the user (2026-10-06) wants more rounds after C10; in the same campaign every round's selection readout stays comparable with the others; the user wants the new rounds on C13's code | Decided | User, 2026-10-06 (the same campaign, 14 rounds, on C13's code, the paths read again); P46, P47: user, 2026-10-07; the form: Claude |
 | D161 | **The ceiling readout** (C15; stage C's P48). The selection readout stopped near 85 % landed and 12 % lost separation from round 6 on. A runner, `experiments/post_ceiling.py` (with tests and an entry in `runners.md`), reads the 1,000 select windows of the selection readout (`selection_windows`) N = 32 times for each of three models: the campaign's start (the base with zero-output traffic modules), round 6 (D7's choice) and round 8 (the best of the 14). Draw 0 takes the readout's own numbers (`readout_numbers`, unchanged bit for bit) and must give that round's `round.json` readout again, which checks the runner; draw d ≥ 1 takes `[seed, 1 << 30, place, d]`. For each window it records every draw's outcome and reward; for each model, by airport, it reports the share of windows with at least one landing among the first n draws (n = 1, 2, 4, … 32), and the windows lost in every draw and their overlap between the models. Select days only, never val. Reading: where the curve flattens is the most that sampling this model reaches, a lower bound of the setting's ceiling; near 85 %, the setting (one commanded aircraft among recorded traffic that does not give way) is the limit and stage D is the way on; well above, the model has room (search at speaking time, or training on the landed sentences). Cost about 2–3 h on the GPU with four workers, with no other job; the data read-only after it. Why: whether 85 % is the setting's ceiling or the training's limit decides what comes next | Decided | User, 2026-10-07 (the readout after round 13, as proposed) |
 | D162 | **A campaign starts from the base or from a round of another campaign** (C16; the user, 2026-10-07). The start is a setting, `Settings.start`: `null` (the base with zero-output traffic modules, D29) or `{campaign (repository-relative), round, checkpoint_sha256}` of a campaign on the same base. The start's checkpoint is refused by name unless its bytes are the recorded ones and its identity names this base, the same masks, the same traffic shape and that round; a formal campaign never starts from a smoke one. The pull term pulls toward the base; the optimizer starts afresh; each campaign has its own one val read (D132). A campaign from a round takes a seed other than its source's, refused by name otherwise, so that its rounds draw new windows. A resume compares the start with the other settings. Stage D's start from stage C's chosen round follows the same rules through one function (§9 item 12; multi-aircraft control D164). A checkpoint's identity is unchanged; C10's `campaign.json` holds `"start": null` (added when it was sealed). Why: a later method (D161's reading) may start from a post-trained round | Decided | User, 2026-10-07 ((a)–(e) and the seed); the form: stage C's readings |
+| D165 | **Training on the landed sentences** (C17; stage C's P49, "expert iteration"). A new campaign of rounds, started by D162 from round 8 of `post_train_20261006`, with a seed other than C10's. Each round r: the windows of the train days drawn as C10 draws them (`draw_round`, the seed and r); each window spoken N = 8 times by the round's model (the first pass with no branch, the draws' numbers as in D161, read by the workers); for each window the landed sentence with the highest reward kept (a tie: the lowest draw; a window with no landing in 8 gives nothing); one pass over the kept sentences; the selection readout on the same 1,000 select windows and numbers as C10, and the checkpoint. The loss: the negative log-likelihood of the commanded aircraft's words of each kept sentence, teacher-forced under its traffic as the surrogate reads them (`post/loss.py` `Samples`), with C10's data term (D36, weight 1) and pull toward the base (D29, weight 0.04); no clipped surrogate and no advantage. C10's learning rates (1e-5 the prior, 1e-4 the traffic modules) and weight decay (0.01); 6 rounds, then the user's criterion (D7) over them; one val read of its own (D132). It is its own runner with its own campaign schema name; its checkpoints keep `ts-post-checkpoint-v1`, their identity naming the method, so that a later start (D162, stage D's D164) opens them through the one function of §9 item 12. Why: C15 found a landing within 32 draws in 99.3–99.4 % of the select windows for every model, against 79.5–85.7 % in one draw, and the 14 rounds raised the one-draw share without widening what the model can land: the model can say a landing sentence almost everywhere and gives it too little probability, and D94's surrogate stopped raising it from round 6; choosing at speaking time is not wanted (P50: only what the model is trained to say counts) | Decided | User, 2026-10-07 (the proposal as made; the start round 8); the method and its settings: stage C's proposal |
 
 ### 0.2 Open items
 
@@ -91,21 +92,22 @@ commits, the tests and the readings are in the implementation log.
 ### 0.4 Plan
 
 1. C10, C13 and C14 are done: `post_train_20261006` has 14 rounds (log §26, §27; stage B's log §6 for C13's check).
-2. C15 (D161), the ceiling readout, and C16 (D162), a campaign's start, by stage C's implementer on
-   `dev-two-tier-v4-post`; C15 runs after the user's merge, from a run worktree (outline D163), with no other job on
-   the host or the GPU.
-3. The user's criterion for the round (D7) over the 14 rounds; the validation readout of the chosen round; then its
-   speed (frontend §3 item 10, `model_speed`), with no other job on the host or the GPU.
-4. C12.
-5. The window view (C11) and the window export change with the one layout of the three stages' Training views (outline
+2. C15 (D161, the ceiling readout: `outputs/POOLED/post/ceiling_20261007`, log §28) and C16 (D162) are done.
+3. C17 (D165), training on the landed sentences, by stage C's implementer: its code on `dev-two-tier-v4-post`; after the
+   user's merge, its 6 rounds from a run worktree (outline D163), with no other job on the host or the GPU; then the
+   user's criterion (D7) over its rounds.
+4. The validation readout of the round that the user chooses (C10's round 6 by D7 over its 14 rounds, or C17's), then
+   its speed (frontend §3 item 10, `model_speed`), with no other job on the host or the GPU.
+5. C12.
+6. The window view (C11) and the window export change with the one layout of the three stages' Training views (outline
    §6.2, D133–D135: the results page, the rounds' envelopes, one block of a flown sentence), built by stage B's
    implementer.
-6. The generalisations of §9 marked "to be built" (multi-aircraft control D149, its MC0), by stage D's implementer
+7. The generalisations of §9 marked "to be built" (multi-aircraft control D149, its MC0), by stage D's implementer
    on `dev-multi-control` (outline §5 rule 1), each checked against stage C's code before the change, bit for bit;
    nothing of them goes into C10's worktree.
 
 Every other milestone from now on is built by stage D's implementer (it takes over stage B's) on `dev-two-tier-v4`, in the worktree
-`.claude/worktrees/two-tier-v4` (outline §5 rule 1); C15 and C16 by stage C's implementer on `dev-two-tier-v4-post` (worktree
+`.claude/worktrees/two-tier-v4` (outline §5 rule 1); C17 by stage C's implementer on `dev-two-tier-v4-post` (worktree
 `.claude/worktrees/two-tier-v4-post`), first brought level with `dev-two-tier`.
 
 ---
@@ -463,9 +465,9 @@ campaign), `ts-post-checkpoint-v1`, `post-windows-census-v1`, `aeroviz-training-
 
 ## 8 Milestones not done
 
-C0–C7, C9, C10, C11, C13 and C14 are done; their specifications are in the implementation log (§22, §26, §27; C13's check in stage B's log §6). The rules of outline §5 apply:
+C0–C7, C9, C10, C11 and C13–C16 are done; their specifications are in the implementation log (§22, §26–§28; C13's check in stage B's log §6). The rules of outline §5 apply:
 from 2026-10-06 one implementer builds every milestone of every stage (outline §5 rule 1: stage D's, which takes over
-stage B's remaining steps); stage C's implementer builds and runs C15 and C16.
+stage B's remaining steps); stage C's implementer builds and runs C17.
 
 **C8. Profile and the go-around probability** (§2 item 6). After B5's base and Claude's check of stage B.
 
@@ -489,17 +491,15 @@ stage B's remaining steps); stage C's implementer builds and runs C15 and C16.
   as §4 item 2. Tests: it refuses a second read; it reads no train or select window.
 - A formal campaign and its validation readout refuse a base that is not stage B's formal base (D132).
 
-**C15. The ceiling readout** (D161). `experiments/post_ceiling.py`, its tests and its entry in `runners.md`:
-`readout_numbers(seed, place, draw=0)` with draw 0 unchanged bit for bit, and `read_batch` / `Speakers.read` take the
-draw; the campaign opened as `post_validation` opens it (`inputs_here`, the checks). Tests: draw 0 gives the round's
-`round.json` readout on a synthetic campaign; the first-n shares; the overlap. The run after the user's merge, from a run
-worktree (outline D163), N = 32 on the start, round 6 and round 8; the data read-only with `SHA256SUMS`; the table in
-stage C's log.
-
-**C16. A campaign's start** (D162). `Settings.start` and `post_train --start-campaign <dir> --start-round <r>`; the
-start's checks; the seed rule. Tests: a campaign from a round speaks its round 0 from that round's weights; each refusal
-by name (other bytes, another base, masks or traffic shape, a smoke source for a formal campaign, the source's seed); a
-resume with another start refused.
+**C17. Training on the landed sentences** (D165). A runner of its own (with tests and an entry in `runners.md`), on the
+campaign's skeleton of §9 item 11: its draw (C10's `draw_round`), its speaking (8 draws of each window, the first pass
+with no branch), the kept sentences (the best landed one of each window), its pass (the loss of D165 through `one_pass`
+with the data term and the pull), C10's selection readout, resume, the start (D162). Its campaign schema name is its
+own; its checkpoints `ts-post-checkpoint-v1` with the method in the identity; `post_validation` and the Training export
+read its campaigns. Tests: a kept sentence is the best landed one (a tie, the lowest draw; a window with no landing
+gives nothing); the loss of a sentence is its words' log-likelihood; a campaign resumed is the campaign run through;
+D162's refusals hold for its start. About 120 lines and 100 of tests. The run: 6 rounds from round 8 of
+`post_train_20261006`, a seed other than 1337, C10's other settings, about 35 min a round; the data read-only after it.
 
 **C12. Close of stage C.** The full ts suite passes. The implementation log and `docs/reference/runners.md` are
 updated; the report gives the code index for §7 (outline §5 rule 10). Report to the user: the commits, the rounds and
