@@ -50,7 +50,11 @@ they start with `4dTrajectory/` or `.claude/`.
   <the user's>`, a seed other than 1337) → MC5's profile at the formal size (time of a batch and a round, memory with N
   speaking workers, the spread of round 0's W per aircraft for the select set's size) → the user's settings → MC6 from a
   run worktree at the merged commit (outline D163) → MC7 by fronter → version 2 (MC8, MC9) → MC10.
-- **Waiting for the user**: O16; requests items 19, 22, 29–35 (decided: 6, 7, 21, 25).
+- **O16 decided by the user (2026-10-07)**: several spans L mixed, the windows of one L in one batch (no serial speaking);
+  real and compressed (c_min 0.8) windows; 1000 of each kind a round (requests item 36). D146 changes: the designer
+  writes it first; then stage D builds it (multi_train's draw, batches by L, select set and identity by span), then
+  MC4's smoke.
+- **Waiting for the user**: requests items 19, 22, 29–35 (decided: 6, 7, 21, 25, O16).
 - **Left running from earlier**: the test stack of stage B's browser check from `.claude/worktrees/two-tier-v4`
   (vite 5185, backend 8795; stop: `kill $(lsof -t -iTCP:5185 -sTCP:LISTEN) $(lsof -t -iTCP:8795 -sTCP:LISTEN)`).
 - **Scratch results kept** (`/tmp/claude-1000/`): `d73/` (the D73 checks' records), `d149/` (the real-window check's

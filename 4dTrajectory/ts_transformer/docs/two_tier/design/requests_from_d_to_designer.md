@@ -6,7 +6,7 @@ until the user decides. Paths are relative to `4dTrajectory/ts_transformer/`.
 
 State: 2026-10-07: MC0 (stages A, B, C), MC1, MC2 and MC3 built on `dev-multi-control` (fd720c75), MC4's first part in
 review; nothing run on real data yet. Decided by the user 2026-10-07: items 6, 7, 21, 25 (built: ac919f9c; 21 and 25 as
-written). Items 19, 22 and 29–35 wait for the user.
+written). O16 decided by the user (2026-10-07, item 36: its D146 change for the designer). Items 19, 22 and 29–35 wait for the user.
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -198,3 +198,24 @@ written). Items 19, 22 and 29–35 wait for the user.
     no landed runway, so it never judges one (a stated limit). A loss in which the landed aircraft itself is the
     responsible one (only where the other is at or past its own threshold) could still read `records_kept` (S3, far
     below 0.1 % of steps).
+
+## O16 · decided by the user (2026-10-07), after MC1's census (stage D's log §10)
+
+36. **The windows of stage D: several spans L, batched by L** (the user: "mix L, 但是在设计的时候，最好同L同批次，总之要考虑到批量
+    加速 不要搞出串行"; kinds: real and compressed with c_min 0.8; 1000 windows of each kind a round). L is a setting of the
+    training data only: the model reads no L, and a window has no length in the loop (it ends when every commanded
+    aircraft is done or silent), so any span can be flown; the mix gives the training windows of several sizes. This
+    changes D146 ("L is a setting", one L a campaign) — **for the designer to write first** (D146, §3.1, §7 rows 3–4,
+    §8, MC4). Claude's readings of what the user left open, as proposals:
+    - **The spans**: L ∈ {5, 10, 20} min (MC1's census measured them; L = 0 is stage C's window and stays out); each
+      kind's 1,000 windows of a round in equal parts of the spans, the span of each window drawn with the round's numbers
+      (D146's draw: the train's anchors in a permutation, each anchor's window of its L), a shortfall of a span recorded.
+    - **The batches** (the user's rule): the windows of one batch have one L (`post_train.batches` per L: a batch commands
+      each flight once, as now), so a batch's rows and ticks are alike and the speaking stays one call of the network a
+      tick; the batches of one L are spoken in turn and in parallel by the speaking workers as now — nothing serial
+      beyond today's.
+    - **The select set** (§5 item 2) and the validation readout: windows of each span (the readouts by airport, kind and
+      span), so the gain is read for each size; the round's criterion (D7) is the user's.
+    - **The identity** (§7 row 3): the spans and their counts in place of one L; the campaign's settings hold the spans.
+    - **The cost**: a round's speaking between L = 5 min and L = 20 min (p90 3 and 7 commanded aircraft a window); MC5
+      measures it at the formal size, per span.
