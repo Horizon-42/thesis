@@ -230,7 +230,7 @@ def test_a_round_of_stage_d_from_a_round_of_stage_c_end_to_end(setup, tmp_path, 
     shaped, _ = stage.start_model(context, settings)
     assert shaped.state_dict().keys() == model.state_dict().keys()                     # what a resume loads into
     out = tmp_path / "stage_d"
-    options = dict(schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER)
+    options = dict(schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER, settings_type=MultiSettings)
 
     def inputs(rounds):
         paths = {key: str(tmp_path / "inputs" / key) for key in post_train.INPUT_PATHS}
@@ -317,7 +317,7 @@ def test_stage_ds_round_with_speaking_workers_is_the_round_of_one_process(setup,
                         lambda context, settings, rng: ([window], {"drawn": {REAL_KIND: 1}}))
     stage = stage_d()
     settings = _multi_settings(start=start)
-    options = dict(schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER)
+    options = dict(schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER, settings_type=MultiSettings)
     records = []
     for name, workers in (("here", 0), ("there", 2)):
         out = tmp_path / name
@@ -482,14 +482,16 @@ def test_the_runner_records_stage_ds_campaign_and_opens_its_context_formal_or_sm
             "1e-3", "--weight-decay", "0", "--update-groups", "1", "--data-sentences", "1", "--select-per-airport", "1",
             "--windows-real", "1", "--windows-compressed", "0", "--start-campaign", str(tmp_path / "c"),
             "--start-round", "0", "--device", "cpu"]
-    monkeypatch.setattr(multi_train, "MultiSettings", lambda *values: (calls.append(("spans", values[2])),
-                                                                        MultiSettings(*values))[1])
+    settings_from = multi_train.settings_from
+    monkeypatch.setattr(multi_train, "settings_from", lambda args, start: (calls.append(("spans", args.spans_s)),
+                                                                            settings_from(args, start))[1])
     for extra, formal in (([], True), (["--smoke"], False)):
         calls.clear()
         assert multi_train.main(argv + extra) == 0
         assert calls == [("start_of", formal)] + [("finished", tmp_path / "c")] * formal + [
             ("spans", [300.0, 600.0]), ("context", formal), ("start", start),
-            ("campaign", {"schema": MULTI_CAMPAIGN_SCHEMA, "reader": MULTI_CLAIM_READER}), ("run", True)]
+            ("campaign", {"schema": MULTI_CAMPAIGN_SCHEMA, "reader": MULTI_CLAIM_READER,
+                          "settings_type": MultiSettings}), ("run", True)]
 
 
 def test_the_time_the_aircraft_take(built):
@@ -566,7 +568,7 @@ def test_a_round_of_stage_d_is_refused_unless_its_identity_is_the_campaigns(setu
     settings = _multi_settings(start=start)
     out = tmp_path / "stage_d"
     post_train.open_campaign(out, {"settings": asdict(settings)}, {"head": "x", "dirty": False}, {},
-                             schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER)
+                             schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER, settings_type=MultiSettings)
     post_train.run_campaign(out, settings, context, stage=stage_d())
     assert not multi_train.round_model(context, settings, out, 0).training
     for wrong in (replace(settings, seed=7), replace(settings, spans_s=[60.0]), replace(settings, spans_s=[1.0, 60.0], batch_rows=[2, 2]),
@@ -612,9 +614,9 @@ def test_the_workers_are_sized_from_the_profile_and_the_memory_free_now(tmp_path
     with pytest.raises(SystemExit, match=r"do not fit \(O15, from the profile\): host"):
         multi_train.profiled_fit(profile, settings, inputs, 4, cuda)            # 4 × 2.5 = 10 > 8 GiB
     monkeypatch.setattr(multi_train, "available_memory", lambda device: {"host": 16 * gib, "gpu": 5 * gib})
-    # 4 workers fit by workers_fit (speaking 4 × 1.25 = 5, the pass 3 + 4 × 0.5 = 5 ≤ 5), but a worker's share
-    # (5 − 0.5) / 4 = 1.125 GiB is below its peak and readout model, 1.25 GiB: refused by the share alone
-    with pytest.raises(SystemExit, match=r"profile\): gpu: a worker's share 1.12 GiB is below its profiled peak"):
+    # the workers speak beside what this process holds after a pass (D167's form, subtracted once): 4 × 1.25 = 5 GiB
+    # against 5 − 0.5 = 4.5 refused, where the pass alone (3 + 4 × 0.5 = 5 ≤ 5) fits
+    with pytest.raises(SystemExit, match=r"profile\): gpu: 4 workers speaking need 5.0 GiB .* 4.5 GiB available"):
         multi_train.profiled_fit(profile, settings, inputs, 4, cuda)
     monkeypatch.setattr(multi_train, "available_memory", lambda device: {"host": 8 * gib, "gpu": 5 * gib})
     for other, named in ((replace(settings, batch_rows=[32, 48]), "batch_rows"), (replace(settings, spans_s=[300.0, 1200.0]),

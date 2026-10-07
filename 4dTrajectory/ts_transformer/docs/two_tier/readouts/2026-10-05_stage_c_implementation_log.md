@@ -1156,3 +1156,121 @@ reads C10 as its start.
 - C10's record edit would make its older code fail by name when it reads C10's settings.
 - When it ends: C10's record edit, `dev-two-tier` fast-forwarded, the run worktree, the launch.
 
+**C17's run (2026-10-07).**
+- Launched 08:18 from `run-post-landed` (`61e718ba`), CPU, 16 workers; O15 measured one worker at 0.70 GB.
+- Round 0 ended 09:07: speaking 22 min, the pass on one CPU thread about 23 min. Landed 84.2 %, lost separation 12.9 %,
+  mean reward 0.835. 3,646 windows kept; 78.4 % of the draws landed.
+- Round 1 ended 09:48: 84.5 %, 12.2 %, 0.838. 3,701 windows kept; 80.8 % of the draws landed.
+- Round 2's speaking ended 10:07. The process was then killed in round 2's pass, with no error and no out-of-memory
+  kill. The shells ran inside the GNOME Terminal tab's systemd scope (`vte-spawn-….scope`), and when the previous
+  Claude Code session's terminal closed, systemd stopped the scope and every process in it; `nohup setsid` changes the
+  session, not the cgroup.
+- Resumed at 11:52 with the same command, now in a systemd user unit of its own (`systemd-run --user`, unit
+  `post-landed-115211`, its cgroup checked). The half round is moved aside by `open_campaign`. The first run's log is
+  kept as `campaign_1.log`.
+- Round 2 rerun ended 12:39 (84.8 %); round 3 ended 13:21 (85.1 %). The user's rule, 2026-10-07: if this round is
+  still flat, stop. My reading of "flat": below the start's 85.7 % plus the readout's noise, 86.9 %. A watcher in its
+  own systemd unit read round 3's readout after its checkpoint and stopped the campaign at 13:21:47. Round 4, just
+  begun, was moved aside as `round_4.aborted-…`.
+- Sealed: `logs/` (both runs' logs, the launch and the watcher), `SHA256SUMS` 78 files checked, read-only. The run
+  worktree was removed, its data links unlinked first.
+- Rounds 0–3 against the start (C10 round 8: 85.7 %, 11.7 %, 0.849): 84.2 / 84.5 / 84.8 / 85.1 % landed, 12.9 / 12.2 /
+  12.0 / 11.3 % lost separation. The table, the intent and my reading of why it did not help are in the experiment log,
+  `readouts/2026-10-07_stage_c_experiments.zh.md`, which also holds the next experiment: branch training with K = 16
+  (the user's priority, 2026-10-07; an experiment within the design, not a design change).
+
+## 30 C19 and C18: gradient clipping, the measure reused (2026-10-07)
+
+Built on `dev-two-tier-v4-post` after fast-forwarding it to `dev-two-tier` (`b849340f`), while the campaign with K = 16
+runs from its own run worktree (only the changed modules' tests, 2–3 processes, rule 13).
+
+**C19 (D168), `f3ce543f`.**
+- `Settings.clip_norm`, default None: not clipped, the code's behaviour before it. A record without the field reads as
+  None (the user's standing permission); no record is edited. `SETTINGS_ADDED` lists the settings with a default, and a
+  test pins it to the dataclass.
+- `post.loss.one_pass(..., clip_norm=)`: after an update's backward, the gradient's norm over the optimizer's parameters
+  (`torch.nn.utils.get_total_norm`, read-only); with a clip, `clip_grads_with_norm_` before the step (what
+  `clip_grad_norm_` does). Each update keeps its norm before the clip and whether it was clipped.
+- `round.json`'s `pass` gains `grad_norm_mean`, `grad_norm_max` and `grad_clipped_share`. They are recorded with no
+  clip too (share 0), so the norms of a campaign at the old setting show where a clip would act.
+- Stage C's pass reads the setting through its stage (`STAGE_C`, `STAGE_C_LANDED`). The skeleton's default pass, which
+  stage D's campaign uses, clips nothing: its `MultiSettings` has no such field (D168: stage D takes the defaults).
+- `open_campaign` compares the recorded settings as the stage's settings class reads them (`settings_type`). Without
+  this, an old record (no `clip_norm`) would differ from a resume's settings (`clip_norm: None`). Stage D's runner and
+  its tests pass `MultiSettings` (a one-word change in `multi_train.py` and its tests).
+- Tests: with None the pass is the loop before D168 bit for bit; below every norm each stepped gradient has the clip's
+  norm and every update is counted clipped; above every norm the pass is the unclipped one bit for bit; an old record
+  opens with the default and resumes with it, another value refused by name, and the reverse; stage C hands its setting
+  to `one_pass`, stage D's pass hands None.
+- Review (opus, independent): no S1. S2: `test_multi_validation` opened a stage D campaign without `settings_type`
+  (safe only because it never resumed) — fixed. S3: the stage D test now calls `stage_d()`. S3 noted: a record that
+  lacks an older required field now stops with a TypeError rather than "other settings" (no live record does: the four
+  records under `POOLED/post` were checked by the reviewer; only `post_train_20261006.aborted-…` lacks fields).
+
+**C18 (D167), `364c2f4c`.**
+- The first launch with speaking workers measures (O15, `require_workers_fit`) and adds the measure to
+  `campaign.json`'s `measures`: the devices (the pass's and the workers'), the round, the time, the workers it admitted,
+  the worker's and the pass's measures, the memory free then.
+- A later launch takes the newest measure on its devices. When that measure admitted at least as many workers, it is
+  read before this process uses the GPU, and only the memory free now is checked (`workers_fit(held_now=False)`, the
+  form of stage D's branch: the workers' and the pass's whole peaks, the workers on the GPU beside what this process
+  holds after a pass). Workers that do not fit are refused by name, naming the measure. Otherwise it measures again.
+- My reading of D167's "more workers than the measure allows": more than the measure was checked for and admitted. A
+  record without `measures` (every campaign so far, the one with K = 16 included) measures at its next launch.
+- Each launch's entry (the record itself for the first launch, `resumed[-1]` for a resume) names the measure it read:
+  `fit` = its place in `measures`, whether it measured, the workers, the memory read; None without workers or with no
+  round left.
+- `main` now moves the context to the GPU after the recorded fit is read (inside `try`, so the workers are closed on a
+  refusal).
+- APPROXIMATION, stated in `workers_fit`: with nothing held yet, the host's free memory is read before this process
+  starts CUDA, so its own host memory for CUDA (a few hundred MB, not measured) is not taken out.
+- Tests: the arithmetic with nothing held (the speaking line on the GPU deciding too); the newest measure on the
+  devices, more workers, other devices, a record from before D167, a refusal naming the measure; through the runner:
+  measured once, read on a resume, measured again for more workers, none without workers, a record without measures
+  measures, the free memory read before the move.
+- Review (opus, independent): S2, fixed: on a resume the workers on the GPU were checked without what this process
+  holds after a pass. S3: the host approximation now stated; the order in `main` pinned by a test.
+- Merge note for stage D: `dev-multi-control` changes `workers_fit` the same way (`held_now`), but its pass line has no
+  guard for workers on the CPU (`--speak-device`, `ac455d2e`). The merge keeps the guard; its `profiled_fit` already
+  takes `passed["now"]` out of the GPU share.
+
+`dev-two-tier-v4-post` (`364c2f4c`) fast-forwards `dev-two-tier`; the user merges. C20 (D169) follows the campaign
+with K = 16.
+
+**The runs after C18 (2026-10-07).**
+- The campaign with K = 16 (`post_branch16_20261007`) stopped after round 3 on the user's word: 84.4 / 84.9 / 85.8 /
+  85.1 % landed, no large change against the start's 85.7 %. Round 4, just begun, moved aside (`round_4.aborted-…`);
+  sealed (`logs/`, `SHA256SUMS` 12 files, read-only); its run worktree removed.
+- The user then chose the next experiment (candidate 3a: the prior's learning rate 3e-5, the traffic modules' 3e-4,
+  `--clip-norm 1.0`, K = 8, from C10's round 8, seed 2026) and allowed the fast-forward of `dev-two-tier` to
+  `dev-two-tier-v4-post` (`704879d7`). Launched 16:00 local from `run-post-lr3` in the systemd unit `post-lr3-160054`.
+- Intents and results: `readouts/2026-10-07_stage_c_experiments.zh.md` (experiments 2 and 3); `intents.json`.
+
+**C20 (D169), `2e2e860f`, merged into `dev-two-tier` on the user's word ("审完测完直接合并").**
+- `Settings.epochs`, default 1 (a record without it reads as 1; none edited); `SETTINGS_ADDED` = clip_norm, epochs.
+- `post.loss.passes`: E passes, one `PassStart` (the model at the round's start) for all, each pass's updates drawn
+  lazily from its own iterable (a pass's groups are loaded only when it runs); `one_pass` is a pass of it.
+- `pass_orders`: the first pass reads the round's numbers (`[seed, round, 1]`, so E = 1 is the pass before, bit for
+  bit); pass e ≥ 1 `default_rng([seed, round, 1, 1 << 31, e])`. The reviewer found that `Generator.spawn` children
+  would have equalled a continuation's key (`[seed, round, 1, 0, k]`, branch 0, never drawn); the explicit key avoids it.
+- `round.json`'s pass: the means over every pass and `passes` (each pass's); the landed method renames each alike.
+  Nothing reads `round.json["pass"]` (the reviewer's search: backend, exports, readouts).
+- Stage D keeps one pass (the skeleton's default `train_pass`, epochs 1).
+- `--epochs` (default from `Settings`).
+- Tests: two passes share one frozen `PassStart` and draw in order; the pass orders (the first the round's, the later
+  ones their own, no continuation's key); stage C hands epochs and clip, stage D one pass, no clip; a record without
+  `epochs` opens and resumes as 1, 2 refused; the pass record over two passes, branch and landed.
+- Review (opus, independent): no S1, no S2; four S3 fixed (above, and a test that compared `one_pass` with itself).
+- Found while testing: `test_post_generalised`'s campaign digest had failed since `ac455d2e` (`--speak-device`), whose
+  test run left that file out: `round.json` gained `speak_device`. The digest now leaves out the information keys added
+  since (`speak_device`, the gradient norms, `passes`), and with them out it is the digest recorded before the
+  skeleton: models and optimizers unchanged bit for bit. A lesson for me: the generalisation test runs with every
+  change to `round.json`.
+- The pass's rng `[seed, round, 1]` is the same stream as `first_numbers(seed, round, window=1)` (the reviewer's note,
+  older than C20). The two read different things (a shuffle and a data draw, a sentence's words), so no result is
+  affected; a key apart would change every campaign's numbers, so I leave it as it is and note it here.
+
+**The larger-learning-rate campaign (`post_lr3_20261007`) ended 17:39 local**, 6 rounds, exit 0: landed 85.8 / 85.6 /
+84.9 / 85.6 / 85.4 / 84.4 % against the start's 85.7 %; KL 0.040 → 0.051; the ratio's clip 1.2–1.45 % of the words;
+29–43 % of the updates clipped at the gradient norm 1.0. Sealed (`logs/`, `SHA256SUMS` 15 files, read-only); the run
+worktree removed. C18's first measure is in its `campaign.json`. Table and my reading: the experiment log, experiment 3.

@@ -9,7 +9,8 @@ into the interfaces).
 
 State: 2026-10-07: MC0–MC4 merged into `dev-two-tier` (b967d2b1); the windows of several spans (D146) and D166
 item 19 built and reviewed on `dev-multi-control` (6cc49ad1, items 37–43); MC4's smoke passed; MC5's runner
-committed (bd6dd1be, items 44–45), its profile at the formal size running.
+committed (bd6dd1be, items 44–45); its profile read (one worker fits at 64 rows); the user's decisions after it
+built (fffe900d, items 46–48); dev-two-tier merged in (ea9d5217).
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -153,4 +154,15 @@ committed (bd6dd1be, items 44–45), its profile at the formal size running.
     independent numbers: an upper bound of the noise of comparing two rounds, which share their numbers. Over all spans
     the unit is an anchor (its windows of the spans are nested and share their aircraft); within a span, windows of
     other anchors may still share flights in a dense select set (stated).
+46. **Decided (the user, 2026-10-07), for the designer to write into §11 MC5 and post-training O15**: a campaign of
+    stage D sizes its speaking workers from its profile (`multi_train.profiled_fit`, `--profile`): the profile's measure
+    of one worker and of the pass and the memory free now, refused by name for a profile of other inputs or of other
+    settings that set the memory (`PROFILED_SETTINGS`: the counts, spans, c_min, batch rows, K, update groups, data
+    sentences, select windows), and each worker's GPU capped at its share. Nothing is measured before a run. Stage C's
+    campaign still measures before its rounds (O15 as written): whether it reads a profile too is the user's to say.
+47. **Decided (the user, 2026-10-07)**: one batch size a span (`MultiSettings.batch_rows`, one number a span; 64 / 48 /
+    24 rows for 5 / 10 / 20 min): a batch's GPU memory grows with its ticks as well as its rows (MC5's profile: one
+    batch of 64 rows peaked at 1.4, 1.9 and 3.6 GiB).
+48. **Decided (the user, 2026-10-07)**: the profile speaks each span's batch once (in the worker whose memory it
+    measures; in its own process only without workers).
 

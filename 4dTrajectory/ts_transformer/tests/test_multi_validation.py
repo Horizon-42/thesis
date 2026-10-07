@@ -12,7 +12,7 @@ import pytest
 
 from ts_transformer.experiments import multi_train, post_train
 from ts_transformer.experiments import multi_validation as validation
-from ts_transformer.experiments.multi_train import MULTI_CAMPAIGN_SCHEMA, MULTI_CLAIM_READER, stage_d
+from ts_transformer.experiments.multi_train import MULTI_CAMPAIGN_SCHEMA, MULTI_CLAIM_READER, MultiSettings, stage_d
 from ts_transformer.multi.windows import REAL_KIND
 from ts_transformer.tests.test_multi_train import _multi_settings
 from ts_transformer.tests.test_post_branches import _ahead
@@ -42,7 +42,7 @@ def campaign(setup, tmp_path, monkeypatch):  # noqa: F811
                   "executor": str(tmp_path / "executor"), "windows": str(tmp_path / "census"),
                   "procedure_root": str(tmp_path / "cifp"), "settings": asdict(settings), "smoke": False}
         post_train.open_campaign(out, inputs, {"head": "x", "dirty": False}, {}, schema=MULTI_CAMPAIGN_SCHEMA,
-                                 reader=MULTI_CLAIM_READER)
+                                 reader=MULTI_CLAIM_READER, settings_type=MultiSettings)
         post_train.run_campaign(out, settings, context, stage=stage_d())
     assert post_train.done_rounds(out) == 1
     asked = []

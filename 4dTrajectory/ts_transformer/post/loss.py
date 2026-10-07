@@ -33,12 +33,21 @@ words and divided by the counted rows of the WHOLE update, and its backward take
 whole update's (to float rounding: the sums are added in another order) while the memory is a piece's, whatever the
 longest group of the round. The data term is one piece (its dropout would draw other masks if cut). `update_loss`, the
 whole update at once, is the readable reference `update_step` is checked against.
+
+**Gradient-norm clipping** (D168, `one_pass`'s ``clip_norm``): each update's gradient, over the optimizer's
+parameters, is scaled to that norm where its norm is above it, before the optimizer's step
+(`torch.nn.utils.clip_grads_with_norm_`, as `torch.nn.utils.clip_grad_norm_`). Every update's norm before the clip is
+kept (`LossParts.grad_norm`), clipped or not; with ``clip_norm`` None no gradient is touched (the pass before D168).
+
+**Passes per round** (D169, `passes`): E passes over a round's samples, each drawn in its own order by the caller, the
+ratio of every pass against the same `PassStart` (the model that spoke the samples, at the round's start), the clip of
+the ratio unchanged; one pass is `one_pass`.
 """
 
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable, Iterable, Sequence
 
 import torch
@@ -86,7 +95,9 @@ class Samples:
 
 @dataclass(frozen=True)
 class LossParts:
-    """One update's loss and its parts (each a scalar tensor), the words counted and those whose ratio left the clip."""
+    """One update's loss and its parts (each a scalar tensor), the words counted and those whose ratio left the clip;
+    after `one_pass`'s step, the norm of its gradient before the clip of D168 and whether it was clipped (None and False
+    from a step alone)."""
 
     loss: torch.Tensor
     surrogate: torch.Tensor
@@ -94,6 +105,8 @@ class LossParts:
     data: torch.Tensor
     words: int
     clipped: int
+    grad_norm: torch.Tensor | None = None
+    grad_clipped: bool = False
 
 
 class PassStart:
@@ -236,26 +249,53 @@ def landed_step(model: Prior, start: PassStart, base: Prior, pieces: Sequence[Sa
 
 
 def one_pass(model: Prior, base: Prior, optimizer: torch.optim.Optimizer,
-             pairs: Iterable[tuple[Sequence[Samples], RowTensors]], step: Callable[..., LossParts] = update_step
-             ) -> list[LossParts]:
+             pairs: Iterable[tuple[Sequence[Samples], RowTensors]], step: Callable[..., LossParts] = update_step,
+             clip_norm: float | None = None) -> list[LossParts]:
     """One pass over a round's samples (§2 item 5): the model at the start of the pass is the one that spoke them;
     each update's samples, in pieces (``step``: `update_step`, or `landed_step` for P49), paired with a batch of the
     data term, drawn from ``pairs`` one at a time (a round's samples need not be held at once); one optimizer step for
-    each. The parts of each update, detached."""
+    each, its gradient clipped to ``clip_norm`` first (D168; None: not clipped). The parts of each update, detached,
+    with its gradient's norm before the clip."""
+    return passes(model, base, optimizer, [pairs], step, clip_norm)[0]
+
+
+def passes(model: Prior, base: Prior, optimizer: torch.optim.Optimizer,
+           each: Sequence[Iterable[tuple[Sequence[Samples], RowTensors]]], step: Callable[..., LossParts] = update_step,
+           clip_norm: float | None = None) -> list[list[LossParts]]:
+    """E passes over a round's samples (D169; E = ``len(each)``): the model at the start of the first is the one that
+    spoke them, and every pass's ratio is against it (one `PassStart`); pass e's updates drawn from ``each[e]`` (its own
+    order), each as `one_pass`'s. The parts of each pass's updates."""
     start = PassStart(model)
+    parameters = [p for group in optimizer.param_groups for p in group["params"]]
+    return [_updates(model, start, base, optimizer, parameters, pairs, step, clip_norm) for pairs in each]
+
+
+def _updates(model: Prior, start: PassStart, base: Prior, optimizer: torch.optim.Optimizer,
+             parameters: Sequence[torch.nn.Parameter], pairs: Iterable[tuple[Sequence[Samples], RowTensors]],
+             step: Callable[..., LossParts], clip_norm: float | None) -> list[LossParts]:
+    """One pass's updates against ``start`` (`one_pass`)."""
     out = []
     for pieces, rows in pairs:
         optimizer.zero_grad(set_to_none=True)
-        out.append(step(model, start, base, pieces, rows))
+        parts = step(model, start, base, pieces, rows)
+        norm = torch.nn.utils.get_total_norm([p.grad for p in parameters if p.grad is not None])
+        clipped = clip_norm is not None and bool(norm > clip_norm)
+        if clip_norm is not None:
+            torch.nn.utils.clip_grads_with_norm_(parameters, clip_norm, norm)
+        out.append(replace(parts, grad_norm=norm.detach(), grad_clipped=clipped))
         optimizer.step()
     return out
 
 
 def stacked(parts: Sequence[LossParts]) -> dict[str, float]:
-    """The means of a pass's parts and its share of clipped words (for its log)."""
+    """The means of a pass's parts, its share of clipped words, its updates' gradient norms before the clip (mean and
+    largest) and the share of its updates clipped (D168; for its log)."""
     words = sum(p.words for p in parts)
+    norms = torch.stack([p.grad_norm for p in parts])
     return {"loss": float(torch.stack([p.loss for p in parts]).mean()),
             "surrogate": float(torch.stack([p.surrogate for p in parts]).mean()),
             "kl": float(torch.stack([p.kl for p in parts]).mean()),
             "data": float(torch.stack([p.data for p in parts]).mean()),
-            "words": words, "clipped_share": sum(p.clipped for p in parts) / words}
+            "words": words, "clipped_share": sum(p.clipped for p in parts) / words,
+            "grad_norm_mean": float(norms.mean()), "grad_norm_max": float(norms.max()),
+            "grad_clipped_share": sum(p.grad_clipped for p in parts) / len(parts)}

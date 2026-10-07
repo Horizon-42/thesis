@@ -452,13 +452,10 @@ def profiled_fit(profile: Path, settings: MultiSettings, inputs: dict[str, Any],
                          f"(multi_profile)")
     available = available_memory(device)
     short = workers_fit(workers, measured, passed, available, held_now=False)
-    budget = None if passed is None else (available["gpu"] - passed["now"]) // workers
-    if budget is not None and budget < measured["gpu"]["peak"] + measured["held"]["reader_model"]:
-        short.append(f"gpu: a worker's share {budget / 2**30:.2f} GiB is below its profiled peak and readout model "
-                     f"{(measured['gpu']['peak'] + measured['held']['reader_model']) / 2**30:.2f} GiB")
     if short:
         raise SystemExit("the speaking workers do not fit (O15, from the profile): " + "; ".join(short)
                          + " — start fewer (--speak-workers)")
+    budget = None if passed is None else (available["gpu"] - passed["now"]) // workers   # at least its peak: fitted
     return {"profile": str(profile), "speak_workers": workers, "available": available, "gpu_budget": budget}
 
 
@@ -608,7 +605,8 @@ def main(argv: list[str] | None = None) -> int:
         speakers = Speakers(context, settings, args.speak_workers, device, stage=stage, gpu_budget=fit["gpu_budget"])
     context = replace(context, device=device, base=context.base.to(device).eval())
     try:
-        open_campaign(out, inputs, git, opened["checks"], schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER)
+        open_campaign(out, inputs, git, opened["checks"], schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER,
+                      settings_type=MultiSettings)
         run_campaign(out, settings, context, speakers, stage=stage)
     finally:
         if speakers is not None:

@@ -1699,9 +1699,17 @@ checkpoint.
   `--start-round`; D162: a seed other than the source's).
 - A resume continues from the last checkpoint and may raise `--rounds` (D157).
 - `--speak-workers` speaks the batches in worker processes, measured against the host's and the GPU's memory before
-  the first round (O15).
+  the first round (O15). The measure is kept in `campaign.json` (`measures`); a later launch on the same devices with
+  at most the workers it admitted reads it and checks only the memory free now (seconds, D167, C18); a record without
+  one, or more workers, measures again. Each launch's entry names the measure it read (`fit`).
 - `--select-seed`: the selection readout's windows and numbers, apart from `--seed` (C10's: 1337), so that a campaign
   from a round reads its source's select windows.
+- `--clip-norm` (D168, C19): each update's gradient clipped to that norm before the optimizer's step; left out, not
+  clipped (the behaviour before it; a record without the setting reads so). `round.json`'s pass gives the updates'
+  gradient norms before the clip (mean, largest) and the share clipped.
+- `--epochs` (D169, C20): the passes over a round's groups (default 1, the behaviour before it), each in its own order
+  (the first the round's numbers, the others children of them), every pass's ratio against the model at the round's
+  start; `round.json`'s pass gives the means over every pass and each pass's (`passes`).
 - A clean tree unless `--smoke`; formal runs from a detached run worktree (D163).
 - Writes `campaign.json` (`ts-post-train-v1`) and, for each round, `round.json` and `checkpoint.pt`
   (`ts-post-checkpoint-v1`).
