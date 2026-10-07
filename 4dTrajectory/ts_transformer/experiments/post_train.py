@@ -533,6 +533,7 @@ class Speakers:
                                         initializer=_initialise_speaker)
         list(self.pool.map(_started, range(workers)))         # every worker forked now, before the GPU is used
         self.workers = workers
+        self.device = device
         self.readings = 0
 
     def speak(self, model: Prior, windows: Sequence[Window], places: Sequence[Sequence[int]], round_: int,
@@ -829,7 +830,8 @@ def workers_fit(workers: int, measured: Mapping[str, Any], passed: Mapping[str, 
                        f"{measured[name]['peak'] / 2**30:.2f} GiB and {besides[name] / 2**30:.2f} GiB held in a round), "
                        f"{have / 2**30:.1f} GiB available")
     if passed is not None:
-        each = measured["gpu"]["now"] + reader["gpu"]
+        # a worker on the CPU (``--speak-device cpu`` beside a pass on the GPU) holds nothing of the GPU
+        each = (measured["gpu"]["now"] if measured["gpu"] is not None else 0) + reader["gpu"]
         need = passed["peak"] - passed["now"] + (workers - 1) * each + reader["gpu"]
         if need > available["gpu"]:
             out.append(f"gpu: the pass beside {workers} workers needs {need / 2**30:.1f} GiB more (its peak "
@@ -1224,6 +1226,7 @@ def run_campaign(out: Path, settings: Settings, context: Context, speakers: Spea
         write_json_atomic(directory / "round.json", {
             "round": round_, "git": git_state(), "finished_utc": utc_now(), "draw": drawn,
             "speak_workers": speakers.workers if speakers is not None else 1,         # information (`Speakers`)
+            "speak_device": str(speakers.device if speakers is not None else context.device),      # information
             "windows": [stage.record(w) for w in windows], "speaking": spoken,
             "groups_bytes": sum(p.stat().st_size for p in written), "pass": passed, "selection_readout": readout})
         torch.save({"model": model.state_dict(), "optimizer": optimizer.state_dict(),
@@ -1270,10 +1273,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--speak-workers", type=int, default=1,
                         help="processes that speak a round's batches in parallel (Speakers; the same results)")
+    parser.add_argument("--speak-device",
+                        help="the speaking workers' device (default: --device); e.g. cpu beside a pass on cuda")
     parser.add_argument("--smoke", action="store_true", help="SMOKE: a tree with changes too; no result")
     args = parser.parse_args(argv)
     if args.speak_workers < 1:
         parser.error("--speak-workers is at least 1")
+    if args.speak_device is not None and args.speak_workers == 1:
+        parser.error("--speak-device is the speaking workers' device: it needs --speak-workers 2 or more")
+    if (args.speak_device is not None and torch.device(args.speak_device).type == "cuda"
+            and torch.device(args.device).type != "cuda"):
+        parser.error("--speak-device cuda needs --device cuda (the workers' memory is read against the campaign's GPU)")
     if (args.start_campaign is None) != (args.start_round is None):
         parser.error("--start-campaign and --start-round go together")
     start = None
@@ -1303,7 +1313,9 @@ def main(argv: list[str] | None = None) -> int:
     if settings.start is not None:      # refused by name before the workers and campaign.json (D162)
         campaign_start(context, settings)
     stage = STAGES_C[settings.method]
-    speakers = Speakers(context, settings, args.speak_workers, device, stage=stage) if args.speak_workers > 1 else None
+    speak_device = torch.device(args.speak_device or args.device)
+    speakers = (Speakers(context, settings, args.speak_workers, speak_device, stage=stage) if args.speak_workers > 1
+                else None)
     context = replace(context, device=device, base=context.base.to(device).eval())
     inputs = {"prior": str(prior_dir), "instructions": str(instructions), "executor": str(executor),
               "windows": str(census), "procedure_root": str(procedure_root), "settings": asdict(settings),

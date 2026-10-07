@@ -256,6 +256,7 @@ def test_the_runner_hands_the_method_s_stage_to_the_workers_and_the_campaign(tmp
 
         def __init__(self, context, settings, workers, device, *, stage):
             handed["speakers"] = stage
+            handed["speak_device"] = device
 
         def close(self):
             pass
@@ -278,4 +279,25 @@ def test_the_runner_hands_the_method_s_stage_to_the_workers_and_the_campaign(tmp
             "--speak-workers", "2", "--device", "cpu"]
     argv += [x for kind in KINDS for x in (f"--windows-{kind.lower()}", "1")]
     assert post_train.main(argv) == 0
-    assert handed == {"speakers": STAGE_C_LANDED, "campaign": STAGE_C_LANDED, "method": LANDED_SENTENCES}
+    assert handed == {"speakers": STAGE_C_LANDED, "campaign": STAGE_C_LANDED, "method": LANDED_SENTENCES,
+                      "speak_device": CPU}
+    # the workers' device apart from the campaign's: `--speak-device meta` reaches `Speakers`, the campaign stays on the
+    # CPU (a device that is neither, so that the test tells the two apart)
+    handed.clear()
+    (tmp_path / "campaign").rename(tmp_path / "first")
+    assert post_train.main(argv + ["--speak-device", "meta"]) == 0 and handed["speak_device"] == torch.device("meta")
+    with pytest.raises(SystemExit):                                     # workers' device without workers
+        post_train.main([a for a in argv if a not in ("--speak-workers", "2")] + ["--speak-device", "cpu"])
+    with pytest.raises(SystemExit):                                     # workers on the GPU, the campaign on the CPU
+        post_train.main(argv + ["--speak-device", "cuda"])
+
+
+def test_workers_on_the_cpu_beside_a_pass_on_the_gpu_hold_nothing_of_the_gpu():
+    """O15 with ``--speak-device cpu`` and a pass on the GPU: the workers' measure has no GPU part, and the pass needs
+    only its own growth (each worker holds 0 of the GPU)."""
+    measured = {"host": {"peak": 1 << 30, "now": 1 << 29}, "gpu": None,
+                "held": {"reader_model": 1 << 20, "series": 1 << 20}}
+    passed = {"peak": 3 << 30, "now": 1 << 30}
+    assert post_train.workers_fit(16, measured, passed, {"host": 64 << 30, "gpu": 2 << 30}) == []    # exactly the pass's
+    short = post_train.workers_fit(16, measured, passed, {"host": 64 << 30, "gpu": (2 << 30) - 1})
+    assert len(short) == 1 and short[0].startswith("gpu: the pass beside 16 workers")
