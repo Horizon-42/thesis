@@ -49,7 +49,11 @@ is claimed (P47: the round would then be chosen after the val days were read). T
 are compared as this checkout reads them (`inputs_here`: a campaign recorded in a worktree resumes from another
 checkout). Every random number of a round comes from the seed and the round (the draw, the speaking's, the data term's
 sentences and its dropout, `pass_seed`), so a resumed campaign is the campaign run through, a raised one the campaign
-of the larger count from its start. A START FROM A ROUND (``--start-campaign``, ``--start-round``;
+of the larger count from its start. THE LANDED SENTENCES (``--method landed``, P49; the user, 2026-10-07): instead of steps 3
+and 4's branch groups and clipped surrogate, each window is spoken `Settings.continuations` times (the first pass,
+`landed_numbers`), its landed sentence of the highest reward is kept (`speak_landed_batch`), and the pass learns the kept
+sentences' words (their negative log-likelihood, `post.loss.landed_step`) with the pull toward the base and the data
+term; the rest of a round is the same. A START FROM A ROUND (``--start-campaign``, ``--start-round``;
 `campaign_start`, D162): instead of the base with zero-output traffic modules (D29), the weights of a round of another
 campaign on the same base, its checkpoint's bytes recorded in the settings, with a seed other than its campaign's; a
 new optimizer, and the pull term toward the base either way. A formal campaign does not start from a smoke one.
@@ -92,9 +96,10 @@ from ts_transformer.instructions.artefact import closed_loop_sentences, load_spe
 from ts_transformer.instructions.faults import faulty_flights
 from ts_transformer.instructions.words import Words
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
-from ts_transformer.post.branches import CONTINUATIONS, Group, samples
+from ts_transformer.post.branches import CONTINUATIONS, Group, Landed, Sentence, landed_numbers, landed_samples, samples
 from ts_transformer.post.fault_census import fault_rows
-from ts_transformer.post.loss import Samples, one_pass, stacked
+from ts_transformer.post.loss import PassStart, Samples, landed_step, one_pass, stacked
+from ts_transformer.post.reward import LANDED
 from ts_transformer.post.runways import airport_separation
 from ts_transformer.post.scene import (
     INSERTED, LEADER_MOVED, MOVED_START, REAL, Window, inserted_window, leader_moved_window, moved_start_window,
@@ -113,6 +118,9 @@ from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 CAMPAIGN_SCHEMA = "ts-post-train-v1"
 POST_CHECKPOINT_SCHEMA = "ts-post-checkpoint-v1"
 KINDS = (REAL, INSERTED, LEADER_MOVED, MOVED_START)
+#: How a round trains (`Settings.method`): branch groups and the clipped surrogate (D94), or the landed sentences (P49).
+BRANCH, LANDED_SENTENCES = "branch", "landed"
+METHODS = (BRANCH, LANDED_SENTENCES)
 #: The paths among a campaign's inputs (``campaign.json``), read as this checkout reads them (`inputs_here`, D157).
 INPUT_PATHS = ("prior", "instructions", "executor", "windows", "procedure_root")
 #: The reader's name in the claim of a campaign's val read (prior D119; `post_validation`'s, named here so that a raise
@@ -122,7 +130,8 @@ CLAIM_READER = "post_validation"
 
 @dataclass(frozen=True)
 class Settings:
-    """What a campaign is: everything a resume must find the same."""
+    """What a campaign is: everything a resume must find the same. Under `LANDED_SENTENCES` (P49) ``continuations`` is
+    the draws of each window and ``update_groups`` the kept sentences of an update."""
 
     rounds: int
     per_kind: dict[str, int]
@@ -141,6 +150,14 @@ class Settings:
     #: modules (D29); or a round of another campaign on the same base — ``campaign`` (its directory, repo-relative),
     #: ``round`` and ``checkpoint_sha256`` (the bytes it started from).
     start: dict[str, Any] | None
+    #: How a round trains (`METHODS`): `BRANCH` (D94: branch groups, the clipped surrogate) or `LANDED_SENTENCES`
+    #: (P49: each window spoken ``continuations`` times, its best landed sentence learned; the user, 2026-10-07).
+    method: str
+    #: The seed of the selection readout's windows and random numbers (`selection_windows`, `read_batch`), apart from
+    #: the campaign's: a
+    #: campaign started from a round takes another seed (D162) and still reads the select windows and numbers of its
+    #: source (the user, 2026-10-07; C10's: 1337, as its seed).
+    select_seed: int
 
     def __post_init__(self) -> None:
         if set(self.per_kind) != set(KINDS) or min(self.per_kind.values()) < 0 or not any(self.per_kind.values()):
@@ -151,6 +168,8 @@ class Settings:
                              "are positive")
         if self.start is not None and set(self.start) != {"campaign", "round", "checkpoint_sha256"}:
             raise ValueError(f"a start is its campaign, round and checkpoint_sha256, not {sorted(self.start)}")
+        if self.method not in METHODS:
+            raise ValueError(f"method {self.method!r} is none of {METHODS}")
 
 
 @dataclass
@@ -289,6 +308,11 @@ class Stage:
     #: the width of the stage's token part beside the edge features (post-training §9 item 7; stage C's: none, 0), which
     #: the pass's samples read
     part_width: int
+    #: the pass of a round (``(model, context, optimizer, directory, settings, rng, part_width=)``) and this process's
+    #: memory in one update of it (``(context, settings, directory, stage)``, O15): branch training's, `train_pass` and
+    #: `pass_memory_of`, unless the stage names others (`STAGE_C_LANDED`: the landed sentences, P49)
+    train: Callable[..., dict[str, Any]] = lambda *args, **kwargs: train_pass(*args, **kwargs)
+    pass_memory: Callable[..., dict[str, Any] | None] = lambda *args: pass_memory_of(*args)
 
 
 def _stage_c_draw(context: Context, settings: Settings, round_: int) -> tuple[list[Window], dict[str, Any]]:
@@ -311,6 +335,15 @@ STAGE_C = Stage(start_model=lambda context, settings: start_model(context, setti
                 readout=lambda *args, stage: _stage_c_readout(*args, stage=stage),
                 record=lambda window: window_record(window),
                 speak_batch=lambda *args: speak_batch(*args), read_batch=lambda *args: read_batch(*args), part_width=0)
+#: Stage C's campaign that trains on the landed sentences (P49, `Settings.method` `LANDED_SENTENCES`): stage C's parts,
+#: but its batches spoken `Settings.continuations` times with their best landed sentences kept (`speak_landed_batch`),
+#: and its pass on them (`landed_train_pass`, its memory `landed_pass_memory`).
+STAGE_C_LANDED = replace(STAGE_C, speak_batch=lambda *args: speak_landed_batch(*args),
+                         train=lambda *args, **kwargs: landed_train_pass(*args, **kwargs),
+                         pass_memory=lambda context, settings, directory, stage: landed_pass_memory(context, settings,
+                                                                                                   directory))
+#: The stage of each of stage C's methods (`Settings.method`).
+STAGES_C = {BRANCH: STAGE_C, LANDED_SENTENCES: STAGE_C_LANDED}
 
 
 
@@ -394,26 +427,69 @@ def speak_batch(model: Prior, context: Context, windows: Sequence[Window], place
             "outcomes": dict(Counter(r.outcome for r in found.first))}
 
 
+def best_landed(drawn: Sequence[tuple[Sequence[WindowResult], Sequence[tuple[Any, Any, list[np.ndarray]]]]]
+                ) -> dict[int, Sentence]:
+    """Each window's kept sentence (P49) from its draws (``drawn[d]``: draw d's ends and its sentences for the loss,
+    `WindowLoop.samples`, both in the batch's order): its landed sentence of the highest reward, a tie the lowest draw;
+    a window with no landing of a reward above 0 keeps none (absent; a landing the reward scores 0, D105, is not
+    learned)."""
+    best: dict[int, Sentence] = {}
+    for ends, made in drawn:
+        for b, end in enumerate(ends):
+            if end.outcome == LANDED and end.reward > 0.0 and (b not in best or end.reward > best[b].reward):
+                best[b] = Sentence(*made[b], end.reward)
+    return best
+
+
+def speak_landed_batch(model: Prior, context: Context, windows: Sequence[Window], places: Sequence[int],
+                       settings: Settings, round_: int, directory: Path, k: int) -> dict[str, Any]:
+    """Batch ``k`` of a round of a campaign that trains on the landed sentences (P49): its windows spoken
+    `Settings.continuations` times (the first pass, no branch; draw d with `landed_numbers`), each window's landed
+    sentence of the highest reward kept (`best_landed`) and written to ``kept_<k>.pt``, and its record: the windows kept,
+    the landings over all draws, and draw 0's ends (its outcomes, rewards, faulty steps and losses near one; draw 0 is
+    the window's first sentence)."""
+    train = context.splits["train"]
+    batch = [windows[p] for p in places]
+    drawn = []
+    for draw in range(settings.continuations):
+        loop, order, observed = context.start_loop("train", batch)([w.signal_index for w in batch])
+        flown = WindowLoop(model, loop, order, batch, train["sentences"], train["flights"], context.geometries,
+                           context.rosters, context.finals, context.words, interval_s=context.interval_s,
+                           variant=context.variant, edges_reference=context.edges_reference, faults=train["faults"],
+                           observed=observed, device=context.device)
+        ends = flown.run([landed_numbers(settings.seed, round_, p, draw) for p in places])
+        drawn.append((ends, flown.samples("train")))
+    best = best_landed(drawn)
+    first = drawn[0][0]
+    landings = sum(end.outcome == LANDED for ends, _ in drawn for end in ends)
+    kept = [Landed(places[b], best[b]) for b in sorted(best)]
+    torch.save(kept, directory / f"kept_{k}.pt")
+    return {"kept": len(kept), "landings": landings,
+            "reward_sum": sum(r.reward for r in first), "faulty_steps": sum(r.faulty_steps for r in first),
+            "losses_reading_fault": sum(r.loss_reads_fault for r in first),
+            "outcomes": dict(Counter(r.outcome for r in first))}
+
+
 def speak_round(model: Prior, context: Context, windows: Sequence[Window], settings: Settings, round_: int,
                 directory: Path, speakers: Speakers | None = None, *, stage: Stage = STAGE_C) -> dict[str, Any]:
-    """Step 3 of a round (module docstring): every batch's two passes (``stage``'s `Stage.speak_batch`, stage C's
-    `speak_batch`), here or by ``speakers`` (the same groups and records: a batch reads only its windows' own random
-    numbers; refused unless they run ``stage``), its informative groups written, its first pass's ends counted; the
-    batches' records summed in batch order."""
+    """Step 3 of a round (module docstring): every batch spoken by ``stage``'s `Stage.speak_batch` (stage C's
+    `speak_batch`: its two passes and its informative groups; `STAGE_C_LANDED`'s `speak_landed_batch`: its draws and its
+    kept sentences, P49), here or by ``speakers`` (the same files and records: a batch reads only its windows' own random
+    numbers; refused unless they run ``stage``); the batches' records summed in batch order: each count, the list of
+    windows that differed, the outcomes."""
     _require_stage(speakers, stage)
     places = batches(windows, settings.batch_windows)
     parts = (speakers.speak(model, windows, places, round_, directory) if speakers is not None else
              [stage.speak_batch(model, context, windows, p, settings, round_, directory, k)
               for k, p in enumerate(places)])
-    record: dict[str, Any] = {"batches": 0, "groups": 0, "informative_groups": 0, "spoken_again": 0, "differed": [],
-                              "reward_sum": 0.0, "faulty_steps": 0, "losses_reading_fault": 0}
+    record: dict[str, Any] = {"batches": len(parts)}
     outcomes: Counter = Counter()
     for part in parts:
-        record["batches"] += 1
-        for key in ("groups", "informative_groups", "spoken_again", "differed", "reward_sum", "faulty_steps",
-                    "losses_reading_fault"):
-            record[key] += part[key]
-        outcomes.update(part["outcomes"])
+        for key, value in part.items():
+            if key == "outcomes":
+                outcomes.update(value)
+            else:
+                record[key] = record[key] + value if key in record else value
     return {**record, "windows": len(windows), "outcomes": dict(outcomes)}
 
 
@@ -703,6 +779,32 @@ def pass_memory_of(context: Context, settings: Settings, directory: Path, stage:
     return {"peak": peak, "now": _gpu_used(), "groups": measured["groups_written"]}
 
 
+def landed_pass_memory(context: Context, settings: Settings, directory: Path) -> dict[str, Any]:
+    """O15 for a campaign that trains on the landed sentences (P49): this process's GPU memory in one update of the
+    pass (`landed_step`) on the `Settings.update_groups` longest sentences kept in ``directory`` (each a piece) with
+    `Settings.data_sentences` of the data term's sentences, the model's gradients cleared after; its peak (the CUDA
+    context and the most the allocator held) and what it holds after. Refused by name when fewer sentences were kept
+    than an update takes; None on the CPU. APPROXIMATION, stated: the sentences of one batch; the optimizer's state is not
+    in it."""
+    if context.device.type != "cuda":
+        return None
+    device = context.device
+    kept: list[Landed] = [k for path in sorted(directory.glob("kept_*.pt")) for k in torch.load(path, weights_only=False)]
+    if len(kept) < settings.update_groups:
+        raise SystemExit(f"the pass's memory is not measured (O15): the measured batch kept {len(kept)} sentences, an "
+                         f"update takes {settings.update_groups}")
+    longest = sorted(kept, key=lambda k: -len(k.sentence.tokens))[:settings.update_groups]
+    model, _ = start_model(context, settings)
+    torch.cuda.reset_peak_memory_stats(device)
+    held = _gpu_used() - torch.cuda.memory_reserved(device)
+    landed_step(model, PassStart(model), context.base, [landed_samples([k], device) for k in longest],   # one_pass's
+                collate(context.data[:settings.data_sentences], device))
+    peak = held + torch.cuda.max_memory_reserved(device)
+    del model
+    torch.cuda.empty_cache()
+    return {"peak": peak, "now": _gpu_used(), "sentences": len(kept)}
+
+
 def workers_fit(workers: int, measured: Mapping[str, Any], passed: Mapping[str, Any] | None,
                 available: Mapping[str, int | None]) -> list[str]:
     """O15: where ``workers`` workers do not fit, read after the measures (``available``: the host's and the GPU's free
@@ -754,7 +856,7 @@ def require_workers_fit(speakers: Speakers, context: Context, settings: Settings
     and returned."""
     with tempfile.TemporaryDirectory(prefix="post_measure_") as scratch:
         measured = speakers.measure(round_, Path(scratch))
-        passed = pass_memory_of(context, settings, Path(scratch), speakers.stage)
+        passed = speakers.stage.pass_memory(context, settings, Path(scratch), speakers.stage)
     available = available_memory(context.device)
     out = {"speak_workers": speakers.workers, "measured": measured, "pass": passed, "available": available}
     print(json.dumps(out), flush=True)
@@ -783,6 +885,21 @@ def update_pairs(directory: Path, data: Sequence[Any], settings: Settings, rng: 
                    collate([data[int(i)] for i in chosen], device))
 
 
+def landed_pairs(directory: Path, data: Sequence[Any], settings: Settings, rng: np.random.Generator,
+                 device: torch.device) -> Iterator[tuple[list[Samples], RowTensors]]:
+    """The updates of a round's pass in a campaign that trains on the landed sentences (P49): its kept sentences, file by
+    file in the order they were spoken, each file's in an order shuffled by ``rng``, `Settings.update_groups` at a time
+    (a file's last update may hold fewer; each sentence a piece, `post.loss.landed_step`), each paired with
+    `Settings.data_sentences` sentences of ``data`` drawn by ``rng`` (as `update_pairs`)."""
+    for path in sorted(directory.glob("kept_*.pt"), key=lambda p: int(p.stem.split("_")[1])):
+        loaded: list[Landed] = torch.load(path, weights_only=False)
+        kept = [loaded[int(i)] for i in rng.permutation(len(loaded))]
+        for k in range(0, len(kept), settings.update_groups):
+            chosen = rng.choice(len(data), size=min(settings.data_sentences, len(data)), replace=False)
+            yield ([landed_samples([one], device) for one in kept[k:k + settings.update_groups]],   # a piece a sentence
+                   collate([data[int(i)] for i in chosen], device))
+
+
 def pass_seed(seed: int, round_: int) -> int:
     """The torch seed of round ``round_``'s pass (the data term's dropout): a round is the same from its last
     checkpoint, so a resumed campaign is the campaign run through."""
@@ -799,6 +916,19 @@ def train_pass(model: Prior, context: Context, optimizer: torch.optim.Optimizer,
     return {"updates": len(parts), **(stacked(parts) if parts else {})}
 
 
+def landed_train_pass(model: Prior, context: Context, optimizer: torch.optim.Optimizer, directory: Path,
+                      settings: Settings, rng: np.random.Generator, part_width: int = 0) -> dict[str, Any]:
+    """Step 4 of a round of a campaign that trains on the landed sentences (P49, `STAGE_C_LANDED`): one pass
+    (`post.loss.one_pass` with `landed_step`) over `landed_pairs`; its means (``nll``: the kept words' negative
+    log-likelihood a row), or no update where the round kept no sentence. ``part_width``: the skeleton's argument; stage
+    C has no token part."""
+    parts = one_pass(model, context.base, optimizer, landed_pairs(directory, context.data, settings, rng, context.device),
+                     step=landed_step)
+    means = stacked(parts) if parts else {}
+    return {"updates": len(parts), **{("nll" if key == "surrogate" else key): value for key, value in means.items()
+                                      if key != "clipped_share"}}
+
+
 # ---- the selection readout
 def readout_numbers(seed: int, place: int, draw: int = 0) -> np.random.Generator:
     """The random numbers of the selection readout's window ``place``: the same every round (the readout compares the
@@ -811,7 +941,7 @@ def selection_windows(context: Context, settings: Settings, split: str = "select
     """The selection readout's windows (module docstring, step 5): at most ``select_per_airport`` real windows of each
     airport of the select days (``split``; the val days for `post_validation`, drawn alike), drawn once with the seed
     from those that do not open inside a loss (D113)."""
-    rng = np.random.default_rng([settings.seed, 1 << 31])
+    rng = np.random.default_rng([settings.select_seed, 1 << 31])
     out = []
     for mine in readout_pool(context, split).values():
         out += [mine[int(i)] for i in sorted(rng.choice(len(mine), min(settings.select_per_airport, len(mine)),
@@ -838,7 +968,7 @@ def read_batch(model: Prior, context: Context, windows: Sequence[Window], places
     return WindowLoop(model, loop, order, batch, data["sentences"], data["flights"], context.geometries,
                       context.rosters, context.finals, context.words, interval_s=context.interval_s,
                       variant=context.variant, edges_reference=context.edges_reference, faults=data["faults"],
-                      observed=observed, device=context.device).run([readout_numbers(settings.seed, p, draw) for p in places])
+                      observed=observed, device=context.device).run([readout_numbers(settings.select_seed, p, draw) for p in places])
 
 
 def selection_readout(model: Prior, context: Context, windows: Sequence[Window], settings: Settings,
@@ -1085,12 +1215,12 @@ def run_campaign(out: Path, settings: Settings, context: Context, speakers: Spea
             torch.cuda.empty_cache()     # the speakers share the GPU: the memory this process cached in the last pass
         spoken = stage.speak(model, context, windows, settings, round_, directory, speakers, stage=stage)
         torch.manual_seed(pass_seed(settings.seed, round_))                    # the data term's dropout
-        passed = train_pass(model, context, optimizer, directory, settings,
+        passed = stage.train(model, context, optimizer, directory, settings,
                             np.random.default_rng([settings.seed, round_, 1]), part_width=stage.part_width)
         if speakers is not None and context.device.type == "cuda":
             torch.cuda.empty_cache()     # the memory of the pass, before the speakers read
         readout = stage.readout(model, context, select, settings, speakers, stage=stage)
-        written = sorted(directory.glob("groups_*.pt"))
+        written = sorted([*directory.glob("groups_*.pt"), *directory.glob("kept_*.pt")])
         write_json_atomic(directory / "round.json", {
             "round": round_, "git": git_state(), "finished_utc": utc_now(), "draw": drawn,
             "speak_workers": speakers.workers if speakers is not None else 1,         # information (`Speakers`)
@@ -1124,11 +1254,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--prior-lr", type=float, required=True)
     parser.add_argument("--traffic-lr", type=float, required=True, help="§2 item 5: the traffic modules' own")
     parser.add_argument("--weight-decay", type=float, required=True)
-    parser.add_argument("--update-groups", type=int, required=True, help="the branch groups of an update")
+    parser.add_argument("--update-groups", type=int, required=True,
+                        help="the branch groups of an update (branch), or the kept sentences of an update (landed)")
     parser.add_argument("--data-sentences", type=int, required=True, help="the data term's sentences of an update")
     parser.add_argument("--select-per-airport", type=int, required=True)
     parser.add_argument("--traffic-hidden", type=int, required=True)
     parser.add_argument("--traffic-heads", type=int, required=True)
+    parser.add_argument("--select-seed", type=int, required=True,
+                        help="the seed of the selection readout's windows and numbers (C10's: 1337)")
+    parser.add_argument("--method", choices=METHODS, required=True,
+                        help="how a round trains: branch groups (D94) or the landed sentences (P49)")
     parser.add_argument("--start-campaign", type=Path,
                         help="start from a round of this campaign (with --start-round); the base when left out")
     parser.add_argument("--start-round", type=int, help="the round of --start-campaign whose weights the campaign starts from")
@@ -1153,7 +1288,7 @@ def main(argv: list[str] | None = None) -> int:
     settings = Settings(args.rounds, {kind: getattr(args, f"windows_{kind.lower()}") for kind in KINDS},
                         args.batch_windows, args.continuations, args.seed, args.prior_lr, args.traffic_lr,
                         args.weight_decay, args.update_groups, args.data_sentences, args.select_per_airport,
-                        args.traffic_hidden, args.traffic_heads, start)
+                        args.traffic_hidden, args.traffic_heads, start, args.method, args.select_seed)
     git = git_state()
     if git["dirty"] and not args.smoke:
         parser.error("a campaign that is not a smoke runs on a clean checkout")
@@ -1167,7 +1302,8 @@ def main(argv: list[str] | None = None) -> int:
                            formal=not args.smoke)                                  # D132
     if settings.start is not None:      # refused by name before the workers and campaign.json (D162)
         campaign_start(context, settings)
-    speakers = Speakers(context, settings, args.speak_workers, device) if args.speak_workers > 1 else None
+    stage = STAGES_C[settings.method]
+    speakers = Speakers(context, settings, args.speak_workers, device, stage=stage) if args.speak_workers > 1 else None
     context = replace(context, device=device, base=context.base.to(device).eval())
     inputs = {"prior": str(prior_dir), "instructions": str(instructions), "executor": str(executor),
               "windows": str(census), "procedure_root": str(procedure_root), "settings": asdict(settings),
@@ -1176,7 +1312,7 @@ def main(argv: list[str] | None = None) -> int:
         open_campaign(out, inputs, git, opened["checks"])           # a resume of other inputs refused before the measure
         if speakers is not None and done_rounds(out) < settings.rounds:
             require_workers_fit(speakers, context, settings, done_rounds(out))       # O15, before any round
-        run_campaign(out, settings, context, speakers)
+        run_campaign(out, settings, context, speakers, stage=stage)
     finally:
         if speakers is not None:
             speakers.close()

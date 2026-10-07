@@ -33,7 +33,7 @@ PER_KIND = {REAL: 1, INSERTED: 1, LEADER_MOVED: 1, MOVED_START: 1}
 def _settings(**changed):
     values = dict(rounds=2, per_kind=PER_KIND, batch_windows=2, continuations=2, seed=1337, prior_lr=1e-4,
                   traffic_lr=1e-3, weight_decay=0.0, update_groups=1, data_sentences=1, select_per_airport=1,
-                  traffic_hidden=16, traffic_heads=4, start=None)
+                  traffic_hidden=16, traffic_heads=4, start=None, method=post_train.BRANCH, select_seed=1337)
     return Settings(**{**values, **changed})
 
 
@@ -656,7 +656,7 @@ def test_a_start_is_named_by_both_options_and_a_formal_campaign_takes_no_smoke_s
             "--windows", str(tmp_path / "w"), "--out", str(tmp_path / "campaign"), "--rounds", "1",
             "--batch-windows", "1", "--seed", "1", "--prior-lr", "1e-4", "--traffic-lr", "1e-3", "--weight-decay", "0",
             "--update-groups", "1", "--data-sentences", "1", "--select-per-airport", "1", "--traffic-hidden", "16",
-            "--traffic-heads", "4"]
+            "--traffic-heads", "4", "--method", "branch", "--select-seed", "1"]
     argv += [x for kind in KINDS for x in (f"--windows-{kind.lower()}", "1")]
     monkeypatch.setattr(post_train, "git_state", lambda: (_ for _ in ()).throw(RuntimeError("past the options")))
     for more, says in ((["--start-campaign", str(source)], "go together"),
@@ -724,7 +724,8 @@ def test_a_formal_campaign_needs_a_clean_tree(tmp_path, monkeypatch):
             "--windows", str(tmp_path / "w"), "--procedure-root", str(tmp_path / "cifp"),
             "--out", str(tmp_path / "no_such_campaign_20991231"), "--rounds", "1", "--batch-windows", "1",
             "--seed", "1", "--prior-lr", "1e-4", "--traffic-lr", "1e-3", "--weight-decay", "0", "--update-groups", "1",
-            "--data-sentences", "1", "--select-per-airport", "1", "--traffic-hidden", "16", "--traffic-heads", "4"]
+            "--data-sentences", "1", "--select-per-airport", "1", "--traffic-hidden", "16", "--traffic-heads", "4",
+            "--method", "branch", "--select-seed", "1"]
     argv += [x for kind in KINDS for x in (f"--windows-{kind.lower()}", "1")]
     monkeypatch.setattr(post_train, "git_state", lambda: {"head": "x", "dirty": True})
     with pytest.raises(SystemExit):
@@ -780,7 +781,8 @@ def test_a_formal_campaign_checks_its_base_and_a_smoke_does_not(tmp_path, monkey
             "--windows", str(tmp_path / "w"), "--procedure-root", str(tmp_path / "cifp"),
             "--out", str(tmp_path / "campaign_20991231"), "--rounds", "1", "--batch-windows", "1",
             "--seed", "1", "--prior-lr", "1e-4", "--traffic-lr", "1e-3", "--weight-decay", "0", "--update-groups", "1",
-            "--data-sentences", "1", "--select-per-airport", "1", "--traffic-hidden", "16", "--traffic-heads", "4"]
+            "--data-sentences", "1", "--select-per-airport", "1", "--traffic-hidden", "16", "--traffic-heads", "4",
+            "--method", "branch", "--select-seed", "1"]
     argv += [x for kind in KINDS for x in (f"--windows-{kind.lower()}", "1")]
     for extra in ([], ["--smoke"]):
         with pytest.raises(RuntimeError, match="opened"):
@@ -790,8 +792,8 @@ def test_a_formal_campaign_checks_its_base_and_a_smoke_does_not(tmp_path, monkey
 
 def test_a_stage_gives_the_campaigns_round_its_parts_and_stage_cs_is_the_campaign_as_before(setup, tmp_path, monkeypatch):
     """Post-training §9 item 11 (multi-aircraft control D149): `run_campaign` is the round's skeleton; a stage gives it
-    its parts — the campaign's start, the selection set, the draw, the speaking (its batch speaker), the readout (its
-    batch reader), the checkpoint's identity — in that order; stage C's stage (`STAGE_C`, the default) runs the campaign it ran: a campaign run through a
+    its parts — the campaign's start, the selection set, the draw, the speaking (its batch speaker), the pass, the
+    readout (its batch reader), the checkpoint's identity — in that order; stage C's stage (`STAGE_C`, the default) runs the campaign it ran: a campaign run through a
     stage that wraps `STAGE_C`'s parts leaves the same checkpoint, bit for bit."""
     from dataclasses import fields as dataclass_fields
 
@@ -816,7 +818,7 @@ def test_a_stage_gives_the_campaigns_round_its_parts_and_stage_cs_is_the_campaig
         run_campaign(out, settings, _context(s), stage=stage)
         states.append(torch.load(out / "round_0" / "checkpoint.pt", weights_only=False))
     # the speaking and the readout run the stage's own batch speaker and reader (the campaign hands them the stage)
-    assert called == ["start", "selection", "draw", "speak", "speak_batch", "readout", "read_batch", "record",
+    assert called == ["start", "selection", "draw", "speak", "speak_batch", "train", "readout", "read_batch", "record",
                       "identity"]
     assert states[0]["model"].keys() == states[1]["model"].keys()
     assert all(torch.equal(states[0]["model"][k], states[1]["model"][k]) for k in states[0]["model"])

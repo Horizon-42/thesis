@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
-from typing import Iterable, Sequence
+from typing import Callable, Iterable, Sequence
 
 import torch
 
@@ -207,17 +207,46 @@ def update_step(model: Prior, start: PassStart, base: Prior, pieces: Sequence[Sa
     return LossParts(reward + KL_WEIGHT * kl + DATA_WEIGHT * teacher, reward, kl, teacher, words, clipped)
 
 
+def landed_step(model: Prior, start: PassStart, base: Prior, pieces: Sequence[Samples], data: RowTensors) -> LossParts:
+    """One update of a campaign that trains on the landed sentences (P49), in pieces as `update_step`: each kept
+    sentence's words, teacher-forced under its traffic and the speaker's records, their negative log-likelihood (in
+    ``surrogate``) and the pull to the base, summed over the counted words (every row said) and divided by the counted
+    rows of all the pieces, and their backward; then the data term and its backward. No ratio and no advantage
+    (``start`` is not read; ``clipped`` is 0). The words are scored in eval mode, the data term in training mode."""
+    model.eval()
+    rows = sum(piece.counted.sum() for piece in pieces).to(torch.float32)
+    nll_sum = torch.zeros((), device=rows.device)
+    kl_sum = torch.zeros((), device=rows.device)
+    words = 0
+    for piece in pieces:
+        log_p = masked_log_probability(model, piece.rows, piece.permitted, piece.traffic)
+        with torch.no_grad():
+            base_log_p = masked_log_probability(base, piece.rows, piece.permitted)
+        nll = -_counted_sum(log_p, piece.counted)
+        kl = _counted_sum(_pull_words(log_p, base_log_p), piece.counted)
+        ((nll + KL_WEIGHT * kl) / rows).backward()
+        object.__setattr__(piece.traffic, "embedded", None)      # the input keeps no embedded tokens and their graph
+        nll_sum += nll.detach()
+        kl_sum += kl.detach()
+        words += int(piece.counted[..., None].expand_as(log_p).sum())
+    teacher = data_term(model, data)
+    (DATA_WEIGHT * teacher).backward()
+    nll, kl, teacher = nll_sum / rows, kl_sum / rows, teacher.detach()
+    return LossParts(nll + KL_WEIGHT * kl + DATA_WEIGHT * teacher, nll, kl, teacher, words, 0)
+
+
 def one_pass(model: Prior, base: Prior, optimizer: torch.optim.Optimizer,
-             pairs: Iterable[tuple[Sequence[Samples], RowTensors]]) -> list[LossParts]:
+             pairs: Iterable[tuple[Sequence[Samples], RowTensors]], step: Callable[..., LossParts] = update_step
+             ) -> list[LossParts]:
     """One pass over a round's samples (§2 item 5): the model at the start of the pass is the one that spoke them;
-    each update's samples, in pieces (`update_step`), paired with a batch of the data term, drawn from ``pairs`` one at
-    a time (a round's samples need not be held at once); one optimizer step for each. The parts of each update,
-    detached."""
+    each update's samples, in pieces (``step``: `update_step`, or `landed_step` for P49), paired with a batch of the
+    data term, drawn from ``pairs`` one at a time (a round's samples need not be held at once); one optimizer step for
+    each. The parts of each update, detached."""
     start = PassStart(model)
     out = []
     for pieces, rows in pairs:
         optimizer.zero_grad(set_to_none=True)
-        out.append(update_step(model, start, base, pieces, rows))
+        out.append(step(model, start, base, pieces, rows))
         optimizer.step()
     return out
 
