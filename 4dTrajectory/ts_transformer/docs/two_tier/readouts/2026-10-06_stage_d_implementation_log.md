@@ -31,6 +31,34 @@ they start with `4dTrajectory/` or `.claude/`.
 | The full ts suite on dev-multi-control (fccbab8d) | dev-multi-control | 1,963 passed, 1 skipped (8 workers, 13.2 min, 2026-10-07) |
 | dev-multi-control into dev-two-tier | dev-two-tier | Merged at the user's word ("合进去", 2026-10-07): b967d2b1, no conflict, no code differs from the tested branch |
 
+### 0.1 Where to resume (2026-10-07, before a compression of the context)
+
+- **Code**: MC0–MC4 of version 1 built and reviewed, merged into `dev-two-tier` at the user's word (b967d2b1; the
+  branch `dev-multi-control` and its worktree `.claude/worktrees/multi-control` kept for stage D's next steps — keep
+  them level with dev-two-tier by merging it in before new work). Full ts suite on it: 1,963 passed, 1 skipped.
+- **Running when this was written: MC1's census, a stated sample** (the user: "sample, and you may use more cpu, just
+  finish it as soon as possible"): 500 anchors of each airport and split, seed 1337, in 6 processes from the
+  multi-control worktree (`/tmp/claude-1000/mc1/run_part.sh`: one split each, spans {0, 5}, {10}, {20} min, every c_min);
+  each part writes `/tmp/claude-1000/mc1/s500/<split>.<spans>/census.json` and a line in `/tmp/claude-1000/mc1/s500/done`
+  (6 lines when all are done; the four parts of 0, 5 and 10 min took 6–7 min each). Then: join the six parts (same
+  anchors: the sample's seed is per split, not per span) into one table by split, span, kind and airport — the commanded
+  aircraft of a window (p50, p90, largest), the recorded aircraft at a first predicted step, the windows left out (by the
+  anchor, by a later aircraft), the losses by pair on the records and on the baseline (share of windows and of steps) —
+  report it to the user for O16 (L, the kinds and their counts, c_min), and write it into this log (a readout).
+- **Next, in order**: the user's O16 → MC4's smoke (`multi_train --smoke`, two rounds, a few windows of each airport,
+  from a chosen round of stage C: `--start-campaign 4dTrajectory/outputs/POOLED/post/post_train_20261006 --start-round
+  <the user's>`, a seed other than 1337) → MC5's profile at the formal size (time of a batch and a round, memory with N
+  speaking workers, the spread of round 0's W per aircraft for the select set's size) → the user's settings → MC6 from a
+  run worktree at the merged commit (outline D163) → MC7 by fronter → version 2 (MC8, MC9) → MC10.
+- **Waiting for the user**: O16; requests items 19, 22, 29–35 (decided: 6, 7, 21, 25).
+- **Left running from earlier**: the test stack of stage B's browser check from `.claude/worktrees/two-tier-v4`
+  (vite 5185, backend 8795; stop: `kill $(lsof -t -iTCP:5185 -sTCP:LISTEN) $(lsof -t -iTCP:8795 -sTCP:LISTEN)`).
+- **Scratch results kept** (`/tmp/claude-1000/`): `d73/` (the D73 checks' records), `d149/` (the real-window check's
+  script `check.py`, `compare.py` and digests `old.json`, `new.json`), `mc1/sample20/` (the 20-anchor sample).
+- **The working rules** (notes/stage_d.md): every step single-file tests → an independent review (code only, at D131's
+  depth: review_guide §3 step 6, §6, checklist §5) → an explicit-path commit (`git diff --cached --stat` first) → one line
+  here. Real-data jobs only with the host and GPU free (rule 13), one thread each, outputs in scratch; tests on the CPU.
+
 ## 1 The branches (2026-10-06)
 
 1. The user let the implementer fast-forward `dev-two-tier-v4` to `dev-multi-control-design` (2f834c89; asked through
