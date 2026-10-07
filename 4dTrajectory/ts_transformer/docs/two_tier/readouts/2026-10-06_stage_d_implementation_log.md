@@ -342,4 +342,14 @@ workers asked. Started 05:39 UTC, stopped by name at part 2 at 06:19 UTC (exit 1
 - The user (2026-10-07): a campaign's workers are sized from the profile, never measured before each run (the measure
   of every span was about 20 min a launch); built on `dev-multi-control` (`multi_train.profiled_fit`, `--profile`, each
   worker's GPU capped at its share), in review.
+- The user's decisions after the profile (2026-10-07): (a) the workers are sized from the profile, never measured
+  before each run (the user: "每次跑之前花20分钟测内存" — the measure of every span, added by the review of 6cc49ad1, cost
+  about 20 min a launch and a resume); (b) one batch size a span, 64 / 48 / 24 rows for 300 / 600 / 1200 s; (c) the
+  profile speaks each span's batch once. Built, reviewed (opus, two rounds: S2 each measured batch's own GPU peak, S2
+  four test gaps; clean), committed **fffe900d**: `multi_train.profiled_fit`, `--profile`, each worker's GPU capped at
+  its share (`Speakers(gpu_budget=)`), `MultiSettings.batch_rows` a list, `span_batches`; stage C's own measure
+  unchanged. Tests run beside C17 in one process at the lowest priority.
+- dev-two-tier merged into `dev-multi-control` (**ea9d5217**; C17's `Settings.method`, `select_seed`, `STAGE_C_LANDED`;
+  the conflicts in `post_train` resolved by keeping both: `Stage.batches` beside `Stage.train` and `pass_memory`;
+  `test_post_train` and `test_multi_train` 53 passed). The profile is run again with 64 / 48 / 24 after C17 ends.
 
