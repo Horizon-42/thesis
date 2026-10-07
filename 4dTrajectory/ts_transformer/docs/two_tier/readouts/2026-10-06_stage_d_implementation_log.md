@@ -61,15 +61,16 @@ built and measured last); `docs/two_tier/design/requests_from_d_to_designer.md` 
    check `ps aux | grep run_ts.py` and `nvidia-smi` first (stage C's campaigns run from their own worktrees; on
    2026-10-07 evening `post_train --method …` was running). Run from the multi-control worktree at 246eca69 (or later
    merged code) **in a systemd unit** (`systemd-run --user --unit=mc5-profile …`; nohup/setsid died with a session
-   once), output to a NEW directory (the old `/tmp/claude-1000/mc5/profile` holds the old integer `batch_rows`;
-   `profiled_fit` refuses it):
+   once), output to a NEW directory under `4dTrajectory/outputs/POOLED/multi/` (the user, 2026-10-07: MC6 reads it
+   with `--profile`; `multi_profile` refuses an existing directory; the old `/tmp/claude-1000/mc5/profile` holds the
+   old integer `batch_rows` and `profiled_fit` refuses it):
 
        python run_ts.py multi_profile --prior 4dTrajectory/outputs/POOLED/prior/prior_base_20261006/base/run \
          --instructions 4dTrajectory/outputs/POOLED/instruction_language/v12_20261005 \
          --executor 4dTrajectory/outputs/POOLED/executor/v17_20261005 \
          --windows 4dTrajectory/outputs/POOLED/post/windows_20261006 \
          --start-campaign 4dTrajectory/outputs/POOLED/post/post_train_20261006 --start-round 6 \
-         --out <new dir> --rounds 1 --windows-real 1000 --windows-compressed 1000 --spans-s 300 600 1200 \
+         --out 4dTrajectory/outputs/POOLED/multi/profile_<YYYYMMDD> --rounds 1 --windows-real 1000 --windows-compressed 1000 --spans-s 300 600 1200 \
          --c-min 0.8 --batch-rows 64 48 24 --continuations 8 --seed 2027 --prior-lr 1e-5 --traffic-lr 1e-4 \
          --weight-decay 0.01 --update-groups 4 --data-sentences 64 --select-per-airport 100 \
          --device cuda --speak-workers 3
@@ -84,8 +85,8 @@ built and measured last); `docs/two_tier/design/requests_from_d_to_designer.md` 
    select windows for a standard error of 0.01 / 0.02, in all and an airport). Expect several hours (one round at the
    formal size: about 12.6 h of speaking in one process at 64 rows, §12, divided by the workers). Arm a Monitor on its
    end and errors; the user must not learn hours later that it ended.
-   **Where the profile lives** is the user's to say: MC6 reads it with `--profile`, and `/tmp` does not survive a
-   reboot (proposal: copy it under `4dTrajectory/outputs/POOLED/multi/`).
+   After it ends: the profile's directory read-only, with a `SHA256SUMS` (MC6 reads it; a campaign refuses a profile
+   of other inputs or settings, `profiled_fit`).
 2. **Record it and propose MC6's settings to the user** (as a question, AskUserQuestion): the profile's numbers in a
    new section of this log; then the proposals — `--speak-workers` (the largest N with an empty `workers.short[N]`),
    `--batch-rows` (keep 64 / 48 / 24 unless one span's GPU peak in `workers.measured.batches` is far from the others),
