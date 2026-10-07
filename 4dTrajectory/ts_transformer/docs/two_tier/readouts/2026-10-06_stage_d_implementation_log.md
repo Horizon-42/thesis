@@ -282,3 +282,16 @@ labelled words: not a model's result, §5 item 4).
 | select | 20min | compressed_0.6 | 2330 | 152 (anchor 2, later 150) | 4.0 / 8.0 / 13.0 | 0.0 / 2.0 | 30.2 / 12.0 / 0.0 / 5.7 | 30.1 / 12.9 / 2.3 / 5.2 |
 | select | 20min | compressed_0.8 | 2330 | 63 (anchor 2, later 61) | 4.0 / 8.0 / 13.0 | 0.0 / 2.0 | 18.2 / 10.5 / 0.0 / 5.6 | 20.2 / 11.4 / 2.7 / 4.9 |
 | select | 20min | real | 2500 | 11 (anchor 2, later 9) | 4.0 / 8.0 / 13.0 | 0.0 / 2.0 | 7.4 / 5.7 / 0.0 / 4.6 | 9.8 / 6.2 / 2.7 / 3.9 |
+
+## 11 MC4 · the windows of several spans (notes/stage_d.md 一; 2026-10-07)
+
+- dev-two-tier (8eeaf4bf) merged into `dev-multi-control` (a fast-forward). The windows of several spans (D146 after
+  O16) and D166 item 19 built, reviewed (opus, two rounds: S2 the memory measure of every span, fixed by
+  `post_train.measured_batches`; S2 the readout of two spans untested, tested; clean), committed **6cc49ad1**: each
+  kind's count in equal parts of the spans (1,000 → 334 / 333 / 333), each window's span drawn with the round's numbers,
+  the counts by kind and span; a batch of one span up to `batch_rows` commanded aircraft (`post_train.batches`, stage
+  C's batches unchanged, checked by the reviewer on 3,000 random inputs); the select set, the readouts and the
+  validation readout by span; the identity with `spans_s`, `per_kind`, `per_span`; `multi_train.require_finished`.
+  Tests: the post_* and multi_* files and `test_architecture` (D149's digests and MC2's check with stage C's numbers
+  among them) passed. Readings 37–43 in the requests note (rewritten, the decided items deleted).
+
