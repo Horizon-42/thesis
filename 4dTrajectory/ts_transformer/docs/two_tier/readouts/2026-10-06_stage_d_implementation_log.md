@@ -24,7 +24,10 @@ they start with `4dTrajectory/` or `.claude/`.
 | dev-two-tier (C15, C16) into dev-multi-control (notes 二 1) | dev-multi-control | Merged (fc962015), one conflict resolved; reviewed with the next row |
 | One start function (notes 二 2, §9 item 12, D164) and MC4 · stage D's runner `multi_train` | dev-multi-control | Built, reviewed (three rounds), committed (2b370d37); touched tests 162 passed |
 | Cleanup (notes 三) | — | Done 2026-10-07 (§7): seven worktrees removed, their data links unlinked first; ten branches deleted with `-d` |
-| MC0's checks and MC1's census on real data | dev-multi-control | After C14's rounds (outline §4 item 7) |
+| MC4 · the time readouts (O18) and `multi_validation` | dev-multi-control | Built, reviewed (three rounds), committed (fccbab8d) |
+| MC0's D73 checks on the formal artefact (notes 三) | dev-multi-control | Passed 2026-10-07 (§9) |
+| D149's check on real windows (notes 三) | dev-multi-control | Passed 2026-10-07: 200 of 200 windows bit for bit (§9) |
+| MC1's census on real data (notes 三) | dev-multi-control | A sample of 20 anchors an airport and split measured (§9); the full census running |
 
 ## 1 The branches (2026-10-06)
 
@@ -171,3 +174,28 @@ afterwards: all there.
 Before (in review, now committed above): the one start function (`round_start`, `source_campaign`, `start_of`; `campaign_start` and stage D's start
 call it; `open_round` removed; `Context.formal`) and stage D's runner `experiments/multi_train.py` (requests items
 29–34).
+
+## 9 The parts on real data (notes/stage_d.md 三; 2026-10-07, after C15's ceiling readout)
+
+The host and the GPU free (rule 13: 19 GB of RAM free, the GPU idle, only idle backends); every job on the CPU with one
+thread, its outputs in a scratch directory (`/tmp/claude-1000/`), the code of `dev-multi-control` (fccbab8d).
+
+1. **MC0's D73 checks** on the formal artefact (`v12_20261005`, executor `v17_20261005`), the code with the start's join
+   ticks (vocabulary §6 item 5): `executor_conformance` — conforming in every way of flying (batch, staggered, single,
+   moved; 285 flights, 0 beyond the bounds, the largest difference 2.2e-06 m); `closed_loop_start_check` on train and
+   select at Δ = 2, 4 and 8 s, 50 flights an airport, seed 1337 — 250 flights each, 0 failed, the largest position
+   difference 0 m: PASSED both.
+2. **D149's check on real windows** (§6.1): 10 windows of each of stage C's kinds and each airport of the train days of
+   the formal census (`windows_20261006`; stage C's own draw, seed 1337), each batch's branch round (K = 8) with C10's
+   round-0 weights, on the CPU with one thread, by the code before the generalisation (c7a0b6b0, in a detached
+   worktree, removed after) and by today's: each window's first-pass ends and branch groups digested by field
+   (`test_post_generalised._Digest`'s fields, stage D's added ones left out). **200 of 200 windows identical**, the
+   same windows drawn, no window whose second pass differed. Time: 248 s for the old code, 255 s for the new (+3 %).
+   (A one-off script beside the two checkouts, not a runner: it runs on a commit that has no runner of it.)
+3. **MC1's census, a sample first** (requests item 18): `multi_windows --sample 20` (20 anchors of each airport and
+   split, seed 1337, every span and kind, the records and the baseline): 167 s with the closed loop's checks. The full
+   census is 40,530 train and 6,199 select anchors, so about 6–7 h in one process (about 0.5 s an anchor); run in full
+   (not a sample), detached, started 2026-10-07. The sample's commanded aircraft of a window (train, real): L = 0:
+   1; 5 min: p50 2, p90 3; 10 min: p50 2, p90 4, largest 8; 20 min: p50 4, p90 7, largest 11. On the records
+   `records_kept` is 0 (as it must be: on the records every loss is the records'). The full census's report goes to the
+   user for O16.

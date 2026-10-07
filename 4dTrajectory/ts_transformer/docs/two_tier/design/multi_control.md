@@ -67,10 +67,10 @@ nothing of stage D has run on real data (C14's rounds run first).
 
 | Milestone | State |
 |---|---|
-| MC0 | Built, reviewed, committed (9c98a8d6, d7bf55f5, 3a9b7153, 80fe774c, 648b6591, 5e456406, a1ea664f); D73's checks and D149's real-window check after C14 |
-| MC1 | Built, reviewed, committed (e6f0e564); the census after C14 (its cost measured on a sample first) |
+| MC0 | Built, reviewed, committed (9c98a8d6, d7bf55f5, 3a9b7153, 80fe774c, 648b6591, 5e456406, a1ea664f); D73's checks on the formal artefact passed and D149's real-window check passed, 200 of 200 windows bit for bit (2026-10-07) |
+| MC1 | Built, reviewed, committed (e6f0e564); its cost measured on a sample (about 6–7 h in one process); the full census running (2026-10-07) |
 | MC2, MC3 | Built, reviewed, committed (fd720c75): stage D's rule of who answers, its token part, its credit |
-| MC4 | The round's stage committed (054727db); the user's items 6 and 7 built (ac919f9c); C15 and C16 merged in (fc962015); the one start function (D164) and the runner `multi_train` committed (2b370d37); `multi_validation` and the O18 readouts next; the smoke waits for O16 |
+| MC4 | The round's stage committed (054727db); the user's items 6 and 7 built (ac919f9c); C15 and C16 merged in (fc962015); the one start function (D164) and the runner `multi_train` committed (2b370d37); the O18 readouts and `multi_validation` committed (fccbab8d); the smoke waits for O16 |
 | MC5–MC10 | Not started |
 
 ### 0.4 Plan

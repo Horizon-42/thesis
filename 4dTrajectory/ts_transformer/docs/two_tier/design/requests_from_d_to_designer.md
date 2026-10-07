@@ -106,7 +106,7 @@ written). Items 19, 22 and 29–35 wait for the user.
     (D145), so the census's commanded pairs include losses in the first 16 s of a later aircraft that the loop would
     not charge. Proposal: leave as is (after the left-out rule, only losses ending within those 16 s remain), or count
     them as recorded.
-18. **The cost of the census at the formal size** (the reviewer's estimate, not measured on real data): 0.2–0.9 ms a
+18. **Measured (2026-10-07): 167 s for a sample of 20 anchors an airport and split (about 0.5 s an anchor), so about 6–7 h for the full census in one process; run in full.** **The cost of the census at the formal size** (the reviewer's estimate, not measured on real data): 0.2–0.9 ms a
     judged step, about 5,200 steps an anchor (4 spans, 3 kinds, records and baseline), so about 16–45 h in one process
     for 45,000 train anchors, the select days besides. Proposal: after C10, measure seconds per anchor on a sample
     (`--sample`, D55), then choose: the full census with one worker per airport, or a stated sample of anchors per
