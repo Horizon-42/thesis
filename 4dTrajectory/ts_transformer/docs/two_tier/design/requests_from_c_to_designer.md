@@ -5,10 +5,10 @@ names a public interface must give, and the questions that only the user can dec
 it is rewritten in full each time, never appended to, and an item leaves when it is done. The evidence and the commits
 are in the implementation log (`readouts/2026-10-05_stage_c_implementation_log.md`, cited by §).
 
-**State: 2026-10-07, 16:10 (local).**
-- C19 (`f3ce543f`) and C18 (`364c2f4c`) are built and reviewed on `dev-two-tier-v4-post`, which fast-forwards
-  `dev-two-tier`; the user merges (log §30).
-- The campaign with K = 16 (`post_branch16_20261007`) runs from its run worktree; C20 waits for it.
+**State: 2026-10-07, 16:20 (local).**
+- C19 (`f3ce543f`) and C18 (`364c2f4c`) are merged into `dev-two-tier` (`704879d7`, the user's word; log §30).
+- The campaign with K = 16 stopped after round 3 (no change); the campaign at the larger learning rate
+  (`post_lr3_20261007`) runs. C20 is next to build.
 
 **Resolved:** items 1–7 of the last version (D161, D162, D165, D167, D168, D169, §9 items 10 and 11).
 

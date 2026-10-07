@@ -1236,3 +1236,12 @@ runs from its own run worktree (only the changed modules' tests, 2–3 processes
 
 `dev-two-tier-v4-post` (`364c2f4c`) fast-forwards `dev-two-tier`; the user merges. C20 (D169) follows the campaign
 with K = 16.
+
+**The runs after C18 (2026-10-07).**
+- The campaign with K = 16 (`post_branch16_20261007`) stopped after round 3 on the user's word: 84.4 / 84.9 / 85.8 /
+  85.1 % landed, no large change against the start's 85.7 %. Round 4, just begun, moved aside (`round_4.aborted-…`);
+  sealed (`logs/`, `SHA256SUMS` 12 files, read-only); its run worktree removed.
+- The user then chose the next experiment (candidate 3a: the prior's learning rate 3e-5, the traffic modules' 3e-4,
+  `--clip-norm 1.0`, K = 8, from C10's round 8, seed 2026) and allowed the fast-forward of `dev-two-tier` to
+  `dev-two-tier-v4-post` (`704879d7`). Launched 16:00 local from `run-post-lr3` in the systemd unit `post-lr3-160054`.
+- Intents and results: `readouts/2026-10-07_stage_c_experiments.zh.md` (experiments 2 and 3); `intents.json`.
