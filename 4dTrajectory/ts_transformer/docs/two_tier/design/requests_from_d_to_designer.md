@@ -5,7 +5,8 @@ time. Each item is a reading the implementer made where the design says nothing,
 until the user decides. Paths are relative to `4dTrajectory/ts_transformer/`.
 
 State: 2026-10-07: MC0 (stages A, B, C), MC1, MC2 and MC3 built on `dev-multi-control` (fd720c75), MC4's first part in
-review; nothing run on real data yet (C14's rounds run first). Items 6, 7, 19, 21, 22 and 25 wait for the user.
+review; nothing run on real data yet. Decided by the user 2026-10-07: items 6, 7, 21, 25 (built: ac919f9c; 21 and 25 as
+written). Items 19, 22 and 29–34 wait for the user.
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -33,7 +34,7 @@ review; nothing run on real data yet (C14's rounds run first). Items 6, 7, 19, 2
 5. **An absent flight's inputs.** An aircraft that has not joined gets a row that is not present, computed from finite
    states (its observed row 0), so that its keys and values in the cache are finite (a masked key with a value that
    is not a number would still give a NaN through the attention's product).
-6. **A landing added while a loop runs, on a sealed test day.** §6.3 item 5: "the index keeps its checks". Built so: a
+6. **Decided (the user, 2026-10-07: left out and counted; built ac919f9c).** **A landing added while a loop runs, on a sealed test day.** §6.3 item 5: "the index keeps its checks". Built so: a
    loop landing whose time falls on a sealed test day (a crossing just after a day cut) is refused by the index
    (`SealedDay`), which would stop a campaign. Stage C's own window landings (`post.landings.window_landings`) instead
    leave a shifted landing on a test day out and count it with the sealed landings. Proposal: the same for a landing
@@ -42,7 +43,7 @@ review; nothing run on real data yet (C14's rounds run first). Items 6, 7, 19, 2
 
 ## MC0 · stage C (post-training §9 items 1, 2, 3, 7, 8)
 
-7. **The wake minimum at the threshold behind a commanded leader is never judged** (review of item 8, S2, not
+7. **Decided (the user, 2026-10-07: judged once at the row after it lands; built ac919f9c).** **The wake minimum at the threshold behind a commanded leader is never judged** (review of item 8, S2, not
    measured). A recorded aircraft is "over its threshold" at its last row in the air (`AircraftAt.last_step`); a
    commanded aircraft has `last_step` false and leaves the scene in the row after the executor ends it, so
    `wake_at_threshold` never runs with a commanded leader. In a window of several commanded aircraft in trail to one
@@ -121,7 +122,7 @@ review; nothing run on real data yet (C14's rounds run first). Items 6, 7, 19, 2
 
 ## MC2 · the window loop of several commanded aircraft (stage D's rules, fd720c75)
 
-21. **The token part's features** (D152 says what it carries, not its features; `multi/tokens.py`,
+21. **Decided (the user, 2026-10-07: confirmed).** **The token part's features** (D152 says what it carries, not its features; `multi/tokens.py`,
     `multi-commanded-tokens-v1`, 10 features): for another commanded aircraft, the flags commanded, silent and "words
     in force" (from the row after its first row said); its heading word as the prior's own input reads it (sine and
     cosine of its track less the course of its runway in force); its altitude level over 1,000 m, with a flag for "no
@@ -143,7 +144,7 @@ review; nothing run on real data yet (C14's rounds run first). Items 6, 7, 19, 2
     aircraft — its own, or one that another commanded aircraft answered for against v. A varied aircraft whose event is
     at or before its first predicted step has no branch point (no group). An aircraft that answers two losses at one
     step records one other aircraft (the loop's first), so the second partner is not varied (the review, S3: rare).
-25. **The silent flag reads the records under D145** (the review, S2, for the user). Under D145, a commanded aircraft
+25. **Decided (the user, 2026-10-07: accepted as a stated limit).** **The silent flag reads the records under D145** (the review, S2, for the user). Under D145, a commanded aircraft
     becomes silent for a loss that only the recorded aircraft is responsible for only when the records kept their
     separation, and the records include that aircraft's own record after its first predicted step — its withheld
     observed path. The other aircraft read the flag from the next row (D152), so in that case the flag carries one bit
@@ -166,3 +167,27 @@ review; nothing run on real data yet (C14's rounds run first). Items 6, 7, 19, 2
     an aircraft answers for. A readout's counts by pair (including `recorded_only`) are judged again on the flown states
     of the window's commanded aircraft with the census's machinery (`multi.census.window_losses`, positions from the
     loop's states and words), the same rule as the census's baseline. Stage C's loop is not changed for it.
+
+## After the merge of C15 and C16 (notes/stage_d.md 二; in review)
+
+29. **The merge keeps both sides by giving `Stage` a start** (post-training §9 item 11): `Stage.start` is what a new
+    campaign starts from (stage C's `campaign_start`: the base with zero-output traffic modules, or a round of another
+    campaign), `Stage.start_model` the model of the stage's shape that a resume and a speaking worker load a state into;
+    `Stage.read_batch` takes C15's draw (0 by default).
+30. **Where the one start function learns that a campaign is formal** (§9 item 12: "a formal start comes from a formal
+    campaign"): the campaign's context, opened formal or not (`open_context(formal=)`, D132), records it
+    (`Context.formal`); `round_start` refuses a smoke source under it. `start_of` (the setting from `--start-campaign`,
+    `--start-round`) checks the source's rules first, so that a main refuses before anything is opened (as C16's did).
+31. **The landed leader past its plane is not established** (the review of item 7, S3): at its threshold row, a follower
+    is not charged for an in-trail or 3 NM loss against it (only the wake minimum at the threshold, as item 7 asks); the
+    pair was judged in trail one row earlier. Its state is its first 2 s row past the plane, up to 2 s behind the other
+    aircraft's (up to about 140 m on the gap, 2.5 % of the least TBL 5-5-2 minimum). Proposal: state both as limits.
+32. **A compressed window whose shifts all round to 0** flies the real window and is counted as real in the readouts
+    (`multi_train.kind_of`); the draw counts it as drawn compressed. A window without a later aircraft has no
+    compressed form (counted, never drawn as compressed).
+33. **The select set of stage D** (§5 item 2): real windows of span L only, at most `select_per_airport` an airport,
+    anchors in an order drawn once with the seed, each kept unless it is left out (D146). Its size is MC5's proposal.
+34. **The readout's numbers** of stage D: `default_rng([seed, 2^30, place, member])` for each aircraft (draw 0; a later
+    draw appends its number, as C15's). The readouts of the time the aircraft take (O18: each landing's delay against its
+    record, the spacing at the threshold, the landing order) need each aircraft's crossing in the window loop's result;
+    not built yet (stated in `multi_train`'s docstring).
