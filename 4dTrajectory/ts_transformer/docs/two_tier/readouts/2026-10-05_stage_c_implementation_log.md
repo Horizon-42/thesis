@@ -1269,3 +1269,8 @@ with K = 16.
 - The pass's rng `[seed, round, 1]` is the same stream as `first_numbers(seed, round, window=1)` (the reviewer's note,
   older than C20). The two read different things (a shuffle and a data draw, a sentence's words), so no result is
   affected; a key apart would change every campaign's numbers, so I leave it as it is and note it here.
+
+**The larger-learning-rate campaign (`post_lr3_20261007`) ended 17:39 local**, 6 rounds, exit 0: landed 85.8 / 85.6 /
+84.9 / 85.6 / 85.4 / 84.4 % against the start's 85.7 %; KL 0.040 → 0.051; the ratio's clip 1.2–1.45 % of the words;
+29–43 % of the updates clipped at the gradient norm 1.0. Sealed (`logs/`, `SHA256SUMS` 15 files, read-only); the run
+worktree removed. C18's first measure is in its `campaign.json`. Table and my reading: the experiment log, experiment 3.
