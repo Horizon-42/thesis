@@ -92,6 +92,7 @@ commits, the tests and the readings are in the implementation log.
 | C17 (D165) | Code `6afa3c0b` (reviewed), merged `61e718ba`. Run `outputs/POOLED/post/post_landed_20261007` from round 8 of C10, seed 2024, select seed 1337: rounds 0–3 landed 84.2 / 84.5 / 84.8 / 85.1 % against the start's 85.7 %, all within the readout's noise; stopped after round 3 on the user's rule ("如果还是平了就停"); read-only (`SHA256SUMS`, 78 files). Intent and results: `readouts/2026-10-07_stage_c_experiments.zh.md` (log §29) |
 | C19 (D168) | Code `f3ce543f` (reviewed), merged `704879d7` (the user's word): `Settings.clip_norm` (default None), the clip in `one_pass`, the norms and the share clipped in `round.json`; `open_campaign` compares the recorded settings through the stage's settings class (log §30) |
 | C18 (D167) | Code `364c2f4c` (reviewed), merged `704879d7`: the measure in `campaign.json` (`measures`), read by a later launch on the same devices, each launch's `fit` (log §30) |
+| C20 (D169) | Code `2e2e860f` (reviewed), merged into `dev-two-tier` (the user's word): `Settings.epochs` (default 1), `post.loss.passes`, each pass's numbers and means (log §30) |
 | The validation readout of the chosen round | Built and reviewed on synthetic artefacts (`post_validation`, `0c95a821`, log §23; D132 `483b81d7`) |
 | C12 | After C10 |
 

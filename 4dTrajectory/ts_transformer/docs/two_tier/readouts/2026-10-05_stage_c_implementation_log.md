@@ -1245,3 +1245,27 @@ with K = 16.
   `--clip-norm 1.0`, K = 8, from C10's round 8, seed 2026) and allowed the fast-forward of `dev-two-tier` to
   `dev-two-tier-v4-post` (`704879d7`). Launched 16:00 local from `run-post-lr3` in the systemd unit `post-lr3-160054`.
 - Intents and results: `readouts/2026-10-07_stage_c_experiments.zh.md` (experiments 2 and 3); `intents.json`.
+
+**C20 (D169), `2e2e860f`, merged into `dev-two-tier` on the user's word ("审完测完直接合并").**
+- `Settings.epochs`, default 1 (a record without it reads as 1; none edited); `SETTINGS_ADDED` = clip_norm, epochs.
+- `post.loss.passes`: E passes, one `PassStart` (the model at the round's start) for all, each pass's updates drawn
+  lazily from its own iterable (a pass's groups are loaded only when it runs); `one_pass` is a pass of it.
+- `pass_orders`: the first pass reads the round's numbers (`[seed, round, 1]`, so E = 1 is the pass before, bit for
+  bit); pass e ≥ 1 `default_rng([seed, round, 1, 1 << 31, e])`. The reviewer found that `Generator.spawn` children
+  would have equalled a continuation's key (`[seed, round, 1, 0, k]`, branch 0, never drawn); the explicit key avoids it.
+- `round.json`'s pass: the means over every pass and `passes` (each pass's); the landed method renames each alike.
+  Nothing reads `round.json["pass"]` (the reviewer's search: backend, exports, readouts).
+- Stage D keeps one pass (the skeleton's default `train_pass`, epochs 1).
+- `--epochs` (default from `Settings`).
+- Tests: two passes share one frozen `PassStart` and draw in order; the pass orders (the first the round's, the later
+  ones their own, no continuation's key); stage C hands epochs and clip, stage D one pass, no clip; a record without
+  `epochs` opens and resumes as 1, 2 refused; the pass record over two passes, branch and landed.
+- Review (opus, independent): no S1, no S2; four S3 fixed (above, and a test that compared `one_pass` with itself).
+- Found while testing: `test_post_generalised`'s campaign digest had failed since `ac455d2e` (`--speak-device`), whose
+  test run left that file out: `round.json` gained `speak_device`. The digest now leaves out the information keys added
+  since (`speak_device`, the gradient norms, `passes`), and with them out it is the digest recorded before the
+  skeleton: models and optimizers unchanged bit for bit. A lesson for me: the generalisation test runs with every
+  change to `round.json`.
+- The pass's rng `[seed, round, 1]` is the same stream as `first_numbers(seed, round, window=1)` (the reviewer's note,
+  older than C20). The two read different things (a shuffle and a data draw, a sentence's words), so no result is
+  affected; a key apart would change every campaign's numbers, so I leave it as it is and note it here.
