@@ -229,3 +229,37 @@ thread, its outputs in a scratch directory (`/tmp/claude-1000/`), the code of `d
    1; 5 min: p50 2, p90 3; 10 min: p50 2, p90 4, largest 8; 20 min: p50 4, p90 7, largest 11. On the records
    `records_kept` is 0 (as it must be: on the records every loss is the records'). The full census's report goes to the
    user for O16.
+
+## 10 MC1's census (a stated sample, 2026-10-07)
+
+The user's choice ("sample, and you may use more cpu, just finish it as soon as possible"): 500 anchors of each airport
+and split (2,500 of 40,530 train anchors, 2,500 of 6,199 select anchors), seed 1337, every span and kind, in 6 processes
+(the longest 537 s), on dev-multi-control's code (fccbab8d); the records in `/tmp/claude-1000/mc1/s500/`. A compressed
+window needs a later aircraft (an anchor without one has no compressed form), so its windows are fewer. The pairs: cc
+commanded–commanded, ca a commanded aircraft responsible against a recorded one, rk only the recorded one responsible
+and the records kept their separation (D145: the loop charges the commanded one), ro the records lost it too. On the
+records rk is 0 by construction; the baseline is the commanded aircraft flown on their stored closed-loop sentences (the
+labelled words: not a model's result, §5 item 4).
+
+| Split | L | Kind | Windows | Left out (anchor, later) | Commanded p50 / p90 / largest | Recorded at a first step p50 / p90 | Records: cc / ca / rk / ro (% of windows) | Baseline: cc / ca / rk / ro |
+|---|---|---|---|---|---|---|---|---|
+| train | 0min | real | 2500 | 2 (anchor 2, later 0) | 1.0 / 1.0 / 1.0 | 1.0 / 3.0 | 0.0 / 3.2 / 0.0 / 2.2 | 0.0 / 4.0 / 0.9 / 1.5 |
+| train | 5min | compressed_0.6 | 1413 | 31 (anchor 0, later 31) | 2.0 / 3.0 / 5.0 | 1.0 / 2.0 | 16.5 / 11.9 / 0.0 / 3.0 | 13.7 / 13.5 / 1.7 / 2.7 |
+| train | 5min | compressed_0.8 | 1413 | 6 (anchor 0, later 6) | 2.0 / 3.0 / 5.0 | 1.0 / 2.0 | 7.9 / 9.7 / 0.0 / 2.8 | 8.0 / 11.0 / 1.4 / 2.1 |
+| train | 5min | real | 2500 | 5 (anchor 2, later 3) | 2.0 / 3.0 / 5.0 | 1.0 / 2.0 | 2.3 / 4.6 / 0.0 / 2.5 | 2.6 / 5.3 / 1.4 / 2.0 |
+| train | 10min | compressed_0.6 | 1974 | 88 (anchor 1, later 87) | 3.0 / 5.0 / 9.0 | 1.0 / 2.0 | 23.0 / 12.1 / 0.0 / 5.3 | 21.8 / 13.1 / 2.0 / 5.1 |
+| train | 10min | compressed_0.8 | 1974 | 32 (anchor 1, later 31) | 3.0 / 5.0 / 9.0 | 0.0 / 2.0 | 12.5 / 9.4 / 0.0 / 3.1 | 12.4 / 10.5 / 1.9 / 2.9 |
+| train | 10min | real | 2500 | 8 (anchor 2, later 6) | 2.0 / 5.0 / 9.0 | 0.0 / 2.0 | 4.7 / 4.5 / 0.0 / 3.2 | 5.5 / 5.6 / 1.7 / 2.6 |
+| train | 20min | compressed_0.6 | 2313 | 140 (anchor 2, later 138) | 4.0 / 7.0 / 14.0 | 0.0 / 2.0 | 30.0 / 12.5 / 0.0 / 6.8 | 28.2 / 13.3 / 3.2 / 6.6 |
+| train | 20min | compressed_0.8 | 2313 | 82 (anchor 2, later 80) | 4.0 / 7.0 / 14.0 | 0.0 / 2.0 | 17.9 / 11.5 / 0.0 / 5.0 | 17.7 / 12.4 / 2.6 / 4.9 |
+| train | 20min | real | 2500 | 15 (anchor 2, later 13) | 4.0 / 7.0 / 14.0 | 0.0 / 2.0 | 7.0 / 5.7 / 0.0 / 4.2 | 8.3 / 6.4 / 2.6 / 3.8 |
+| select | 0min | real | 2500 | 2 (anchor 2, later 0) | 1.0 / 1.0 / 1.0 | 1.0 / 3.0 | 0.0 / 3.6 / 0.0 / 2.0 | 0.0 / 4.7 / 1.4 / 1.4 |
+| select | 5min | compressed_0.6 | 1430 | 26 (anchor 2, later 24) | 2.0 / 3.0 / 5.0 | 1.0 / 3.0 | 15.5 / 10.2 / 0.0 / 2.1 | 15.8 / 11.8 / 0.9 / 1.9 |
+| select | 5min | compressed_0.8 | 1430 | 7 (anchor 2, later 5) | 2.0 / 3.0 / 5.0 | 1.0 / 3.0 | 8.3 / 8.0 / 0.0 / 2.2 | 9.4 / 9.1 / 0.8 / 1.8 |
+| select | 5min | real | 2500 | 4 (anchor 2, later 2) | 2.0 / 3.0 / 5.0 | 1.0 / 2.0 | 2.5 / 4.1 / 0.0 / 2.4 | 3.5 / 4.8 / 1.3 / 1.7 |
+| select | 10min | compressed_0.6 | 1992 | 72 (anchor 2, later 70) | 3.0 / 5.0 / 8.0 | 1.0 / 2.0 | 22.5 / 11.7 / 0.0 / 4.2 | 22.2 / 12.8 / 1.6 / 3.9 |
+| select | 10min | compressed_0.8 | 1992 | 29 (anchor 2, later 27) | 3.0 / 5.0 / 8.0 | 0.0 / 2.0 | 12.5 / 8.5 / 0.0 / 2.6 | 13.7 / 9.3 / 1.2 / 2.3 |
+| select | 10min | real | 2500 | 6 (anchor 2, later 4) | 3.0 / 5.0 / 8.0 | 0.0 / 2.0 | 4.5 / 4.4 / 0.0 / 2.9 | 6.1 / 4.9 / 1.8 / 2.3 |
+| select | 20min | compressed_0.6 | 2330 | 152 (anchor 2, later 150) | 4.0 / 8.0 / 13.0 | 0.0 / 2.0 | 30.2 / 12.0 / 0.0 / 5.7 | 30.1 / 12.9 / 2.3 / 5.2 |
+| select | 20min | compressed_0.8 | 2330 | 63 (anchor 2, later 61) | 4.0 / 8.0 / 13.0 | 0.0 / 2.0 | 18.2 / 10.5 / 0.0 / 5.6 | 20.2 / 11.4 / 2.7 / 4.9 |
+| select | 20min | real | 2500 | 11 (anchor 2, later 9) | 4.0 / 8.0 / 13.0 | 0.0 / 2.0 | 7.4 / 5.7 / 0.0 / 4.6 | 9.8 / 6.2 / 2.7 / 3.9 |
