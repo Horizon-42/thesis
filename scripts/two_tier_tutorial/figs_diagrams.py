@@ -141,39 +141,43 @@ def fig11_cv_design() -> None:
 
 
 # ------------------------------------------------------------------ Fig 12: the post-training loop
+def _post_training_loop(name, method, msub, usub) -> None:
+    """The loop of one post-training method: the top row is the same for both methods; the bottom row is the method."""
+    fig, ax, H = canvas(DOUBLE, 2.9)
+    oy = 3.0
+    win = box(ax, 1, oy + 26, 15, 10, "Window", FILL["n"], sub="recorded traffic", fs=6.8)
+    pri = box(ax, 20, oy + 26, 22, 10, "Prior + traffic attention", FILL["b"], bold=True, sub="speaks under its masks", fs=6.6)
+    exe = box(ax, 46, oy + 26, 15, 10, "Executor", FILL["a"], sub="flies the words", fs=6.8)
+    jdg = box(ax, 65, oy + 26, 18, 10, "Judges", FILL["a"], sub="outcome, separation", fs=6.8)
+    rew = box(ax, 87, oy + 26, 12, 10, "Reward", FILL["c"], sub="1, 0.9ⁿ, 0", fs=6.8)
+    arrow(ax, anchor(win, "r"), anchor(pri, "l"), None)
+    arrow(ax, anchor(pri, "r"), anchor(exe, "l"), None)
+    arrow(ax, anchor(exe, "r"), anchor(jdg, "l"), None)
+    arrow(ax, anchor(jdg, "r"), anchor(rew, "l"), None)
+    met = box(ax, 40, oy + 5, 26, 12, method, FILL["c"], sub=msub, fs=6.8)
+    upd = box(ax, 72, oy + 5, 17, 12, "Update of the prior", FILL["c"], bold=True, sub=usub, fs=6.4)
+    bas = box(ax, 92, oy + 5, 7.5, 12, "Base", FILL["b"], sub="frozen", fs=6.4)
+    ax.plot([93, 93, 53], [oy + 26, oy + 21.5, oy + 21.5], color=C["ink2"], lw=0.9, zorder=2)
+    arrow(ax, (53, oy + 21.5), anchor(met, "t"), None)
+    ax.text(73, oy + 22.3, "reward", fontsize=5.6, color=C["ink2"], ha="center", va="bottom")
+    arrow(ax, anchor(met, "r"), anchor(upd, "l"), "samples", lxy=(69, oy + 11.3), fs=5.6)
+    arrow(ax, anchor(bas, "l"), anchor(upd, "r"), None)
+    ax.plot([80.5, 80.5, 31, 31], [oy + 5, oy + 1.8, oy + 1.8, oy + 26], color=C["ink2"], lw=0.9, zorder=2)
+    arrow(ax, (31, oy + 24.5), (31, oy + 26), None)
+    ax.text(55, oy + 2.4, "new weights", fontsize=5.8, color=C["ink2"], ha="center", va="bottom")
+    ax.text(50, 1.0, "Data term: teacher forcing on the landed sentences of the train days. The other aircraft of a window fly their records.",
+            ha="center", fontsize=5.9, color=C["ink2"], va="center")
+    save(fig, name)
+
+
 def fig12_post_training_loop() -> None:
-    fig, ax, H = canvas(DOUBLE, 6.4)
+    _post_training_loop("fig12_post_training_loop", "Branch training", "8 copies at each branch point;\nadvantage inside each group",
+                        "clipped ratio\n+ 0.04 × pull + data term")
 
-    def panel_loop(oy, title, method, msub, usub):
-        ax.text(1, oy + 41.2, title, fontsize=7.2, fontweight="bold", va="center")
-        win = box(ax, 1, oy + 26, 15, 10, "Window", FILL["n"], sub="recorded traffic", fs=6.8)
-        pri = box(ax, 20, oy + 26, 22, 10, "Prior + traffic attention", FILL["b"], bold=True, sub="speaks under its masks", fs=6.6)
-        exe = box(ax, 46, oy + 26, 15, 10, "Executor", FILL["a"], sub="flies the words", fs=6.8)
-        jdg = box(ax, 65, oy + 26, 18, 10, "Judges", FILL["a"], sub="outcome, separation", fs=6.8)
-        rew = box(ax, 87, oy + 26, 12, 10, "Reward", FILL["c"], sub="1, 0.9ⁿ, 0", fs=6.8)
-        arrow(ax, anchor(win, "r"), anchor(pri, "l"), "tokens", lxy=(18, 31.7 + oy), fs=5.6)
-        arrow(ax, anchor(pri, "r"), anchor(exe, "l"), "words", lxy=(43.5, 31.7 + oy), fs=5.6)
-        arrow(ax, anchor(exe, "r"), anchor(jdg, "l"), "flown track", lxy=(63, 31.7 + oy), fs=5.6)
-        arrow(ax, anchor(jdg, "r"), anchor(rew, "l"), None)
-        met = box(ax, 40, oy + 5, 26, 12, method, FILL["c"], sub=msub, fs=6.8)
-        upd = box(ax, 72, oy + 5, 17, 12, "Update of the prior", FILL["c"], bold=True, sub=usub, fs=6.4)
-        bas = box(ax, 92, oy + 5, 7.5, 12, "Base", FILL["b"], sub="frozen", fs=6.4)
-        ax.plot([93, 93, 53], [oy + 26, oy + 21.5, oy + 21.5], color=C["ink2"], lw=0.9, zorder=2)
-        arrow(ax, (53, oy + 21.5), anchor(met, "t"), None)
-        ax.text(73, oy + 22.3, "reward", fontsize=5.6, color=C["ink2"], ha="center", va="bottom")
-        arrow(ax, anchor(met, "r"), anchor(upd, "l"), "samples", lxy=(69, oy + 11.3), fs=5.6)
-        arrow(ax, anchor(bas, "l"), anchor(upd, "r"), None)
-        ax.plot([80.5, 80.5, 31, 31], [oy + 5, oy + 1.8, oy + 1.8, oy + 26], color=C["ink2"], lw=0.9, zorder=2)
-        arrow(ax, (31, oy + 24.5), (31, oy + 26), None)
-        ax.text(55, oy + 2.4, "new weights", fontsize=5.8, color=C["ink2"], ha="center", va="bottom")
 
-    panel_loop(46, "(a) Branch training", "Branch training", "8 copies at each branch point;\nadvantage inside each group",
-               "clipped ratio\n+ 0.04 × pull + data term")
-    panel_loop(0, "(b) Training on the landed sentences", "Keep the landed sentence", "each window spoken several times;\nthe landing of highest reward kept",
-               "log-likelihood\n+ 0.04 × pull + data term")
-    ax.text(50, -2.4, "Data term: teacher forcing on the landed sentences of the train days. The other aircraft of a window fly their records.", ha="center", fontsize=5.9, color=C["ink2"], va="center")
-    ax.set_ylim(-4, H)
-    save(fig, "fig12_post_training_loop")
+def fig17_landed_training() -> None:
+    _post_training_loop("fig17_landed_training", "Keep the landed sentence", "each window spoken several times;\nthe landing of highest reward kept",
+                        "log-likelihood\n+ 0.04 × pull + data term")
 
 
 # ------------------------------------------------------------------ Fig 13: branch training
@@ -317,5 +321,5 @@ def fig15_judge_outcomes() -> None:
 
 
 if __name__ == "__main__":
-    for name in sys.argv[1:] or ["fig01_architecture", "fig08_prior_architecture", "fig10_decoding", "fig11_cv_design", "fig12_post_training_loop", "fig13_branch_training", "fig14_traffic_features", "fig15_judge_outcomes", "fig16_window_kinds"]:
+    for name in sys.argv[1:] or ["fig01_architecture", "fig08_prior_architecture", "fig10_decoding", "fig11_cv_design", "fig12_post_training_loop", "fig13_branch_training", "fig14_traffic_features", "fig15_judge_outcomes", "fig16_window_kinds", "fig17_landed_training"]:
         globals()[name]()
