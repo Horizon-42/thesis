@@ -27,7 +27,9 @@ they start with `4dTrajectory/` or `.claude/`.
 | MC4 · the time readouts (O18) and `multi_validation` | dev-multi-control | Built, reviewed (three rounds), committed (fccbab8d) |
 | MC0's D73 checks on the formal artefact (notes 三) | dev-multi-control | Passed 2026-10-07 (§9) |
 | D149's check on real windows (notes 三) | dev-multi-control | Passed 2026-10-07: 200 of 200 windows bit for bit (§9) |
-| MC1's census on real data (notes 三) | dev-multi-control | A sample of 20 anchors an airport and split measured (§9); the full census running |
+| MC1's census on real data (notes 三) | dev-multi-control | A sample of 20 anchors measured; the full census stopped at the user's word ("sample, … finish it as soon as possible"); a stated sample of 500 anchors an airport and split running in 6 processes (§9) |
+| The full ts suite on dev-multi-control (fccbab8d) | dev-multi-control | 1,963 passed, 1 skipped (8 workers, 13.2 min, 2026-10-07) |
+| dev-multi-control into dev-two-tier | dev-two-tier | Merged at the user's word ("合进去", 2026-10-07): b967d2b1, no conflict, no code differs from the tested branch |
 
 ## 1 The branches (2026-10-06)
 

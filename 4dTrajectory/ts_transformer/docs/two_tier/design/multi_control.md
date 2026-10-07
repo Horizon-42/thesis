@@ -62,8 +62,8 @@ the evidence is in §9.
 ### 0.3 Implementation
 
 Stage D's implementer keeps this table and its log, `readouts/2026-10-06_stage_d_implementation_log.md` (outline §5
-rule 10); its readings and requests go to `requests_from_d_to_designer.md`. All on `dev-multi-control`, not merged;
-nothing of stage D has run on real data (C14's rounds run first).
+rule 10); its readings and requests go to `requests_from_d_to_designer.md`. MC0–MC4's code merged into `dev-two-tier`
+(b967d2b1, 2026-10-07); MC0's checks on real data passed; MC1's census (a stated sample) running.
 
 | Milestone | State |
 |---|---|
