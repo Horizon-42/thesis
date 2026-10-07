@@ -95,6 +95,8 @@ commits, the tests and the readings are in the implementation log.
 | C19 (D168) | Code `f3ce543f` (reviewed), merged `704879d7` (the user's word): `Settings.clip_norm` (default None), the clip in `one_pass`, the norms and the share clipped in `round.json`; `open_campaign` compares the recorded settings through the stage's settings class (log §30) |
 | C18 (D167) | Code `364c2f4c` (reviewed), merged `704879d7`: the measure in `campaign.json` (`measures`), read by a later launch on the same devices, each launch's `fit` (log §30) |
 | C20 (D169) | Code `2e2e860f` (reviewed), merged into `dev-two-tier` (the user's word): `Settings.epochs` (default 1), `post.loss.passes`, each pass's numbers and means (log §30) |
+| C21 (D170) | Code `1ce26b63` (reviewed) on `dev-two-tier-v4-post`, not yet merged (log §30) |
+| C22 (D171) | Built on `dev-two-tier-v4-post`, in review (log §30) |
 | The validation readout of the chosen round | Built and reviewed on synthetic artefacts (`post_validation`, `0c95a821`, log §23; D132 `483b81d7`) |
 | C12 | After C10 |
 
