@@ -39,7 +39,9 @@ said in the row that the caller's rule makes answer (``answering``; stage C's: t
 make responsible) become silent (D144): reward 0, flown on by a caller's mask that permits only "unchanged" in every
 column, never answering again; an aircraft in its observed rows answers for nothing. A commanded aircraft that the
 executor ends `landed` adds its landing (its landed runway, its crossing time) to the other commanded aircraft of its
-window (D147 item 2). A window ends when every commanded aircraft is done or silent (D144): its silent ones are halted
+window (D147 item 2; a loop landing on a sealed test day is left out and counted, `LandingIndex.with_landing`), and is
+judged once more at the row flown to, over its threshold at its last state flown, so that the wake minimum at the
+threshold behind a commanded leader is judged as behind a recorded one (`_judged`; the user, 2026-10-07). A window ends when every commanded aircraft is done or silent (D144): its silent ones are halted
 then. Each commanded aircraft gives its own result (`results`). A stage C window (one commanded aircraft, joining at
 tick 0) is flown as before, bit for bit: silent is its window's end.
 """
@@ -377,7 +379,7 @@ class WindowLoop:
         alive_before = self.speaking.alive.copy()
         said = self.speaking.step(numbers, self._masks(masks), traffic)
         self._keep(rows, joined, applies)
-        self._landed(alive_before & ~self.speaking.alive & ~self.speaking.ended)
+        landed = self._landed(alive_before & ~self.speaking.alive & ~self.speaking.ended)
         self._next = {}
         ending = np.zeros(len(self.order), dtype=bool)
         for w, rows_w in enumerate(self.members):
@@ -387,18 +389,18 @@ class WindowLoop:
             self._next[w] = tick
             self._read(w, t + 1, tick.recorded)
             if tick.rows:
-                found = step_losses(tick.scene, tick.aircraft.last_step, self.separations[self.geometries[rows_w[0]]
-                                                                                           .code])
+                judged, scene, commanded = self._judged(tick, [b for b in landed if self.window_of[b] == w])
+                found = step_losses(scene, judged.last_step, self.separations[self.geometries[rows_w[0]].code])
                 for k, b in enumerate(tick.rows):
                     if self.silent[b] or not said_now[b]:       # an observed one answers for nothing (D145)
                         continue
                     loss = next((loss for loss in found if k in self.answering(self.windows[w], t + 1, loss,
-                                                                                   tick.aircraft, len(tick.rows))),
-                                None) if len(tick.rows) > 1 or self.answering is not responsible else \
+                                                                                   judged, commanded)),
+                                None) if commanded > 1 or self.answering is not responsible else \
                         answered_loss(found, 0)
                     if loss is not None:
                         partner = loss.j if loss.i == k else loss.i
-                        self.loss[b], self.loss_step[b], self.other[b] = loss, t + 1, tick.aircraft.keys[partner]
+                        self.loss[b], self.loss_step[b], self.other[b] = loss, t + 1, judged.keys[partner]
                         self.silent[b] = True
             alive = self.speaking.alive[rows_w]
             if (self.silent[rows_w] | ~alive).all():          # every commanded aircraft done or silent: its end
@@ -407,20 +409,48 @@ class WindowLoop:
             self.speaking.end(ending)
         return said
 
-    def _landed(self, done: np.ndarray) -> None:
+    def _landed(self, done: np.ndarray) -> list[int]:
         """The rows the executor ended in the row just flown (``done``): one judged `landed` adds its landing on its
-        landed runway at its crossing time to the other commanded aircraft of its window (D147 item 2)."""
+        landed runway at its crossing time to the other commanded aircraft of its window (D147 item 2; not a silent
+        one's). The rows judged `landed` in a window of other commanded aircraft (silent ones too), for the judge
+        (`_judged`)."""
+        out = []
         for b in np.flatnonzero(done):
             others = [c for c in self.members[self.window_of[b]] if c != b]
             if not others:
                 continue
             outcome = self.speaking.loop.outcome(b)
-            if outcome.outcome != LANDED or self.silent[b]:
+            if outcome.outcome != LANDED:
+                continue
+            out.append(int(b))
+            if self.silent[b]:
                 continue
             g = self.geometries[b]
             time_s = self.records[b].first_step_s + outcome.crossing["at_row"] * self.speaking.loop.params.cycle_s
             landing = Landing(time_s, g.candidates[int(outcome.crossing["runway_index"])].ident, self.keys[b])
             self.speaking.add_landing(others, landing)
+        return out
+
+    def _judged(self, tick: _Tick, landed: Sequence[int]) -> tuple[AircraftAt, Any, int]:
+        """The judged set of a window at the row flown to, its scene and its count of commanded aircraft: the tick's
+        (its commanded aircraft still flown, then its recorded ones), and with ``landed`` (its rows judged `landed` in
+        the row just flown) each of those once more, over its threshold (``last_step``) at its last state flown on its
+        landed runway, after the commanded ones still flown: the wake minimum at the threshold behind a commanded leader
+        (post-training's judge, as for a recorded leader at its last row; the user, 2026-10-07, stage D's requests item
+        7). It is never asked to answer (it is not said)."""
+        if not landed:
+            return tick.aircraft, tick.scene, len(tick.rows)
+        over = []
+        for b in landed:
+            states = self.speaking.states(b)
+            runway = int(self.speaking.loop.outcome(b).crossing["runway_index"])
+            over.append(AircraftAt.of([(self.records[b].key, tuple(states[-1, :3]), tuple(states[-2, :3]), True, runway,
+                                        self.records[b].category, True, False)]))
+        judged = scene_aircraft(_concat(tick.owns + over), tick.recorded)
+        b = tick.rows[0]
+        g = self.geometries[b]
+        return judged, separation_traffic(judged, g, self.separations[g.code], self.finals[b], self.step_s), \
+            len(tick.rows) + len(landed)
 
     def copy(self, windows: Sequence[int]) -> WindowLoop:
         """A loop of copies of the windows ``windows`` (places in ``windows``, repeats permitted; post-training D94): the

@@ -6,14 +6,13 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import fields
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pytest
 import torch
 
 from flight_scenarios.fas_geometry import fas_course_geometry
-from ts_transformer.data.day_split import SealedDay
 from ts_transformer.autopilot.conformance import STATE_BOUND_M
 from ts_transformer.autopilot.flights import FlightInputs
 from ts_transformer.autopilot.start import NO_MOVE, Loop, start_moved
@@ -240,8 +239,9 @@ def test_a_copy_of_a_loop_with_join_ticks_says_what_its_original_says(tmp_path, 
 def test_a_landing_added_changes_only_the_counts_of_the_chosen_flights_rows_after_it(tmp_path, monkeypatch):
     """D150, §6.3 item 5 (multi-aircraft control D147): a landing added to chosen flights' landings while the loop runs
     changes only their rows whose time is after it (within the 30 min of the input), and nothing else of any row; a
-    copy keeps it; the index keeps its checks — a second landing of a flight and a landing on a sealed test day are
-    refused."""
+    copy keeps it; the index keeps its checks — a second landing of a flight and a landing on a day outside the split
+    are refused; one on a sealed test day is left out and counted with the sealed landings (requests item 6, the user,
+    2026-10-07)."""
     speaking, _, _ = _setup(tmp_path, monkeypatch)
     loop = speaking(JOIN_TICKS)
     rows_of = loop.rows_of
@@ -265,8 +265,15 @@ def test_a_landing_added_changes_only_the_counts_of_the_chosen_flights_rows_afte
         rows_of.landings[1].with_landing(Landing(float(utc[1]), idents[0], "NEW"))
     days = rows_of.landings[0].days
     test_day = datetime.strptime(sorted(days.days["test"])[0], "%Y-%m-%d").replace(hour=21, tzinfo=timezone.utc)
-    with pytest.raises(SealedDay):
-        rows_of.landings[0].with_landing(Landing(test_day.timestamp(), idents[0], "SEALED"))
+    sealed = rows_of.landings[0].with_landing(Landing(test_day.timestamp(), idents[0], "SEALED"))
+    assert sealed.landings == rows_of.landings[0].landings and sealed.sealed == rows_of.landings[0].sealed + 1
+    early = test_day.replace(hour=5) + timedelta(days=1)                   # UTC − 9 h: still the test day's
+    assert rows_of.landings[0].with_landing(Landing(early.timestamp(), idents[0], "EARLY")).sealed == sealed.sealed
+    with pytest.raises(ValueError, match="lands twice"):                    # the other checks first
+        rows_of.landings[1].with_landing(Landing(test_day.timestamp(), idents[0], "NEW"))
+    outside = datetime(1990, 1, 1, 21, tzinfo=timezone.utc)                # a day outside the split: refused
+    with pytest.raises(KeyError, match="not in this day split"):
+        rows_of.landings[0].with_landing(Landing(outside.timestamp(), idents[0], "OUTSIDE"))
 
 
 def test_a_row_of_several_roles_is_refused_out_of_order_or_unlike_its_rows(tmp_path, monkeypatch):

@@ -170,7 +170,7 @@ def test_a_landing_in_the_loop_counts_for_the_other_aircraft_of_its_window_from_
     crossing = {"at_row": 37.5, "runway_index": 0, "cross_m": 0.0, "height_m": 15.0}
     monkeypatch.setattr(loop.speaking.loop, "outcome", lambda b: SimpleNamespace(outcome=LANDED, crossing=crossing))
     before = [index.digest() for index in loop.landings]
-    loop._landed(np.array([True, False, False]))
+    assert loop._landed(np.array([True, False, False])) == [0]           # the rows judged landed, for the judge
     time_s = loop.records[0].first_step_s + 37.5 * loop.speaking.loop.params.cycle_s
     for b in (1, 2):
         added = [x for x in loop.landings[b].landings if x.flight_key == loop.keys[0]]
@@ -178,8 +178,10 @@ def test_a_landing_in_the_loop_counts_for_the_other_aircraft_of_its_window_from_
     assert loop.landings[0].digest() == before[0]
     loop.silent[1] = True
     after = [index.digest() for index in loop.landings]
-    loop._landed(np.array([False, True, False]))                  # a silent aircraft's landing adds nothing
+    assert loop._landed(np.array([False, True, False])) == [1]    # a silent aircraft's landing adds nothing, but is judged
     assert [index.digest() for index in loop.landings] == after
+    monkeypatch.setattr(loop.speaking.loop, "outcome", lambda b: SimpleNamespace(outcome="timeout", crossing=None))
+    assert loop._landed(np.array([False, False, True])) == []
 
 
 def test_a_copy_of_a_window_of_several_aircraft_says_and_flies_what_it_does(setup):
@@ -429,3 +431,69 @@ def test_the_check_of_the_second_pass_reads_an_aircraft_ended_before_the_point_a
     first = run(_rules(lambda place, member, v, tick, k: np.random.default_rng([9, place, member, tick, k]),
                        lambda window, loop, rows, results: [(1, [40 + start])]), (0, 40))
     assert first.differed == []
+
+
+def test_a_commanded_leader_that_landed_is_judged_once_over_its_threshold(setup, monkeypatch):
+    """Stage D's requests item 7 (the user, 2026-10-07): at the row after a commanded aircraft lands, the judge sees it
+    once more, after the commanded aircraft still flown, over its threshold (`last_step`) at its last state flown on its
+    landed runway, counted among the commanded aircraft — so the wake minimum at the threshold behind it is judged as
+    behind a recorded leader (here a heavy leader and its follower 30 s behind: a loss at the threshold, the follower
+    responsible); the loop gives the judge its window's landed rows."""
+    from dataclasses import replace as dc_replace
+
+    from ts_transformer.inference.separation import AT_THRESHOLD
+    from ts_transformer.post.scene import AircraftAt
+    from ts_transformer.post.traffic import step_losses
+
+    s = setup
+    _, loop_of = _multi(s)
+    loop = loop_of(_with_module(s["base"]), answering=lambda *args: ())
+    numbers = _numbers(len(JOINS))
+    while loop.speaking.t < JOINS[2] + 8:
+        roles = loop.speaking.roles()
+        loop.step(np.stack([n.random(len(COLUMNS)) if r == SAID else np.zeros(len(COLUMNS))
+                            for n, r in zip(numbers, roles)]))
+    crossing = {"at_row": 40.0, "runway_index": 0, "cross_m": 0.0, "height_m": 15.0}
+    monkeypatch.setattr(loop.speaking.loop, "outcome", lambda b: SimpleNamespace(outcome=LANDED, crossing=crossing))
+    loop.records[0] = dc_replace(loop.records[0], category="B")                # a heavy leader
+    g = s["geometry"]
+    (threshold,) = g.candidates
+    course = np.radians(90.0 - threshold.course_deg)                            # math ENU of the course
+
+    def on_final(behind_m):                                                     # a point on the final, MSL
+        e, n = threshold.threshold_e_m - behind_m * np.cos(course), threshold.threshold_n_m - behind_m * np.sin(course)
+        return e, n, threshold.elevation_m + 15.0 + behind_m * np.tan(np.radians(3.0))
+
+    flown = np.zeros((2, loop.speaking.states(0).shape[1]))
+    flown[0, :3], flown[1, :3] = on_final(150.0), on_final(-10.0)              # the leader's last two rows: over it
+    real_states = loop.speaking.states
+    monkeypatch.setattr(loop.speaking, "states", lambda b: flown if b == 0 else real_states(b))
+    tick = loop._tick(0, loop.speaking.t)
+    owns = [AircraftAt.of([(loop.records[b].key, on_final(d), on_final(d + 150.0), True, 0, "F", False, False)])
+            for b, d in ((1, 2_000.0), (2, 9_000.0))]
+    recorded = AircraftAt.of([("REC", on_final(30_000.0), on_final(30_150.0), True, 0, "F", False, False)])
+    gone = post_window_loop._Tick(tick.t, [1, 2], owns, recorded, tick.aircraft, tick.scene)
+    judged, scene, commanded = loop._judged(gone, [0])
+    keys = [loop.records[b].key for b in (1, 2, 0)] + ["REC"]                  # the recorded aircraft last
+    assert list(judged.keys) == keys and judged.last_step.tolist() == [False, False, True, False] and commanded == 3
+    assert np.array_equal(judged.at[2], flown[-1, :3]) and judged.runway_index[2] == 0
+    found = step_losses(scene, judged.last_step, loop.separations[g.code])
+    at = [x for x in found if x.kind == AT_THRESHOLD]
+    assert [(x.i, x.j, x.responsible) for x in at] == [(2, 0, (0,))]           # the follower behind it answers
+    assert loop._judged(tick, []) == (tick.aircraft, tick.scene, len(tick.rows))
+    # the loop's step: its window's landed rows to the judge, and the rule of who answers given the judged set with
+    # the landed aircraft at its place after the commanded ones still flown, counted among them
+    from ts_transformer.inference.separation import Loss
+
+    asked, answered = [], []
+    monkeypatch.setattr(loop, "_landed", lambda done: [0])
+    real = loop._judged
+    monkeypatch.setattr(loop, "_judged", lambda tick, landed: (asked.append(list(landed)), real(tick, landed))[1])
+    still = len([b for b in range(len(JOINS)) if loop.speaking.joined()[b] and loop.speaking.alive[b]])
+    monkeypatch.setattr(post_window_loop, "step_losses",
+                        lambda scene, last, separation: [Loss(0, still, AT_THRESHOLD, "same", 1.0, 0.5, 0.0, (0,), True)])
+    loop.answering = lambda window, step, loss, aircraft, commanded: (answered.append((aircraft.keys, commanded)), ())[1]
+    roles = loop.speaking.roles()
+    loop.step(np.stack([n.random(len(COLUMNS)) if r == SAID else np.zeros(len(COLUMNS)) for n, r in zip(numbers, roles)]))
+    assert asked == [[0]]
+    assert answered and all(keys[still] == loop.records[0].key and commanded == still + 1 for keys, commanded in answered)

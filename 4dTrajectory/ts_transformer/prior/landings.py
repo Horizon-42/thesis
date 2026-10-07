@@ -70,8 +70,17 @@ class LandingIndex:
 
     def with_landing(self, landing: Landing) -> LandingIndex:
         """These landings and ``landing`` (a landing that a loop adds, multi-aircraft control D150, §6.3 item 5), in time
-        order; the index's checks hold: a landing on a sealed test day or on a day outside the split, a runway that is no
-        candidate and a second landing of one flight are refused."""
+        order. A landing on a sealed test day is left out and counted with the sealed landings, as a window's shifted
+        landing is (`post.landings.window_landings`; the user, 2026-10-07, stage D's requests item 6); the index's other
+        checks hold: a landing on a day outside the split, a runway that is no candidate and a second landing of one
+        flight are refused."""
+        if landing.runway not in self.runways:
+            raise ValueError(f"a landing on {landing.runway}, not a candidate of {self.runways}")
+        if landing.flight_key in self._own:
+            raise ValueError("a flight lands twice in the index")
+        day = operational_day(datetime.fromtimestamp(landing.time_s, timezone.utc))
+        if self.days.split_of(day) == "test":
+            return LandingIndex(self.runways, self.landings, self.sealed + 1, self.days)
         kept = sorted((*self.landings, landing), key=lambda item: (item.time_s, item.flight_key))
         return LandingIndex(self.runways, tuple(kept), self.sealed, self.days)
 
