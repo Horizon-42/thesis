@@ -4,7 +4,8 @@ Stage D's implementer writes this file (outline §5 rule 10, multi-aircraft cont
 time. Each item is a reading the implementer made where the design says nothing, or a gap; a reading is a proposal
 until the user decides. Paths are relative to `4dTrajectory/ts_transformer/`.
 
-State: 2026-10-07: MC0 (stages A, B, C) and MC1 built on `dev-multi-control`, not yet run on real data.
+State: 2026-10-07: MC0 (stages A, B, C), MC1, MC2 and MC3 built on `dev-multi-control` (fd720c75), MC4's first part in
+review; nothing run on real data yet (C14's rounds run first). Items 6, 7, 19, 21, 22 and 25 wait for the user.
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -74,6 +75,9 @@ State: 2026-10-07: MC0 (stages A, B, C) and MC1 built on `dev-multi-control`, no
   Item 8: `post_window_loop.WindowLoop(…, answering=…, token_part=…, part_width=…)`, `responsible`, `Answering`,
   `TokenPartOf`, `WindowLoop.members`, `window_of`, `member_of`, `records`, `silent`, `landings` (now the speaking
   loop's, with the loop's own landings).
+- Post-training §9 item 9 (MC3): `post_branches.Rules.varied(window, loop, rows, results)` (the first pass's ends added).
+  Item 11 (MC4): `Stage.speak_batch`, `Stage.read_batch`, `Stage.part_width`, `Stage.selection(context, settings,
+  split)`, `Speakers(…, stage=)`, `train_pass(…, part_width=)`, `update_pairs(…, part_width=)`.
 
 ## MC0 · stage C, items 9, 11, 12
 
@@ -114,3 +118,51 @@ State: 2026-10-07: MC0 (stages A, B, C) and MC1 built on `dev-multi-control`, no
 20. **A batch holds windows, not aircraft** (review S3, for MC5): `batches` counts windows; with several commanded
     aircraft a batch's rows grow with L, and the memory measure of C13 (`_measure`) times one batch. MC5's preflight sizes
     a batch by its rows.
+
+## MC2 · the window loop of several commanded aircraft (stage D's rules, fd720c75)
+
+21. **The token part's features** (D152 says what it carries, not its features; `multi/tokens.py`,
+    `multi-commanded-tokens-v1`, 10 features): for another commanded aircraft, the flags commanded, silent and "words
+    in force" (from the row after its first row said); its heading word as the prior's own input reads it (sine and
+    cosine of its track less the course of its runway in force); its altitude level over 1,000 m, with a flag for "no
+    level-off"; its angle word's nominal angle over 3°; its speed target over 100 m/s, with a flag for "unspecified".
+    A recorded aircraft's part is 0. The height and speed scales are the edge features' (a mirror, pinned by a test).
+    Proposal: confirm before MC6 fixes the format.
+22. **D145 at L = 0.** Stage D's rule of who answers (`multi.separation.Answering`) charges a commanded aircraft for a
+    loss that only the recorded aircraft is responsible for, where the records kept their separation; stage C's rule
+    does not. So a window of stage D with one commanded aircraft is stage C's window with D145's charge, not stage C's
+    round. (Stage D's numbers do not differ there: numpy reads `[seed, round, place, 0]` as `[seed, round, place]`, so
+    an anchor draws stage C's numbers.) Built and tested: with stage C's numbers, stage D's reward, spoken-again rule,
+    varied aircraft, branch points and rule of who answers give stage C's round bit for bit on window A and the real
+    window, where no loss of `records_kept` occurs. Proposal: MC2's "L = 0 equals stage C" means this; D149 holds for
+    stage C's own code (tested since MC0).
+23. **Items 6 and 7 are still open, and the loop of several commanded aircraft now uses both**: a loop landing on a
+    sealed test day stops the campaign (item 6); the wake minimum behind a commanded leader at its threshold is not
+    judged (item 7). Both need the user's decision before MC4's smoke.
+24. **"The loss that v is in"** (D143, v's event): read as the earliest loss of the first sentence in which v is either
+    aircraft — its own, or one that another commanded aircraft answered for against v. A varied aircraft whose event is
+    at or before its first predicted step has no branch point (no group). An aircraft that answers two losses at one
+    step records one other aircraft (the loop's first), so the second partner is not varied (the review, S3: rare).
+25. **The silent flag reads the records under D145** (the review, S2, for the user). Under D145, a commanded aircraft
+    becomes silent for a loss that only the recorded aircraft is responsible for only when the records kept their
+    separation, and the records include that aircraft's own record after its first predicted step — its withheld
+    observed path. The other aircraft read the flag from the next row (D152), so in that case the flag carries one bit
+    of the records: at most one a commanded aircraft, once, only in windows with a `records_kept` loss (MC1 counts them;
+    in the archived census the records lost separation by themselves in 2.76 % of the flights). The silent aircraft's
+    forced "unchanged" carries the same bit, more weakly, so leaving the flag out would not remove it. Proposal: accept
+    it as a stated limit of D144 × D145 × D152.
+26. **Stage D's numbers** (§3.3): `default_rng([seed, round, place, member])` for an aircraft's first sentence and
+    `default_rng([seed, round, place, member, tick, k])` for a continuation of the varied aircraft `member` at tick
+    `tick` (`multi.credit`).
+
+## MC4 · the round's stage (first part, in review)
+
+27. **The campaign's round is the stage's throughout** (post-training §9 item 11): `Stage` also gives its batch speaker,
+    its batch reader and its token part's width (which the pass's samples read); `Stage.selection` takes the split;
+    the speaking workers run the stage's parts. Stage C's campaign is the campaign as before (D149's campaign digests
+    unchanged). Still stage C's only: the memory measure of the pass (`pass_memory_of`, `post_profile`); stage D's comes
+    with MC5.
+28. **The losses by pair in stage D's readouts** (§5 item 4; reading for MC4): the loop records only the losses that
+    an aircraft answers for. A readout's counts by pair (including `recorded_only`) are judged again on the flown states
+    of the window's commanded aircraft with the census's machinery (`multi.census.window_losses`, positions from the
+    loop's states and words), the same rule as the census's baseline. Stage C's loop is not changed for it.

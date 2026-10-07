@@ -276,7 +276,7 @@ def main(argv: list[str] | None = None) -> int:
     settings = Settings(1, {kind: getattr(args, f"windows_{kind.lower()}") for kind in KINDS}, args.batch_windows,
                         args.continuations, args.seed, args.prior_lr, args.traffic_lr, args.weight_decay,
                         args.update_groups, args.data_sentences, args.select_per_airport, args.traffic_hidden,
-                        args.traffic_heads)
+                        args.traffic_heads, None)                     # the base's start (D29): the profile's model
     _, opened, _ = require_conforming_closed_loop(instructions, executor)
     edges_reference = census / "conformance" / "edges.npz"
     checked_edges(edges_reference)

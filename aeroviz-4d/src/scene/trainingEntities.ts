@@ -3,7 +3,8 @@
  * -------------------
  * The pieces the Training 3D scene is built from (`hooks/useTrainingTrackLayer.ts`, `hooks/useTrainingLiveLayer.ts`): the
  * entity ids, the exporter's and the backend's coordinates as Cesium's flat arrays, and the few entity shapes every
- * layer draws — a line in the air (dashed where terrain hides it), a line on the ground, a marker. Nothing here computes
+ * layer draws — a line in the air (solid; dashed where terrain hides it), a line on the ground (always dashed, thinner
+ * and fainter, so that it never reads as a track in the air: frontend §3 item 6, D159), a marker. Nothing here computes
  * geometry: every coordinate is the exporter's (lon / lat and heights computed in Python) or the backend's.
  *
  * Every layer adds its entities through one `entityGroup` and removes them together when its inputs change.
@@ -54,8 +55,10 @@ export const TRAINING_ENTITY = {
   aircraftFlown: "training-aircraft-flown",
 } as const;
 
-/** A heading word's judged rows on the ground (px): wider than the ground trace they lie on. */
-export const GROUND_ROWS_WIDTH = 5;
+/** Every line on the ground (frontend §3 item 6, D159): dashed, at most this wide (px) and at this opacity. A heading
+ *  word's judged rows are drawn this wide over the ground trace (2 px) they lie on. */
+export const GROUND_LINE_WIDTH = 3;
+export const GROUND_LINE_ALPHA = 0.6;
 
 export const colour = (css: string, alpha = 1) => Cesium.Color.fromCssColorString(css).withAlpha(alpha);
 
@@ -174,11 +177,16 @@ export function airLine(
   };
 }
 
-/** A line draped on the ground. */
-export function groundLine(
-  id: string, name: string | undefined, degrees: number[], width: number, material: Cesium.Color | Cesium.MaterialProperty,
-): EntityOptions {
-  return { id, name, polyline: { positions: Cesium.Cartesian3.fromDegreesArray(degrees), clampToGround: true, width, material } };
+/** A line draped on the ground, in ``css``: dashed, at `GROUND_LINE_ALPHA`; ``thin`` draws it 2 px instead of
+ *  `GROUND_LINE_WIDTH` (a ground trace, under the envelopes that lie on it). */
+export function groundLine(id: string, name: string | undefined, degrees: number[], css: string, thin = false): EntityOptions {
+  return {
+    id, name,
+    polyline: {
+      positions: Cesium.Cartesian3.fromDegreesArray(degrees), clampToGround: true, width: thin ? 2 : GROUND_LINE_WIDTH,
+      material: dash(css, GROUND_LINE_ALPHA),
+    },
+  };
 }
 
 /** A dashed line's material. */

@@ -19,8 +19,8 @@
  *
  * ONE LAYOUT FOR THE THREE STAGES (outline §6.2), KEPT SHORT, TOP TO BOTTOM: the stage switch; the set chooser (the set
  * and its own line of the intent registry, `GET /experiments/intent`); the session — its list, one line per readout, the
- * Draw switches. Everything longer — what the view shows, the set and its experiment, the vocabulary's numbers, the
- * readouts' tables — is on the DETAILS PAGE (`TrainingDetails`), opened by the header's ⓘ (never disabled: on its first
+ * Draw switches. The set and its experiment, and the models' statistics (frontend §3 item 3, D159), are on the DETAILS
+ * PAGE (`TrainingDetails`), opened by the header's ⓘ (never disabled: on its first
  * section, "The set and the experiment"), by a readout's line or by the sentence bar's notes; the dock never unfolds it.
  * The panel owns the page's state (`useDetailsPage`) and gives it to every stage's session, which supplies its sections.
  * The sentence on screen is chosen by the sentence bar's tabs, which the session gives (`data/trainingTabs.ts`).
@@ -92,7 +92,7 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
   const [indexState, setIndexState] = useState<IndexState>({ status: "loading" });
   const [setId, setSetId] = useState<string | null>(null);
   /** Whose sets the panel shows: stage A's (`index_v5.json`), stage B's prior sets (`index_prior_v3.json`) or stage C's
-   *  window sets (`index_post_v2.json`) — B and C offered only where the airport has the file. */
+   *  window sets (`index_post_v3.json`) — B and C offered only where the airport has the file. */
   const [viewing, setViewing] = useState<"stageA" | "prior" | "window">("stageA");
   const priorIndex = useTrainingPriorIndex(activeAirportCode || null);
   const windowIndex = useTrainingWindowIndex(activeAirportCode || null);
@@ -159,8 +159,8 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
       <header className="training-panel-header">
         {/* the module's name (its tab's); what it shows is still training — "Training details" below */}
         <h2>Learning</h2>
-        {/* Everything read ONCE — what the module is, the vocabulary, the readouts — is on the details page, so the
-            list keeps the dock's height. */}
+        {/* The set and its experiment, and the models' statistics, are on the details page, so the list keeps the
+            dock's height. */}
         <button type="button" className="training-details-open" aria-haspopup="dialog" aria-label="Training details"
           title="Training details: the set and the experiment" onClick={details.open(EXPERIMENT_SECTION)}>
           ⓘ

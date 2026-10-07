@@ -53,7 +53,8 @@ import useMeasuredWidth from "../hooks/useMeasuredWidth";
 import { chooseTrainingTab, tabForKey, useTrainingTabs } from "../data/trainingTabs";
 import { useTrainingSetIntent } from "../data/trainingSetIntent";
 import { trainingPriorOriginOf } from "../data/trainingPriorSample";
-import { trainingWindowOriginOf } from "../data/trainingWindowSample";
+import { lossesOf, otherOf, trainingWindowOriginOf } from "../data/trainingWindowSample";
+import { flownSentenceKind } from "../data/trainingSentenceKind";
 import { EXPERIMENT_SECTION, requestTrainingDetails } from "./training/PanelParts";
 import {
   TRAINING_AUTOPILOT_COLOR,
@@ -64,6 +65,7 @@ import {
   TRAINING_EXECUTOR_COLOR,
   TRAINING_OUTSIDE_COLOR,
   TRAINING_RAW_COLOR,
+  TRAINING_SENTENCE_COLOR,
   TRAINING_WORD_COLOR,
   trainingOutcomeColour,
 } from "../utils/trainingWordColors";
@@ -81,6 +83,7 @@ import {
   correctionCount,
   wordUnreached,
   formatSeconds,
+  readingAxisEndS,
   readingRowAt,
   readingRowTimeS,
   sentenceColumnRuns,
@@ -263,6 +266,8 @@ export default function TrainingSentenceBar() {
   // THE KIND OF THE SENTENCE ON SCREEN — its chips and notes follow it (outline §6.2 item 2)
   const priorOrigin = trainingPriorOriginOf(flight);
   const windowOrigin = trainingWindowOriginOf(flight);
+  // a round's loss of separation that the commanded aircraft on screen is in (stage C's: the one that ended its window)
+  const windowLoss = windowOrigin === undefined ? null : lossesOf(windowOrigin.end, windowOrigin.aircraft.datasetId)[0] ?? null;
   const kind: "labelled" | "closed" | "sample" | "round" = intervalS === null ? "labelled"
     : priorOrigin?.sentence ? "sample" : windowOrigin !== undefined ? "round" : "closed";
   const stepS = vocabulary.stepS;
@@ -270,7 +275,7 @@ export default function TrainingSentenceBar() {
   const reading = trainingReadingOf(flight, stepS, intervalS);
   const { closed } = reading;
   // the axis is the flight's own time from 0 to where the sentence (or the flown track) ends
-  const endS = Math.max(reading.endS, reading.judged.tS[reading.judged.tS.length - 1]);
+  const endS = readingAxisEndS(reading);
   const xFor = (seconds: number) => GUTTER + (seconds / endS) * plotW;
   const timeOf = (row: number) => readingRowTimeS(reading, row);
   const cursorRow = readingRowAt(reading, cursorS);
@@ -311,7 +316,8 @@ export default function TrainingSentenceBar() {
 
   return (
     <section className="training-sentence-bar" aria-label="Sentence bar" ref={bar}>
-      <TrainingLegend layers={trainingLayers} vocabulary={vocabulary} closed={closed !== null} corrections={corrections > 0}
+      <TrainingLegend layers={trainingLayers} vocabulary={vocabulary} flown={closed === null ? null : flownSentenceKind(flight)}
+        corrections={corrections > 0}
         autopilotColour={autopilot?.status === "ready" && autopilotHasLine(autopilot.segment) ? autopilotColour(autopilot.segment) : null} />
       <header className="training-sentence-head">
         <span className="training-source-tabs" role="group" aria-label="Which sentence is read"
@@ -326,6 +332,9 @@ export default function TrainingSentenceBar() {
           {(tabs?.tabs ?? []).map((tab) => (
             <button key={tab.id} type="button" className="training-source-tab" data-tab={tab.id} aria-pressed={tab.id === tabs?.chosen}
               tabIndex={tab.id === tabs?.chosen ? 0 : -1} title={tab.title} onClick={() => chooseTrainingTab(tab.id)}>
+              {tab.kind === null ? null : (
+                <span className="training-source-tab-swatch" style={{ background: TRAINING_SENTENCE_COLOR[tab.kind] }} aria-hidden="true" />
+              )}
               {tab.outcome === null ? null : (
                 <span className="training-source-tab-dot" style={{ background: trainingOutcomeColour(tab.outcome) }} aria-hidden="true" />
               )}
@@ -354,12 +363,12 @@ export default function TrainingSentenceBar() {
         ) : null}
         {kind === "round" && windowOrigin !== undefined ? (
           <>
-            <span className="training-chip" title="the round's reward for the commanded aircraft">reward {windowOrigin.sentence.end.reward.toFixed(2)}</span>
-            <span className="training-chip" title={windowOrigin.sentence.end.loss === null ? "no loss of separation ended the round"
-              : `a loss of separation with ${windowOrigin.sentence.end.loss.other}: ${windowOrigin.sentence.end.loss.distanceM.toFixed(0)} m of ` +
-                `${windowOrigin.sentence.end.loss.requiredM.toFixed(0)} m required`}
-              style={windowOrigin.sentence.end.loss === null ? undefined : { color: TRAINING_DECISION_FAIL_COLOR, borderColor: "currentColor" }}>
-              {windowOrigin.sentence.end.loss === null ? "no loss of separation" : `loss of separation · ${windowOrigin.sentence.end.loss.other}`}
+            <span className="training-chip" title="the round's reward for the commanded aircraft">reward {windowOrigin.sentence.reward.toFixed(2)}</span>
+            <span className="training-chip" title={windowLoss === null ? "no loss of separation ended the round"
+              : `a loss of separation with ${otherOf(windowLoss, windowOrigin.aircraft.datasetId)}: ${windowLoss.distanceM.toFixed(0)} m of ` +
+                `${windowLoss.requiredM.toFixed(0)} m required`}
+              style={windowLoss === null ? undefined : { color: TRAINING_DECISION_FAIL_COLOR, borderColor: "currentColor" }}>
+              {windowLoss === null ? "no loss of separation" : `loss of separation · ${otherOf(windowLoss, windowOrigin.aircraft.datasetId)}`}
             </span>
           </>
         ) : null}

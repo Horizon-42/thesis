@@ -1666,3 +1666,20 @@ other job on the host or the GPU. Stage B's Training export names the readout (`
 
     python run_ts.py model_speed --prior <a prior_train run> --instructions <artefact> --executor <spec> --out <new dir>
 
+
+### R64 · `run_ts.py post_ceiling` — how many select windows a campaign's model lands at all, each spoken many times (stage C's requests P48)
+
+2026-10-07. The ceiling readout: each model of a post-training campaign reads the selection readout's 1,000 select
+windows `--draws` times (`--models`: `start`, or a round). Draw 0 uses the readout's own numbers, so a round's draw 0
+must give that round's `round.json` readout: the runner checks this before its other draws and stops by name if not.
+Draw d uses `readout_numbers(seed, place, d)`. Writes `config.json`, `model_<model>.json` (each window's outcome and
+reward for every draw; in all and by airport, the share landed in at least one of the first n draws, n = 1, 2, 4, …, N,
+the best reward of the first n, the windows never landed and those lost to separation in every draw) and `summary.json`
+(the curves; how the windows never landed overlap between the models), schema `ts-post-ceiling-v1`. The curve's
+flattening is the most that sampling the model reaches, a lower bound of the setting's ceiling. Select days only, never
+val; the campaign's paths through `inputs_here`; the closed loop's and the edges' checks first; a clean tree unless
+`--smoke`; into a new directory; `--speak-workers` reads the batches in worker processes (the same ends). About 0.28 s a
+window in one process. Tests: `tests/test_post_ceiling.py`.
+
+    python run_ts.py post_ceiling --campaign 4dTrajectory/outputs/POOLED/post/<campaign id> --models start 6 13 \
+        --draws 32 --out <a new directory> [--speak-workers 4]

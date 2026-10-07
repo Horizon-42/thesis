@@ -493,7 +493,7 @@ def test_the_flown_block_of_every_stage_is_its_earlier_one_with_the_envelopes():
     b = json.loads((fixtures / "stage_b" / "fixture_set" / "sample.json").read_text(encoding="utf-8"))
     c = json.loads((fixtures / "stage_c" / "fixture-windows" / "sample.json").read_text(encoding="utf-8"))
     for stage, sentences in (("B", [s for f in b["flights"] for s in f["prior"]]),
-                             ("C", [r for w in c["windows"] for r in w["rounds"]])):
+                             ("C", [r for w in c["windows"] for aircraft in w["commanded"] for r in aircraft["rounds"]])):
         assert [_digest({key: s[key] for key in (*_BLOCK, "timedOut", "goArounds")}) for s in sentences] \
             == EARLIER_BLOCKS[stage], stage
         assert all(s["envelopes"] is not None and s["envelopes"]["heading"] for s in sentences), stage

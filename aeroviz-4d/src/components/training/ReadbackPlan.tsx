@@ -14,7 +14,6 @@ import {
   TRAINING_DECISION_FAIL_COLOR,
   TRAINING_DECISION_PASS_COLOR,
   TRAINING_DESIGNATED_COLOR,
-  TRAINING_EXECUTOR_COLOR,
   TRAINING_OUTSIDE_COLOR,
   TRAINING_TRACE_COLOR,
   TRAINING_WORD_COLOR,
@@ -80,11 +79,11 @@ export default function ReadbackPlan({ m }: { m: ReadbackModel }) {
 
         {flown ? (
           <g aria-label="the flown path">
-            <polyline points={planPoints(flown)} fill="none" stroke={TRAINING_EXECUTOR_COLOR} strokeWidth={1.6}
+            <polyline points={planPoints(flown)} fill="none" stroke={m.flownColour} strokeWidth={1.6}
               className="training-readback-executor">
-              <title>the flown path: the closed-loop sentence flown by the executor from the first predicted step</title>
+              <title>the flown path: the sentence on screen flown by the executor from the first predicted step</title>
             </polyline>
-            <rect x={endOf(flown).x - 3.5} y={endOf(flown).y - 3.5} width={7} height={7} fill={TRAINING_EXECUTOR_COLOR}
+            <rect x={endOf(flown).x - 3.5} y={endOf(flown).y - 3.5} width={7} height={7} fill={m.flownColour}
               stroke="black" strokeWidth={0.6} />
           </g>
         ) : null}
@@ -127,7 +126,7 @@ export default function ReadbackPlan({ m }: { m: ReadbackModel }) {
         ) : null}
         {flown && m.cursorS >= flown.tS[0] ? (
           <circle cx={px(flown.eM[m.indexAt(flown.tS, m.cursorS)])} cy={py(flown.nM[m.indexAt(flown.tS, m.cursorS)])} r={4.5}
-            fill={TRAINING_EXECUTOR_COLOR} stroke="black" strokeWidth={0.6} />
+            fill={m.flownColour} stroke="black" strokeWidth={0.6} />
         ) : null}
       </g>
       <text x={GUTTER + 4} y={PLAN_H - 6} className="training-readback-tick">

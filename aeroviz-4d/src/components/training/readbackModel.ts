@@ -10,6 +10,7 @@
  * (`readingRowTimeS`, `envelopeTimeS`); a chart draws what it is told at the time it is told.
  */
 
+import { flownSentenceColour } from "../../data/trainingSentenceKind";
 import type { TrainingLayers } from "../../context/AppContext";
 import { TRAINING_AUTOPILOT_COLOR } from "../../utils/trainingWordColors";
 import {
@@ -175,7 +176,7 @@ export function readbackModel({ selection, reading, layers, cursorS, column, aut
 
   return {
     selection, flight, vocabulary, candidates, layers, reading, cursorS, cursorRow, column, designated, stepS,
-    observed, flown, judged: judgedTrack, envelopes, closed, decision,
+    observed, flown, flownColour: flownSentenceColour(flight), judged: judgedTrack, envelopes, closed, decision,
     live, liveColour, focus, focusIndex, focused, recede, focusSpanS, focusPoints, corrections, unspecifiedRuns,
     width, plotW, endS, xTime, timeAtX, envelopeTimeS, rowTimeS,
     px, py, planPoints, rows, indexAt, runwayLine, reach, bandCentre, bands, tubes, spans,

@@ -1,7 +1,8 @@
 """The live executor on a window of a Training set of stage C (`aeroviz_backend.autopilot_segment.window`; post-training
 §8 C11): a word of the commanded aircraft's sentence flown live is the export's flight — window B's from its moved
 start — (the export's unrounded states within the executor conformance's bound, its written track within its rounding),
-the window and round are chosen by the request, a word after the window's end is refused, the endpoint maps the errors,
+the window, its commanded aircraft and the round are chosen by the request (an aircraft the window does not command is
+refused by name), a word after the window's end is refused, the endpoint maps the errors,
 and the frontend reads the names the backend writes. The set is the export's own synthetic one
 (`test_post_training_export.stage_c_fixture`)."""
 
@@ -74,11 +75,19 @@ def world(tmp_path_factory):
     monkeypatch.undo()
 
 
+def aircraft_of(world, window):
+    """The window's one commanded aircraft (stage C's windows command one, frontend §5.7)."""
+    (aircraft,) = world["sample"]["windows"][window]["commanded"]
+    return aircraft
+
+
 def request(world, window=0, **changes):
-    said = world["sample"]["windows"][window]["rounds"][0]
+    aircraft = aircraft_of(world, window)
+    said = aircraft["rounds"][0]
     event = said["events"][0] if said["events"] else {"column": 0, "row": 0}
     return {"clientId": "page", "seq": 1, "airport": world["sample"]["airport"], "setId": FIXTURE_SET,
-            "window": window, "round": "start", "column": COLUMNS[event["column"]], "row": event["row"], **changes}
+            "window": window, "aircraft": aircraft["datasetId"], "round": "start", "column": COLUMNS[event["column"]],
+            "row": event["row"], **changes}
 
 
 def every_cycles(params, words):
@@ -95,15 +104,16 @@ def test_every_word_of_every_window_flown_live_is_the_exported_flight(world):
     kinds = []
     for window, states in zip(world["sample"]["windows"], world["states"]):
         kinds.append(window["kind"])
-        (said,) = window["rounds"]
+        (aircraft,) = window["commanded"]
+        (said,) = aircraft["rounds"]
         reference = states[said["flownFromRow"]:]
         batch, inputs = flown.batch, flown.inputs
-        if window_segments.is_moved(window["startMove"]):
-            batch, inputs = window_segments.moved_start(batch, 0, window["startMove"], params.start_rule)
+        if window_segments.is_moved(aircraft["startMove"]):
+            batch, inputs = window_segments.moved_start(batch, 0, aircraft["startMove"], params.start_rule)
         grid = np.array(said["words"], dtype=np.int16)
         told, sentence = on_words(batch, 0, flown.sentences[0], grid, words)
         for row, column in zip(*np.nonzero(grid != UNCHANGED)):
-            lost = said["end"]["loss"] is not None
+            lost = said["outcome"] == window_segments.LOST_SEPARATION
             result = window_segments.fly_window_segment(told, inputs, 0, sentence, int(column), int(row), params, words,
                                                         lambda: False, said["track"]["lastCycle"] if lost else None)
             if lost:                                   # ended at the window's end, its loss: never past it, unjudged
@@ -119,9 +129,9 @@ def test_every_word_of_every_window_flown_live_is_the_exported_flight(world):
             assert max(apart["horizontalM"], apart["verticalM"]) < STATE_BOUND_M
     assert kinds == ["real", "A", "B"]
     # window B's set carries its moved observed rows (the view draws them before the first predicted step)
-    moved = world["sample"]["windows"][2]["movedStart"]
+    moved = aircraft_of(world, 2)["movedStart"]
     stored = s["stored"].rows.states[: moved["rows"]]
-    assert moved["rows"] == world["sample"]["windows"][2]["rounds"][0]["flownFromRow"]
+    assert moved["rows"] == aircraft_of(world, 2)["rounds"][0]["flownFromRow"]
     assert not np.allclose(moved["eM"], stored[:, 0], atol=1.0)
     assert np.allclose(moved["heightMslM"], world["states"][2][: moved["rows"], 2], atol=0.051)
 
@@ -132,6 +142,7 @@ def test_a_request_flies_the_window_and_round_it_names(world):
         answer = backend.window.fly(request(world, window=place, seq=place + 1))
         assert (answer["schema"], answer["setId"], answer["window"], answer["round"], answer["rowIntervalS"]) == (
             window_segments.SCHEMA, FIXTURE_SET, place, "start", 4.0)
+        assert answer["aircraft"] == answer["datasetId"] == aircraft_of(world, place)["datasetId"]
         assert max(answer["stored"]["horizontalM"], answer["stored"]["verticalM"]) < STATE_BOUND_M
 
 
@@ -145,9 +156,13 @@ def test_a_request_is_refused_or_not_listed_by_name(world):
         backend.window.fly(request(world, round="first", seq=3))
     with pytest.raises(NotListed):
         backend.window.fly(request(world, setId="other", seq=4))
-    lost = world["sample"]["windows"][1]["rounds"][0]
+    with pytest.raises(NotListed, match="commands no aircraft 'KXXX:nobody'"):    # not one of the window's
+        backend.window.fly(request(world, aircraft="KXXX:nobody", seq=6))
+    with pytest.raises(RequestRefused, match="aircraft"):                            # the request must name it
+        backend.window.fly({key: value for key, value in request(world, seq=7).items() if key != "aircraft"})
+    lost = aircraft_of(world, 1)["rounds"][0]
     with pytest.raises(RequestRefused, match="after the window's end"):           # the lost window ends at its loss
-        backend.window.fly(request(world, window=1, seq=5, row=lost["track"]["lastCycle"] // 4 + 1))
+        backend.window.fly(request(world, window=1, seq=8, row=lost["track"]["lastCycle"] // 4 + 1))
 
 
 class FakeAutopilot:
@@ -181,21 +196,23 @@ def test_the_warm_up_opens_every_listed_window_set(world):
     backend = SyntheticBackend(world["root"], world["flown"], world["setup"]["words"])
     lines = []
     backend.window.warm_up(lines.append)
-    assert any("1 sets ready" in line for line in lines) and post_files.INDEX_FILE == "index_post_v2.json"
+    assert any("1 sets ready" in line for line in lines) and post_files.INDEX_FILE == "index_post_v3.json"
 
 
 def test_a_lost_window_s_last_word_ends_at_the_loss(world):
     """A column's last word is flown to the outcome in a window the executor ended; in a window ended at a loss of
     separation it stops at the window's last state, unjudged, and the answer carries the window's end."""
     backend = SyntheticBackend(world["root"], world["flown"], world["setup"]["words"])
-    lost = world["sample"]["windows"][1]["rounds"][0]
+    lost = aircraft_of(world, 1)["rounds"][0]
     grid = np.array(lost["words"])
     said = [(int(r), int(c)) for r, c in zip(*np.nonzero(grid != UNCHANGED))]
     if not said:
         pytest.skip("the lost window's one row said no word")
     row, column = said[-1]
     answer = backend.window.fly(request(world, window=1, seq=9, row=row, column=COLUMNS[column]))
-    assert answer["windowEnd"]["loss"]["other"].endswith(INSERTED_SUFFIX) and answer["crossing"] is None
+    (loss,) = answer["windowEnd"]["losses"]
+    assert loss["aircraft"][1].endswith(INSERTED_SUFFIX) and loss["answering"] == [answer["aircraft"]]
+    assert answer["reward"] == 0.0 and answer["crossing"] is None
     assert answer["segment"]["end"] == SEGMENT_END and answer["segment"]["endCycle"] == lost["track"]["lastCycle"]
 
 
@@ -209,7 +226,7 @@ def window_answers(world):
     backend = SyntheticBackend(world["root"], world["flown"], world["setup"]["words"])
     out = []
     for seq, place in enumerate((0, 1), start=1):
-        said = world["sample"]["windows"][place]["rounds"][0]
+        said = aircraft_of(world, place)["rounds"][0]
         grid = np.array(said["words"])
         cells = [(int(r), int(c)) for r, c in zip(*np.nonzero(grid != UNCHANGED))]
         if not cells:

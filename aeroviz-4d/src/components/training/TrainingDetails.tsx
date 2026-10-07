@@ -1,9 +1,8 @@
 /**
  * TrainingDetails.tsx
  * -------------------
- * The Training details page: everything the panel would otherwise unfold INSIDE the left dock — what the module shows,
- * the vocabulary's numbers, the models' sentences, the executor's replay gate, the prior's readout — on a page of its own
- * over the scene, wide enough for its tables. The panel lists each readout as one line (its conclusion) and opens the page
+ * The Training details page: its two sections (frontend §3 item 3, D159) — the set and the experiment, and the models'
+ * statistics — on a page of its own over the scene, wide enough for its table. The panel lists each readout as one line (its conclusion) and opens the page
  * on that section; its header's ⓘ opens it on the first.
  *
  * A modal dialog (the readouts are read, not compared against the scene): a tab per section down the left, the chosen

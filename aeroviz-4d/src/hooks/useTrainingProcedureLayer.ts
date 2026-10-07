@@ -24,11 +24,11 @@ import { runwayInForce, trainingPriorOriginOf, type TrainingPriorOrigin } from "
 import {
   TRAINING_CANDIDATE_COLOR,
   TRAINING_DESIGNATED_COLOR,
-  TRAINING_EXECUTOR_COLOR,
+  TRAINING_SENTENCE_COLOR,
   trainingOutcomeColour,
 } from "../utils/trainingWordColors";
 import { TRAINING_OUTCOME_TAG } from "../data/trainingText";
-import { airLine, colour, entityGroup, groundLine, lonLatHeights, marker, planDegrees } from "../scene/trainingEntities";
+import { airLine, entityGroup, groundLine, lonLatHeights, marker, planDegrees } from "../scene/trainingEntities";
 
 /** The glidepath lower edge's colour. */
 const EDGE_COLOR = "#c084fc";
@@ -49,7 +49,7 @@ function drawProcedure(viewer: Cesium.Viewer, origin: TrainingPriorOrigin, desig
     const mine = limit.index === designated;
     const hue = mine ? TRAINING_DESIGNATED_COLOR : TRAINING_CANDIDATE_COLOR;
     group.add(groundLine(ENTITY.region(limit.index), `Runway ${limit.ident}: the region the procedure's masks rule (inside the FAF and the LPV cone)`,
-      planDegrees(limit.region), mine ? 3 : 2, colour(hue, mine ? 0.9 : 0.55)));
+      planDegrees(limit.region), hue, !mine));
     const edge = limit.glidepathLowerEdge;
     group.add(airLine(ENTITY.edge(limit.index), `Runway ${limit.ident}: the glidepath lower edge (${limit.glidepathBelowM} m below the glidepath)`,
       Cesium.Cartesian3.fromDegreesArrayHeights(lonLatHeights({ lon: edge.lon, lat: edge.lat, altitudeHaeM: edge.heightHaeM })),
@@ -69,7 +69,7 @@ function drawOtherSentences(viewer: Cesium.Viewer, origin: TrainingPriorOrigin) 
   const group = entityGroup(viewer);
   const closed = origin.flight.head.closedLoop[String(origin.sample.model.rowIntervalS)];
   const sentences = [
-    ...(origin.which === "closedLoop" ? [] : [{ key: "closed", name: "Closed-loop sentence", track: closed.flown, hue: TRAINING_EXECUTOR_COLOR, tag: TRAINING_OUTCOME_TAG[closed.replay.outcome] }]),
+    ...(origin.which === "closedLoop" ? [] : [{ key: "closed", name: "Closed-loop sentence", track: closed.flown, hue: TRAINING_SENTENCE_COLOR.closedLoop, tag: TRAINING_OUTCOME_TAG[closed.replay.outcome] }]),
     ...origin.flight.sentences.filter((item) => item.sample !== origin.which).map((item) => ({
       key: String(item.sample), name: `Prior sentence ${item.sample}`, track: item.flown, hue: trainingOutcomeColour(item.outcome),
       tag: TRAINING_OUTCOME_TAG[item.outcome],

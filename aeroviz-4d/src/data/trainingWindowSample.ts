@@ -5,17 +5,26 @@
  * windows of recorded traffic. Written by `ts_transformer/experiments/post_training_export.py` (the files:
  * `ts_transformer/post/training_files.py`); design: post-training §8 C11, outline §6.
  *
- * A set's `flights` are stage A's heads of the windows' commanded flights (read by stage A's reader: `trainingSample.ts`).
- * A window names its commanded flight (`datasetId`), its kind (real, A: one aircraft inserted, D: the aircraft ahead moved,
- * B: the commanded aircraft's start moved — `movedStart`, its observed rows to the first predicted step as the start moved
- * them), the other aircraft on their records over the window (`traffic`), and for each round of the post-training
- * campaign the sentence that round's model said for the commanded aircraft, flown — its words, flown track and attitude,
- * its end (the judge's outcome, or a loss of separation: `TRAINING_LOST_SEPARATION`) and the window's end (`end`: the
- * reward, the loss with its other aircraft and the minimum it broke).
+ * ONE WINDOW FORMAT FOR STAGES C AND D (frontend D156, §5.7): a window holds a LIST of commanded aircraft — stage C's
+ * windows one, stage D's several — in the order they join it. A set's `flights` are stage A's heads of the windows'
+ * commanded flights (read by stage A's reader: `trainingSample.ts`). A window holds its kind (real, A: one aircraft
+ * inserted, D: the aircraft ahead moved, B: the commanded aircraft's start moved) and c (a compressed window's; none in
+ * stage C), its commanded aircraft — each its flight (`datasetId`), its join offset from the window's row 0, its move in
+ * time, its first predicted step, its start move (window B: `movedStart`, its observed rows to the first predicted step as
+ * the start moved them) and, for each round of the campaign, the sentence that round's model said for it, flown (its
+ * words, flown track and attitude, its outcome — the judge's, or `TRAINING_LOST_SEPARATION` —, its reward and the row
+ * from which it is silent) —, the other aircraft on their records over the window (`traffic`), and each round's end: its
+ * losses of separation, each with its two aircraft, the ones that answer for it, the minimum it broke and whether it
+ * costs W.
+ *
+ * TWO CLOCKS. The window's own times — the traffic, the losses — are seconds from the window's row 0. Each commanded
+ * aircraft's are its flight's (from its observed track's row 0, as stage A's views read a flight): `clockS` is its flight
+ * time at the window's row 0, so a window time t is the aircraft's t + `clockS` (`onAircraftClock`).
  *
  * THIS FILE COMPUTES NO WORD, NO SEPARATION AND NO REWARD: every number is the exporter's. The reader checks the file's
  * BOOKKEEPING — lengths, rows, that the events are the grid's words, that a round's sentence starts where the flight's
- * closed-loop sentence does, that a loss goes with a loss's end — and places times on the flight's clock.
+ * closed-loop sentence does, that a loss's aircraft are the window's and an aircraft that ended at a loss answers for one
+ * — and places each aircraft's times on its flight's clock.
  *
  * NO COMPATIBILITY. The index and sample schemas and the set kind are pinned below; a file that carries anything else is
  * refused by name. This reader never reads stage A's or stage B's index.
@@ -51,15 +60,16 @@ import {
   type TrainingVocabulary,
 } from "./trainingSample";
 
-/** MIRROR of the exporter's `INDEX_SCHEMA` (`ts_transformer/post/training_files.py`): the airport's index of window sets.
- *  A name changes with its file's shape, on both sides, in the same change. */
-export const TRAINING_WINDOW_INDEX_SCHEMA = "aeroviz-training-window-index-v2";
-/** MIRROR of `training_files.INDEX_FILE`. */
-export const TRAINING_WINDOW_INDEX_FILE = "index_post_v2.json";
-/** MIRROR of `training_files.SAMPLE_SCHEMA` (v2: a round's flown track unrounded, prior D127 followed for windows). */
-export const TRAINING_WINDOW_SAMPLE_SCHEMA = "aeroviz-training-window-sample-v3";
+/** MIRROR of the exporter's `INDEX_SCHEMA` (`ts_transformer/post/training_files.py`): the airport's index of window sets,
+ *  one format for stages C and D (the stage is the index file's). A name changes with its file's shape, on both sides, in
+ *  the same change. */
+export const TRAINING_WINDOW_INDEX_SCHEMA = "aeroviz-training-window-index-v3";
+/** MIRROR of `training_files.INDEX_FILE`: stage C's index. */
+export const TRAINING_WINDOW_INDEX_FILE = "index_post_v3.json";
+/** MIRROR of `training_files.SAMPLE_SCHEMA` (v4: the window format of stages C and D, frontend D156). */
+export const TRAINING_WINDOW_SAMPLE_SCHEMA = "aeroviz-training-window-sample-v4";
 /** MIRROR of `training_files.SET_KIND`. */
-export const TRAINING_WINDOW_SET_KIND = "post-training-windows";
+export const TRAINING_WINDOW_SET_KIND = "training-windows";
 /** MIRROR of `post_training_export.START`: the round that names the model at the start of the campaign. */
 export const TRAINING_WINDOW_START = "start";
 /** MIRROR of `post.scene`'s window kinds (`REAL`, `INSERTED`, `LEADER_MOVED`, `MOVED_START`). */
@@ -122,29 +132,33 @@ export interface TrainingWindowIndex {
   rejected: Array<{ id: string; problem: string }>;
 }
 
-/** The loss of separation that ended a window: the loop's Δ row (from the window's row 0) and the flight time it was
- *  found at, the other aircraft (its key in the window's traffic), the kind of minimum and the distances. */
+/** A loss of separation of a round: the loop's step and its time (on the WINDOW's clock: s from its row 0), its two
+ *  aircraft (a commanded one's dataset id, or a key of the window's traffic), the commanded ones that answer for it, the
+ *  kind of minimum and the distances, whether the other aircraft read a faulty point near it (D114) and whether it
+ *  costs W. */
 export interface TrainingWindowLoss {
   step: number;
   timeS: number;
-  other: string;
+  aircraft: [string, string];
+  answering: string[];
   kind: string;
   relation: string;
   requiredM: number;
   distanceM: number;
   verticalM: number;
   wakeKnown: boolean;
+  readsFault: boolean;
+  costsW: boolean;
 }
 
-export interface TrainingWindowEnd {
-  reward: number;
-  loss: TrainingWindowLoss | null;
-  speedMaskRows: number;
+/** A window's end in a round: its losses of separation and the steps at which a recorded aircraft read a faulty point. */
+export interface TrainingWindowRoundEnd {
+  round: TrainingWindowRound;
+  losses: TrainingWindowLoss[];
   faultySteps: number;
-  lossReadsFault: boolean;
 }
 
-/** One round's sentence for the commanded aircraft, flown. Rows are the sentence's Δ rows from the first predicted step. */
+/** One round's sentence for a commanded aircraft, flown. Rows are the sentence's Δ rows from the first predicted step. */
 export interface TrainingWindowSentence {
   round: TrainingWindowRound;
   words: number[][];
@@ -160,10 +174,13 @@ export interface TrainingWindowSentence {
   envelopes: TrainingEnvelopes | null;
   timedOut: boolean;
   goArounds: number;
-  end: TrainingWindowEnd;
+  reward: number;
+  /** The Δ row from which the model no longer speaks to it (it answered for a loss and flies on), or null. */
+  silentFromRow: number | null;
+  speedMaskRows: number;
 }
 
-/** Another aircraft of a window on its record's 2 s rows over the window, on the commanded flight's clock. */
+/** Another aircraft of a window on its record's 2 s rows over the window, on the WINDOW's clock (s from its row 0). */
 export interface TrainingWindowTraffic {
   key: string;
   role: TrainingWindowRole;
@@ -179,7 +196,7 @@ export interface TrainingWindowTraffic {
   altitudeHaeM: number[];
 }
 
-/** Window B's moved observed rows: positions and heights on the flight's clock. */
+/** Window B's moved observed rows: positions and heights on the aircraft's flight clock. */
 export interface TrainingWindowMovedStart {
   tS: number[];
   lon: number[];
@@ -188,23 +205,39 @@ export interface TrainingWindowMovedStart {
   altitudeHaeM: number[];
 }
 
+/** A commanded aircraft of a window. */
+export interface TrainingWindowAircraft {
+  /** Its place in the window's commanded aircraft (the order they join it). */
+  place: number;
+  datasetId: string;
+  head: TrainingFlight;
+  /** When it joins: its row 0, s from the window's row 0. */
+  joinS: number;
+  /** Its move in time in a compressed window (s), or null. */
+  shiftS: number | null;
+  /** Its flight time at the window's row 0: a window time t is its flight time t + clockS. */
+  clockS: number;
+  /** Its first predicted step, on its flight's clock. */
+  firstStepS: number;
+  startMove: { turnDeg: number; heightM: number; speedScale: number };
+  /** Window B: its observed rows from its row 0 to the first predicted step as its start moved them (the view draws them
+   *  beside the head's observed track, which stays the recorded flight's: its open-loop reading is read on it); null
+   *  otherwise (its start is the head's). */
+  movedStart: TrainingWindowMovedStart | null;
+  rounds: TrainingWindowSentence[];
+}
+
 export interface TrainingWindow {
   /** Its place in the set's windows (the live executor's request names it). */
   index: number;
-  datasetId: string;
-  head: TrainingFlight;
   kind: TrainingWindowKind;
-  /** The flight time of the window's row 0 and of its first predicted step, on the commanded flight's clock. */
-  row0S: number;
-  firstStepS: number;
-  startMove: { turnDeg: number; heightM: number; speedScale: number };
+  /** A compressed window's c; null for a window that is not compressed (every window of stage C). */
+  c: number | null;
+  /** In the order they join; stage C's windows hold one. */
+  commanded: TrainingWindowAircraft[];
   moved: Array<[string, number]>;
-  /** Window B: its observed rows from the window's row 0 to the first predicted step as its start moved them (the view
-   *  draws them beside the head's observed track, which stays the recorded flight's: its open-loop reading is read on
-   *  it); null for any other window (its start is the head's). */
-  movedStart: TrainingWindowMovedStart | null;
   traffic: TrainingWindowTraffic[];
-  rounds: TrainingWindowSentence[];
+  rounds: TrainingWindowRoundEnd[];
 }
 
 export interface TrainingWindowSample {
@@ -288,12 +321,21 @@ export function parseTrainingWindowIndex(raw: unknown): Parsed<TrainingWindowInd
 
 // ── one set ──────────────────────────────────────────────────────────────────
 
-/** A loss as the file writes it, its time (from the window's row 0) put on the flight's clock (``row0S``). */
-function parseLoss(reader: Reader, row0S: number): TrainingWindowLoss {
+/** A loss as the file writes it (its time on the window's clock). Its aircraft are the window's (``known``: the commanded
+ *  aircraft's dataset ids and the traffic's keys); the ones that answer for it are commanded aircraft of it. */
+function parseLoss(reader: Reader, commanded: Set<string>, known: Set<string>): TrainingWindowLoss {
+  const aircraft = reader.strings("aircraft");
+  if (aircraft.length !== 2 || aircraft[0] === aircraft[1]) reader.fail(`aircraft is [${aircraft.join(", ")}], not two aircraft`);
+  for (const key of aircraft) if (!known.has(key)) reader.fail(`aircraft ${key} is none of the window's`);
+  const answering = reader.strings("answering");
+  for (const key of answering) {
+    if (!aircraft.includes(key) || !commanded.has(key)) reader.fail(`${key} answers for the loss but is not a commanded aircraft of it`);
+  }
   return {
-    step: reader.count("step", 1), timeS: row0S + reader.number("timeS"), other: reader.string("other"),
+    step: reader.count("step", 1), timeS: reader.number("timeS"), aircraft: [aircraft[0], aircraft[1]], answering,
     kind: reader.string("kind"), relation: reader.string("relation"), requiredM: reader.number("requiredM"),
     distanceM: reader.number("distanceM"), verticalM: reader.number("verticalM"), wakeKnown: reader.boolean("wakeKnown"),
+    readsFault: reader.boolean("readsFault"), costsW: reader.boolean("costsW"),
   };
 }
 
@@ -316,25 +358,19 @@ function parseSentence(
   const block = parseFlownBlock(reader, [...TRAINING_OUTCOMES, TRAINING_LOST_SEPARATION], candidates, cycleS, stepS,
     firstRow + flownFromRow, head.haeMinusMslM, head.observed);
   const { outcome, crossing } = block;
-  const end = reader.child("end");
-  const loss = end.nullableChild("loss");
-  if ((loss !== null) !== (outcome === TRAINING_LOST_SEPARATION)) {
-    end.fail(`the window ended ${outcome} but its loss is ${loss === null ? "absent" : "given"}: a loss of separation and its end go together`);
+  if (outcome === TRAINING_LOST_SEPARATION && crossing !== null) reader.fail("a flight ended at a loss of separation crossed no threshold");
+  const silentFromRow = reader.nullableNumber("silentFromRow");
+  if (silentFromRow !== null && !(Number.isInteger(silentFromRow) && silentFromRow >= 0 && silentFromRow < words.length)) {
+    reader.fail(`silentFromRow ${silentFromRow} is not a row of the sentence`);
   }
-  if (loss !== null && crossing !== null) reader.fail("a window ended at a loss of separation crossed no threshold");
-  const row0S = firstRow * stepS;
   return {
     round, words, events, firstRow, startRow, flownFromRow, outcome, endCycle: block.endCycle, crossing, flown: block.flown,
     envelopes: block.envelopes, timedOut: reader.boolean("timedOut"), goArounds: reader.count("goArounds"),
-    end: {
-      reward: end.number("reward"),
-      loss: loss === null ? null : parseLoss(loss, row0S),
-      speedMaskRows: end.count("speedMaskRows"), faultySteps: end.count("faultySteps"), lossReadsFault: end.boolean("lossReadsFault"),
-    },
+    reward: reader.number("reward"), silentFromRow, speedMaskRows: reader.count("speedMaskRows"),
   };
 }
 
-function parseTraffic(reader: Reader, row0S: number, candidates: TrainingCandidate[]): TrainingWindowTraffic {
+function parseTraffic(reader: Reader, candidates: TrainingCandidate[]): TrainingWindowTraffic {
   const role = reader.oneOf("role", TRAINING_WINDOW_ROLES);
   const shiftS = reader.nullableNumber("shiftS");
   if ((shiftS === null) !== (role === "recorded")) reader.fail(`an aircraft ${role} has ${shiftS === null ? "no" : "a"} shift`);
@@ -346,13 +382,13 @@ function parseTraffic(reader: Reader, row0S: number, candidates: TrainingCandida
   const heights = reader.numbers("heightMslM", rows);
   return {
     key: reader.string("key"), role, shiftS, runway, category: reader.nullableString("category"),
-    landingS: row0S + reader.number("landingS"), tS: times.map((t) => row0S + t), lon: reader.numbers("lonDeg", rows),
+    landingS: reader.number("landingS"), tS: times, lon: reader.numbers("lonDeg", rows),
     lat: reader.numbers("latDeg", rows), altitudeMslM: heights, altitudeHaeM: heights.map((value) => value + hae),
   };
 }
 
-/** Window B's observed rows from the window's row 0 to its first predicted step as its start moved them: the written
- *  positions and heights, on the flight's clock (`TrainingWindowMovedStart`). */
+/** Window B's observed rows from its row 0 to its first predicted step as its start moved them: the written positions and
+ *  heights, on the aircraft's flight clock (`TrainingWindowMovedStart`). */
 function parseMovedStart(reader: Reader, head: TrainingFlight, firstRow: number, stepS: number): TrainingWindowMovedStart {
   const rows = reader.count("rows", 1);
   const heights = reader.numbers("heightMslM", rows);
@@ -362,26 +398,24 @@ function parseMovedStart(reader: Reader, head: TrainingFlight, firstRow: number,
   };
 }
 
-function parseWindow(
-  reader: Reader, index: number, heads: Map<string, TrainingFlight>, model: TrainingWindowModel, candidates: TrainingCandidate[],
-  vocabulary: TrainingVocabulary, cycleS: number,
-): TrainingWindow {
+function parseAircraft(
+  reader: Reader, place: number, kind: TrainingWindowKind, c: number | null, heads: Map<string, TrainingFlight>,
+  model: TrainingWindowModel, candidates: TrainingCandidate[], vocabulary: TrainingVocabulary, cycleS: number,
+): TrainingWindowAircraft {
   const datasetId = reader.string("datasetId");
   const head = heads.get(datasetId);
   if (head === undefined) return reader.fail(`the set holds no flight ${datasetId}`);
-  const kind = reader.oneOf("kind", TRAINING_WINDOW_KINDS);
+  const joinS = reader.number("joinS");
+  if (!(joinS >= 0)) reader.fail(`joinS ${joinS} is before the window's row 0`);
+  const shiftS = reader.nullableNumber("shiftS");
+  if (c === null && shiftS !== null) reader.fail(`a window that is not compressed moves aircraft ${datasetId} by ${shiftS} s`);
   const closed = head.closedLoop[String(model.rowIntervalS)];
   const row0S = closed.firstRow * vocabulary.stepS;
+  const clockS = row0S - joinS;
   const move = reader.child("startMove");
   const startMove = { turnDeg: move.number("turnDeg"), heightM: move.number("heightM"), speedScale: move.number("speedScale") };
   const isMoved = startMove.turnDeg !== 0 || startMove.heightM !== 0 || startMove.speedScale !== 1;
   if (isMoved !== (kind === "B")) reader.fail(`a window ${kind} with ${isMoved ? "a" : "no"} start move: window B, and only B, moves its start`);
-  const moved = reader.list("moved").map((pair) => {
-    if (!Array.isArray(pair) || pair.length !== 2 || typeof pair[0] !== "string" || typeof pair[1] !== "number") {
-      return reader.fail("a moved aircraft is [key, shift]");
-    }
-    return [pair[0], pair[1]] as [string, number];
-  });
   const start = reader.nullableChild("movedStart");
   if ((start !== null) !== (kind === "B")) reader.fail(`a window ${kind} with ${start === null ? "no" : "a"} moved start`);
   const rounds = reader.children("rounds").map((item) => {
@@ -391,11 +425,67 @@ function parseWindow(
   if (rounds.map((item) => item.round).join() !== model.rounds.join()) {
     reader.fail(`rounds ${rounds.map((item) => item.round).join(", ")}, the set's are ${model.rounds.join(", ")}`);
   }
+  // the file's first predicted step is on the window's clock; on the aircraft's it is its closed-loop sentence's
+  const firstStepS = clockS + reader.number("firstStepS");
+  if (Math.abs(firstStepS - closed.startS) > 1e-6) {
+    reader.fail(`firstStepS puts the first predicted step at ${firstStepS} s of the flight, its closed-loop sentence at ${closed.startS} s`);
+  }
   return {
-    index, datasetId, head, kind, row0S, firstStepS: row0S + reader.number("firstStepS"), startMove, moved,
-    movedStart: start === null ? null : parseMovedStart(start, head, closed.firstRow, vocabulary.stepS),
-    traffic: reader.children("traffic").map((item) => parseTraffic(item, row0S, candidates)), rounds,
+    place, datasetId, head, joinS, shiftS, clockS, firstStepS, startMove,
+    movedStart: start === null ? null : parseMovedStart(start, head, closed.firstRow, vocabulary.stepS), rounds,
   };
+}
+
+function parseWindow(
+  reader: Reader, index: number, heads: Map<string, TrainingFlight>, model: TrainingWindowModel, candidates: TrainingCandidate[],
+  vocabulary: TrainingVocabulary, cycleS: number,
+): TrainingWindow {
+  const kind = reader.oneOf("kind", TRAINING_WINDOW_KINDS);
+  const c = reader.nullableNumber("c");
+  const commanded = reader.children("commanded").map((item, place) =>
+    parseAircraft(item, place, kind, c, heads, model, candidates, vocabulary, cycleS));
+  if (commanded.length === 0) reader.fail("the window commands no aircraft");
+  if (commanded[0].joinS !== 0) reader.fail(`its first commanded aircraft joins at ${commanded[0].joinS} s: the window's row 0 is its row 0`);
+  if (commanded.some((aircraft, place) => place > 0 && aircraft.joinS < commanded[place - 1].joinS)) {
+    reader.fail("the commanded aircraft are not in the order they join");
+  }
+  const ids = new Set(commanded.map((aircraft) => aircraft.datasetId));
+  if (ids.size !== commanded.length) reader.fail("the window commands one flight twice");
+  const moved = reader.list("moved").map((pair) => {
+    if (!Array.isArray(pair) || pair.length !== 2 || typeof pair[0] !== "string" || typeof pair[1] !== "number") {
+      return reader.fail("a moved aircraft is [key, shift]");
+    }
+    return [pair[0], pair[1]] as [string, number];
+  });
+  const traffic = reader.children("traffic").map((item) => parseTraffic(item, candidates));
+  const known = new Set([...ids, ...traffic.map((aircraft) => aircraft.key)]);
+  const rounds = reader.children("rounds").map((item) => ({
+    round: parseRound(item.raw("round"), item),
+    losses: item.children("losses").map((loss) => parseLoss(loss, ids, known)),
+    faultySteps: item.count("faultySteps"),
+  }));
+  if (rounds.map((item) => item.round).join() !== model.rounds.join()) {
+    reader.fail(`the window's rounds ${rounds.map((item) => item.round).join(", ")}, the set's are ${model.rounds.join(", ")}`);
+  }
+  // a loss and the end of the aircraft that answers for it go together: an aircraft answers for at most one loss of a
+  // round (it is not spoken to after it, D144); one whose flight ended at a loss answers for one, and one that answers
+  // ended there or is silent from a row on; one silent from a row on answers for one
+  for (const aircraft of commanded) {
+    aircraft.rounds.forEach((sentence, r) => {
+      const answered = rounds[r].losses.filter((loss) => loss.answering.includes(aircraft.datasetId)).length;
+      if (answered > 1) reader.fail(`${aircraft.datasetId} answers for ${answered} losses in round ${sentence.round}: one at most (D144)`);
+      if (sentence.outcome === TRAINING_LOST_SEPARATION && answered === 0) {
+        reader.fail(`${aircraft.datasetId} ended at a loss of separation in round ${sentence.round}, but answers for none: they go together`);
+      }
+      if (answered === 1 && sentence.outcome !== TRAINING_LOST_SEPARATION && sentence.silentFromRow === null) {
+        reader.fail(`${aircraft.datasetId} answers for a loss in round ${sentence.round}, but flew on spoken to its ${sentence.outcome}: they go together`);
+      }
+      if (sentence.silentFromRow !== null && answered === 0) {
+        reader.fail(`${aircraft.datasetId} is silent from row ${sentence.silentFromRow} in round ${sentence.round}, but answers for no loss: they go together`);
+      }
+    });
+  }
+  return { index, kind, c, commanded, moved, traffic, rounds };
 }
 
 /** Parse a set's sample. A schema other than `TRAINING_WINDOW_SAMPLE_SCHEMA` is refused whole, naming the one found and
@@ -469,18 +559,46 @@ export function windowShiftText(seconds: number): string {
 
 // ── a round's sentence as the stage-A views read it ──────────────────────────
 
-/** What a derived flight stands for: the set's window and the round. */
+/** A round as the view's lines and titles name it. */
+export function roundLabel(round: TrainingWindowRound): string {
+  return round === TRAINING_WINDOW_START ? "start (base)" : `round ${round}`;
+}
+
+/** A window time (s from its row 0) on ``aircraft``'s flight clock. */
+export function onAircraftClock(aircraft: TrainingWindowAircraft, windowS: number): number {
+  return windowS + aircraft.clockS;
+}
+
+/** A flight time of ``aircraft`` on the window's clock (s from its row 0): `onAircraftClock`'s inverse. */
+export function onWindowClock(aircraft: TrainingWindowAircraft, flightS: number): number {
+  return flightS - aircraft.clockS;
+}
+
+/** The losses of a round that ``datasetId`` is in. */
+export function lossesOf(end: TrainingWindowRoundEnd, datasetId: string): TrainingWindowLoss[] {
+  return end.losses.filter((loss) => loss.aircraft.includes(datasetId));
+}
+
+/** The other aircraft of a loss that ``datasetId`` is in. */
+export function otherOf(loss: TrainingWindowLoss, datasetId: string): string {
+  return loss.aircraft[0] === datasetId ? loss.aircraft[1] : loss.aircraft[0];
+}
+
+/** What a derived flight stands for: the set's window, the commanded aircraft, the round, its sentence and the window's
+ *  end in that round. */
 export interface TrainingWindowOrigin {
   sample: TrainingWindowSample;
   window: TrainingWindow;
+  aircraft: TrainingWindowAircraft;
   round: TrainingWindowRound;
   sentence: TrainingWindowSentence;
+  end: TrainingWindowRoundEnd;
 }
 
 const origins = new WeakMap<TrainingFlight, TrainingWindowOrigin>();
-const views = new WeakMap<TrainingWindow, Map<TrainingWindowRound, TrainingFlight>>();
+const views = new WeakMap<TrainingWindowAircraft, Map<TrainingWindowRound, TrainingFlight>>();
 
-/** The set's window and round a flight on screen was derived from; undefined for any other flight. */
+/** The set's window, aircraft and round a flight on screen was derived from; undefined for any other flight. */
 export function trainingWindowOriginOf(flight: TrainingFlight): TrainingWindowOrigin | undefined {
   return origins.get(flight);
 }
@@ -488,7 +606,7 @@ export function trainingWindowOriginOf(flight: TrainingFlight): TrainingWindowOr
 /** A round's sentence as stage A's closed-loop sentence at Δ, so the sentence bar, the read-back window and the 3D layers
  *  read it unchanged (as stage B's: `trainingPriorSample.ts`): its envelopes the judge's on its flown track (D135); the
  *  reading added no word;
- *  `notReached` counts the words said after the window's end (`wordUnreached`). */
+ *  `notReached` counts the words said after the aircraft's end (`wordUnreached`). */
 function closedLoopOf(model: TrainingWindowModel, flight: TrainingFlight, sentence: TrainingWindowSentence): TrainingClosedLoop {
   const closed = flight.closedLoop[String(model.rowIntervalS)];
   const result = {
@@ -505,23 +623,26 @@ function closedLoopOf(model: TrainingWindowModel, flight: TrainingFlight, senten
   return { ...result, replay: { ...result.replay, flewTheSentence: notReached === 0, notReached } };
 }
 
-/** The window's commanded flight as the views draw it with ``round``'s sentence read at the set's Δ (its observed track
- *  and open-loop reading the head's: window B's moved start is drawn by the window's own layer). Another window or round
- *  is another flight (its key says which), so the cursor and the live pick reset with it. Built once. */
-export function trainingWindowFlightView(sample: TrainingWindowSample, window: TrainingWindow, round: TrainingWindowRound): TrainingFlight {
-  const kept = views.get(window)?.get(round);
+/** A commanded aircraft of a window as the views draw it with ``round``'s sentence read at the set's Δ (its observed
+ *  track and open-loop reading its head's: window B's moved start is drawn by the window's own layer). Another window,
+ *  aircraft or round is another flight (its key says which), so the cursor and the live pick reset with it. Built once. */
+export function trainingWindowFlightView(
+  sample: TrainingWindowSample, window: TrainingWindow, aircraft: TrainingWindowAircraft, round: TrainingWindowRound,
+): TrainingFlight {
+  const kept = views.get(aircraft)?.get(round);
   if (kept !== undefined) return kept;
-  const sentence = window.rounds.find((item) => item.round === round);
-  if (sentence === undefined) throw new Error(`window ${window.index} has no round ${round}`);
+  const place = window.rounds.findIndex((item) => item.round === round);
+  if (place < 0) throw new Error(`window ${window.index} has no round ${round}`);
+  const sentence = aircraft.rounds[place];
   const key = String(sample.model.rowIntervalS);
   const view: TrainingFlight = {
-    ...window.head, flightKey: `${window.head.flightKey}~window-${window.index}-round-${round}`,
-    closedLoop: { [key]: closedLoopOf(sample.model, window.head, sentence) },
+    ...aircraft.head, flightKey: `${aircraft.head.flightKey}~window-${window.index}-aircraft-${aircraft.place}-round-${round}`,
+    closedLoop: { [key]: closedLoopOf(sample.model, aircraft.head, sentence) },
   };
-  origins.set(view, { sample, window, round, sentence });
-  const byRound = views.get(window) ?? new Map<TrainingWindowRound, TrainingFlight>();
+  origins.set(view, { sample, window, aircraft, round, sentence, end: window.rounds[place] });
+  const byRound = views.get(aircraft) ?? new Map<TrainingWindowRound, TrainingFlight>();
   byRound.set(round, view);
-  views.set(window, byRound);
+  views.set(aircraft, byRound);
   return view;
 }
 

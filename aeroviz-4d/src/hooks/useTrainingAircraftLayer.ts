@@ -18,7 +18,8 @@ import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import { aircraftModel, colour, entityGroup, placeAircraft, TRAINING_ENTITY } from "../scene/trainingEntities";
 import { poseAt, poseText, type TrainingAttitudeTrack } from "../data/trainingAttitude";
 import { trainingReadingOf } from "../data/trainingSample";
-import { TRAINING_EXECUTOR_COLOR, TRAINING_TRACE_COLOR } from "../utils/trainingWordColors";
+import { TRAINING_TRACE_COLOR } from "../utils/trainingWordColors";
+import { flownSentenceColour } from "../data/trainingSentenceKind";
 
 /** The model's least size on screen (px). */
 const AIRCRAFT_PX = 64;
@@ -44,7 +45,7 @@ export default function useTrainingAircraftLayer(): void {
     return [
       { id: TRAINING_ENTITY.aircraftObserved, track: reading.observed, css: TRAINING_TRACE_COLOR, who: `${flight.callsign} (observed)` },
       ...(reading.closed === null ? []
-        : [{ id: TRAINING_ENTITY.aircraftFlown, track: reading.closed.flown, css: TRAINING_EXECUTOR_COLOR,
+        : [{ id: TRAINING_ENTITY.aircraftFlown, track: reading.closed.flown, css: flownSentenceColour(flight),
           who: `${flight.callsign} (flown, Δ ${reading.closed.rowIntervalS} s)` }]),
     ];
   }, [selection, trainingIntervalS]);

@@ -1,13 +1,19 @@
 /**
  * The stage-C reader (`trainingWindowSample.ts`) on the files the Python code writes (`stageC.ts`): the index and the
- * sample are read; a file of another schema is refused by name; the bookkeeping is checked (a loss goes with a loss's end,
- * window B and only B moves its start, the rounds are the set's); a round's sentence is read as a closed-loop sentence by
- * stage A's views; window B's observed track is its moved start; the traffic is on the commanded flight's clock.
+ * sample (v4, the window format of stages C and D: a list of commanded aircraft, stage C's one) are read; a file of another
+ * schema is refused by name; the bookkeeping is checked (a loss's aircraft are the window's, an aircraft that ended at a
+ * loss answers for one and one that answers ended there or is silent, window B and only B moves its start, the rounds are
+ * the set's, the aircraft join in order); a round's sentence is read as a closed-loop sentence by stage A's views; window
+ * B's observed track is its moved start; the traffic and the losses are on the window's clock, each aircraft has its own.
  */
 import { describe, expect, it } from "vitest";
 import {
   parseTrainingWindowIndex,
   parseTrainingWindowSample,
+  lossesOf,
+  onAircraftClock,
+  onWindowClock,
+  otherOf,
   trainingWindowFlightView,
   trainingWindowOriginOf,
   TRAINING_WINDOW_INDEX_SCHEMA,
@@ -46,37 +52,51 @@ describe("the index", () => {
 describe("the sample", () => {
   const sample = stageCSample();
 
-  it("is read: the commanded flight's head and three windows, each with its round", () => {
+  it("is read: the commanded flight's head and three windows, each commanding one aircraft at its row 0, with its round", () => {
     expect(sample.flights).toHaveLength(1);
     expect(sample.windows.map((window) => window.kind)).toEqual(["real", "A", "B"]);
     for (const window of sample.windows) {
-      expect(window.head).toBe(sample.flights[0]);
-      expect(window.rounds.map((sentence) => sentence.round)).toEqual(["start"]);
-      expect(window.firstStepS).toBeGreaterThan(window.row0S);
+      expect(window.c).toBeNull();
+      const [aircraft, ...others] = window.commanded;
+      expect(others).toEqual([]);
+      expect(aircraft).toMatchObject({ place: 0, datasetId: sample.flights[0].datasetId, joinS: 0, shiftS: null });
+      expect(aircraft.head).toBe(sample.flights[0]);
+      expect(aircraft.rounds.map((sentence) => sentence.round)).toEqual(["start"]);
+      expect(window.rounds.map((end) => end.round)).toEqual(["start"]);
+      // its clock: the window's row 0 is its sentence's first row
+      expect(aircraft.clockS).toBe(aircraft.head.closedLoop["4"].firstRow * sample.vocabulary.stepS);
+      expect(aircraft.firstStepS).toBeGreaterThan(aircraft.clockS);
     }
   });
 
-  it("reads the lost window's end: a loss of separation with its other aircraft, on the flight's clock", () => {
+  it("reads the lost window's end: a loss with its two aircraft, the commanded one answering, on the window's clock", () => {
     const lost = sample.windows[1];
-    const [sentence] = lost.rounds;
+    const [aircraft] = lost.commanded;
+    const [sentence] = aircraft.rounds;
     expect(sentence.outcome).toBe(TRAINING_LOST_SEPARATION);
     expect(sentence.crossing).toBeNull();
-    expect(sentence.end.reward).toBe(0);
-    const loss = sentence.end.loss!;
-    expect(loss.other).toBe(lost.traffic[0].key);
+    expect(sentence.reward).toBe(0);
+    expect(sentence.silentFromRow).toBeNull();
+    const [loss] = lossesOf(lost.rounds[0], aircraft.datasetId);
+    expect(loss.aircraft).toEqual([aircraft.datasetId, lost.traffic[0].key]);
+    expect(loss.answering).toEqual([aircraft.datasetId]);
+    expect(otherOf(loss, aircraft.datasetId)).toBe(lost.traffic[0].key);
+    expect(loss.costsW).toBe(true);
     expect(lost.traffic[0]).toMatchObject({ role: "inserted", shiftS: -8 });
     // the loss is at the first step after the first predicted step, inside the flown track
-    expect(loss.timeS).toBeCloseTo(lost.firstStepS + 4, 6);
-    expect(loss.timeS).toBeLessThanOrEqual(sentence.flown.tS[sentence.flown.tS.length - 1]);
-    // the traffic is placed on the commanded flight's clock: from the window's row 0
-    expect(lost.traffic[0].tS[0]).toBe(lost.row0S);
+    expect(onAircraftClock(aircraft, loss.timeS)).toBeCloseTo(aircraft.firstStepS + 4, 6);
+    expect(onAircraftClock(aircraft, loss.timeS)).toBeLessThanOrEqual(sentence.flown.tS[sentence.flown.tS.length - 1]);
+    // the traffic is on the window's clock: from its row 0
+    expect(lost.traffic[0].tS[0]).toBe(0);
+    expect(lossesOf(sample.windows[0].rounds[0], sample.windows[0].commanded[0].datasetId)).toEqual([]);
   });
 
   it("reads window B's moved start, and no other window has one", () => {
-    const [real, , moved] = sample.windows;
+    const real = sample.windows[0].commanded[0];
+    const moved = sample.windows[2].commanded[0];
     expect(real.movedStart).toBeNull();
     const start = moved.movedStart!;
-    expect(start.tS[0]).toBe(moved.row0S);
+    expect(start.tS[0]).toBe(moved.clockS);
     expect(start.tS[start.tS.length - 1]).toBeLessThan(moved.firstStepS);
     expect(moved.startMove.turnDeg).not.toBe(0);
     // the start moved: not where the recorded flight was, and drawn at the flight's runway's ellipsoid height
@@ -99,15 +119,45 @@ describe("the sample", () => {
       expect(parsed.ok).toBe(false);
       if (!parsed.ok) expect(parsed.problem).toContain(says);
     };
-    refused((raw) => { raw.windows[1].rounds[0].end.loss = null; }, "go together");
-    refused((raw) => { raw.windows[0].rounds[0].end.loss = raw.windows[1].rounds[0].end.loss; }, "go together");
-    refused((raw) => { raw.windows[0].startMove.turnDeg = 5; }, "and only B, moves its start");
-    refused((raw) => { raw.windows[2].movedStart = null; }, "moved start");
-    refused((raw) => { raw.windows[0].rounds[0].round = 3; }, "rounds");
-    refused((raw) => { raw.windows[0].datasetId = "KXXX:nobody"; }, "no flight");
+    refused((raw) => { raw.windows[1].rounds[0].losses = []; }, "go together");
+    refused((raw) => {                                                   // the real window: it landed, answering for a loss
+      raw.windows[0].rounds[0].losses = raw.windows[1].rounds[0].losses;
+      raw.windows[0].traffic = raw.windows[1].traffic;
+    }, "go together");
+    refused((raw) => { raw.windows[1].rounds[0].losses[0].aircraft[1] = "KXXX:nobody"; }, "none of the window's");
+    refused((raw) => { raw.windows[1].rounds[0].losses[0].answering = [raw.windows[1].traffic[0].key]; }, "not a commanded aircraft");
+    refused((raw) => { raw.windows[0].commanded = []; }, "commands no aircraft");
+    refused((raw) => {                                                   // joining 4 s in: its first step 4 s later on the window's clock
+      raw.windows[0].commanded[0].joinS = 4;
+      raw.windows[0].commanded[0].firstStepS += 4;
+    }, "the window's row 0 is its row 0");
+    refused((raw) => { raw.windows[0].commanded.push(structuredClone(raw.windows[0].commanded[0])); }, "one flight twice");
+    refused((raw) => { raw.windows[0].commanded[0].shiftS = 8; }, "not compressed");
+    refused((raw) => { raw.windows[0].commanded[0].startMove.turnDeg = 5; }, "and only B, moves its start");
+    refused((raw) => { raw.windows[2].commanded[0].movedStart = null; }, "moved start");
+    refused((raw) => { raw.windows[0].commanded[0].rounds[0].round = 3; }, "rounds");
+    refused((raw) => { raw.windows[0].rounds[0].round = 3; }, "the window's rounds");
+    refused((raw) => { raw.windows[0].commanded[0].datasetId = "KXXX:nobody"; }, "no flight");
     refused((raw) => { raw.windows[1].traffic[0].shiftS = null; }, "shift");
-    refused((raw) => { raw.windows[0].rounds[0].firstRow += 1; }, "first predicted step");
+    refused((raw) => { raw.windows[0].commanded[0].rounds[0].firstRow += 1; }, "first predicted step");
+    refused((raw) => { raw.windows[0].commanded[0].rounds[0].silentFromRow = 10_000; }, "silentFromRow");
+    refused((raw) => { raw.windows[0].commanded[0].rounds[0].silentFromRow = 1; }, "answers for no loss");
+    refused((raw) => {                                                   // one aircraft answering two losses of a round
+      const losses = raw.windows[1].rounds[0].losses;
+      losses.push({ ...structuredClone(losses[0]), step: losses[0].step + 1 });
+    }, "one at most");
+    refused((raw) => { raw.windows[1].rounds[0].losses[0].aircraft.push("KXXX:a"); }, "not two aircraft");
+    refused((raw) => { raw.windows[0].commanded[0].firstStepS += 4; }, "first predicted step at");
     refused((raw) => { raw.cohort.windows = 2; }, "cohort.windows");
+  });
+});
+
+describe("the two clocks", () => {
+  it("put a window time on an aircraft's flight clock and back (an aircraft whose window's row 0 is 300 s into its flight)", () => {
+    const aircraft = { ...stageCSample().windows[0].commanded[0], clockS: 300 };
+    expect(onAircraftClock(aircraft, 20)).toBe(320);
+    expect(onWindowClock(aircraft, 320)).toBe(20);
+    expect(onWindowClock(aircraft, onAircraftClock(aircraft, 7.5))).toBe(7.5);
   });
 });
 
@@ -117,7 +167,7 @@ describe("a round's sentence as stage A's views read it", () => {
   it("is the closed-loop sentence at the set's Δ, with the window's end", () => {
     const selection = stageCSelection(sample, 1);
     const closed = selection.flight.closedLoop["4"];
-    const sentence = sample.windows[1].rounds[0];
+    const sentence = sample.windows[1].commanded[0].rounds[0];
     expect(closed.words).toBe(sentence.words);
     expect(closed.replay.outcome).toBe(TRAINING_LOST_SEPARATION);
     expect(closed.flown).toBe(sentence.flown);
@@ -133,11 +183,14 @@ describe("a round's sentence as stage A's views read it", () => {
   });
 
   it("is built once, remembers where it came from, and is a flight of its own for the views (another key)", () => {
-    const view = trainingWindowFlightView(sample, sample.windows[0], "start");
-    expect(trainingWindowFlightView(sample, sample.windows[0], "start")).toBe(view);
-    expect(trainingWindowOriginOf(view)).toMatchObject({ round: "start", window: sample.windows[0] });
-    expect(view.flightKey).not.toBe(trainingWindowFlightView(sample, sample.windows[1], "start").flightKey);
-    expect(() => trainingWindowFlightView(sample, sample.windows[0], 4)).toThrow("no round 4");
+    const [first, second] = sample.windows;
+    const view = trainingWindowFlightView(sample, first, first.commanded[0], "start");
+    expect(trainingWindowFlightView(sample, first, first.commanded[0], "start")).toBe(view);
+    expect(trainingWindowOriginOf(view)).toMatchObject({
+      round: "start", window: first, aircraft: first.commanded[0], sentence: first.commanded[0].rounds[0], end: first.rounds[0],
+    });
+    expect(view.flightKey).not.toBe(trainingWindowFlightView(sample, second, second.commanded[0], "start").flightKey);
+    expect(() => trainingWindowFlightView(sample, first, first.commanded[0], 4)).toThrow("no round 4");
   });
 });
 

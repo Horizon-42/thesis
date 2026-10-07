@@ -16,7 +16,11 @@ they start with `4dTrajectory/` or `.claude/`.
 | MC0 · stage C (post-training §9 items 1–3, 7–9, 11, 12) | dev-multi-control | Built, reviewed, committed (3a9b7153, 80fe774c, 648b6591, 5e456406, a1ea664f) |
 | MC1 · `multi/`, `experiments/multi_windows.py` | dev-multi-control | Built, reviewed, committed (e6f0e564); not run on real data |
 | The full ts suite on dev-multi-control (a1ea664f) | dev-multi-control | 1,918 passed, 1 skipped (8 workers, 10.6 min, 2026-10-06 after C10) |
-| Stage B's steps after C10 (notes/stage_d.md 一 1–5) | dev-two-tier-v4 | Items 1–4 done 2026-10-07 (§6); item 5, the browser check, next |
+| Stage B's steps after C10 (notes/stage_d.md 一 1–5) | dev-two-tier-v4 | Done 2026-10-07 (§6; stage B's log §6); dev-two-tier fast-forwarded to v4 (1e829e95) |
+| dev-two-tier into dev-multi-control (notes 二 1) | dev-multi-control | Merged 2026-10-07 (9b90d5d7), no conflict; the changed modules' tests 72 passed |
+| MC2, MC3 · stage D's rules (`multi/separation`, `tokens`, `credit`) | dev-multi-control | Built, reviewed, committed (fd720c75); synthetic tests only (C14 runs) |
+| MC4 · the round's stage (first part) | dev-multi-control | Built, in review |
+| Cleanup (notes 三) | — | Done 2026-10-07 (§7): seven worktrees removed, their data links unlinked first; ten branches deleted with `-d` |
 | MC0's checks and MC1's census on real data | dev-multi-control | After C14's rounds (outline §4 item 7) |
 
 ## 1 The branches (2026-10-06)
@@ -133,3 +137,20 @@ stage B's log, §6.
    indexes left as they were.
 
 **Items 2–4 are done (2026-10-07): C14 may start.**
+
+## 7 The multi-aircraft control after stage B's wrap-up (notes/stage_d.md 二, 三; 2026-10-07)
+
+While C14's rounds run (from 00:10, 2026-10-07): code and synthetic tests only, on the CPU with at most 4 processes
+(rule 13).
+
+| Commit | What | Review |
+|---|---|---|
+| 9b90d5d7 | dev-two-tier (1e829e95: C14's code, D157, P47) merged into dev-multi-control; no conflict (C14's change of `open_campaign` and the stage of MC0 touch other functions) | The changed modules' tests: 72 passed |
+| fd720c75 | MC2, MC3: `multi/separation.py` (the census's judge on the records, shared; `Answering`, D145), `multi/tokens.py` (`TokenPart`, `multi-commanded-tokens-v1`, D152), `multi/credit.py` (W, spoken again, the varied aircraft and their branch points, stage D's numbers, `rules()`); `Rules.varied` also reads the first pass's ends | No S1. S2 fixed: a test that the loop asks the rule at the judged step. S2 to the user: requests item 25 (the silent flag reads the records under D145). The touched modules' tests: 81 passed |
+
+**The cleanup of notes 三** (git only): for each worktree, its data links listed (`find -maxdepth 4 -type l`) and
+unlinked, then `git worktree remove` (none refused: no worktree had changes), then `git branch -d` (none refused: each
+in dev-two-tier). Removed: merge-a43, training-attitude, stage2-restart, a25-build, stage2-real400, traffic-scenarios;
+branches deleted: dev-two-tier-merge-a43, dev-training-attitude, dev-stage2-restart, docs-optimizer-multi-aircraft,
+dev-frontend-design, dev-multi-control-design, dev-traffic-scenarios. The links' targets (the live data) checked
+afterwards: all there.

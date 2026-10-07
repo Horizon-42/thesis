@@ -1,49 +1,36 @@
 # 阶段 C：当前命令
 
 只放最新一条命令，新命令整份覆盖，不是日志（过程记在 `readouts/2026-10-05_stage_c_implementation_log.md`）。
-2026-10-06 深夜，Claude 写，用户转发。
+2026-10-07，Claude 写，用户转发。
 
 ```
-C10 已经跑完（十轮，只读）。用户决定：把 C10 续训到 14 轮，作为同一个 campaign（post_training D157，里程碑 C14）。
-这件事交给你做：写代码，再跑新增的 4 轮。新的 4 轮用合并后的代码跑，包括 C13。
+C14 做完了，用户已经看过你的 requests。用户的决定（post_training D161、D162，outline D163）：
+- P48 上限读数按你的方案做：N = 32，模型取起点、第 6 轮、第 8 轮，只用 select 日（D161，里程碑 C15）。
+- campaign 可以从另一个 campaign 的某一轮出发，按你的读法做（D162，里程碑 C16）。
+  补一条规则：从某一轮出发的 campaign，种子必须和源 campaign 不同，相同就按名字拒绝。
+- 正式实验以后都从专用的运行工作树启动，不再用主检出（D163）。intent 在启动时不检查，发布时由发布器检查。
+- P45 接受（窗口集合的航迹不取整），已写进 D125。
+- 第 4 条（路径字段在三个地方各写一遍）是 S3，已记录，不再处理。第 5 条已由 D163 解决。
 路径相对 4dTrajectory/ts_transformer/。
 
-先读：post_training D157、§0.4、§8 C14；outline §4 items 3、6、9，§5 rule 1、rule 13。
+一、代码（在 dev-two-tier-v4-post 上，先把 dev-two-tier 合进来）
+1. C15、C16 按 post_training §8 写，包括 D162 的种子规则和它的测试。
+2. 去掉启动时对 intent 的检查（你已经在做）。
+3. 跑改动文件的测试和 test_architecture → 独立审查 → 显式路径提交 → 日志写一行。
+4. 报告 dev-two-tier-v4-post 能否快进 dev-two-tier，由用户合并。
 
-一、分支
-1. 先在 .claude/worktrees/two-tier-v4-post 里把 dev-two-tier 合过来：git merge --ff-only dev-two-tier。
-   dev-two-tier-v4-post 是 dev-two-tier 的祖先，应该能快进；不能快进就停下来报告。
-2. C14 只在 dev-two-tier-v4-post 上做。只改 C14 需要的代码：experiments/post_train.py、experiments/post_validation.py
-   和它们的测试。其他代码一律不动（阶段 D 的实现者和 fronter 在别的分支上开发）。
+二、跑上限读数（用户合并之后）
+1. 先确认主机和 GPU 上没有别的任务（rule 13）。
+2. 在合并后的提交上建一个分离的运行工作树：git worktree add --detach .claude/worktrees/run-post-ceiling <提交>；
+   数据目录按 outline §5 rule 1 用绝对路径链到 live 数据。
+3. 在这个工作树里跑。第 0 次抽样必须复现每一轮 round.json 里的读数，对不上就停下来报告。
+4. 跑完以后：数据设为只读，写 SHA256SUMS；结果表写进日志；运行工作树先断开数据链接再删掉。
+5. 报告给用户：每个模型、每个机场，前 n 次抽样里至少落地一次的比例（n = 1、2、4、…、32），
+   每次都失败的窗口，以及这些窗口在三个模型之间的重叠。不下结论，结论由用户看了再定（D7）。
 
-二、C14 的代码（post_training §8 C14）
-1. open_campaign：续跑时只允许轮数变大，其他设置和输入都必须相同。
-   campaign.json 记下每次改轮数：时间、旧轮数、新轮数、commit、checks。
-2. 记录里的输入路径用 this_checkout 映射后再比对（experiments/training_export.py 里的那一份，像 model_speed 那样
-   import，不要复制）。post_validation 也这样读。记录里原来的路径不改，每次续跑在自己那一条里写下实际读到的路径。
-3. 测试按 C14 写的做。另外在 experiments/ 里查所有读 campaign 记录 "inputs" 的地方，确认都经过 this_checkout。
-4. 在 docs/experiments/intents.json 里写新 4 轮的 intent，和代码一起提交。必须在启动之前提交。
-5. 跑改动文件的测试和 test_architecture → 独立审查（只审代码，审查者不能是作者）→ 用显式路径提交（不用 git add -A，
-   提交前看 git diff --cached --stat）→ 日志写一行。
-6. 报告 dev-two-tier-v4-post 能否快进 dev-two-tier，由用户合并。
-
-三、启动新的 4 轮（用户合并之后）
-1. 先等阶段 D 的实现者报告：C13 的 GPU 检查已经通过，测速和重导这些占 GPU、要计时的步骤都已做完
-   （见 D 的日志 readouts/2026-10-06_stage_d_implementation_log.md 和阶段 B 日志里新开的那一节）。
-   看一眼主机和 GPU，确认上面没有别的任务（rule 13）。
-2. 在主检出上跑，树必须干净：
-   - 先把 4dTrajectory/outputs/POOLED/post/post_train_20261006 改成可写；
-   - 命令和 C10 最后一次 resume 一样（见日志 §26），只把 --rounds 改成 14；
-   - 所有路径都写成仓库相对路径（用绝对路径时执行器检查会拒绝，见日志 §26 的 launch 一行）；
-   - worker 数按 C13 的内存规则（O15）定；
-   - 启动时就设好结束和出错的通知。
-3. 运行期间不改主检出里的任何文件，也不往 dev-two-tier 合代码。
-4. 跑完以后：
-   - SHA256SUMS 加上新文件，目录改回只读；
-   - 每一轮的 selection readout 写进日志；
-   - 报告给用户，由用户按 D7 在 14 轮里选一轮。验证读数等用户选完再说。
+验证读数（D7 选出的那一轮）等用户说了再做。
 
 你只能写这些设计文本：post_training §0.3 的状态行和你的日志。设计没说到的地方写成读法，
-放进 docs/two_tier/design/requests_from_c_to_designer.md（整份重写），等用户定。
+放进 docs/two_tier/design/requests_from_c_to_designer.md（整份重写，已经定了的条目删掉），等用户定。
 日志和 requests 文件提交到 dev-two-tier：用一个临时工作树加快进，只放这些文件。
 ```

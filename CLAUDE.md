@@ -113,8 +113,9 @@ Full text, with the investigation behind each line: `docs/environment.md` (E1–
   `activate.d/zz-libstdcxx.sh` hook is what stops `import torch` before `import traffic` (the order
   `run_all_tests.sh` uses) from breaking matplotlib's CXXABI (E5).
 - A py3.11 consolidation is BLOCKED: `cifparse` ≥ 2.0.4 needs Python 3.12 syntax (E4).
-- ts campaigns run from the main tree: `.git/info/exclude` must carry `.claude/worktrees/`, or a
-  nested worktree dirties the tree and a formal run refuses to start (E7); a killed formal run
+- ts campaigns run from a detached run worktree at the commit the user merged, never the main checkout, so merges go
+  on during a run (user 2026-10-07; two-tier outline D163); `.git/info/exclude` must carry `.claude/worktrees/`, or a
+  nested worktree dirties a tree and a formal run refuses to start (E7); a killed formal run
   leaves a `running` manifest — if the arm directory holds only `config.json` + the manifest, move
   it aside as `<arm>.aborted-<UTC>` and rerun the SAME campaign command (E8).
 - Env spec backups in `.env-backup/` (E9); GPU RTX 4060 8 GB, cc 8.9, cu128 wheels (E10); 16 GB
@@ -192,9 +193,8 @@ Short index; the full text (with measurements) is in the named file, which loads
 - **Every published experiment states its INTENT** (the user's rule, 2026-09-12): each campaign's
   title + question and one line per run live in
   `4dTrajectory/ts_transformer/docs/experiments/intents.json`, and the publisher BLOCKS a run
-  without an entry. Write the entries when the campaign is designed and commit them with its arm
-  declaration BEFORE launch (editing the registry under a running campaign dirties the main tree);
-  when reporting a publication, state each campaign's intent too. →
+  without an entry. Write the entries before publication (a launch does not check them, user
+  2026-10-07); when reporting a publication, state each campaign's intent too. →
   `4dTrajectory/ts_transformer/CLAUDE.md` (L27)
 - **A ts checkpoint's data identity is the eligible SET, never the eligibility roster's bytes** —
   the roster embeds upstream provenance that legitimately moves over an unchanged set (a
