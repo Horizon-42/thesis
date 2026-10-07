@@ -1091,3 +1091,68 @@ separation in most draws and landed in a few:
 - 871 and 876 (KSTL) were never landed by the start, but landed 3–4 and 10–11 times in 32 by rounds 6 and 8;
 - 900 and 906 (KSTL) were never landed by round 8, or by rounds 6 and 8.
 
+## 29 C17: training on the landed sentences (2026-10-07)
+
+The order is `notes/stage_c.md` of 2026-10-07 (`77517176`), and the design is post-training D165 and §8 C17.
+
+**The user's decisions after the note:**
+- the form: a required `Settings.method` in the same runner and campaign schema, rather than D165's own runner and
+  schema;
+- a required `Settings.select_seed`;
+- C10's record gains both fields in the same step as the merge.
+
+| Step | Commit | What |
+|---|---|---|
+| Merge | `2816f2a6` and before | `dev-two-tier` merged in, including stage D's code (the `Stage` skeleton of §9 items 11 and 12). The work was carried onto it by a three-way patch, its conflicts resolved toward stage D's structure |
+| C17 | `6afa3c0b` | See the list below |
+
+**C17, the code.**
+- `Settings.method`: `branch` or `landed`; a resume compares it.
+- `STAGE_C_LANDED`:
+  - `speak_landed_batch`: N draws a window; draw 0 is the window's first sentence (`landed_numbers`).
+  - `best_landed`: the landed sentence of the highest reward above 0, a tie to the lowest draw, kept in
+    `kept_<k>.pt`.
+  - `landed_train_pass` → `post.loss.landed_step`: the kept words' negative log-likelihood, the pull and the data term,
+    in pieces, normalised per counted row (D115).
+  - `landed_pass_memory`: one update measured for O15.
+- `Stage` gains two parts, `train` and `pass_memory`, with branch training's defaults, so stage D's code is unchanged.
+  `speak_round` sums whatever its batches report, so the branch record is unchanged.
+- `Settings.select_seed`: the selection readout's windows and numbers, read by `selection_windows`, `read_batch` and
+  `model_speed`.
+- The options `--method` and `--select-seed` are required.
+- `intents.json`: `post_landed_20261007`; `runners.md` R65.
+- The stage C frontend fixtures were written again by the export: their settings gain `method` and `select_seed`.
+
+**Two readings of mine, told to the user:**
+- 16 kept sentences an update, about 250 updates a round, against C10's 244–391;
+- a landing that the reward scores 0 (D105) is not kept.
+
+**Tests.**
+- The affected files, stage D's included: 143 passed; after the last fixes, 69. `test_post_landed`: 10. The vitest files
+  on the fixtures: 75.
+- The new tests:
+  - the keep rule;
+  - the draws' numbers;
+  - the loss against the whole expression (value and gradient);
+  - a real kept sentence spoken here and through two workers (byte-equal kept files), then passed;
+  - a landed campaign resumed, equal to the campaign run through, started from a round of another campaign;
+  - the runner handing the method's stage to the workers and the campaign;
+  - the readout's seed: seed 2024 reads C10's windows and numbers.
+- The guarded tests fail under their mutations.
+
+**Review** (opus, independent, two rounds):
+- S1, fixed: the readout took its seed from the campaign's seed, so seed 2024 would have read about 195 of C10's 1,000
+  windows.
+- S2, fixed:
+  - the update size;
+  - reward-0 landings;
+  - two missing tests;
+  - a select-seed test that could not fail.
+- S3: fixed or noted.
+
+**The run waits.** Stage D's `multi_profile` (MC5 at the formal size) runs from `dev-multi-control` with 4 workers, and
+reads C10 as its start.
+- It must not be slowed (rule 13).
+- C10's record edit would make its older code fail by name when it reads C10's settings.
+- When it ends: C10's record edit, `dev-two-tier` fast-forwarded, the run worktree, the launch.
+
