@@ -424,15 +424,17 @@ def test_n_workers_are_refused_by_name_where_one_workers_measured_memory_does_no
     passed = {"peak": 3 * gib, "now": gib // 2, "groups": 4}
     # host: 3 × (2 + 0.5 series) = 7.5 ≤ 6.5 + 1; GPU: 3 × (1 + 0.25 model) = 3.75 ≤ 3.75 + 0.25, the pass
     # 2.5 + 2 × (0.25 + 0.25) + 0.25 = 3.75 ≤ 3.75
-    assert post_train.workers_fit(3, measured, passed, {"host": int(6.5 * gib), "gpu": int(3.75 * gib)}) == []
-    short = post_train.workers_fit(3, measured, passed, {"host": 6 * gib, "gpu": int(3.25 * gib)})
+    assert post_train.workers_fit(3, measured, passed, {"host": int(6.5 * gib), "gpu": int(3.75 * gib)},
+                                  held_now=True) == []
+    short = post_train.workers_fit(3, measured, passed, {"host": 6 * gib, "gpu": int(3.25 * gib)}, held_now=True)
     assert [line.split(":")[0] for line in short] == ["host", "gpu", "gpu"]
     assert "3 workers speaking need 7.5 GiB" in short[0] and "the pass beside 3 workers needs 3.8 GiB more" in short[2]
     assert [line.split(":")[0] for line in post_train.workers_fit(3, measured, passed, {"host": int(6.5 * gib),
-                                                                                      "gpu": int(3.7 * gib)})] == ["gpu"]
+                                                                                      "gpu": int(3.7 * gib)},
+                                                                      held_now=True)] == ["gpu"]
     on_cpu = {**measured, "gpu": None}                     # the readout's model on the host: 3 × 2.75 = 8.25 ≤ 7.25 + 1
-    assert post_train.workers_fit(3, on_cpu, None, {"host": int(7.25 * gib), "gpu": None}) == []
-    assert post_train.workers_fit(3, on_cpu, None, {"host": 7 * gib, "gpu": None})
+    assert post_train.workers_fit(3, on_cpu, None, {"host": int(7.25 * gib), "gpu": None}, held_now=True) == []
+    assert post_train.workers_fit(3, on_cpu, None, {"host": 7 * gib, "gpu": None}, held_now=True)
     s = setup
     context = _context(s)
     short_round(monkeypatch, s)                            # before the fork: the workers draw the short round too
@@ -451,6 +453,109 @@ def test_n_workers_are_refused_by_name_where_one_workers_measured_memory_does_no
             post_train.require_workers_fit(speakers, context, settings, 0)
     finally:
         speakers.close()
+
+
+def test_with_nothing_held_yet_the_workers_and_the_pass_need_their_whole_peaks():
+    """D167: a fit read from a recorded measure, before this process uses the GPU (``held_now`` false): N workers need N
+    times a worker's peak and what it holds besides of the free memory, the pass its whole peak beside what each
+    worker holds."""
+    gib = 1 << 30
+    held = {"reader_model": gib // 4, "series": gib // 2, "round_flights": 100}
+    measured = {"host": {"peak": 2 * gib, "now": 1 * gib}, "gpu": {"peak": 1 * gib, "now": gib // 4}, "held": held}
+    passed = {"peak": 3 * gib, "now": gib // 2, "groups": 4}
+    # host: 3 × 2.5 = 7.5; GPU: 3 × 1.25 = 3.75; the pass 3 + 3 × (0.25 + 0.25) = 4.5
+    assert post_train.workers_fit(3, measured, passed, {"host": int(7.5 * gib), "gpu": int(4.5 * gib)},
+                                  held_now=False) == []
+    short = post_train.workers_fit(3, measured, passed, {"host": int(7.4 * gib), "gpu": int(4.4 * gib)},
+                                   held_now=False)
+    assert [line.split(":")[0] for line in short] == ["host", "gpu"] and "the pass beside 3 workers" in short[1]
+    # the workers on the GPU beside what this process holds after a pass: 3 × 1.25 = 3.75 > 4.2 − 0.5
+    short = post_train.workers_fit(3, measured, {"peak": gib // 2, "now": gib // 2, "groups": 4},
+                                   {"host": 8 * gib, "gpu": int(4.2 * gib)}, held_now=False)
+    assert len(short) == 1 and short[0].startswith("gpu: 3 workers speaking need 3.8 GiB")
+
+
+def _measure(workers):
+    """A measure as `require_workers_fit` returns it (on the CPU: the host only)."""
+    return {"speak_workers": workers, "pass": None, "available": {"host": 64 << 30, "gpu": None},
+            "measured": {"host": {"peak": 1 << 30, "now": 1 << 29}, "gpu": None,
+                         "held": {"reader_model": 1 << 20, "series": 1 << 20, "round_flights": 1}}}
+
+
+def test_a_recorded_measure_is_read_on_its_devices_for_as_many_workers_as_it_was_checked_for(monkeypatch):
+    """D167: the newest measure on the launch's devices, for at most the workers it admitted, checked against the free
+    memory now; none on these devices, or more workers, or a record from before D167: a new measure is due; workers
+    that do not fit are refused by name."""
+    cpu, cuda = torch.device("cpu"), torch.device("cuda")
+    monkeypatch.setattr(post_train, "available_memory", lambda device: {"host": 8 << 30, "gpu": None})
+    measures = [{**_measure(4), "utc": "first", "round": 0, "device": "cpu", "speak_device": "cpu"},
+                {**_measure(2), "utc": "on the gpu", "round": 1, "device": "cuda", "speak_device": "cpu"},
+                {**_measure(3), "utc": "newest", "round": 2, "device": "cpu", "speak_device": "cpu"}]
+    record = {"measures": measures}
+    assert post_train.recorded_fit({}, 2, cpu, cpu) is None                       # a record from before D167
+    assert post_train.recorded_fit(record, 4, cpu, cpu) is None                    # the newest admitted 3
+    fit = post_train.recorded_fit(record, 3, cpu, cpu)
+    assert fit == {"measure": 2, "measured": False, "speak_workers": 3, "available": {"host": 8 << 30, "gpu": None}}
+    assert post_train.recorded_fit(record, 2, cuda, cpu)["measure"] == 1
+    assert post_train.recorded_fit(record, 2, cuda, cuda) is None                  # no measure on these devices
+    monkeypatch.setattr(post_train, "available_memory", lambda device: {"host": 2 << 30, "gpu": None})
+    with pytest.raises(SystemExit, match=r"do not fit \(O15, the measure recorded newest\): host: 3 workers"):
+        post_train.recorded_fit(record, 3, cpu, cpu)
+
+
+def test_a_launch_measures_once_and_a_resume_reads_the_recorded_measure(tmp_path, monkeypatch):
+    """D167 through the runner: the first launch measures and records it, its entry naming it; a resume reads it and
+    measures nothing; more workers than it admitted measure again; a record without a measure (from before D167, left
+    as it was otherwise) measures; a launch without workers names none."""
+    measured = []
+
+    class Workers:
+        def __init__(self, context, settings, workers, device, *, stage):
+            self.workers = workers
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(post_train, "git_state", lambda: {"head": "x", "dirty": False})
+    monkeypatch.setattr(post_train, "require_conforming_closed_loop", lambda *a: (None, {"checks": {}}, None))
+    monkeypatch.setattr(post_train, "checked_edges", lambda path: None)
+    monkeypatch.setattr(post_train, "open_context", lambda *a, **k: SimpleNamespace(base=torch.nn.Linear(1, 1),
+                                                                                   device=CPU))
+    order = []
+    monkeypatch.setattr(post_train, "replace", lambda c, **k: (order.append("moved"), c)[1])
+    monkeypatch.setattr(post_train, "Speakers", Workers)
+    monkeypatch.setattr(post_train, "available_memory", lambda device: (order.append("read"),
+                                                                        {"host": 64 << 30, "gpu": None})[1])
+    monkeypatch.setattr(post_train, "require_workers_fit", lambda speakers, context, settings, round_: (
+        measured.append(speakers.workers), _measure(speakers.workers))[1])
+    monkeypatch.setattr(post_train, "run_campaign", lambda *a, **k: None)
+    out = tmp_path / "campaign"
+
+    def launch(rounds, workers):
+        argv = ["--prior", str(tmp_path / "p"), "--instructions", str(tmp_path / "i"), "--executor",
+                str(tmp_path / "e"), "--windows", str(tmp_path / "w"), "--out", str(out), "--rounds", str(rounds),
+                "--batch-windows", "1", "--seed", "1", "--prior-lr", "1e-4", "--traffic-lr", "1e-3",
+                "--weight-decay", "0", "--update-groups", "1", "--data-sentences", "1", "--select-per-airport", "1",
+                "--traffic-hidden", "16", "--traffic-heads", "4", "--method", "branch", "--select-seed", "1",
+                "--device", "cpu", *(["--speak-workers", str(workers)] if workers > 1 else [])]
+        assert post_train.main(argv + [x for kind in KINDS for x in (f"--windows-{kind.lower()}", "1")]) == 0
+        return json.loads((out / "campaign.json").read_text())
+
+    first = launch(1, 3)
+    assert measured == [3] and len(first["measures"]) == 1 and first["measures"][0]["device"] == "cpu"
+    assert first["fit"]["measure"] == 0 and first["fit"]["measured"] is True
+    again = launch(2, 2)                                                          # fewer workers: the record read
+    assert order[-2:] == ["read", "moved"]                     # the free memory read before the GPU is used
+    assert measured == [3] and again["resumed"][-1]["fit"] == {
+        "measure": 0, "measured": False, "speak_workers": 2, "available": {"host": 64 << 30, "gpu": None}}
+    more = launch(2, 4)                                                           # more than it admitted
+    assert measured == [3, 4] and len(more["measures"]) == 2 and more["resumed"][-1]["fit"]["measure"] == 1
+    assert launch(2, 1)["resumed"][-1]["fit"] is None                             # no workers
+    record = json.loads((out / "campaign.json").read_text())
+    del record["measures"]                                                        # a record from before D167
+    (out / "campaign.json").write_text(json.dumps(record))
+    older = launch(2, 2)
+    assert measured == [3, 4, 2] and len(older["measures"]) == 1 and older["resumed"][-1]["fit"]["measured"] is True
 
 
 def short_round(monkeypatch, s):

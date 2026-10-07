@@ -268,7 +268,8 @@ def test_the_runner_hands_the_method_s_stage_to_the_workers_and_the_campaign(tmp
     monkeypatch.setattr(post_train, "open_context", lambda *a, **k: context)
     monkeypatch.setattr(post_train, "replace", lambda c, **k: c)
     monkeypatch.setattr(post_train, "Speakers", Workers)
-    monkeypatch.setattr(post_train, "require_workers_fit", lambda *a: None)
+    monkeypatch.setattr(post_train, "require_workers_fit", lambda *a: {"speak_workers": 2, "measured": None, "pass": None,
+                                                                      "available": None})
     monkeypatch.setattr(post_train, "run_campaign", lambda out, settings, context, speakers, *, stage:
                         handed.update(campaign=stage, method=settings.method))
     argv = ["--prior", str(tmp_path / "p"), "--instructions", str(tmp_path / "i"), "--executor", str(tmp_path / "e"),
@@ -298,6 +299,6 @@ def test_workers_on_the_cpu_beside_a_pass_on_the_gpu_hold_nothing_of_the_gpu():
     measured = {"host": {"peak": 1 << 30, "now": 1 << 29}, "gpu": None,
                 "held": {"reader_model": 1 << 20, "series": 1 << 20}}
     passed = {"peak": 3 << 30, "now": 1 << 30}
-    assert post_train.workers_fit(16, measured, passed, {"host": 64 << 30, "gpu": 2 << 30}) == []    # exactly the pass's
-    short = post_train.workers_fit(16, measured, passed, {"host": 64 << 30, "gpu": (2 << 30) - 1})
+    assert post_train.workers_fit(16, measured, passed, {"host": 64 << 30, "gpu": 2 << 30}, held_now=True) == []    # exactly the pass's
+    short = post_train.workers_fit(16, measured, passed, {"host": 64 << 30, "gpu": (2 << 30) - 1}, held_now=True)
     assert len(short) == 1 and short[0].startswith("gpu: the pass beside 16 workers")

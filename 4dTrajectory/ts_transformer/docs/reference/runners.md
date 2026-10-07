@@ -1699,7 +1699,9 @@ checkpoint.
   `--start-round`; D162: a seed other than the source's).
 - A resume continues from the last checkpoint and may raise `--rounds` (D157).
 - `--speak-workers` speaks the batches in worker processes, measured against the host's and the GPU's memory before
-  the first round (O15).
+  the first round (O15). The measure is kept in `campaign.json` (`measures`); a later launch on the same devices with
+  at most the workers it admitted reads it and checks only the memory free now (seconds, D167, C18); a record without
+  one, or more workers, measures again. Each launch's entry names the measure it read (`fit`).
 - `--select-seed`: the selection readout's windows and numbers, apart from `--seed` (C10's: 1337), so that a campaign
   from a round reads its source's select windows.
 - `--clip-norm` (D168, C19): each update's gradient clipped to that norm before the optimizer's step; left out, not

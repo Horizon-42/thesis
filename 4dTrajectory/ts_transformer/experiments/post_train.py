@@ -18,7 +18,8 @@ EACH ROUND r:
    (N ≥ 2) the batches are spoken by N worker processes (`Speakers`), with the same groups and records (the pass after
    them agrees to float rounding): the speaking is simulation on the CPU (the executor, the masks, the scene), one batch
    at a time a process. Before the first round, one worker speaks a batch at the formal size and N workers are refused
-   by name where its memory times N does not fit (`require_workers_fit`, O15). Every window is started through its
+   by name where its memory times N does not fit (`require_workers_fit`, O15); the measure is kept in ``campaign.json``
+   and a later launch reads it instead of measuring again (`recorded_fit`, D167). Every window is started through its
    split's `Start`, opened once before the workers fork (C13, vocabulary A44).
 4. **One training pass** (`train_pass`, §2 item 5): the written groups, each file's in an order shuffled by the
    round's numbers (D130), `update_groups` at a time, each paired with `data_sentences` single-aircraft sentences of
@@ -820,14 +821,19 @@ def landed_pass_memory(context: Context, settings: Settings, directory: Path) ->
 
 
 def workers_fit(workers: int, measured: Mapping[str, Any], passed: Mapping[str, Any] | None,
-                available: Mapping[str, int | None]) -> list[str]:
-    """O15: where ``workers`` workers do not fit, read after the measures (``available``: the host's and the GPU's free
-    memory, with the measured worker and this process holding what they hold after them). Each worker needs the
+                available: Mapping[str, int | None], *, held_now: bool) -> list[str]:
+    """O15: where ``workers`` workers do not fit (``available``: the host's and the GPU's free memory; ``held_now``:
+    with the measured worker and this process holding what they hold after the measures, as just after them
+    (`require_workers_fit`), or with nothing held yet, as before this process uses the GPU with a recorded measure
+    (`recorded_fit`, D167)). Each worker needs the
     measured worker's peak (``measured``, `Speakers.measure`; it holds part of it already) and what a worker holds
     besides in a round (``measured["held"]``: the readout's model on the campaign's device, the round's kept series on
     the host). The pass, on a GPU: this process grows to its pass's peak (``passed``, `pass_memory_of`) while each of
     the other workers holds what the measured one holds after its batch and the readout's model, and the measured one
-    its readout's model besides. One line for each that does not fit; none: they fit."""
+    its readout's model besides. With nothing held yet, the workers on the GPU speak beside what this process holds of
+    it after a pass (``passed["now"]``: its model and optimizer stay there). APPROXIMATION, stated, with nothing held
+    yet: the host's free memory is read before this process starts CUDA, so its own host memory for it (some hundred
+    MB, not measured) is not taken out. One line for each that does not fit; none: they fit."""
     held = measured["held"]
     reader = {"host": 0 if measured["gpu"] is not None else held["reader_model"],
               "gpu": held["reader_model"] if measured["gpu"] is not None else 0}
@@ -837,7 +843,8 @@ def workers_fit(workers: int, measured: Mapping[str, Any], passed: Mapping[str, 
         if measured[name] is None:
             continue
         one = measured[name]["peak"] + besides[name]
-        need, have = workers * one, available[name] + measured[name]["now"]
+        mine = passed["now"] if name == "gpu" and passed is not None else 0     # this process's, after a pass
+        need, have = workers * one, available[name] + (measured[name]["now"] if held_now else -mine)
         if need > have:
             out.append(f"{name}: {workers} workers speaking need {need / 2**30:.1f} GiB (one worker's peak "
                        f"{measured[name]['peak'] / 2**30:.2f} GiB and {besides[name] / 2**30:.2f} GiB held in a round), "
@@ -845,7 +852,8 @@ def workers_fit(workers: int, measured: Mapping[str, Any], passed: Mapping[str, 
     if passed is not None:
         # a worker on the CPU (``--speak-device cpu`` beside a pass on the GPU) holds nothing of the GPU
         each = (measured["gpu"]["now"] if measured["gpu"] is not None else 0) + reader["gpu"]
-        need = passed["peak"] - passed["now"] + (workers - 1) * each + reader["gpu"]
+        need = (passed["peak"] - passed["now"] + (workers - 1) * each + reader["gpu"] if held_now else
+                passed["peak"] + workers * each)
         if need > available["gpu"]:
             out.append(f"gpu: the pass beside {workers} workers needs {need / 2**30:.1f} GiB more (its peak "
                        f"{passed['peak'] / 2**30:.2f} GiB, each worker holding {each / 2**30:.2f} GiB), "
@@ -875,11 +883,59 @@ def require_workers_fit(speakers: Speakers, context: Context, settings: Settings
     available = available_memory(context.device)
     out = {"speak_workers": speakers.workers, "measured": measured, "pass": passed, "available": available}
     print(json.dumps(out), flush=True)
-    short = workers_fit(speakers.workers, measured, passed, available)
+    short = workers_fit(speakers.workers, measured, passed, available, held_now=True)
     if short:
         raise SystemExit("the speaking workers do not fit (O15): " + "; ".join(short) + " — start fewer "
                          "(--speak-workers)")
     return out
+
+
+def _measures(record: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """A campaign's recorded measures (`record_measure`); a record written before D167 holds none (D167: it measures)."""
+    return record["measures"] if "measures" in record else []
+
+
+def recorded_fit(record: Mapping[str, Any], workers: int, device: torch.device, speak_device: torch.device
+                 ) -> dict[str, Any] | None:
+    """D167: the launch's O15 read from campaign ``record``'s newest measure taken on these devices (``device``: the
+    pass's, ``speak_device``: the workers'), before this process uses the GPU — the host's and the GPU's free memory now
+    checked against ``workers`` workers (`workers_fit` with nothing held yet), refused by name where they do not fit;
+    its fit (the measure's place in the record, the memory read). None: a new measure is due — the record holds no
+    measure on these devices, or its newest admitted fewer workers than ``workers`` (the measure allows the workers it
+    was checked for)."""
+    mine = [k for k, m in enumerate(_measures(record))
+            if (m["device"], m["speak_device"]) == (str(device), str(speak_device))]
+    if not mine or record["measures"][mine[-1]]["speak_workers"] < workers:
+        return None
+    measure = record["measures"][mine[-1]]
+    available = available_memory(device)
+    short = workers_fit(workers, measure["measured"], measure["pass"], available, held_now=False)
+    if short:
+        raise SystemExit(f"the speaking workers do not fit (O15, the measure recorded {measure['utc']}): "
+                         + "; ".join(short) + " — start fewer (--speak-workers)")
+    return {"measure": mine[-1], "measured": False, "speak_workers": workers, "available": available}
+
+
+def record_measure(out: Path, measure: Mapping[str, Any], device: torch.device, speak_device: torch.device,
+                   round_: int) -> dict[str, Any]:
+    """D167: a launch's new measure (`require_workers_fit`'s, taken before round ``round_``, on these devices) added to
+    campaign ``out``'s ``campaign.json`` (``measures``); its fit."""
+    path = out / "campaign.json"
+    record = json.loads(path.read_text(encoding="utf-8"))
+    record["measures"] = [*_measures(record), {"utc": utc_now(), "round": round_, "device": str(device),
+                                               "speak_device": str(speak_device), **measure}]
+    write_json_atomic(path, record)
+    return {"measure": len(record["measures"]) - 1, "measured": True, "speak_workers": measure["speak_workers"],
+            "available": measure["available"]}
+
+
+def name_fit(out: Path, fit: dict[str, Any] | None) -> None:
+    """D167: the launch's entry in campaign ``out``'s ``campaign.json`` (a new campaign's record, or its newest
+    resume's) names the measure it read (``fit``; None: no workers, or no round left)."""
+    path = out / "campaign.json"
+    record = json.loads(path.read_text(encoding="utf-8"))
+    (record["resumed"][-1] if record["resumed"] else record)["fit"] = fit
+    write_json_atomic(path, record)
 
 
 # ---- the training pass
@@ -1340,14 +1396,18 @@ def main(argv: list[str] | None = None) -> int:
     speak_device = torch.device(args.speak_device or args.device)
     speakers = (Speakers(context, settings, args.speak_workers, speak_device, stage=stage) if args.speak_workers > 1
                 else None)
-    context = replace(context, device=device, base=context.base.to(device).eval())
     inputs = {"prior": str(prior_dir), "instructions": str(instructions), "executor": str(executor),
               "windows": str(census), "procedure_root": str(procedure_root), "settings": asdict(settings),
               "smoke": args.smoke}
     try:
-        open_campaign(out, inputs, git, opened["checks"])           # a resume of other inputs refused before the measure
-        if speakers is not None and done_rounds(out) < settings.rounds:
-            require_workers_fit(speakers, context, settings, done_rounds(out))       # O15, before any round
+        record = open_campaign(out, inputs, git, opened["checks"])   # a resume of other inputs refused before the measure
+        measuring = speakers is not None and done_rounds(out) < settings.rounds        # O15, before any round
+        fit = recorded_fit(record, speakers.workers, device, speak_device) if measuring else None   # D167, GPU unused
+        context = replace(context, device=device, base=context.base.to(device).eval())
+        if measuring and fit is None:
+            fit = record_measure(out, require_workers_fit(speakers, context, settings, done_rounds(out)), device,
+                                 speak_device, done_rounds(out))
+        name_fit(out, fit)
         run_campaign(out, settings, context, speakers, stage=stage)
     finally:
         if speakers is not None:
