@@ -1692,6 +1692,11 @@ C10, C14, C16, C17). `--method` (required, a setting of the campaign):
   learned with the clipped surrogate;
 - `landed` (P49): each window spoken `--continuations` times, its best landed sentence kept, and the kept words
   learned (their negative log-likelihood).
+- `value` (D171, C22): each window spoken one time (`--continuations 1`), every sentence a sample; a value network V
+  (a copy of the start model with a token part of its own: the recorded aircraft's future at +30/60/120 s and the
+  time to their landing, and the time left, read only by V) gives each row its advantage (GAE, λ 0.95); V trained
+  beside the model (`--value-lr`), alone for the first `--value-warmup` rounds; V kept in `round_<r>/value.pt`
+  (`ts-post-value-v1`), written before the checkpoint, never read by a readout or a start.
 
 Both keep the pull toward the base and the data term, and each round ends with the selection readout and a
 checkpoint.

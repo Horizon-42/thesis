@@ -876,10 +876,11 @@ def test_stage_c_s_pass_clips_and_passes_as_its_settings_say(monkeypatch):
         landed = stage is post_train.STAGE_C_LANDED
         here = replace(settings, method=post_train.LANDED_SENTENCES, segment_only=False,
                        branch_every_s=120.0) if landed else settings
-        assert stage.train(None, context, None, None, here, rng, part_width=0) == {
+        assert stage.train(None, context, None, None, here, rng, part_width=0, round_=0, companion=None) == {
             "updates": 0, "passes": [{"updates": 0}, {"updates": 0}]}
         assert numbers[-2] is rng and numbers[-1] is not rng
-    stage_d().train(None, context, None, None, settings, np.random.default_rng(0), part_width=0)
+    stage_d().train(None, context, None, None, settings, np.random.default_rng(0), part_width=0, round_=0,
+                    companion=None)
     assert seen == [(0.5, 2), (0.5, 2), (None, 1)]
     assert segments == [15, 15, None]          # D170: 60 s in 4 s rows, stage C's branch pass only; stage D's none
 
@@ -1069,8 +1070,8 @@ def test_a_stage_gives_the_campaigns_round_its_parts_and_stage_cs_is_the_campaig
         run_campaign(out, settings, _context(s), stage=stage)
         states.append(torch.load(out / "round_0" / "checkpoint.pt", weights_only=False))
     # the speaking and the readout run the stage's own batch speaker and reader (the campaign hands them the stage)
-    assert called == ["start", "selection", "draw", "speak", "batches", "speak_batch", "train", "readout", "batches",
-                      "read_batch", "record", "identity"]
+    assert called == ["start", "selection", "companion", "draw", "speak", "batches", "speak_batch", "train", "readout",
+                      "batches", "read_batch", "record", "close_round", "identity"]
     assert states[0]["model"].keys() == states[1]["model"].keys()
     assert all(torch.equal(states[0]["model"][k], states[1]["model"][k]) for k in states[0]["model"])
     assert states[0]["identity"] == states[1]["identity"]

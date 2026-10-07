@@ -60,7 +60,12 @@ of the larger count from its start. THE LANDED SENTENCES (``--method landed``, P
 and 4's branch groups and clipped surrogate, each window is spoken `Settings.continuations` times (the first pass,
 `landed_numbers`), its landed sentence of the highest reward is kept (`speak_landed_batch`), and the pass learns the kept
 sentences' words (their negative log-likelihood, `post.loss.landed_step`) with the pull toward the base and the data
-term; the rest of a round is the same. A START FROM A ROUND (``--start-campaign``, ``--start-round``;
+term; the rest of a round is the same. THE VALUE FUNCTION (``--method value``, D171, post-training §2 item 10): each
+window is spoken one time (`first_numbers`), every sentence a sample, with what the value network V reads beside the
+model at each row (`speak_value_batch`, `post.value`); V (a copy of the start model with a token part of its own and a
+head, `ValueRun`) gives each row its advantage (GAE) and is trained beside the model; the first `Settings.value_warmup`
+rounds train V alone; V is kept in ``round_<r>/value.pt`` (`post.value.VALUE_SCHEMA`), written before the checkpoint,
+which no reader of a round opens. A START FROM A ROUND (``--start-campaign``, ``--start-round``;
 `campaign_start`, D162): instead of the base with zero-output traffic modules (D29), the weights of a round of another
 campaign on the same base, its checkpoint's bytes recorded in the settings, with a seed other than its campaign's; a
 new optimizer, and the pull term toward the base either way. A formal campaign does not start from a smoke one.
@@ -105,18 +110,23 @@ from ts_transformer.instructions.faults import faulty_flights
 from ts_transformer.instructions.words import Words
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.post.branches import (
-    BRANCH_EVERY_S, CONTINUATIONS, Group, Landed, Sentence, branch_rows, landed_numbers, landed_samples, samples,
+    BRANCH_EVERY_S, CONTINUATIONS, Group, Landed, Sentence, branch_rows, first_numbers, landed_numbers, landed_samples,
+    samples,
 )
 from ts_transformer.post.fault_census import fault_rows
-from ts_transformer.post.loss import LossParts, PassStart, Samples, landed_step, passes, stacked
+from ts_transformer.post.loss import LossParts, PassStart, Samples, clipped_step, landed_step, passes, stacked, update_step
+from ts_transformer.post.value import (
+    VALUE_FEATURES, VALUE_SCHEMA, Value, ValueBatch, ValueSample, advantages, time_left, value_batch, value_loss,
+    value_part,
+)
 from ts_transformer.post.reward import LANDED
 from ts_transformer.post.runways import airport_separation
 from ts_transformer.post.scene import (
-    INSERTED, LEADER_MOVED, MOVED_START, REAL, Window, inserted_window, leader_moved_window, moved_start_window,
+    INSERTED, LEADER_MOVED, MOVED_START, REAL, AircraftAt, Window, inserted_window, leader_moved_window, moved_start_window,
     real_windows, scenes_of,
 )
 from ts_transformer.post.traffic import opens_inside_loss
-from ts_transformer.post.traffic_attention import TrafficConfig, add_traffic_attention, parameter_groups
+from ts_transformer.post.traffic_attention import Traffic, TrafficConfig, add_traffic_attention, parameter_groups
 from ts_transformer.prior.batch import RowTensors, collate
 from ts_transformer.prior.checkpoint import OpenedPrior, open_prior, validation_claim
 from ts_transformer.prior.model import Prior
@@ -128,9 +138,10 @@ from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 CAMPAIGN_SCHEMA = "ts-post-train-v1"
 POST_CHECKPOINT_SCHEMA = "ts-post-checkpoint-v1"
 KINDS = (REAL, INSERTED, LEADER_MOVED, MOVED_START)
-#: How a round trains (`Settings.method`): branch groups and the clipped surrogate (D94), or the landed sentences (P49).
-BRANCH, LANDED_SENTENCES = "branch", "landed"
-METHODS = (BRANCH, LANDED_SENTENCES)
+#: How a round trains (`Settings.method`): branch groups and the clipped surrogate (D94), the landed sentences (P49), or
+#: one sentence a window with a value function (D171).
+BRANCH, LANDED_SENTENCES, VALUE = "branch", "landed", "value"
+METHODS = (BRANCH, LANDED_SENTENCES, VALUE)
 #: The paths among a campaign's inputs (``campaign.json``), read as this checkout reads them (`inputs_here`, D157).
 INPUT_PATHS = ("prior", "instructions", "executor", "windows", "procedure_root")
 #: The reader's name in the claim of a campaign's val read (prior D119; `post_validation`'s, named here so that a raise
@@ -181,6 +192,10 @@ class Settings:
     #: P55: the interval of the branch points (`post.branches.branch_points`), s; D37's 120 s by default. Added as
     #: ``clip_norm``.
     branch_every_s: float = BRANCH_EVERY_S
+    #: D171: V's learning rate (its own AdamW, the campaign's weight decay and gradient clip), and the rounds that
+    #: train V alone; both required with `VALUE` and refused with another method. Added as ``clip_norm`` (None: no V).
+    value_lr: float | None = None
+    value_warmup: int | None = None
 
     def __post_init__(self) -> None:
         if set(self.per_kind) != set(KINDS) or min(self.per_kind.values()) < 0 or not any(self.per_kind.values()):
@@ -198,6 +213,13 @@ class Settings:
         if self.method != BRANCH and (self.segment_only or self.branch_every_s != BRANCH_EVERY_S):
             raise ValueError(f"segment_only and branch_every_s are branch training's (method {BRANCH!r}), not "
                              f"{self.method!r}'s")
+        if (self.method == VALUE) != (self.value_lr is not None) or (self.method == VALUE) != (
+                self.value_warmup is not None):
+            raise ValueError(f"value_lr and value_warmup are required with method {VALUE!r} and refused with another "
+                             f"(method {self.method!r})")
+        if self.method == VALUE and not (self.value_lr > 0 and self.value_warmup >= 0 and self.continuations == 1):
+            raise ValueError("with method value: value_lr positive, value_warmup at least 0, and continuations 1 (one "
+                             "sentence a window, D171)")
         if self.epochs < 1:
             raise ValueError(f"epochs {self.epochs}: at least one pass a round")
         if self.clip_norm is not None and not self.clip_norm > 0:
@@ -347,8 +369,15 @@ class Stage:
     #: memory in one update of it (``(context, settings, directory, stage)``, O15): branch training's, `train_pass` and
     #: `pass_memory_of`, unless the stage names others (`STAGE_C`: its gradient clip, D168; `STAGE_C_LANDED`: the
     #: landed sentences, P49)
-    train: Callable[..., dict[str, Any]] = lambda *args, **kwargs: train_pass(*args, **kwargs)
+    train: Callable[..., dict[str, Any]] = lambda *args, round_, companion, **kwargs: train_pass(*args, **kwargs)
     pass_memory: Callable[..., dict[str, Any] | None] = lambda *args: pass_memory_of(*args)
+    #: what a campaign keeps beside its model from round to round (``(context, settings, out, first round, model)``;
+    #: `ValueRun` for `STAGE_C_VALUE`, D171; None for the others), handed to the pass (``companion=``, with the round),
+    #: and the round's close after its record and before its checkpoint (``(context, settings, out, round, companion,
+    #: record)``: the keys it adds to ``round.json``; the value method writes ``value.pt`` there, with the round's
+    #: identity)
+    companion: Callable[..., Any] = lambda *args: None
+    close_round: Callable[..., dict[str, Any]] = lambda *args: {}
 
 
 def _stage_c_draw(context: Context, settings: Settings, round_: int) -> tuple[list[Window], dict[str, Any]]:
@@ -372,7 +401,7 @@ STAGE_C = Stage(start_model=lambda context, settings: start_model(context, setti
                 record=lambda window: window_record(window),
                 speak_batch=lambda *args: speak_batch(*args), read_batch=lambda *args: read_batch(*args), part_width=0,
                 batches=lambda windows, settings: batches(windows, settings.batch_windows),
-                train=lambda model, context, optimizer, directory, settings, rng, *, part_width: train_pass(
+                train=lambda model, context, optimizer, directory, settings, rng, *, part_width, round_, companion: train_pass(
                     model, context, optimizer, directory, settings, rng, part_width=part_width,
                     clip_norm=settings.clip_norm, epochs=settings.epochs,
                     segment_rows=segment_rows_of(settings, context.interval_s)))
@@ -380,11 +409,20 @@ STAGE_C = Stage(start_model=lambda context, settings: start_model(context, setti
 #: but its batches spoken `Settings.continuations` times with their best landed sentences kept (`speak_landed_batch`),
 #: and its pass on them (`landed_train_pass`, its memory `landed_pass_memory`).
 STAGE_C_LANDED = replace(STAGE_C, speak_batch=lambda *args: speak_landed_batch(*args),
-                         train=lambda *args, **kwargs: landed_train_pass(*args, **kwargs),
+                         train=lambda *args, round_, companion, **kwargs: landed_train_pass(*args, **kwargs),
                          pass_memory=lambda context, settings, directory, stage: landed_pass_memory(context, settings,
                                                                                                    directory))
+#: Stage C's campaign with a value function (D171, `Settings.method` `VALUE`): its batches spoken once with V's reading
+#: (`speak_value_batch`), V kept beside the model (`ValueRun`), the pass of both (`value_train_pass`, its memory
+#: `value_pass_memory`), V's file and the warm-up's check at the round's close (`close_value_round`).
+STAGE_C_VALUE = replace(STAGE_C, speak_batch=lambda *args: speak_value_batch(*args),
+                        train=lambda *args, **kwargs: value_train_pass(*args, **kwargs),
+                        pass_memory=lambda context, settings, directory, stage: value_pass_memory(context, settings,
+                                                                                                 directory),
+                        companion=lambda *args: ValueRun.of(*args),
+                        close_round=lambda *args: close_value_round(*args))
 #: The stage of each of stage C's methods (`Settings.method`).
-STAGES_C = {BRANCH: STAGE_C, LANDED_SENTENCES: STAGE_C_LANDED}
+STAGES_C = {BRANCH: STAGE_C, LANDED_SENTENCES: STAGE_C_LANDED, VALUE: STAGE_C_VALUE}
 
 
 
@@ -1130,6 +1168,277 @@ def landed_train_pass(model: Prior, context: Context, optimizer: torch.optim.Opt
             "passes": [named(means) for means in record["passes"]]}
 
 
+# ---- the value function (D171, post-training §2 item 10)
+def read_value(loop: WindowLoop, b: int, t: int, own: AircraftAt, other: AircraftAt) -> tuple[np.ndarray, float]:
+    """What V reads at row ``b``'s tick ``t`` beside the model (`post.value`): V's token part of its recorded aircraft
+    ``other`` against its aircraft ``own``, and the time left before its time limit (the limit in force, its
+    go-arounds' included, less its cycles flown)."""
+    if not loop.speaking.alive[b]:          # its window has ended: rows past its sentence, never read (`values`)
+        return np.zeros((len(other), len(VALUE_FEATURES)), dtype=np.float32), 0.0
+    window = loop.windows[int(loop.window_of[b])]
+    part = value_part(window, t, own, other, loop.separations[loop.geometries[b].code], loop.step_s)
+    executor = loop.speaking.loop.executor
+    flown_s = max(int(executor.own_cycle()[b]), 0) * loop.speaking.loop.params.cycle_s
+    return part, time_left(float(executor.time_limit_s[b]), flown_s)
+
+
+def speak_value_batch(model: Prior, context: Context, windows: Sequence[Window], places: Sequence[int],
+                      settings: Settings, round_: int, directory: Path, k: int) -> dict[str, Any]:
+    """Batch ``k`` of a round with a value function (D171): its windows spoken one time (`first_numbers`), each
+    sentence a sample with what V reads at each of its rows (`read_value`), written to ``sentences_<k>.pt``; its
+    record: the windows, the counted rows, and the ends (outcomes, rewards, faulty steps and losses near one)."""
+    train = context.splits["train"]
+    batch = [windows[p] for p in places]
+    loop, order, observed = context.start_loop("train", batch)([w.signal_index for w in batch])
+    flown = WindowLoop(model, loop, order, batch, train["sentences"], train["flights"], context.geometries,
+                       context.rosters, context.finals, context.words, interval_s=context.interval_s,
+                       variant=context.variant, edges_reference=context.edges_reference, faults=train["faults"],
+                       observed=observed, device=context.device, value_reader=read_value)
+    ends = flown.run([first_numbers(settings.seed, round_, p) for p in places])
+    kept = [ValueSample(places[b], Sentence(rows, permitted, tokens, end.reward), part, left)
+            for b, ((rows, permitted, tokens), (part, left), end) in enumerate(zip(flown.samples("train"),
+                                                                                  flown.values("train"), ends))]
+    torch.save(kept, directory / f"sentences_{k}.pt")
+    return {"windows": len(kept), "rows": sum(len(one.sentence.rows.time_s) - one.sentence.rows.first_step
+                                              for one in kept),
+            "reward_sum": sum(r.reward for r in ends), "faulty_steps": sum(r.faulty_steps for r in ends),
+            "losses_reading_fault": sum(r.loss_reads_fault for r in ends),
+            "outcomes": dict(Counter(r.outcome for r in ends))}
+
+
+@dataclass
+class ValueRun:
+    """A campaign's V (D171): the network and its optimizer, kept from round to round (`Stage.companion`)."""
+
+    value: Value
+    optimizer: torch.optim.Optimizer
+
+    @classmethod
+    def of(cls, context: Context, settings: Settings, out: Path, first: int, model: Prior) -> ValueRun:
+        """A new campaign's V (``first`` 0): a copy of the start model ``model`` with V's token part and a head drawn
+        from the campaign's seed; a resumed one's: read from the last round's ``value.pt``."""
+        copied = model if not first else stage_model(context, settings)      # the shape a resume loads into
+        torch.manual_seed(value_seed(settings.seed))
+        value = Value.of(copied)
+        optimizer = torch.optim.AdamW(value.parameters(), lr=settings.value_lr, weight_decay=settings.weight_decay)
+        if first:
+            held = torch.load(out / f"round_{first - 1}" / "value.pt", weights_only=False, map_location=context.device)
+            checkpoint = torch.load(out / f"round_{first - 1}" / "checkpoint.pt", weights_only=False,
+                                    map_location="cpu")
+            if (held["schema"] != VALUE_SCHEMA or held["shape"] != value.shape()
+                    or held["identity"] != checkpoint["identity"]):
+                raise ValueError(f"round {first - 1}'s value.pt is not a {VALUE_SCHEMA} V of this campaign's shape and "
+                                 f"round (its identity is not the checkpoint's)")
+            value.load_state_dict(held["value"])
+            optimizer.load_state_dict(held["optimizer"])
+        return cls(value, optimizer)
+
+
+def value_seed(seed: int) -> int:
+    """The torch seed of a campaign's V head (`ValueRun.of`)."""
+    return int(np.random.default_rng([seed, 1 << 31, 3]).integers(1 << 62))
+
+
+def stage_model(context: Context, settings: Settings) -> Prior:
+    """The model of the stage's shape (the base with traffic modules of the campaign's shape), its weights the start's
+    as drawn (a resume loads its own into V)."""
+    model, _ = start_model(context, settings)
+    return model
+
+
+def _sample_files(directory: Path) -> list[Path]:
+    """A value round's sample files in the order spoken."""
+    return sorted(directory.glob("sentences_*.pt"), key=lambda p: int(p.stem.split("_")[1]))
+
+
+def _read_once(traffic: Traffic) -> None:
+    """The traffic input keeps no embedded tokens and their graph after a forward (as `post.loss.update_step`)."""
+    object.__setattr__(traffic, "embedded", None)
+
+
+def valued(one: ValueSample, start: Value, device: torch.device) -> ValueBatch:
+    """One sample as the pass reads it: its advantages and target from ``start`` (V at the round's start)."""
+    samples, traffic, left, reward = value_batch([one], device)
+    with torch.no_grad():
+        v = start(samples.rows, traffic, left)
+    _read_once(traffic)
+    advantage, target = advantages(v, samples.counted, reward)
+    return ValueBatch(replace(samples, advantage=advantage), traffic, left, target)
+
+
+def fixed_batch(one: ValueSample, fixed: tuple[torch.Tensor, torch.Tensor], device: torch.device) -> ValueBatch:
+    """One sample with its advantages and target as the round's start fixed them (`round_advantages`)."""
+    samples, traffic, left, _ = value_batch([one], device)
+    advantage, target = fixed
+    return ValueBatch(replace(samples, advantage=advantage.to(device)), traffic, left, target.to(device))
+
+
+def round_advantages(directory: Path, device: torch.device, start: Value
+                     ) -> tuple[dict[tuple[str, int], tuple[torch.Tensor, torch.Tensor]], dict[str, Any]]:
+    """§2 item 10 point 4: V at the round's start (``start``) reads every sample of the round one time; each sample's
+    advantages and targets (by its file and place), fixed for the round's passes, and V's reading before the passes
+    (its loss: the mean of A_t² over the counted rows; the advantages' mean and spread)."""
+    fixed, every = {}, []
+    for path in _sample_files(directory):
+        for i, one in enumerate(torch.load(path, weights_only=False)):
+            batch = valued(one, start, device)
+            fixed[(path.name, i)] = (batch.samples.advantage.cpu(), batch.target.cpu())
+            every.append(batch.samples.advantage[batch.samples.counted].cpu())
+    a = torch.cat(every)
+    return fixed, {"loss_before": float((a ** 2).mean()), "advantage_mean": float(a.mean()),
+                   "advantage_std": float(a.std(unbiased=False)), "rows": int(len(a))}
+
+
+def value_pairs(directory: Path, data: Sequence[Any], settings: Settings, rng: np.random.Generator,
+                device: torch.device, fixed: dict[tuple[str, int], tuple[torch.Tensor, torch.Tensor]]
+                ) -> Iterator[tuple[list[ValueBatch], RowTensors]]:
+    """The updates of a pass with a value function (D171): the round's samples, file by file in the order spoken, each
+    file's in an order shuffled by ``rng``, `Settings.update_groups` at a time (a piece a sample), each with its
+    advantages and targets as the round's start fixed them (``fixed``, `round_advantages`), each update paired with
+    `Settings.data_sentences` sentences of ``data`` drawn by ``rng``."""
+    for path in _sample_files(directory):
+        loaded: list[ValueSample] = torch.load(path, weights_only=False)
+        order = [int(i) for i in rng.permutation(len(loaded))]
+        for k in range(0, len(order), settings.update_groups):
+            chosen = rng.choice(len(data), size=min(settings.data_sentences, len(data)), replace=False)
+            yield ([fixed_batch(loaded[i], fixed[(path.name, i)], device) for i in order[k:k + settings.update_groups]],
+                   collate([data[int(i)] for i in chosen], device))
+
+
+def value_train_pass(model: Prior, context: Context, optimizer: torch.optim.Optimizer, directory: Path,
+                     settings: Settings, rng: np.random.Generator, *, part_width: int, round_: int,
+                     companion: ValueRun) -> dict[str, Any]:
+    """Step 4 of a round with a value function (D171, §2 item 10 point 5): V at the round's start reads every sample
+    once (`round_advantages`); `Settings.epochs` passes over the round's samples (`value_pairs`, each pass in its own
+    order, `pass_orders`); each update one step of the model (§2 item 5's terms with the rows' advantages, in pieces,
+    the ratio against the round's start, `post.loss.update_step`) and one of V (its loss: the mean over the update's
+    counted rows of (V − R_t)², `post.value.value_loss`), each clipped to `Settings.clip_norm`; in a warm-up round
+    (before `Settings.value_warmup`) V's only. Its record: whether it warmed up, the model's means (`pass_means`, none in
+    a warm-up), and V's: its loss before and after the passes, the share of the targets' variance it explains after,
+    the advantages' mean and spread. ``part_width``: the skeleton's argument; stage C has no token part."""
+    value, value_optimizer = companion.value, companion.optimizer
+    warm = round_ < settings.value_warmup
+    start = copy.deepcopy(value).eval()
+    for parameter in start.parameters():
+        parameter.grad = None
+        parameter.requires_grad_(False)
+    fixed, before = round_advantages(directory, context.device, start)
+    del start
+    model_start = PassStart(model)
+    parameters = [p for group in optimizer.param_groups for p in group["params"]]
+    value_parameters = [p for group in value_optimizer.param_groups for p in group["params"]]
+    each: list[list[LossParts]] = []
+    value_losses = []
+    for numbers in pass_orders(rng, settings.epochs):
+        parts = []
+        for batches, rows in value_pairs(directory, context.data, settings, numbers, context.device, fixed):
+            if not warm:
+                optimizer.zero_grad(set_to_none=True)
+                done = update_step(model, model_start, context.base, [b.samples for b in batches], rows)
+                norm, clipped = clipped_step(optimizer, parameters, settings.clip_norm)
+                parts.append(replace(done, grad_norm=norm, grad_clipped=clipped))
+            value_optimizer.zero_grad(set_to_none=True)
+            counted = sum(b.samples.counted.sum() for b in batches).to(torch.float32)
+            total = torch.zeros((), device=context.device)
+            for b in batches:
+                piece = value_loss(value, b, counted)
+                piece.backward()
+                _read_once(b.traffic)
+                total += piece.detach()
+            clipped_step(value_optimizer, value_parameters, settings.clip_norm)
+            value_losses.append(float(total))
+        each.append(parts)
+    after = value_after(directory, context.device, value, fixed)
+    return {"warmup": warm, **({} if warm else pass_means(each)),
+            "value": {**before, "loss_after": after["loss"], "explained_after": after["explained"],
+                      "updates": len(value_losses), "update_loss_mean": float(np.mean(value_losses))
+                      if value_losses else None}}
+
+
+def value_after(directory: Path, device: torch.device, value: Value,
+                fixed: dict[tuple[str, int], tuple[torch.Tensor, torch.Tensor]]) -> dict[str, float | None]:
+    """V's reading after the passes (§2 item 10 point 7): its loss against the round's targets (``fixed``) and the share
+    of the targets' variance it explains."""
+    target, squared = [], []
+    for path in _sample_files(directory):
+        for i, one in enumerate(torch.load(path, weights_only=False)):
+            batch = fixed_batch(one, fixed[(path.name, i)], device)
+            counted = batch.samples.counted
+            with torch.no_grad():
+                v = value(batch.samples.rows, batch.traffic, batch.time_left)
+            _read_once(batch.traffic)
+            target.append(batch.target[counted].cpu())
+            squared.append(((v - batch.target) ** 2)[counted].cpu())
+    r, e = torch.cat(target), torch.cat(squared)
+    variance = float(r.var(unbiased=False))
+    return {"loss": float(e.mean()), "explained": 1.0 - float(e.mean()) / variance if variance > 0 else None}
+
+
+def close_value_round(context: Context, settings: Settings, out: Path, round_: int, companion: ValueRun,
+                      record: dict[str, Any]) -> dict[str, Any]:
+    """The close of a round with a value function (D171, §2 item 10 points 6 and 8), after its record and before its
+    checkpoint: ``round_<r>/value.pt`` (V's weights, its optimizer, its shape and the round's identity, the
+    checkpoint's); in a warm-up round, whether the selection readout is the start's (the source round's readout for a
+    start from a round, read with the same select windows; round 0's for the base after round 0; the model has not
+    moved)."""
+    torch.save({"schema": VALUE_SCHEMA, "value": companion.value.state_dict(),
+                "optimizer": companion.optimizer.state_dict(), "shape": companion.value.shape(),
+                "identity": identity(context, settings, out, round_ + 1)}, out / f"round_{round_}" / "value.pt")
+    readout = record["selection_readout"]
+    if round_ >= settings.value_warmup:
+        return {"value_file": "value.pt"}
+    if settings.start is not None:
+        against = f"{settings.start['campaign']}/round_{settings.start['round']}"
+        source = settings_of(json.loads((REPO_ROOT / settings.start["campaign"] / "campaign.json").read_text(
+            encoding="utf-8")))
+        if (source.select_seed, source.select_per_airport) != (settings.select_seed, settings.select_per_airport):
+            return {"value_file": "value.pt", "warmup_readout": {"against": against, "same": None,
+                                                                 "why": "other select windows than the source's"}}
+        held = json.loads((REPO_ROOT / against / "round.json").read_text(encoding="utf-8"))["selection_readout"]
+    elif round_ > 0:
+        against = "round_0"
+        held = json.loads((out / "round_0" / "round.json").read_text(encoding="utf-8"))["selection_readout"]
+    else:
+        return {"value_file": "value.pt", "warmup_readout": {"against": None, "same": None}}
+    same = json.loads(json.dumps(readout)) == held
+    return {"value_file": "value.pt", "warmup_readout": {"against": against, "same": same}}
+
+
+def value_pass_memory(context: Context, settings: Settings, directory: Path) -> dict[str, Any] | None:
+    """O15 for a campaign with a value function (D171): this process's GPU memory in one update (the model's step and
+    V's) on the `Settings.update_groups` longest samples spoken in ``directory`` (each a piece) with
+    `Settings.data_sentences` of the data term's sentences, the gradients cleared after; its peak (the CUDA context and
+    the most the allocator held) and what it holds after. Refused by name when fewer samples were spoken than an update
+    takes; None on the CPU (V and V at the round's start are both held). APPROXIMATION, stated: the samples of one
+    batch; the optimizers' states are not in it."""
+    if context.device.type != "cuda":
+        return None
+    device = context.device
+    kept: list[ValueSample] = [k for path in sorted(directory.glob("sentences_*.pt"))
+                               for k in torch.load(path, weights_only=False)]
+    if len(kept) < settings.update_groups:
+        raise SystemExit(f"the pass's memory is not measured (O15): the measured batch spoke {len(kept)} samples, an "
+                         f"update takes {settings.update_groups}")
+    longest = sorted(kept, key=lambda k: -len(k.sentence.tokens))[:settings.update_groups]
+    model, _ = start_model(context, settings)
+    torch.manual_seed(value_seed(settings.seed))
+    value = Value.of(model)
+    start = copy.deepcopy(value)                                 # V at the round's start, held through the passes
+    torch.cuda.reset_peak_memory_stats(device)
+    held = _gpu_used() - torch.cuda.memory_reserved(device)
+    batches = [valued(k, start, device) for k in longest]
+    update_step(model, PassStart(model), context.base, [b.samples for b in batches],
+                collate(context.data[:settings.data_sentences], device))
+    counted = sum(b.samples.counted.sum() for b in batches).to(torch.float32)
+    for b in batches:
+        value_loss(value, b, counted).backward()
+        _read_once(b.traffic)
+    peak = held + torch.cuda.max_memory_reserved(device)
+    del model, value, start, batches
+    torch.cuda.empty_cache()
+    return {"peak": peak, "now": _gpu_used(), "samples": len(kept)}
+
+
 # ---- the selection readout
 def readout_numbers(seed: int, place: int, draw: int = 0) -> np.random.Generator:
     """The random numbers of the selection readout's window ``place``: the same every round (the readout compares the
@@ -1240,7 +1549,7 @@ def inputs_here(inputs: Mapping[str, Any]) -> dict[str, Any]:
 
 #: The settings added after campaigns were recorded, each with its default: the code's behaviour before it (the user's
 #: standing permission, 2026-10-07): a record without one reads as its default, and no record is edited.
-SETTINGS_ADDED = ("clip_norm", "epochs", "segment_only", "branch_every_s")
+SETTINGS_ADDED = ("clip_norm", "epochs", "segment_only", "branch_every_s", "value_lr", "value_warmup")
 
 
 def _but_rounds(inputs: Mapping[str, Any]) -> dict[str, Any]:
@@ -1424,6 +1733,7 @@ def run_campaign(out: Path, settings: Settings, context: Context, speakers: Spea
     first = done_rounds(out)
     model, optimizer = campaign_model(out, context, settings, stage)
     select = stage.selection(context, settings, "select")
+    companion = stage.companion(context, settings, out, first, model)
     for round_ in range(first, settings.rounds):
         directory = out / f"round_{round_}"
         directory.mkdir()
@@ -1434,17 +1744,23 @@ def run_campaign(out: Path, settings: Settings, context: Context, speakers: Spea
         spoken = stage.speak(model, context, windows, settings, round_, directory, speakers, stage=stage)
         torch.manual_seed(pass_seed(settings.seed, round_))                    # the data term's dropout
         passed = stage.train(model, context, optimizer, directory, settings,
-                            np.random.default_rng([settings.seed, round_, 1]), part_width=stage.part_width)
+                            np.random.default_rng([settings.seed, round_, 1]), part_width=stage.part_width,
+                            round_=round_, companion=companion)
         if speakers is not None and context.device.type == "cuda":
             torch.cuda.empty_cache()     # the memory of the pass, before the speakers read
         readout = stage.readout(model, context, select, settings, speakers, stage=stage)
-        written = sorted([*directory.glob("groups_*.pt"), *directory.glob("kept_*.pt")])
-        write_json_atomic(directory / "round.json", {
+        written = sorted([*directory.glob("groups_*.pt"), *directory.glob("kept_*.pt"),
+                          *directory.glob("sentences_*.pt")])
+        record = {
             "round": round_, "git": git_state(), "finished_utc": utc_now(), "draw": drawn,
             "speak_workers": speakers.workers if speakers is not None else 1,         # information (`Speakers`)
             "speak_device": str(speakers.device if speakers is not None else context.device),      # information
             "windows": [stage.record(w) for w in windows], "speaking": spoken,
-            "groups_bytes": sum(p.stat().st_size for p in written), "pass": passed, "selection_readout": readout})
+            "groups_bytes": sum(p.stat().st_size for p in written), "pass": passed, "selection_readout": readout}
+        write_json_atomic(directory / "round.json", record)
+        closed = stage.close_round(context, settings, out, round_, companion, record)   # after the record it may name
+        if closed:
+            write_json_atomic(directory / "round.json", {**record, **closed})
         torch.save({"model": model.state_dict(), "optimizer": optimizer.state_dict(),
                     "identity": stage.identity(context, settings, out, round_ + 1)}, directory / "checkpoint.pt")
         for path in written:                                # read by this round's pass only; their size is recorded
@@ -1482,7 +1798,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--select-seed", type=int, required=True,
                         help="the seed of the selection readout's windows and numbers (C10's: 1337)")
     parser.add_argument("--method", choices=METHODS, required=True,
-                        help="how a round trains: branch groups (D94) or the landed sentences (P49)")
+                        help="how a round trains: branch groups (D94), the landed sentences (P49) or a value function "
+                             "(D171)")
     parser.add_argument("--clip-norm", type=float,
                         help="D168: the norm each update's gradient is clipped to (default: not clipped)")
     parser.add_argument("--epochs", type=int, default=Settings.epochs,
@@ -1491,6 +1808,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="P55: a branch group's advantage only up to the next branch point (default: to the event)")
     parser.add_argument("--branch-every-s", type=float, default=Settings.branch_every_s,
                         help="P55: the interval of the branch points, s (default: D37's 120)")
+    parser.add_argument("--value-lr", type=float, help="D171: V's learning rate (with --method value)")
+    parser.add_argument("--value-warmup", type=int, help="D171: the rounds that train V alone (with --method value)")
     parser.add_argument("--start-campaign", type=Path,
                         help="start from a round of this campaign (with --start-round); the base when left out")
     parser.add_argument("--start-round", type=int, help="the round of --start-campaign whose weights the campaign starts from")
@@ -1519,11 +1838,15 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(str(refused))
     prior_dir, instructions, executor, census, procedure_root, out = (p if p.is_absolute() else REPO_ROOT / p for p in (
         args.prior, args.instructions, args.executor, args.windows, args.procedure_root, args.out))
-    settings = Settings(args.rounds, {kind: getattr(args, f"windows_{kind.lower()}") for kind in KINDS},
-                        args.batch_windows, args.continuations, args.seed, args.prior_lr, args.traffic_lr,
-                        args.weight_decay, args.update_groups, args.data_sentences, args.select_per_airport,
-                        args.traffic_hidden, args.traffic_heads, start, args.method, args.select_seed, args.clip_norm,
-                        args.epochs, args.segment_only, args.branch_every_s)
+    try:
+        settings = Settings(args.rounds, {kind: getattr(args, f"windows_{kind.lower()}") for kind in KINDS},
+                            args.batch_windows, args.continuations, args.seed, args.prior_lr, args.traffic_lr,
+                            args.weight_decay, args.update_groups, args.data_sentences, args.select_per_airport,
+                            args.traffic_hidden, args.traffic_heads, start, args.method, args.select_seed,
+                            args.clip_norm, args.epochs, args.segment_only, args.branch_every_s, args.value_lr,
+                            args.value_warmup)
+    except ValueError as refused:                   # a setting refused by name (`Settings`), before anything opens
+        parser.error(str(refused))
     git = git_state()
     if git["dirty"] and not args.smoke:
         parser.error("a campaign that is not a smoke runs on a clean checkout")
