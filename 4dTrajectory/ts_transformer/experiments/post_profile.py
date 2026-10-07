@@ -48,8 +48,8 @@ from flight_scenarios.procedure_final import DEFAULT_PROCEDURE_ROOT
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
 from ts_transformer.experiments.post_branches import branch_round
 from ts_transformer.experiments.post_train import (
-    KINDS, Context, Settings, batches, draw_round, open_context, selection_readout, selection_windows, speak_round,
-    start_model, train_pass,
+    KINDS, STAGE_C, Context, Settings, batches, draw_round, open_context, selection_readout, selection_windows,
+    speak_round, start_model, train_pass,
 )
 from ts_transformer.experiments.post_window_loop import checked_edges
 from ts_transformer.io_utils import utc_now, write_json_atomic
@@ -231,7 +231,8 @@ def profile(context: Context, settings: Settings, out: Path, counts: Sequence[in
                                         lambda part: save({**record, "pass_memory": part}))
     save(record)
     passed, pass_s = timed(device, lambda: train_pass(model, context, optimizer, directory, settings,
-                                                      np.random.default_rng([settings.seed, 0, 1])))
+                                                      np.random.default_rng([settings.seed, 0, 1]),
+                                                      part_width=STAGE_C.part_width))
     record["round"].update(pass_s=pass_s, passed=passed, memory_after_pass=memory(device))
     save(record)
     select = selection_windows(context, settings)
