@@ -56,31 +56,50 @@ class WindowCount:
 
 def closed_loop_positions(window: Window, sentences: Mapping[int, ClosedLoopSentence], words: Words) -> Positions:
     """The commanded aircraft at their closed-loop sentences' states (vocabulary §6 item 3: observed before the first
-    predicted step, flown from it, to the last row said), each at its own row 0 in the window (moved, in a compressed
-    window), its R and G those of its words in force before the row (`instructions.grammar.apply` along its words: R only
-    from the row after its first predicted step, D23) — the baseline of §5 item 4."""
+    predicted step, flown from it, to the last row said) — the baseline of §5 item 4 (`flown_positions`; a stored
+    sentence gives no landed runway here, so no commanded aircraft of the baseline is judged over its threshold: a
+    stated limit)."""
+    return flown_positions(window, [(sentences[i].rows.states, sentences[i].rows.grid, sentences[i].rows.start, None)
+                                    for i in window.signal_indices], words)
+
+
+def flown_positions(window: Window, flown: Sequence[tuple[np.ndarray, np.ndarray, int, int | None]], words: Words
+                    ) -> Positions:
+    """The commanded aircraft at the states they flew — for each, in the window's order, its states on the 2 s rows
+    from its row 0 (`instructions.artefact.STATE_COLUMNS`), the words said to it from its first predicted step, the Δ
+    row of that step and its landed runway (None unless the executor ended it `landed`): a closed-loop sentence's
+    (`closed_loop_positions`) or the window loop's (stage D's readouts, §5 item 4) — each at its own row 0 in the window
+    (moved, in a compressed window), its R and G those of its words in force before the row
+    (`instructions.grammar.apply` along its words: R only from the row after its first predicted step, D23). An aircraft
+    that landed is judged once more as the window loop judges it (`post_window_loop.WindowLoop._judged`): at the first
+    step at or after its last row, over its threshold at its last state on its landed runway."""
     geometry, interval, step_s = window.scene.geometry, window.scene.interval_s, words.spec.step_s
     every = int(round(interval / step_s))
     tables = []
-    for record, index in zip(window.commanded_all, window.signal_indices):
-        rows = sentences[index].rows
+    for record, (states, grid, start, landed) in zip(window.commanded_all, flown, strict=True):
         state, in_force = None, []
-        for q in range(rows.start + len(rows.grid) + 1):          # before the words of each Δ row, and after the last
+        for q in range(start + len(grid) + 1):                    # before the words of each Δ row, and after the last
             in_force.append((state.runway, state.go_around) if state is not None else (-1, False))
-            if rows.start <= q < rows.start + len(rows.grid):
-                height = float(rows.states[q * every, 2]) - geometry.elevation_m
-                state = apply(state, rows.grid[q - rows.start], height, words, len(geometry.candidates))
-        tables.append((record, rows, in_force))
-    end_s = max(record.first_step_s - OBSERVATION_S + (len(rows.states) - 1) * step_s for record, rows, _ in tables)
+            if start <= q < start + len(grid):
+                height = float(states[q * every, 2]) - geometry.elevation_m
+                state = apply(state, grid[q - start], height, words, len(geometry.candidates))
+        # the step at which a landed aircraft is judged over its threshold: the first at or after its last row
+        over = None if landed is None else -(-(len(states) - 1) // every) * every
+        tables.append((record, states, in_force, landed, over))
+    end_s = max(record.first_step_s - OBSERVATION_S + (len(states) - 1 if over is None else over) * step_s
+                for record, states, _, _, over in tables)
 
     def at(member: int, time_s: float):
-        record, rows, in_force = tables[member]
+        record, states, in_force, landed, over = tables[member]
         r = int(round((time_s - (record.first_step_s - OBSERVATION_S)) / step_s))
-        if r < 0 or r >= len(rows.states):
+        if r == over:
+            return (record.key, tuple(states[-1, :3]), tuple(states[-2, :3]), True, landed, record.category, True,
+                    False)
+        if r < 0 or r >= len(states) or (over is not None and r > over):
             return None
         runway, go_around = in_force[min(r // every, len(in_force) - 1)]
-        before = tuple(rows.states[r - 1, :3]) if r else (0.0, 0.0, 0.0)
-        return (record.key, tuple(rows.states[r, :3]), before, r > 0, runway, record.category, False, go_around)
+        before = tuple(states[r - 1, :3]) if r else (0.0, 0.0, 0.0)
+        return (record.key, tuple(states[r, :3]), before, r > 0, runway, record.category, False, go_around)
 
     return Positions(at, end_s, False)
 
@@ -100,8 +119,9 @@ def window_losses(window: Window, positions: Positions, separation: Separation, 
         count.steps += 1
         found = set()
         kept_on_records = None
+        over = frozenset(int(k) for k in np.flatnonzero(aircraft.last_step[:commanded]))   # a landed one (flown_positions)
         for loss in losses:
-            pair = classify(loss.i, loss.j, loss.responsible, commanded)
+            pair = classify(loss.i, loss.j, loss.responsible, commanded, over)
             if pair == "recorded_only" and not positions.records:     # the same pair on the records, at that step
                 if kept_on_records is None:
                     kept_on_records = losses_on_records(window, step, separation, finals, step_s)

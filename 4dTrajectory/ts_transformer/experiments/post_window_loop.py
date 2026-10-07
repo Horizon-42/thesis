@@ -126,6 +126,9 @@ class WindowResult:
     speed_mask_rows: int
     faulty_steps: int               # D114: the steps at which a recorded aircraft reads a faulty point
     loss_reads_fault: bool          # D114: the loss's other aircraft reads one at the event or in the 2 Δ before it
+    #: the judge's crossing (its runway index, its cycle row, …) of an aircraft the executor ended `landed`, a silent
+    #: one's too (the window's later judgement over its threshold, `_judged`, and stage D's readouts read it); else None
+    crossing: Mapping[str, Any] | None = None
 
 
 @dataclass
@@ -533,12 +536,17 @@ class WindowLoop:
         for b, index in enumerate(self.order):
             w = int(self.window_of[b])
             window = self.windows[w]
+            crossing = None
             if self.loss[b] is not None:
                 outcome, landed, go_arounds = LOST_SEPARATION, None, None
+                if not self.speaking.ended[b]:                 # a silent aircraft the executor ended
+                    judged = self.speaking.loop.outcome(b)
+                    crossing = judged.crossing if judged.outcome == LANDED else None
             else:
                 g = generated[b]
                 outcome, go_arounds = g.outcome, g.go_arounds
                 landed = None if g.crossing is None else int(g.crossing["runway_index"])
+                crossing = g.crossing if outcome == LANDED else None
             said = self.speaking.said(b)
             go_arounds = int((said[:, RUNWAY] == RUNWAY_GO_AROUND).sum()) if go_arounds is None else go_arounds
             present = present_runways(self.landings[b], self.geometries[b], self.records[b].first_step_s, self.keys[b])
@@ -551,7 +559,7 @@ class WindowLoop:
                 loss_reads_fault=self.loss_step[b] is not None and any(
                     self.other[b] in self._reading[w][step]
                     for step in range(self.loss_step[b] - STEPS_BEFORE_EVENT, self.loss_step[b] + 1)
-                    if step in self._reading[w])))
+                    if step in self._reading[w]), crossing=crossing))
         return out
 
 

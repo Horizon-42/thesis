@@ -79,16 +79,21 @@ def judged_step(window: Window, positions: Positions, step: int, separation: Sep
     return aircraft, len(present), step_losses(scene, aircraft.last_step, separation)
 
 
-def classify(i: int, j: int, responsible: Sequence[int], commanded: int) -> str | None:
+def classify(i: int, j: int, responsible: Sequence[int], commanded: int, over: frozenset[int] = frozenset()
+             ) -> str | None:
     """The pair of a loss between aircraft ``i`` and ``j`` of a step (the first ``commanded`` commanded, module
     docstring), before the records are read: ``recorded_only`` stands for both pairs of a loss that only the recorded
-    aircraft is responsible for; None when the loss holds no commanded aircraft."""
-    held = [k < commanded for k in (i, j)]
-    if all(held):
+    aircraft is responsible for; None when the loss holds no commanded aircraft. A commanded aircraft in ``over`` — one
+    that landed, judged once over its threshold (`post_window_loop.WindowLoop._judged`) — counts as a recorded one: it
+    answers for nothing (as an aircraft in its observed rows, D145)."""
+    def held(k: int) -> bool:
+        return k < commanded and k not in over
+
+    if held(i) and held(j):
         return "commanded_commanded"
-    if not any(held):
+    if not (held(i) or held(j)):
         return None
-    return "commanded_answers" if any(k < commanded for k in responsible) else "recorded_only"
+    return "commanded_answers" if any(held(k) for k in responsible) else "recorded_only"
 
 
 def losses_on_records(window: Window, step: int, separation: Separation, finals: Sequence[Final], step_s: float

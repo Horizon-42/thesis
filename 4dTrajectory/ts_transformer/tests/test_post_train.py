@@ -395,8 +395,9 @@ def test_the_pass_memory_measures_one_group_alone_and_takes_the_largest_peak(mon
 
     asked = []
 
-    def measure(model, context, directory, settings, counts):
+    def measure(model, context, directory, settings, counts, *, part_width):
         asked.append(list(counts))
+        assert part_width == 0
         return {"groups_written": 9, "updates": {"1": {"gpu_peak_reserved_gib": 1.0},
                                                  "1_densest": {"gpu_peak_reserved_gib": 3.0},
                                                  "4": {"gpu_peak_reserved_gib": 2.0}}}
@@ -922,31 +923,51 @@ def test_a_stage_made_from_stage_cs_runs_its_own_batches_through_the_campaign(se
     assert records[0] == records[1]
 
 
-def test_a_chosen_round_opens_as_the_start_of_a_later_stage_with_its_identity(setup, tmp_path, monkeypatch):
-    """Post-training §9 item 12: `open_round` opens a campaign's round (its checkpoint's model, in eval mode, checked
-    against the campaign's identity on the base) and gives its identity; a round not done and a directory without a
-    campaign are refused."""
+def test_a_round_opens_as_a_start_through_one_function(setup, tmp_path, monkeypatch):
+    """Post-training §9 item 12 (D162, multi-aircraft control D164): `round_start` opens a campaign's round as a start —
+    its checkpoint's model in eval mode and its identity — and refuses by name: other bytes than the recorded ones, a
+    round not done, a smoke source under a formal campaign, a checkpoint of another base or of another round, the
+    source's seed; `start_of` names the start as the setting records it."""
+    import shutil
+
+    from ts_transformer.io_utils import file_sha256
+
     s = setup
     short_round(monkeypatch, s)
-    settings = _settings(rounds=1, continuations=2)
+    settings = _settings(rounds=2, continuations=2)
     out = tmp_path / "campaign"
     open_campaign(out, {"settings": asdict(settings), "smoke": False}, {"head": "x", "dirty": False}, {})
     context = _context(s)
     run_campaign(out, settings, context)
-    model, identity = post_train.open_round(out, 0, context, formal=True)
+    start = post_train.start_of(out, 0, formal=True)
+    assert start == {"campaign": str(out), "round": 0, "checkpoint_sha256": file_sha256(out / "round_0" / "checkpoint.pt")}
+    formal = replace(context, formal=True)
+    model, identity = post_train.round_start(formal, start, seed=2024)
     state = torch.load(out / "round_0" / "checkpoint.pt", weights_only=False)
     assert identity == state["identity"] and not model.training
     assert all(torch.equal(value, state["model"][name]) for name, value in model.state_dict().items())
-    with pytest.raises(ValueError, match="not a round done"):
-        post_train.open_round(out, 1, context, formal=True)
-    with pytest.raises(FileNotFoundError):
-        post_train.open_round(tmp_path / "nowhere", 0, context, formal=True)
+    with pytest.raises(ValueError, match="not the checkpoint the campaign started from"):
+        post_train.round_start(formal, {**start, "checkpoint_sha256": "0" * 64}, seed=2024)
+    with pytest.raises(ValueError, match="holds the checkpoints of rounds 0–1, not 2"):
+        post_train.start_of(out, 2, formal=True)
+    with pytest.raises(ValueError, match=r"takes another seed.*\(D162\)"):
+        post_train.round_start(formal, start, seed=settings.seed)
+    with pytest.raises(ValueError, match="another base, masks, traffic shape or round"):
+        post_train.round_start(replace(formal, base_identity={"base": "another"}), start, seed=2024)
+    later = tmp_path / "later"                                     # round 0's place holding round 1's checkpoint
+    shutil.copytree(out, later)
+    shutil.copy(later / "round_1" / "checkpoint.pt", later / "round_0" / "checkpoint.pt")
+    with pytest.raises(ValueError, match="another base, masks, traffic shape or round"):
+        post_train.round_start(formal, post_train.start_of(later, 0, formal=True), seed=2024)
     smoke = tmp_path / "smoke"
     open_campaign(smoke, {"settings": asdict(settings), "smoke": True}, {"head": "x", "dirty": True}, {})
     run_campaign(smoke, settings, context)
-    with pytest.raises(ValueError, match="a smoke campaign"):
-        post_train.open_round(smoke, 0, context, formal=True)
-    post_train.open_round(smoke, 0, context, formal=False)                 # a smoke start opens it
+    with pytest.raises(ValueError, match="is a smoke campaign: a formal campaign does not start from it"):
+        post_train.start_of(smoke, 0, formal=True)
+    smoke_start = post_train.start_of(smoke, 0, formal=False)
+    with pytest.raises(ValueError, match="is a smoke campaign"):
+        post_train.round_start(formal, smoke_start, seed=2024)
+    post_train.round_start(context, smoke_start, seed=2024)              # a smoke campaign's context opens it
 
 
 def test_a_batch_commands_each_flight_once_with_windows_of_several_aircraft():

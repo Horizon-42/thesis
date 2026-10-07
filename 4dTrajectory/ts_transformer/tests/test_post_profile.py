@@ -58,7 +58,7 @@ def test_an_update_out_of_memory_is_recorded_and_stops_the_larger_ones(tmp_path,
         if len(pieces) >= 4:
             raise torch.OutOfMemoryError("CUDA out of memory")
 
-    def batch_of(groups, device):
+    def batch_of(groups, device, part_width):
         rows = max(len(g.sentences[0].tokens) for g in groups)
         return SimpleNamespace(chosen=[post_profile.group_size(g) for g in groups],
                                rows=SimpleNamespace(asked=torch.zeros(len(groups), rows, dtype=torch.bool)),
@@ -72,7 +72,7 @@ def test_an_update_out_of_memory_is_recorded_and_stops_the_larger_ones(tmp_path,
     context = SimpleNamespace(device=CPU, data=list(range(5)), base=None)
     saved = []
     out = pass_memory(model, context, directory, SimpleNamespace(seed=1, data_sentences=3), [8, 1, 2, 4],
-                      lambda part: saved.append(dict(part["updates"])))
+                      lambda part: saved.append(dict(part["updates"])), part_width=0)
     assert tried == [[(9, 4)], [(9, 4), (9, 1)], [(9, 4), (9, 1), (5, 2), (3, 1)]]
     assert out["updates"]["4"] == "out of memory" and "8" not in out["updates"] and model.weight.grad is None
     two = out["updates"]["2"]
@@ -84,7 +84,7 @@ def test_an_update_out_of_memory_is_recorded_and_stops_the_larger_ones(tmp_path,
     other.mkdir()
     torch.save([_group(10, 1), _group(8, 1), _group(2, 6), _group(7, 1)], other / "groups_0.pt")
     tried.clear()
-    out = pass_memory(model, context, other, SimpleNamespace(seed=1, data_sentences=3), [1, 2])
+    out = pass_memory(model, context, other, SimpleNamespace(seed=1, data_sentences=3), [1, 2], part_width=0)
     assert tried == [[(10, 1)], [(2, 6)], [(10, 1), (2, 6)]] and list(out["updates"]) == ["1", "1_widest", "2"]
     assert out["updates"]["2"]["rows"] == out["largest_rows"] == 10 and out["largest_traffic"] == 6
     # the group of the largest rows × traffic, neither the longest nor the widest, measured alone too
@@ -92,7 +92,7 @@ def test_an_update_out_of_memory_is_recorded_and_stops_the_larger_ones(tmp_path,
     dense.mkdir()
     torch.save([_group(10, 1), _group(2, 6), _group(6, 4)], dense / "groups_0.pt")
     tried.clear()
-    out = pass_memory(model, context, dense, SimpleNamespace(seed=1, data_sentences=3), [1, 2])
+    out = pass_memory(model, context, dense, SimpleNamespace(seed=1, data_sentences=3), [1, 2], part_width=0)
     assert tried == [[(10, 1)], [(2, 6)], [(6, 4)], [(10, 1), (2, 6)]]
     assert list(out["updates"]) == ["1", "1_widest", "1_densest", "2"]
 
@@ -115,7 +115,7 @@ def test_the_update_measured_leaves_the_model_as_it_was(setup, tmp_path):  # noq
     directory.mkdir()
     torch.save([rewarded], directory / "groups_0.pt")
     before = {k: v.clone() for k, v in model.state_dict().items()}
-    out = pass_memory(model, context, directory, settings, [1, 2])
+    out = pass_memory(model, context, directory, settings, [1, 2], part_width=0)
     assert out["updates"]["1"]["s"] >= 0.0 and out["updates"]["1"]["sentences"] == 3
     assert out["updates"]["1"]["rows"] == out["largest_rows"] and out["updates"]["2"] == "fewer groups held"
     assert out["updates"]["1"]["traffic"] == out["largest_traffic"] and "1_widest" not in out["updates"]

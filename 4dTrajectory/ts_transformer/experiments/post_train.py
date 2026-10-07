@@ -173,6 +173,8 @@ class Context:
     finals: Mapping[str, Any]
     splits: Mapping[str, Mapping[str, Any]]
     data: Sequence[Any]
+    #: a formal campaign's context (`open_context`'s ``formal``, D132): a start from a smoke campaign is refused (D162)
+    formal: bool = False
 
     @property
     def variant(self) -> str:
@@ -241,7 +243,7 @@ def open_context(prior_dir: Path, instructions: Path, executor: Path, edges_refe
                    {code: airport_finals(g, root=procedure_root) for code, g in prior.geometries.items()},
                    {split: split_data(instructions, split, words, prior.interval_s, prior.geometries, executor)
                     for split in splits},
-                   sentences)
+                   sentences, formal)
 
 
 def require_formal_base(prior: OpenedPrior) -> None:
@@ -590,7 +592,7 @@ def _measure(round_: int, directory: str) -> dict[str, Any]:
     with _PeakSampler(swapped_here) as sampled:
         stage.speak_batch(model, context, windows, first, settings, round_, Path(directory), 0)
     kept = [len(pickle.dumps(series)) for series in start.series.values()]
-    flights = len({w.signal_index for w in windows})
+    flights = len({i for w in windows for i in w.signal_indices})      # every commanded flight's series
     held = {"reader_model": sum(t.numel() * t.element_size() for t in (*model.parameters(), *model.buffers())),
             "series": flights * sum(kept) // len(kept), "round_flights": flights}
     return {"round": round_, "windows": len(first), **_memory_after_batch(context.device, sampled.peak), "held": held}
@@ -668,7 +670,8 @@ def _gpu_used() -> int:
     return mine[0] * (1 << 20)
 
 
-def pass_memory_of(context: Context, settings: Settings, directory: Path) -> dict[str, Any] | None:
+def pass_memory_of(context: Context, settings: Settings, directory: Path, stage: Stage = STAGE_C
+                   ) -> dict[str, Any] | None:
     """O15: this process's GPU memory in one update of the pass (`post_profile.pass_memory`: forward and backward on
     the `Settings.update_groups` longest groups written in ``directory`` with the data term's sentences, and on one
     group — the longest, the widest and the densest alone: an update runs in pieces of a group each, post-training §2
@@ -676,14 +679,16 @@ def pass_memory_of(context: Context, settings: Settings, directory: Path) -> dic
     update measured) and what it holds after; None on the CPU.
     Refused by name when the update did not form (fewer groups written than an update takes) or ran out of memory.
     APPROXIMATION, stated: the groups of one batch (a round's longest may need more: `post_profile` measures that
-    bound); the optimizer's state (twice the parameters) is not in it."""
+    bound); the optimizer's state (twice the parameters) is not in it. ``stage``: its model at the start and its token
+    part (the stage's speakers measured the groups)."""
     if context.device.type != "cuda":
         return None
     from ts_transformer.experiments.post_profile import pass_memory          # post_profile imports this module
 
     device = context.device
-    model, optimizer = start_model(context, settings)
-    measured = pass_memory(model, context, directory, settings, sorted({1, settings.update_groups}))
+    model, optimizer = stage.start_model(context, settings)
+    measured = pass_memory(model, context, directory, settings, sorted({1, settings.update_groups}),
+                           part_width=stage.part_width)
     update = measured["updates"][str(settings.update_groups)]
     if update == "fewer groups held":
         raise SystemExit(f"the pass's memory is not measured (O15): the measured batch wrote "
@@ -749,7 +754,7 @@ def require_workers_fit(speakers: Speakers, context: Context, settings: Settings
     and returned."""
     with tempfile.TemporaryDirectory(prefix="post_measure_") as scratch:
         measured = speakers.measure(round_, Path(scratch))
-        passed = pass_memory_of(context, settings, Path(scratch))
+        passed = pass_memory_of(context, settings, Path(scratch), speakers.stage)
     available = available_memory(context.device)
     out = {"speak_workers": speakers.workers, "measured": measured, "pass": passed, "available": available}
     print(json.dumps(out), flush=True)
@@ -907,18 +912,21 @@ def _but_rounds(inputs: Mapping[str, Any]) -> dict[str, Any]:
     return {**inputs, "settings": {k: v for k, v in inputs["settings"].items() if k != "rounds"}}
 
 
-def open_campaign(out: Path, inputs: dict[str, Any], git: dict[str, Any], checks: Any) -> dict[str, Any]:
+def open_campaign(out: Path, inputs: dict[str, Any], git: dict[str, Any], checks: Any, *,
+                  schema: str = CAMPAIGN_SCHEMA, reader: str = CLAIM_READER) -> dict[str, Any]:
     """``campaign.json``: a new campaign's, or a resume's. A resume is refused unless its inputs are the record's — the
     recorded paths as this checkout reads them (`inputs_here`), the rounds left out — and its rounds at least the
     record's; more rounds raise the record's count (D157), its paths kept as recorded, and are refused once the
     campaign's val read is claimed (`post_validation`, P47), spent or not. Each resume adds its entry: the
     time, the commit, the checks, the paths it read and the rounds before and after it. A round left half done (its
-    directory without its checkpoint) is moved aside as ``round_<r>.aborted-<UTC>``."""
+    directory without its checkpoint) is moved aside as ``round_<r>.aborted-<UTC>``. A stage's own campaign gives its
+    format (``schema``) and the reader of its val read's claim (``reader``); stage C's by default (post-training §9 item
+    11)."""
     path = out / "campaign.json"
     if path.exists():
         record = json.loads(path.read_text(encoding="utf-8"))
-        if record["schema"] != CAMPAIGN_SCHEMA:
-            raise SystemExit(f"{out}: a {record['schema']} campaign, not {CAMPAIGN_SCHEMA}")
+        if record["schema"] != schema:
+            raise SystemExit(f"{out}: a {record['schema']} campaign, not {schema}")
         recorded, asked = inputs_here(record["inputs"]), inputs_here(inputs)
         if _but_rounds(recorded) != _but_rounds(asked):
             raise SystemExit(f"{out}: a campaign of other inputs or settings; a resume takes the same, its rounds or more")
@@ -926,8 +934,8 @@ def open_campaign(out: Path, inputs: dict[str, Any], git: dict[str, Any], checks
         if after < before:
             raise SystemExit(f"{out}: a campaign of {before} rounds; a resume may raise the rounds, not lower them to "
                              f"{after}")
-        if after > before and validation_claim(out, CLAIM_READER) is not None:
-            raise SystemExit(f"{out}: its val read is claimed ({validation_claim(out, CLAIM_READER)}); its rounds are not "
+        if after > before and validation_claim(out, reader) is not None:
+            raise SystemExit(f"{out}: its val read is claimed ({validation_claim(out, reader)}); its rounds are not "
                              f"raised after it (P47)")
         left = out / f"round_{done_rounds(out)}"
         if left.exists():
@@ -943,7 +951,7 @@ def open_campaign(out: Path, inputs: dict[str, Any], git: dict[str, Any], checks
     if out.exists():
         raise SystemExit(f"{out} exists and holds no campaign")
     out.mkdir(parents=True)
-    record = {"schema": CAMPAIGN_SCHEMA, "started_utc": utc_now(), "inputs": inputs, "git": git, "checks": checks,
+    record = {"schema": schema, "started_utc": utc_now(), "inputs": inputs, "git": git, "checks": checks,
               "aborted": [], "resumed": []}
     write_json_atomic(path, record)
     return record
@@ -965,28 +973,69 @@ def start_checkpoint(start: Mapping[str, Any]) -> Path:
     return REPO_ROOT / start["campaign"] / f"round_{start['round']}" / "checkpoint.pt"
 
 
-def campaign_start(context: Context, settings: Settings) -> tuple[Prior, torch.optim.Optimizer]:
-    """The model a campaign starts from and a new optimizer (the user, 2026-10-07): the base with zero-output traffic
-    modules (D29, ``settings.start`` None), or the weights of a round of another campaign (``settings.start``), refused
-    by name unless its checkpoint's bytes are the recorded ones and its identity is of this base, under today's
-    procedure masks, with this traffic shape, after that round, and unless its seed differs from the start's campaign's
-    (D162). The optimizer starts afresh, and the pull term pulls toward the base either way (the user, 2026-10-07)."""
-    model, optimizer = start_model(context, settings)
-    if settings.start is None:
-        return model, optimizer
-    path = start_checkpoint(settings.start)
-    if file_sha256(path) != settings.start["checkpoint_sha256"]:
+def source_campaign(campaign: Path, round_: int, *, formal: bool) -> dict[str, Any]:
+    """The record of the campaign a start comes from (post-training §9 item 12, D162, multi-aircraft control D164),
+    refused by name unless it is a campaign of stage C (`CAMPAIGN_SCHEMA`) with round ``round_`` done and, for a formal
+    campaign (``formal``), not a smoke one."""
+    record = json.loads((campaign / "campaign.json").read_text(encoding="utf-8"))
+    if record["schema"] != CAMPAIGN_SCHEMA:
+        raise ValueError(f"{campaign} is a {record['schema']} campaign, not {CAMPAIGN_SCHEMA}")
+    if formal and record["inputs"]["smoke"]:
+        raise ValueError(f"{campaign} is a smoke campaign: a formal campaign does not start from it")
+    if not 0 <= round_ < done_rounds(campaign):
+        raise ValueError(f"{campaign} holds the checkpoints of rounds 0–{done_rounds(campaign) - 1}, not {round_}")
+    return record
+
+
+def start_of(campaign: Path, round_: int, *, formal: bool) -> dict[str, Any]:
+    """The setting of a start from round ``round_`` of ``campaign`` (`Settings.start`, D162): the campaign as this
+    checkout names it (repository-relative), the round and its checkpoint's sha256; the source's rules
+    (`source_campaign`) refused by name first."""
+    from ts_transformer.experiments.training_export import this_checkout
+
+    source_campaign(campaign, round_, formal=formal)
+    return {"campaign": repo_relative(this_checkout(campaign)), "round": round_,
+            "checkpoint_sha256": file_sha256(campaign / f"round_{round_}" / "checkpoint.pt")}
+
+
+def round_start(context: Context, start: Mapping[str, Any], seed: int) -> tuple[Prior, dict[str, Any]]:
+    """Post-training §9 item 12 (D162, multi-aircraft control D164): round ``start["round"]`` of the campaign
+    ``start["campaign"]`` opened as a start, in eval mode, with its identity — refused by name unless the checkpoint's
+    bytes are the recorded ones, the source's rules hold (`source_campaign`: a formal campaign, ``context.formal``,
+    from a formal one), its identity is of this base, under today's procedure masks, with its campaign's traffic shape,
+    after that round, and the new campaign's ``seed`` is not its source's (so that its rounds draw new windows). Stage C's
+    start of a campaign (`campaign_start`) and stage D's start call it."""
+    path = start_checkpoint(start)
+    if file_sha256(path) != start["checkpoint_sha256"]:
         raise ValueError(f"{path}: not the checkpoint the campaign started from (its sha256 is not the recorded one)")
+    source = settings_of(source_campaign(REPO_ROOT / start["campaign"], start["round"], formal=context.formal))
     state = torch.load(path, weights_only=False, map_location=context.device)
     held = state["identity"]
     expected = {"schema": POST_CHECKPOINT_SCHEMA, "base": context.base_identity, "procedure_masks": PROCEDURE_MASKS,
-                "traffic": TrafficConfig(settings.traffic_hidden, settings.traffic_heads).to_dict()}
-    if {k: held[k] for k in expected} != expected or len(held["rounds"]) != settings.start["round"] + 1:
+                "traffic": TrafficConfig(source.traffic_hidden, source.traffic_heads).to_dict()}
+    if {k: held[k] for k in expected} != expected or len(held["rounds"]) != start["round"] + 1:
         raise ValueError(f"{path}: a checkpoint of another base, masks, traffic shape or round than the start's")
-    if held["seed"] == settings.seed:
-        raise ValueError(f"{path}: its campaign's seed is {settings.seed}; a campaign from a round takes another seed, so "
-                         f"that its rounds draw new windows (D162)")
-    model.load_state_dict(state["model"])        # in place: the optimizer holds these parameters, with no state yet
+    if held["seed"] == seed:
+        raise ValueError(f"{path}: its campaign's seed is {seed}; a campaign from a round takes another seed, so that its "
+                         f"rounds draw new windows (D162)")
+    model, _ = start_model(context, source)
+    model.load_state_dict(state["model"])
+    return model.eval(), held
+
+
+def campaign_start(context: Context, settings: Settings) -> tuple[Prior, torch.optim.Optimizer]:
+    """The model a campaign starts from and a new optimizer (the user, 2026-10-07): the base with zero-output traffic
+    modules (D29, ``settings.start`` None), or the weights of a round of another campaign (``settings.start``,
+    `round_start`), refused by name besides unless its traffic shape is this campaign's (D162). The optimizer starts
+    afresh, and the pull term pulls toward the base either way (the user, 2026-10-07)."""
+    model, optimizer = start_model(context, settings)
+    if settings.start is None:
+        return model, optimizer
+    source, held = round_start(context, settings.start, settings.seed)
+    if held["traffic"] != TrafficConfig(settings.traffic_hidden, settings.traffic_heads).to_dict():
+        raise ValueError(f"{start_checkpoint(settings.start)}: a checkpoint of another base, masks, traffic shape or round "
+                         f"than the start's (its traffic shape is not this campaign's)")
+    model.load_state_dict(source.state_dict())     # in place: the optimizer holds these parameters, with no state yet
     return model, optimizer
 
 
@@ -1055,24 +1104,6 @@ def run_campaign(out: Path, settings: Settings, context: Context, speakers: Spea
                           "readout": {code: r["reward_mean"] for code, r in readout.items()}}), flush=True)
 
 
-def open_round(campaign: Path, round_: int, context: Context, *, formal: bool) -> tuple[Prior, dict[str, Any]]:
-    """A chosen round of the campaign ``campaign`` opened as the start of a later stage (post-training §9 item 12; the
-    multi-aircraft control's start, D152): its model in eval mode, refused unless its identity is that campaign's on
-    ``context``'s base under today's procedure masks (`round_model`), and that identity (the later stage's own holds
-    it). ``formal``: a formal start, which refuses a smoke campaign (as `post_validation` refuses one)."""
-    record = json.loads((campaign / "campaign.json").read_text(encoding="utf-8"))
-    if record["schema"] != CAMPAIGN_SCHEMA:
-        raise ValueError(f"{campaign}: not a {CAMPAIGN_SCHEMA} campaign")
-    if formal and record["inputs"]["smoke"]:
-        raise ValueError(f"{campaign} is a smoke campaign: no formal start opens it")
-    settings = settings_of(record)
-    if not 0 <= round_ < done_rounds(campaign):
-        raise ValueError(f"{campaign}: round {round_} is not a round done (its checkpoint)")
-    model = round_model(context, settings, campaign, round_)
-    state = torch.load(campaign / f"round_{round_}" / "checkpoint.pt", weights_only=False, map_location="cpu")
-    return model, state["identity"]
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--prior", type=Path, required=True, help="the base: a prior_train run's directory")
@@ -1113,17 +1144,10 @@ def main(argv: list[str] | None = None) -> int:
     start = None
     if args.start_campaign is not None:
         source = args.start_campaign if args.start_campaign.is_absolute() else REPO_ROOT / args.start_campaign
-        held = json.loads((source / "campaign.json").read_text(encoding="utf-8"))
-        if held["schema"] != CAMPAIGN_SCHEMA:
-            parser.error(f"{source} is a {held['schema']} campaign, not {CAMPAIGN_SCHEMA}")
-        if held["inputs"]["smoke"] and not args.smoke:
-            parser.error(f"{source} is a smoke campaign: a formal campaign does not start from it")
-        if not 0 <= args.start_round < done_rounds(source):
-            parser.error(f"{source} holds the checkpoints of rounds 0–{done_rounds(source) - 1}, not {args.start_round}")
-        from ts_transformer.experiments.training_export import this_checkout
-
-        start = {"campaign": repo_relative(this_checkout(source)), "round": args.start_round,
-                 "checkpoint_sha256": file_sha256(source / f"round_{args.start_round}" / "checkpoint.pt")}
+        try:
+            start = start_of(source, args.start_round, formal=not args.smoke)
+        except ValueError as refused:
+            parser.error(str(refused))
     prior_dir, instructions, executor, census, procedure_root, out = (p if p.is_absolute() else REPO_ROOT / p for p in (
         args.prior, args.instructions, args.executor, args.windows, args.procedure_root, args.out))
     settings = Settings(args.rounds, {kind: getattr(args, f"windows_{kind.lower()}") for kind in KINDS},
