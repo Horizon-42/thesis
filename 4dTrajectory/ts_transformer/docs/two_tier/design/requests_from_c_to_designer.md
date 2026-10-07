@@ -5,7 +5,7 @@ names a public interface must give, and the questions that only the user can dec
 it is rewritten in full each time, never appended to, and an item leaves when it is done. The evidence and the commits
 are in the implementation log (`readouts/2026-10-05_stage_c_implementation_log.md`, cited by §).
 
-**State: 2026-10-07, 05:50.**
+**State: 2026-10-07, 06:00.**
 - C15 is done: `outputs/POOLED/post/ceiling_20261007` (log §28).
 - C16 is built and merged into `dev-two-tier` (`67cd9bc8`).
 
@@ -16,12 +16,14 @@ are in the implementation log (`readouts/2026-10-05_stage_c_implementation_log.m
 - The three curves meet at large n. The 14 rounds raised the one-draw share and did not widen the set of windows a
   model can land. The selection readout has been flat since round 6.
 - My reading: the policy can say a landing sentence in nearly every window but gives it too little probability, and
-  the clipped surrogate of D94 stopped raising it. The two proposals below use the landings that sampling finds.
+  the clipped surrogate of D94 stopped raising it. The proposal below trains on the landings that sampling finds.
+
+**Resolved:** P50 (choosing the best of k sentences at speaking time, judged by the executor) — not wanted (the user,
+2026-10-07: "我们只要训练出的能力"): only what the model is trained to say counts, no choice at speaking time.
 
 | # | Request | For | Log |
 |---|---|---|---|
 | 1 | **P49, training on the landed sentences** (closed-loop supervised training, "expert iteration"; the user asked for the proposal on 2026-10-07). See *P49 in full* below the table. | The user, the designer | §28 |
-| 2 | **P50, choosing at speaking time** (best of k, flown by the executor; the user asked for the proposal on 2026-10-07). See *P50 in full* below the table. | The user, the designer | §28 |
 
 ## P49 in full: training on the landed sentences
 
@@ -59,36 +61,3 @@ windows), that is about 27 min of speaking, plus the pass and the readout: about
 **Open for the designer:** whether a window where all N land is kept. Keeping it teaches what the model already says;
 leaving it out trains only on the windows it sometimes fails, which shrinks the data. I propose keeping it, as the
 plain form.
-
-## P50 in full: choosing at speaking time
-
-**What it is.** A way to speak, beside the plain one. For each window, k sentences are spoken from the start of the
-window (the first pass, k draws as in C15) and each is flown by the executor and judged. The one with the highest
-reward is chosen (ties: the lowest draw). No training is needed.
-
-**Its select-day reading is in C15's files already** (the best reward of the first k draws, and the share landed):
-
-| Model | Landed, k = 1 / 2 / 4 / 8 | Mean reward, k = 1 / 2 / 4 / 8 |
-|---|---|---|
-| Start | 79.5 / 88.1 / 94.3 / 97.5 % | 0.787 / 0.868 / 0.929 / 0.965 |
-| Round 6 | 85.1 / 92.3 / 95.7 / 97.9 % | 0.842 / 0.913 / 0.947 / 0.970 |
-| Round 8 | 85.7 / 92.4 / 96.5 / 98.2 % | 0.849 / 0.912 / 0.953 / 0.974 |
-
-**What it reads (a caveat to decide on).** The choice judges each sentence by flying it among the other aircraft's
-recorded tracks: their future, which a speaker in service does not know. So its numbers are those of a search with a
-perfect model of the traffic's future. My reading is that it is a search over the model's sentences, not the model's
-own skill (as the procedure-computed answers were kept apart, a diagnostic or a baseline). Reported, it stands beside
-the plain readout as "round r, best of k", never in place of it.
-
-**Code.** A runner, or a mode of `post_validation` and of the Training export, that takes k and chooses. About 60 lines
-and its tests. The select-day numbers above need no new run.
-
-**Decisions for the user:**
-- k: 4 or 8 is proposed;
-- whether the val read reports it: proposed, one val read (D132) that reports both the plain readout and best of k,
-  since a second read of val is not allowed;
-- whether the choice works on whole sentences (proposed, the plain form) or segment by segment (several futures at
-  each branch point, the best chain kept: closer to the user's picture of 2026-09-20, but a tree search, k times dearer
-  at each point; a later step);
-- whether the traffic's recorded future may be used in it, or a traffic prediction must take its place before it is
-  more than a diagnostic.
