@@ -352,4 +352,12 @@ workers asked. Started 05:39 UTC, stopped by name at part 2 at 06:19 UTC (exit 1
 - dev-two-tier merged into `dev-multi-control` (**ea9d5217**; C17's `Settings.method`, `select_seed`, `STAGE_C_LANDED`;
   the conflicts in `post_train` resolved by keeping both: `Stage.batches` beside `Stage.train` and `pass_memory`;
   `test_post_train` and `test_multi_train` 53 passed). The profile is run again with 64 / 48 / 24 after C17 ends.
+- notes/stage_d.md 一 (2026-10-07, after D172 and O19): dev-two-tier (C17–C20) merged into `dev-multi-control`,
+  **f2bb4a5d**: `workers_fit` is C18's (the check of workers on the CPU kept; with nothing held, `passed["now"]`
+  taken out once, so `profiled_fit`'s own share check, the same condition, dropped; its GPU budget kept); `STAGE_C`
+  with both `batches` and C's `train` (`clip_norm`, `epochs`); stage C's `main` with C18's recorded measure, the
+  measure spoken with the round's model; `settings_type=MultiSettings` kept; stage D runs `train_pass`'s defaults (no
+  clipping, one pass). Tests of the changed files and `test_architecture` (2 low-priority processes beside stage C's
+  campaign): 114 passed, 1 failed (stage D's runner test replaced `MultiSettings`, now records the spans through
+  `settings_from`; passed). Reviewed in parallel (opus: no S1; S2 `test_post_landed.py` to be staged — done; two S3).
 
