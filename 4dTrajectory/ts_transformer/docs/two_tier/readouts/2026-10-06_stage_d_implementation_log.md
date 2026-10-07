@@ -311,3 +311,35 @@ labelled words: not a model's result, §5 item 4).
   size started 2026-10-07 (scratch `/tmp/claude-1000/mc5/profile`): 1,000 windows of each kind, spans 300, 600, 1200 s,
   `batch_rows` 64, 4 speaking workers, 100 select windows an airport and span read twice, start round 6, seed 2027.
 
+## 12 MC5 · the profile at the formal size (2026-10-07, bd6dd1be; scratch `/tmp/claude-1000/mc5/profile/profile.json`)
+
+Settings: 1,000 windows of each kind, spans 300, 600, 1200 s, c_min 0.8, `batch_rows` 64, K = 8, update groups 4, data
+sentences 64, 100 select windows an airport and span; start round 6 of `post_train_20261006`, seed 2027; 4 speaking
+workers asked. Started 05:39 UTC, stopped by name at part 2 at 06:19 UTC (exit 1): 4 workers do not fit on the GPU.
+
+- **The draw** (round 0): each kind 334 / 333 / 333 over the spans, no shortfall; left out (D146) real 0 / 2 / 3,
+  compressed 3 / 6 / 10; without a later aircraft (no compressed form) 245 / 83 / 24.
+- **The batches** (64 rows, one span each): 23 / 31 / 50 batches of 668 / 666 / 666 windows; almost every batch full (no
+  window above 64 rows).
+- **One batch of each span** in the campaign's process (GPU, two passes):
+
+  | Span | Windows | Time | Groups (informative) | Groups' bytes | GPU peak (allocator) | Host peak RSS |
+  |---|---|---|---|---|---|---|
+  | 300 s | 34 | 191 s | 29 | 28 MiB | 1.37 GiB | 4.69 GiB |
+  | 600 s | 24 | 284 s | 30 | 34 MiB | 1.89 GiB | 4.86 GiB |
+  | 1200 s | 15 | 641 s | 37 | 51 MiB | 3.57 GiB | 5.02 GiB |
+
+  The round's speaking in one process, from these: 23 × 191 + 31 × 284 + 50 × 641 s ≈ 12.6 h (an estimate: one batch a
+  span); the 20 min windows are 71 % of it.
+- **One speaking worker** (`Speakers.measure` on the first batch of each span, with round 0's model): its peak on the
+  GPU 3.71 GiB (CUDA context and allocator; 0.51 GiB after), on the host 1.69 GiB; besides in a round 0.02 GiB (the
+  readout's model) and 0.13 GiB of series (4,167 flights). The pass's update (4 groups, 96 groups written): its peak
+  2.18 GiB. Free: host 15.8 GiB, GPU 5.96 GiB.
+- **What fits**: 1 worker; 2, 3, 4 workers need 7.5, 11.2, 14.9 GiB of the GPU against 6.5 GiB (the host would hold
+  about 8). The GPU binds, through the 20 min batch: its peak grows with the batch's ticks, not only its rows.
+- Not measured (the profile stopped before part 3): the round's speaking by the workers, the selection readout and its
+  spread, the pass's time.
+- The user (2026-10-07): a campaign's workers are sized from the profile, never measured before each run (the measure
+  of every span was about 20 min a launch); built on `dev-multi-control` (`multi_train.profiled_fit`, `--profile`, each
+  worker's GPU capped at its share), in review.
+
