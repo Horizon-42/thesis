@@ -457,7 +457,7 @@ another at 1.59, the campaign's process 2.11, 58 MiB of 7.59 GiB free); exit 1. 
 22:04). The fit's underestimate is the requests' item 49.
 
 **MC5's profile stopped at the user's word (2026-10-08 22:41):** after the user asked why a whole round runs before
-the campaign (its speaking alone about 5–6 h with 2 workers; what it learns beyond the memory, MC6's round 0 records),
+the campaign (its speaking alone about 2.5 h with 2 workers — first said as 5–6 h, an estimate from the slowest span only; what it learns beyond the memory, MC6's round 0 records),
 the user chose to stop it, start MC6 from stage C's best model and have the profile's design changed (requests items 50,
 51). Stopped with `systemctl --user stop` after its measures and 16 of 198 batches with 2 workers (no failure); the
 output set aside as `outputs/POOLED/multi/profile_20261008.stopped-20261008T204116Z` (its `workers` block: 1 and 2

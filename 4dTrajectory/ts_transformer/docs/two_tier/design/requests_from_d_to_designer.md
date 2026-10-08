@@ -172,8 +172,8 @@ and 51 are the user's decisions of 2026-10-08 for the design.
 50. **The profile's design is to change: a whole round before the campaign is a waste** (the user, 2026-10-08: stop
     the profile — "这个行为很愚蠢", this behaviour is very stupid — and change its design). What MC5 does now
     (§11 MC5, D172, `experiments/multi_profile.py`): a full round at the formal size before MC6 — the round's draw, one
-    worker's memory on each span's first and largest batch, the whole round spoken (198 batches, about 5–6 h with two
-    workers), the selection readout read twice, the pass, the spread. Only the memory measure must come before a
+    worker's memory on each span's first and largest batch, the whole round spoken (198 batches, about 2.5 h of speaking with two
+    workers, about 3 h with the readouts and the pass), the selection readout read twice, the pass, the spread. Only the memory measure must come before a
     campaign (how many workers fit); everything else is what MC6's own round 0 records anyway (its speaking, readout
     and pass times are in its `round.json`), so the profile spends a round of GPU time to learn what the campaign's
     first round would tell. And the one thing it was trusted for failed: its fit judged 3 workers to fit and the round
@@ -199,8 +199,10 @@ and 51 are the user's decisions of 2026-10-08 for the design.
       weight decay 0.01, 4 groups an update, 64 data sentences, 100 select anchors an airport (each read in every span:
       1,500 windows a readout).
     - Rounds: Claude's proposal 8, with stage C's stop rule (a round's select landed not above the start's by more than
-      the noise: stop; else continue by D157); about 5–6 h a round (the profile's 16 batches at about 1.7 min a batch
-      with 2 workers, 198 batches), so about two days for 8 rounds.
+      the noise: stop; else continue by D157); about 3 h a round: the round's speaking about 5.1 h for one worker
+      from the profile's measured batches (300 s: 23 batches, 62 min; 600 s: 41, 141 min; 1200 s: 134, 101 min), so
+      about 2.5 h with 2 workers, plus the selection readout and the pass; about a day for 8 rounds. (An earlier
+      "5–6 h" came from the first 16 batches alone, all of the slowest span: corrected.)
     - From a run worktree at the merged commit (D163), in a systemd unit; the intent in `docs/experiments/intents.json`
       before publication.
 
