@@ -1729,3 +1729,27 @@ checkpoint.
         --windows <census> --out 4dTrajectory/outputs/POOLED/post/<campaign id> --rounds 6 --continuations 8 \
         --start-campaign 4dTrajectory/outputs/POOLED/post/post_train_20261006 --start-round 8 --seed 2024 \
         --select-seed 1337 --update-groups 16 …   # the readout's seed: C10's select windows and numbers
+
+### R66 · `run_ts.py post_diagnose` — whether a stage C model uses the traffic it reads, and which losses of separation are left (post-training D175)
+
+2026-10-08. The diagnostic readout (C24): one round of a post-training campaign (`--round`) reads the selection
+readout's select windows with the readout's numbers twice in one process — with its traffic attention, then with the
+output layer of every traffic module set to zero (`traffic_off`, the start's initialisation), the rest unchanged. The
+read with traffic on must give the round's `round.json` readout again; the runner stops by name if not. The start is
+not read: with `--ceiling` (a D161 readout of the same campaign, R64) its results per window are that readout's draw 0
+of the start, and the round's draws there give field 5; the windows are compared by their flights and start times.
+Writes, into a new directory: `intent.json` (`--intent`, the decision rules, before the read), `config.json`,
+`per_window.jsonl` (a line per window and read; for each loss of separation five fields: the other aircraft —
+`no_landing`, `leader`, `follower`, `other_runway`; the distance to the threshold at the loss, 0–10, 10–20, 20–40, over
+40 km; the time from the first predicted step, below 60, 60–120, 120–300, over 300 s, a value on an edge in the upper
+bin; in conflict at the start — the commanded aircraft on a straight line at its velocity at the first predicted step,
+the other on its record, judged up to the loss or 120 s; lost in every ceiling draw), `summary.json` (landed, lost
+separation, mean reward of each read and of the start, in all and by airport; the paired differences with a 95 %
+interval from 2,000 window resamples), `failures.json` (each field's counts and shares), `log.jsonl`, `SHA256SUMS`
+(schema `ts-post-diagnose-v1`); the directory read-only at the end. No criterion is applied. Select days only, never
+val; the closed loop's and the edges' checks first; a clean tree unless `--smoke`; `--speak-workers` as R64. Tests:
+`tests/test_post_diagnose.py`.
+
+    python run_ts.py post_diagnose --campaign 4dTrajectory/outputs/POOLED/post/<campaign id> --round 8 \
+        --intent <intent.json> --out 4dTrajectory/outputs/POOLED/post/diagnose_<campaign>_r<round>_<date> \
+        [--ceiling 4dTrajectory/outputs/POOLED/post/<ceiling id>] [--speak-workers 4]
