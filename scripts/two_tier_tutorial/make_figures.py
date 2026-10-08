@@ -10,5 +10,5 @@ for name in ("fig02_vocabulary_grids", "fig03_sentence_example", "fig04_executor
              "fig06_corrections_effect", "fig07_delta_grid", "fig09_procedure_masks"):
     getattr(figs_data, name)()
 for name in ("fig01_architecture", "fig08_prior_architecture", "fig10_decoding", "fig11_cv_design", "fig12_post_training_loop",
-             "fig13_branch_training", "fig14_traffic_features", "fig15_judge_outcomes"):
+             "fig13_branch_training", "fig14_traffic_features", "fig15_judge_outcomes", "fig16_window_kinds", "fig17_landed_training", "fig18_prior_layers", "fig19_traffic_attention"):
     getattr(figs_diagrams, name)()

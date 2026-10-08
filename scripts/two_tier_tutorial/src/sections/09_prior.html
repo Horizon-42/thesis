@@ -6,9 +6,37 @@
 <h3 id="p-inputs" class="toc">9.1 What the prior sees</h3>
 <p>The rule is principle 7: an input gives only what a controller knows <em>before</em> the step. The rows before the first predicted step are observed. From the first predicted step on, every input that comes from a state comes from the <em>flown</em> states of the closed-loop sentence, as in the closed loop where the executor makes the states.</p>
 <ul>
-<li><b>Own state.</b> The height above the airport elevation, the ground speed, the vertical rate, and a flag <code>no_motion</code> that is 1 at row 0 only (<span class="pill d">D58</span>, <span class="pill d">D60</span>). No MSL height and no absolute position.</li>
-<li><b>Candidate vectors.</b> For each candidate runway: the aircraft in the frame of that runway (distance to the threshold, offset right of the final, height above the threshold, direction of motion minus the course), the <b>height above its published glidepath</b> (<span class="pill d">D13</span>), and the landings on it in the last 30 minutes. There is no constant of the runway (<span class="pill d">D24</span>).</li>
-<li><b>Words in force.</b> The runway in force as its candidate vector, the state G, the heading in force (sine and cosine of the angle relative to the course), the other columns as embeddings, and the <b>time since each column said its word</b> (<span class="pill d">D17</span>).</li>
+<li><b>Own state.</b> Four numbers about the aircraft itself (<span class="pill d">D58</span>, <span class="pill d">D60</span>). They give no position and no direction. Where the aircraft is, and where it flies, is in the candidate vectors (next item).
+<table>
+<thead><tr><th>Number</th><th>What it is</th><th>Unit and scale</th></tr></thead>
+<tbody>
+<tr><td>Height</td><td>How high the aircraft is above the airport elevation <i>E</i>. It is not the height above the sea (MSL): with the height above the sea, the elevation of the airport would be a constant that names the airport (<span class="pill d">D24</span>). The altitude words also use the height above <i>E</i>.</td><td>m; height / 1 km</td></tr>
+<tr><td>Ground speed</td><td>How fast the aircraft moves over the ground, in the horizontal plane only. It is not the airspeed: the data has no wind.</td><td>m/s; speed / 100 m/s</td></tr>
+<tr><td>Vertical rate</td><td>How fast the height changes: the change of the height in one second. It is positive in a climb and negative in a descent. Example: on a 3° glidepath at a ground speed of 70 m/s, the aircraft goes down about 3.7 m every second, so the vertical rate is about −3.7 m/s. In level flight it is 0.</td><td>m/s; rate / 10 m/s</td></tr>
+<tr><td><code>no_motion</code></td><td>A flag: 1 at row 0 of an aircraft, 0 at every other row. At row 0 there is no stored state 2 s before, so the ground speed and the vertical rate cannot be measured there and are set to 0. The flag tells the network that these zeros mean “not known”, and not “standing still”.</td><td>0 or 1</td></tr>
+</tbody></table>
+The ground speed and the vertical rate are <b>measured from the past only</b> (<span class="pill d">D25</span>): the distance that the aircraft moved in the 2 s before the row, over 2 s. The horizontal part of the move gives the ground speed. The change of the height gives the vertical rate. A fitted or stored velocity is not used: such a fit reads rows after the row, and an input must not know the future.</li>
+<li><b>Candidate vectors.</b> The prior does not know where the aircraft is on a map. For each <em>candidate runway</em> (a runway end that has a published vertical path), it gets <b>one short vector</b> that says where the aircraft is <em>as seen from that runway</em>. An airport with 5 candidates gives 5 vectors at each row (<span class="pill d">D5</span>, <span class="pill d">D23</span>). A vector has six kinds of number:
+<table>
+<thead><tr><th>Number</th><th>What it is</th><th>Scale</th></tr></thead>
+<tbody>
+<tr><td>Distance before the threshold</td><td>How far the aircraft is before the runway threshold, measured along the course of the runway (the direction of landing).</td><td>asinh(d / 1 km)</td></tr>
+<tr><td>Offset right of the final</td><td>How far the aircraft is to the right of the extended centreline of the runway. A negative value is left of it.</td><td>asinh(d / 1 km)</td></tr>
+<tr><td>Height above the threshold</td><td>How high the aircraft is above the threshold of this runway.</td><td>h / 1 km</td></tr>
+<tr><td>Direction of motion minus the course</td><td>The angle between the direction in which the aircraft moves and the direction of landing. It is given as a sine and a cosine, so that 359° and 1° are close to each other. A value of 0° is “flying to the runway”, and 180° is “flying away from it”.</td><td>sine, cosine</td></tr>
+<tr><td>Height above the glidepath</td><td>How far the aircraft is above (positive) or below (negative) the <b>published glidepath</b> of this runway at its present distance (<span class="pill d">D13</span>). The value is useful near the final only; the offset tells the model if it is near.</td><td>asinh(h / 100 m)</td></tr>
+<tr><td>Landings in the last 30 minutes</td><td>How many aircraft landed on this runway in the 30 minutes before the row. It shows which runways are in use now. A flight never counts its own landing.</td><td>n / 10</td></tr>
+</tbody></table>
+<b>Example.</b> A KRDU arrival is on the left downwind of runway 23R (course 225°). It is 3 km before the threshold and 5 km <em>left</em> of the final, and it flies on track 045°. In the vector of 23R: distance 3 km, offset −5 km, direction of motion minus the course 180° (sine 0, cosine −1), so the model sees “parallel to the runway, going the other way”. In the vector of the parallel runway 23L, the numbers are different (another offset), and in the vector of the opposite runway 05L the distance is negative (the aircraft is past that runway) and it flies in that runway’s landing direction. So <em>the same aircraft</em> has a different vector for each candidate, and the model compares them to decide which runway to expect.
+<br>There is <b>no constant of the runway</b> in a vector: no length, no elevation, no name (<span class="pill d">D24</span>). Such a constant would identify the runway, and with it the airport, and the model would learn the airport and not the geometry. The vector has only numbers that change with the aircraft.</li>
+<li><b>Words in force.</b> What the prior has said so far, and is still holding: the runway in force as its candidate vector, the state G (go-around or not), the heading in force (sine and cosine of the angle relative to the course), and the altitude, angle and speed words as embeddings. A word stays in force until the column says a new one. Before the first predicted step, nothing has been said, and every column is “none yet”.
+<br><b>Time since each column said its word</b> (<span class="pill d">D17</span>). Each of the five columns also gets one number: how many seconds ago this column <em>last said a word</em>. Why the model needs it: a row in which a column says “unchanged” does not tell how old the word in force is. The age matters for the next word.
+<ul>
+<li>A <b>heading word said 4 s ago</b> means that the aircraft is probably still turning. A heading word said 120 s ago means that the aircraft has long been on that track.</li>
+<li>An <b>altitude word said just now</b> means that the aircraft is still on its way to the level. After a long time, it has arrived and may need the next word.</li>
+<li>The <b>speed</b> and the <b>angle</b> words work the same way. And because the executor makes each change at a fixed rate, the time since a word tells how far the change has gone.</li>
+</ul>
+The number is in seconds for every column, so that every row interval Δ reads the same time. It is compressed with a logarithm: <code>log(1 + t / 2 s) / 5</code>. Small times then differ clearly (4 s gives 0.22), and long times do not grow without bound (120 s gives 0.82). It is 0 up to and with the first predicted step, because no column has said anything yet. For the runway column, it is the time since the runway was given, or given again (a change of runway, or the runway word that ends a go-around). The word “go-around” does not restart it, because a go-around keeps the runway in force.</li>
 <li><b>Motion.</b> From the displacement in the 2 s before the row, at every Δ (<span class="pill d">D25</span>). Never the fitted track, ground speed or vertical rate of the signals: a fit over 15 s uses 7.5 s of the future.</li>
 </ul>
 <p>Every input has a <b>fixed physical scale</b> in SI units (<span class="pill d">D41</span>): distances as asinh(d / 1 km), heights over 1 km, the height above a glidepath as asinh(h / 100 m), speeds over 100 m/s. No input uses a mean or a spread of the training data, because a new airport has none.</p>
@@ -17,19 +45,68 @@
 <p>Evidence for principle 4: in an earlier prior, the replacement of the airport embedding with the mean of the four other embeddings raised the loss by 0.024 for each step and lowered the landed share in free generation by 5.8 points. The five embeddings were almost orthogonal: an identity table, not a property of the airports (readout R46). The v4 prior has no airport embedding.</p>
 
 <h3 id="p-candidates" class="toc">9.2 Candidate tokens: any number of runways</h3>
-<p>Each candidate vector goes through <b>one shared network</b> and becomes a <t zh="词元">token</t>. The tokens reach a row through one <t zh="注意力">attention</t> whose weights sum to 1. A sum would grow with the number of candidates. An attention does not. The runway head also points at the candidate tokens, so the model has no fixed number of runway slots (<span class="pill d">D41</span>). A new airport can have 2 or 8 candidates.</p>
+<p>Each candidate vector goes through <b>one shared network</b> (a Linear layer, a GELU, and a second Linear layer, both <i>d</i> wide) and becomes a <t zh="词元">token</t>. The tokens reach a row through one <t zh="注意力">attention</t> whose weights sum to 1. A sum would grow with the number of candidates. An attention does not. The runway head also points at the candidate tokens, so the model has no fixed number of runway slots (<span class="pill d">D41</span>). A new airport can have 2 or 8 candidates.</p>
 <div data-demo="candidate_pool" data-title="KRDU candidates: the vectors that a row reads"></div>
 
 <h3 id="p-network" class="toc">9.3 The network</h3>
-<p>The network has <b>no airport embedding, no row-position embedding and no input “time from row 0”</b>. A row is the sum of: the projected own state, the time since each column’s word, G, the heading in force, an embedding for each other column’s word in force, the runway in force as its candidate token, and the attention over the candidate tokens.</p>
+<p>The network is a small <t zh="变换器">Transformer</t>, in the same family as the language models that say one word after another. It has three parts, and Figure 18 shows them:</p>
+<ol>
+<li><b>The input of a row.</b> All the inputs of 9.1 and 9.2 become <b>one vector of <i>d</i> numbers</b> for each row.</li>
+<li><b>Four layers.</b> Each layer lets a row <em>read the rows before it</em>, and then lets it read the other aircraft. The result is the hidden state <b>h</b>: what the network knows about the situation at this row.</li>
+<li><b>Five heads.</b> Each head turns the hidden state into the probabilities of the words of one column. The heads speak in the order of the columns.</li>
+</ol>
+<p>The network has <b>no airport embedding, no row-position embedding and no input “time from row 0”</b>. Which airport it is, and how late in the flight it is, must follow from the physical inputs.</p>
+
+<h4>Step 1: the input of a row (Figure 18a)</h4>
+<p>Four pieces are added together. Each piece first becomes a vector of <i>d</i> numbers.</p>
 <ul>
-<li><b>Layers.</b> Each layer is pre-normed and residual: a <b>causal time attention</b>, then a module that a caller can add (section 10), then a feed-forward network. A row reads the rows before it and itself.</li>
-<li><b><t zh="旋转位置编码">RoPE</t>.</b> The query and the key of a row are rotated by an angle that grows with the time of the row <em>in seconds</em>. So the attention reads only time differences (<span class="pill d">D16</span>). Seconds, not rows, so that every Δ reads the same time.</li>
-<li><b>Cache.</b> A speaker that adds one row at a time keeps each layer’s rotated keys and values, and encodes only the new rows. A key is rotated one time, when it is written.</li>
-<li><b>Five heads in the order of the columns.</b> Column k’s head reads the hidden state plus the embeddings of the words that the earlier columns chose <em>in this row</em>. The runway head scores each candidate token by q·token/√d, after “unchanged” and “go-around”. At the first predicted step, “unchanged” (and “go-around”) are impossible.</li>
+<li><b>A Linear layer on 12 numbers</b>: the own state (4 numbers, 9.1), the time since each of the 5 columns said its word (5), G (1) and the heading in force as sine and cosine (2). A <t zh="线性层">Linear layer</t> multiplies the numbers by a table of weights, and the training chooses the weights.</li>
+<li><b>Three embeddings</b>: one for each of the altitude, the angle and the speed word in force. An <t zh="嵌入">embedding</t> is a table with one learned vector for each word. Index 0 is “none yet”, the value before the first predicted step.</li>
+<li><b>The runway in force</b>: the token of that candidate (9.2) through a Linear layer. If no runway has been said yet, one learned vector stands in its place.</li>
+<li><b>The candidate pool</b> (9.2). This is one <t zh="注意力">attention</t> over the candidate tokens. It lets the row read the runway information that matters now, in a vector of fixed width, whatever the number of candidates. It works in four steps:
+<ol>
+<li>The <b>query</b> is the row built so far (the sum of the three pieces above). It asks: “In my situation, which candidate runways matter to me?”</li>
+<li>Each candidate token gives a <b>key</b> (a label) and a <b>value</b> (a content). The query is compared with every key, and each comparison gives a score.</li>
+<li>The scores go through a <t zh="归一化指数函数">softmax</t>. The result is one <b>weight</b> for each candidate. The weights are not negative, and <b>they sum to 1</b>. A padded slot, which is not a real candidate, gets the weight 0.</li>
+<li>The result is the <b>weighted average of the values</b>, through one more Linear layer. It is added to the row.</li>
+</ol>
+Why attention, and not a sum or a list. A sum of the tokens would grow with the number of candidates, and a list would need a fixed number of slots. The weights always sum to 1, so the result has the same size at an airport with 4 candidates and at one with 8. If the candidates are put in another order, the result does not change, so the network cannot use “the third slot” as a signal. This is a single attention head with its own weights. It is different from the causal time attention in step 2: that one looks <em>back in time</em> over the rows, and this one looks <em>across the runways</em> of one row. The choice of the runway word is not made here: the runway head scores the same tokens again (step 3).</li>
 </ul>
+<p>The sum is the vector <b>x</b> that enters layer 1. Where each of the pieces comes from was fixed in 9.1: the network gets only physical numbers.</p>
+
+<h4>Step 2: one layer (Figure 18b)</h4>
+<p>The same layer is used four times. A layer is <b>pre-normed and residual</b>. This means: the vector of the row, <b>x</b>, runs through the layer like a rail. Each block of the layer reads a <t zh="层归一化">normalised</t> copy of x, and adds its result back to x. The block cannot erase x, it can only add to it. A layer has three blocks:</p>
+<ol>
+<li><b>Causal time attention.</b> The row asks a question (a <i>query</i>), each earlier row has a label (a <i>key</i>) and a content (a <i>value</i>). The row takes the contents of the rows whose labels match its question best. “Causal” means that a row reads <b>the rows before it and itself</b>, and never a later row. The row always reads itself, so no row has all its keys blocked.
+  <br>The network has to know <em>how long ago</em> a row was. <t zh="旋转位置编码">RoPE</t> does it. Before the query and the key are compared, each is rotated by an angle that grows with the time of the row <em>in seconds</em> (<span class="pill d">D16</span>). Then the comparison depends only on the <em>difference</em> of two times, and never on the time itself. Seconds, not rows, so that every row interval Δ reads the same time. The attention has several <i>heads</i>, each 32 numbers wide, and each head can look for a different thing.</li>
+<li><b>The added module</b> (the traffic attention, section 10). It reads the other aircraft, and its result is added to x without a normalisation. In the base prior alone, this block is empty. The post-training adds it (its output starts at zero).</li>
+<li><b>Feed-forward.</b> A small network that works on each row alone: a Linear layer that makes the vector 4 times wider, a <t zh="GELU 激活函数">GELU</t> (a smooth switch that lets a number pass, or not), and a Linear layer back to <i>d</i>.</li>
+</ol>
+<p>After the four layers, one more normalisation gives the hidden state <b>h</b>. <b>Dropout</b> (a random 10 % of the numbers set to 0 during training, so that the network does not rely on one number) is in the attention, after the attention block, inside the feed-forward and after it. It is off when the prior speaks.</p>
+<p><b>Cache.</b> A speaker adds one row at a time. It keeps the keys and values of every layer, already rotated, and encodes only the new row. A key is rotated one time, when it is written. The result is the same as encoding all the rows again, up to the rounding of the sums.</p>
 <div data-demo="rope" data-title="RoPE: only the time difference counts"></div>
-<p>Configuration A of the design: <code>d_model</code> 192, 4 layers, 6 heads of width 32, feed-forward 768, dropout 0.1. It has <b>2,165,741 parameters</b> (counted from the code). The RoPE base is 10,000.</p>
+
+<h4>Step 3: the five heads (Figure 18c)</h4>
+<p>The heads speak <b>in the order of the columns</b>: runway, heading, altitude, angle, speed. Head <i>k</i> does not read h alone. It reads <b>g<sub>k</sub> = h + the embeddings of the words that the earlier columns said in this same row</b>. So the heading head knows the runway word of this row, and the speed head knows all four words before it. The model is thus <b>autoregressive over the columns</b>, and the rows before it give the second direction (Figure 8). In training the earlier words are the true words (<t zh="教师强制">teacher forcing</t>). When the prior speaks, they are the words it has drawn.</p>
+<ul>
+<li>A word head is one Linear layer from g<sub>k</sub> to the classes of its column: 73 for the heading, 42 for the altitude, 7 for the angle and 49 for the speed (each includes “unchanged”).</li>
+<li>The <b>runway head</b> has two fixed classes, “unchanged” and “go-around”, and one score for each candidate. The score of a candidate is q · token / √<i>d</i>, where q is a learned view of g<sub>1</sub> and token is the candidate token of 9.2. So the head <em>points at</em> a candidate, and the network has no fixed number of runway slots. A padded slot gets −∞.</li>
+<li>At the first predicted step, the heads must say a value: “unchanged” is impossible in every column, and so is “go-around” in the runway column.</li>
+</ul>
+<figure class="paper" data-fig="fig18_prior_layers"></figure>
+
+<h4>The sizes</h4>
+<p>Every attention head is 32 numbers wide, so <i>d</i> = 32 × the number of heads. The design starts from <b>configuration A</b> (<i>d</i> 192, 4 layers, 6 heads, feed-forward 768, dropout 0.1). The cross-validation by airport chose <b>configuration C</b> (<i>d</i> 256, 4 layers, 8 heads, feed-forward 1,024) for the base model. The RoPE base is 10,000: the periods of the rotations run from 6.3 s to about 35,000 s, which is ten times the longest sentence with a go-around. The parameters, counted from the code:</p>
+<table>
+<thead><tr><th>Part</th><th class="num">Configuration A</th><th class="num">Configuration C (the base model)</th></tr></thead>
+<tbody>
+<tr><td>Input of a row (Linear, embeddings, token network, candidate pool, runway in force)</td><td class="num">245,376</td><td class="num">425,472</td></tr>
+<tr><td>Four layers (attention, feed-forward, norms)</td><td class="num">1,779,456</td><td class="num">3,159,040</td></tr>
+<tr><td>Last normalisation</td><td class="num">384</td><td class="num">512</td></tr>
+<tr><td>Five heads, with the embeddings of the chosen words</td><td class="num">140,525</td><td class="num">220,077</td></tr>
+<tr><td><b>Total</b></td><td class="num"><b>2,165,741</b></td><td class="num"><b>3,805,101</b></td></tr>
+</tbody></table>
+<p>Most of the parameters are in the four layers, as expected for a Transformer. The candidate pool is large for what it does (148,224 in A) because it has its own query, key, value and output matrices.</p>
 <figure class="paper" data-fig="fig08_prior_architecture"></figure>
 
 <h3 id="p-decoding" class="toc">9.4 Decoding: the speaker, the masks and the draw</h3>

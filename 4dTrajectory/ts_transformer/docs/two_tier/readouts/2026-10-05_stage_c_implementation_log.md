@@ -1346,3 +1346,37 @@ the default, refused on a resume against a record holding the default. The secon
 equal the start's; the training rounds 83.2 / 83.5 / 82.6 / 83.2 % (the first value campaign's 83.8 / 84.3 / 83.1 /
 83.9 %); the centring brought the surrogate to about 0, so the fall is not the advantages' offset. Sealed (21 files),
 the run worktree removed. Table and reading: the experiment log, experiment 8.
+
+**Experiment 9 (`post_seg60k16_20261008`, segments of 60 s with K = 16 from P55's round 5, the user's choice) ended
+14:55 local**, 4 rounds, exit 0: 87.7 / 86.8 / 87.0 / 86.2 %, within its start's noise. Sealed (11 files), the run
+worktree removed. The experiment log, experiment 9.
+
+**Experiment 10 (`post_seg60lr3_20261008`, segments of 60 s with 3e-5 / 3e-4 and clip 1.0, K = 8, from P55's round 5)
+ended 17:00 local**, 4 rounds, exit 0: 86.2 / 86.9 / 86.3 / 85.9 %, below its start; KL 0.060 → 0.077. Sealed (11
+files), the run worktree removed. The experiment log, experiment 10.
+
+**Stage C's result (2026-10-08, the user's word):** stopped at P55's round 5 (`post_seg60_20261007`, round 5); its val
+read (D132, once): `validation_post_seg60_r5_20261008`, landed 88.9 %, lost separation 9.1 %, mean reward 0.880 over
+1,000 windows of the val days (the select readout of the round: 87.7 %). The sealed campaign directory took the claim
+(the directory made writable for it alone, the claim and lock added to `SHA256SUMS`, sealed again). The experiment log,
+"阶段 C 的结果".
+
+**C24 (D175), the diagnostic readout, built 2026-10-08:** `experiments/post_diagnose.py`, `runners.md` R66, tests
+`tests/test_post_diagnose.py` (13), commit `5880f26e` on `dev-two-tier-v4-post` (dev-two-tier fast-forwards to it).
+The tests: `test_post_diagnose`, `test_post_ceiling` and `test_architecture`, 57 passed (two processes). Reviewed in two rounds; the first found
+two S2, both fixed: a ceiling's start was taken without checking that the campaign starts from the base (a campaign
+from another round, as P55, would have had that round labelled "start"; now refused by name, and a ceiling given
+without the start too), and the loop's tests had no loss (now a loss read in the loop, and the zero-output check with a
+control of random traffic weights). Claude's readings of D175, for the designer:
+- the runway in force at the loss is the last candidate of the runway words said; D175's "else its recorded runway"
+  cannot bind (the first predicted step always says a candidate, and a loss is judged after a said row), so a loss
+  with none said is refused instead of falling back;
+- `no_landing` is read as "the window's landings (D105) hold no landing of the other aircraft"; on real select
+  windows every scene flight is in the tracks roster, so this class will most likely count 0;
+- field 4 judges the Δ rows after the first predicted step (k = 1 … min(loss, 120 s)), as the loop judges, with the
+  runway of field 1 in force, and counts a loss the commanded aircraft answers for (the loop's event rule); a row after
+  the other aircraft's last is skipped;
+- field 5 comes from the ceiling's draws of the round (traffic on) and is attached to the window's loss in both reads;
+- a value on a bin's edge falls in the upper bin (60 s is "60–120", 40 km "over 40").
+The S3 left (one line each): the start refusal could come before the checks; a test passes the synthetic airport's
+2 s step as the loop's; `main()`'s loss branch is run by no test (its parts are).

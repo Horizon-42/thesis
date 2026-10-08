@@ -45,7 +45,7 @@ def fig01_architecture() -> None:
 
 # ------------------------------------------------------------------ Fig 8: the network of the prior
 def fig08_prior_architecture() -> None:
-    fig, ax, H = canvas(DOUBLE, 4.3)
+    fig, ax, H = canvas(DOUBLE, 5.5)
     # inputs
     own = box(ax, 1, 46, 25, 8.5, "Own state", FILL["n"], sub="height above E, speed, vertical rate")
     tim = box(ax, 1, 35, 25, 8.5, "Time since each word", FILL["n"], sub="in seconds, for each column")
@@ -57,7 +57,7 @@ def fig08_prior_architecture() -> None:
     ax.add_patch(FancyBboxPatch((40, 20), 30, 36, boxstyle="round,pad=0,rounding_size=1", fc="white", ec=C["ink2"], lw=0.9, zorder=2))
     ax.text(41.5, 53.8, "× 4 layers (pre-norm, residual)", fontsize=6.5, color=C["ink2"], va="center")
     l1 = box(ax, 42.5, 40, 25, 9, "Causal time attention", FILL["b"], sub="RoPE on the time in seconds")
-    l2 = box(ax, 42.5, 29.5, 25, 8.5, "Added module", "white", dashed=True, sub="traffic attention (stage C)")
+    l2 = box(ax, 42.5, 29.5, 25, 8.5, "Traffic attention", FILL["c"], sub="reads the other aircraft")
     l3 = box(ax, 42.5, 22, 25, 6, "Feed-forward", FILL["b"])
     arrow(ax, (35, 33), (40, 33)); arrow(ax, anchor(l1, "b"), anchor(l2, "t"), lw=0.7, ms=5); arrow(ax, anchor(l2, "b"), anchor(l3, "t"), lw=0.7, ms=5)
     hb = box(ax, 78, 29, 20, 9, "Hidden state h", FILL["n"], bold=True)
@@ -67,10 +67,119 @@ def fig08_prior_architecture() -> None:
     heads = [box(ax, 1 + 19.6 * i, 0.8, 17.2, 7.0, n_, FILL["b"], bold=True, sub=s_, fs=6.8) for i, (n_, s_) in enumerate(names)]
     ax.plot([88, 88, 9.6], [29, 10.8, 10.8], color=C["ink2"], lw=0.9, zorder=2)
     for h in heads: arrow(ax, (h[0] + h[2] / 2, 10.8), (h[0] + h[2] / 2, 7.9), lw=0.9, ms=6)
-    for i in range(4): arrow(ax, anchor(heads[i], "r", 0.3), anchor(heads[i + 1], "l", 0.3), lw=0.8, ms=5)
-    ax.text(60, 15.5, "each head also reads the words that the earlier columns\nchose in this row; the heads speak in the order of the columns", ha="center", fontsize=6.4, color=C["ink2"], va="center")
+    for i in range(4): arrow(ax, anchor(heads[i], "r", 0.3), anchor(heads[i + 1], "l", 0.3), lw=1.8, ms=8, color=C["word"])
+    ax.text(55, 15.5, "autoregressive over the columns: each head also reads the words that the\nearlier columns chose in this row (purple arrows, in the order of the columns)", ha="center", fontsize=6.4, color=C["word"], va="center")
     ax.text(86.5, 20.5, "masks and a random\nnumber u act on the\nlogits of each head", fontsize=6.4, ha="right", va="center", color=C["word"])
+    # autoregressive over the rows: the words said in this row are inputs of the next row
+    rail = -3.0
+    for h in heads:
+        ax.plot([h[0] + h[2] / 2, h[0] + h[2] / 2], [h[1], rail], color=C["word"], lw=0.9, zorder=2)
+    ax.plot([heads[0][0] + heads[0][2] / 2, -3.5, -3.5], [rail, rail, 39.2], color=C["word"], lw=0.9, zorder=2)
+    ax.plot([heads[-1][0] + heads[-1][2] / 2, heads[0][0] + heads[0][2] / 2], [rail, rail], color=C["word"], lw=0.9, zorder=2)
+    for y in (39.2, 28.3):
+        arrow(ax, (-3.5, y), (1, y), None, color=C["word"], lw=0.9, ms=6)
+    ax.text(50, rail - 1.2, "words said in this row  →  inputs of the next row", fontsize=6.6, color=C["word"], ha="center", va="top", fontweight="bold")
+    # the rows in time that the causal attention reads
+    ax.text(87, 55.6, "rows in time", fontsize=6.4, color=C["ink2"], ha="center", va="bottom")
+    for k, (lab, fc) in enumerate([("t−2", "white"), ("t−1", "white"), ("t", FILL["b"])]):
+        box(ax, 75.5 + 8 * k, 48.5, 7, 5, lab, fc, fs=6.0)
+        if k < 2: arrow(ax, (82.5 + 8 * k, 51), (83.5 + 8 * k, 51), None, lw=0.8, ms=5)
+    ax.text(87, 46.6, "each row reads the rows\nbefore it and itself", fontsize=5.8, color=C["ink2"], ha="center", va="top")
+    # the traffic attention in detail: the other aircraft become tokens, and the row attends to them
+    ax.add_patch(FancyBboxPatch((1, 58.5), 98, 19, boxstyle="round,pad=0,rounding_size=1", fc="none", ec=C["ink3"], lw=0.8, ls=(0, (4, 3)), zorder=1))
+    ax.text(3, 75.2, "Traffic attention, in each layer", fontsize=7, fontweight="bold", va="center", color=C["ink"])
+    t1 = box(ax, 5, 62.5, 24, 9.5, "Other aircraft", FILL["n"], sub="edge features and own motion")
+    t2 = box(ax, 35, 62.5, 24, 9.5, "Token network", FILL["c"], sub="one token per aircraft")
+    t3 = box(ax, 65, 62.5, 24, 9.5, "Attention", FILL["c"], sub="query: the commanded aircraft")
+    arrow(ax, anchor(t1, "r"), anchor(t2, "l"), lw=0.9, ms=6); arrow(ax, anchor(t2, "r"), anchor(t3, "l"), "tokens", lxy=(62, 67.6), fs=6.0, lw=0.9, ms=6)
+    ax.text(5, 60.4, "The output is added to the row. It is zero at the start, and zero when there is no other aircraft.", fontsize=6.2, color=C["ink2"], va="center")
+    ax.plot([72.5, 72.5, 67.6], [62.5, 36.0, 36.0], color=C["ink2"], lw=0.9, ls=(0, (3, 2)), zorder=2)
+    arrow(ax, (68.6, 36.0), (67.6, 36.0), lw=0.9, ms=5)
+    ax.set_xlim(-7, 100); ax.set_ylim(-8.5, H)
     save(fig, "fig08_prior_architecture")
+
+
+# ------------------------------------------------------------------ Fig 18: inside the prior: the input, one layer, the heads
+def fig18_prior_layers() -> None:
+    fig, ax, H = canvas(DOUBLE, 4.7)
+    plus = lambda x, y, c=None: (ax.add_patch(plt.Circle((x, y), 1.5, fc="white", ec=c or C["ink2"], lw=0.9, zorder=4)), ax.text(x, y - 0.1, "+", ha="center", va="center", fontsize=8, zorder=5, color=c or C["ink"]))
+    line = lambda xs, ys, c=None, lw=0.9, ls="-": ax.plot(xs, ys, color=c or C["ink2"], lw=lw, ls=ls, zorder=2)
+    A, B = 43.0, 21.5                        # the lower edges of panels (a) and (b); panel (c) starts at 0
+    for y, t in ((A + 22.4, "(a) The input of a row"), (B + 19.4, "(b) One layer (× 4, stacked)"), (18.0, "(c) The five heads, in the order of the columns")):
+        ax.text(1, y, t, fontsize=7.2, fontweight="bold", va="center")
+    # ---- (a) the input of a row: three inputs are added, then what the row reads of the candidates
+    ins = [box(ax, 1 + 22 * i, A + 13.4, 19.5, 7.2, t, FILL["n"], sub=sub, fs=6.6) for i, (t, sub) in enumerate(
+        [("Linear", "own state, time since, G, heading"), ("3 embeddings", "altitude, angle, speed words"), ("Linear", "token of the runway in force")])]
+    bus = A + 10.8
+    for bb in ins:
+        cx = bb[0] + bb[2] / 2
+        line([cx, cx], [A + 13.4, bus])
+    line([ins[0][0] + ins[0][2] / 2, 68.4], [bus, bus])
+    plus(70, bus); plus(90, bus)
+    arrow(ax, (71.6, bus), (88.4, bus), "x", lxy=(80, bus + 0.8), fs=6.4, lw=0.9, ms=6)
+    arrow(ax, (91.6, bus), (99.4, bus), None, lw=0.9, ms=6)
+    ax.text(95.5, bus - 1.6, "input of\nlayer 1", ha="center", va="top", fontsize=5.8, color=C["ink2"])
+    tok = box(ax, 23, A + 1.0, 29, 6.8, "Token network", FILL["a"], sub="Linear, GELU, Linear; the same for every candidate", fs=6.3)
+    pool = box(ax, 58, A + 1.0, 28, 6.8, "Candidate pool", FILL["a"], sub="attention: query = x, keys and values = tokens", fs=6.3)
+    ax.text(1, A + 4.4, "candidate vectors", fontsize=6.0, color=C["ink2"], va="center"); arrow(ax, (15.5, A + 4.4), (22.8, A + 4.4), lw=0.8, ms=5)
+    arrow(ax, anchor(tok, "r"), anchor(pool, "l"), lw=0.8, ms=5)
+    arrow(ax, (80, bus), (80, A + 7.9), None, lw=0.8, ms=5, ls=(0, (2, 2)))
+    line([86, 90, 90], [A + 4.4, A + 4.4, bus - 1.7]); arrow(ax, (90, bus - 3.6), (90, bus - 1.7), lw=0.9, ms=5)
+    # ---- (b) one layer: the rail is the vector of the row; each group reads a copy and adds to the rail
+    rail = B + 1.5
+    line([4, 99.4], [rail, rail], lw=1.4)
+    ax.text(1, rail, "x", fontsize=6.8, color=C["ink2"], va="center")
+    def group(x0, x1, title, boxes, fc, widths=None):
+        ax.add_patch(FancyBboxPatch((x0, B + 4.4), x1 - x0, 12.6, boxstyle="round,pad=0,rounding_size=1", fc="none", ec=C["ink3"], lw=0.8, ls=(0, (4, 3)), zorder=1))
+        ax.text(x0 + 1.2, B + 15.2, title, fontsize=6.2, color=C["ink2"], va="center", fontweight="bold")
+        line([x0 + 1.0, x0 + 1.0], [rail, B + 9.4]); arrow(ax, (x0 + 1.0, B + 9.4), (x0 + 2.2, B + 9.4), lw=0.9, ms=5)
+        placed = []
+        widths = widths or [(x1 - x0 - 3.4) / len(boxes) - 1.6] * len(boxes)
+        bx = x0 + 2.2
+        for (t, sub), w in zip(boxes, widths):
+            placed.append(box(ax, bx, B + 6.0, w, 6.8, t, fc, sub=sub, fs=6.0)); bx += w + 1.6
+        for lo, hi in zip(placed[:-1], placed[1:]): arrow(ax, anchor(lo, "r"), anchor(hi, "l"), lw=0.8, ms=4)
+        last = placed[-1]; cx = last[0] + last[2] / 2
+        arrow(ax, (cx, B + 6.0), (cx, rail + 1.7), lw=0.9, ms=5); plus(cx, rail)
+    group(4, 56, "causal time attention", [("LayerNorm", None), ("Q, K, V", "one Linear"), ("RoPE", "by time in s"), ("Attention", "rows ≤ this row"), ("Linear", None)], FILL["b"])
+    group(58, 74, "added module", [("Traffic attention", "no norm")], FILL["c"])
+    group(76, 99.4, "feed-forward", [("LayerNorm", None), ("Feed-forward", "Linear, GELU, Linear")], FILL["b"], widths=[7.5, 11.0])
+    # ---- (c) the five heads: h feeds all of them; each head passes its word on to the next
+    names = ["Runway", "Heading", "Altitude", "Angle", "Speed"]
+    xs = [1 + 21.7 * i for i in range(5)]
+    box(ax, 1, 10.4, 98.8, 4.6, "h: output of (b), after a final LayerNorm", FILL["n"], fs=6.8)
+    for i, n_ in enumerate(names):
+        box(ax, xs[i], 0, 11, 7.0, n_, FILL["b"], bold=True, fs=7.2)
+        arrow(ax, (xs[i] + 5.5, 10.3), (xs[i] + 5.5, 7.1), lw=0.9, ms=5)
+        if i < 4: arrow(ax, (xs[i] + 11, 3.5), (xs[i + 1], 3.5), lw=1.9, ms=7, color=C["word"])
+    ax.set_ylim(-0.3, H)
+    save(fig, "fig18_prior_layers")
+
+
+
+
+# ------------------------------------------------------------------ Fig 19: the traffic attention
+def fig19_traffic_attention() -> None:
+    fig, ax, H = canvas(DOUBLE, 2.4)
+    plus = lambda x, y: (ax.add_patch(plt.Circle((x, y), 1.5, fc="white", ec=C["ink2"], lw=0.9, zorder=4)), ax.text(x, y - 0.1, "+", ha="center", va="center", fontsize=8, zorder=5))
+    ax.text(1, 32.4, "Once for each step: the tokens of the other aircraft", fontsize=7.0, fontweight="bold", va="center")
+    ax.text(1, 15.6, "In each layer: one attention from the row to the tokens", fontsize=7.0, fontweight="bold", va="center")
+    oth = box(ax, 1, 20.5, 22, 8.0, "Other aircraft", FILL["n"], sub="20 features each", fs=6.6)
+    net = box(ax, 28, 20.5, 30, 8.0, "Traffic token network", FILL["c"], sub="Linear, GELU, Linear; run once per step", fs=6.6)
+    tok = box(ax, 63, 20.5, 20, 8.0, "Tokens", FILL["c"], sub="N tokens", fs=6.6)
+    arrow(ax, anchor(oth, "r"), anchor(net, "l"), lw=0.9, ms=5); arrow(ax, anchor(net, "r"), anchor(tok, "l"), lw=0.9, ms=5)
+    ax.text(91.5, 24.5, "N: the other\naircraft of the\nstep (any number)", fontsize=5.8, color=C["ink2"], ha="center", va="center")
+    xb = box(ax, 1, 2.0, 11, 7.0, "x", FILL["n"], bold=True, sub="the row", fs=7.0)
+    ln = box(ax, 17, 2.0, 17, 7.0, "LayerNorm", FILL["b"], fs=6.6)
+    att = box(ax, 40, 2.0, 36, 7.0, "Attention, 4 heads", FILL["c"], sub="query: the row; keys, values: the tokens", fs=6.6)
+    lin = box(ax, 81, 2.0, 12, 7.0, "Linear", FILL["c"], sub="starts at 0", fs=6.6)
+    arrow(ax, anchor(xb, "r"), anchor(ln, "l"), lw=0.9, ms=5); arrow(ax, anchor(ln, "r"), anchor(att, "l"), lw=0.9, ms=5); arrow(ax, anchor(att, "r"), anchor(lin, "l"), lw=0.9, ms=5)
+    arrow(ax, (73, 20.4), (73, 9.1), "keys, values", lxy=(74.2, 13.2), ha="left", fs=6.0, lw=0.9, ms=5)
+    plus(97.5, 5.5)
+    arrow(ax, anchor(lin, "r"), (95.9, 5.5), lw=0.9, ms=5)
+    ax.text(97.5, 1.4, "added\nto x", fontsize=5.6, color=C["ink2"], ha="center", va="top")
+    ax.set_ylim(-1.8, H)
+    save(fig, "fig19_traffic_attention")
 
 
 # ------------------------------------------------------------------ Fig 10: one column of the speaker
@@ -131,33 +240,43 @@ def fig11_cv_design() -> None:
 
 
 # ------------------------------------------------------------------ Fig 12: the post-training loop
+def _post_training_loop(name, method, msub, usub) -> None:
+    """The loop of one post-training method: the top row is the same for both methods; the bottom row is the method."""
+    fig, ax, H = canvas(DOUBLE, 2.9)
+    oy = 3.0
+    win = box(ax, 1, oy + 26, 15, 10, "Window", FILL["n"], sub="recorded traffic", fs=6.8)
+    pri = box(ax, 20, oy + 26, 22, 10, "Prior + traffic attention", FILL["b"], bold=True, sub="speaks under its masks", fs=6.6)
+    exe = box(ax, 46, oy + 26, 15, 10, "Executor", FILL["a"], sub="flies the words", fs=6.8)
+    jdg = box(ax, 65, oy + 26, 18, 10, "Judges", FILL["a"], sub="outcome, separation", fs=6.8)
+    rew = box(ax, 87, oy + 26, 12, 10, "Reward", FILL["c"], sub="1, 0.9ⁿ, 0", fs=6.8)
+    arrow(ax, anchor(win, "r"), anchor(pri, "l"), None)
+    arrow(ax, anchor(pri, "r"), anchor(exe, "l"), None)
+    arrow(ax, anchor(exe, "r"), anchor(jdg, "l"), None)
+    arrow(ax, anchor(jdg, "r"), anchor(rew, "l"), None)
+    met = box(ax, 40, oy + 5, 26, 12, method, FILL["c"], sub=msub, fs=6.8)
+    upd = box(ax, 72, oy + 5, 17, 12, "Update of the prior", FILL["c"], bold=True, sub=usub, fs=6.4)
+    bas = box(ax, 92, oy + 5, 7.5, 12, "Base", FILL["b"], sub="frozen", fs=6.4)
+    ax.plot([93, 93, 53], [oy + 26, oy + 21.5, oy + 21.5], color=C["ink2"], lw=0.9, zorder=2)
+    arrow(ax, (53, oy + 21.5), anchor(met, "t"), None)
+    ax.text(73, oy + 22.3, "reward", fontsize=5.6, color=C["ink2"], ha="center", va="bottom")
+    arrow(ax, anchor(met, "r"), anchor(upd, "l"), "samples", lxy=(69, oy + 11.3), fs=5.6)
+    arrow(ax, anchor(bas, "l"), anchor(upd, "r"), None)
+    ax.plot([80.5, 80.5, 31, 31], [oy + 5, oy + 1.8, oy + 1.8, oy + 26], color=C["ink2"], lw=0.9, zorder=2)
+    arrow(ax, (31, oy + 24.5), (31, oy + 26), None)
+    ax.text(55, oy + 2.4, "new weights", fontsize=5.8, color=C["ink2"], ha="center", va="bottom")
+    ax.text(50, 1.0, "Data term: teacher forcing on the landed sentences of the train days. The other aircraft of a window fly their records.",
+            ha="center", fontsize=5.9, color=C["ink2"], va="center")
+    save(fig, name)
+
+
 def fig12_post_training_loop() -> None:
-    fig, ax, H = canvas(DOUBLE, 3.9)
-    ax.add_patch(FancyBboxPatch((1, 4), 22, 46, boxstyle="round,pad=0,rounding_size=1.2", fc=FILL["n"], ec=C["ink2"], lw=0.9, zorder=1))
-    ax.text(12, 47.5, "Window of\nrecorded traffic", ha="center", va="center", fontsize=7, fontweight="bold")
-    for x, y in [(6, 14), (13, 24), (17, 12), (8, 33), (15, 38)]:
-        ax.add_patch(Polygon([[x, y + 1.6], [x - 1.1, y - 1.2], [x + 1.1, y - 1.2]], fc=C["obs"], ec="none", zorder=3))
-        ax.plot([x, x + 3.2], [y - 0.2, y - 2.4], color=C["obs"], lw=0.8, zorder=2, ls=(0, (2, 2)))
-    ax.text(12, 6.5, "other aircraft fly\ntheir records", ha="center", fontsize=6.4, color=C["ink2"], va="center")
-    pri = box(ax, 30, 38, 24, 10, "Prior + traffic attention", FILL["b"], bold=True, sub="speaks for one aircraft")
-    exe = box(ax, 30, 23, 24, 9, "Executor", FILL["a"], sub="flies the words")
-    jdg = box(ax, 30, 8, 24, 9, "Judge and separation judge", FILL["a"], sub="outcome, loss of separation")
-    rew = box(ax, 62, 8, 16, 9, "Reward", FILL["c"], sub="1, 0.9ⁿ or 0")
-    bra = box(ax, 62, 23, 16, 11, "Branch training", FILL["c"], sub="K = 8 copies", fs=6.8)
-    upd = box(ax, 85, 23, 14, 17, "Update of\nthe prior", FILL["c"], bold=True)
-    ax.text(92, 25.4, "clipped ratio\n+ 0.04 × pull\n+ data term", ha="center", va="bottom", fontsize=5.8, color=C["ink2"], zorder=6)
-    bas = box(ax, 85, 5, 14, 8.5, "Base model", FILL["b"], sub="frozen copy")
-    arrow(ax, (23, 43), (30, 43), "tokens", lxy=(26.5, 43.8))
-    arrow(ax, anchor(pri, "b"), anchor(exe, "t"), "words", lxy=(42.8, 34.2), ha="left")
-    arrow(ax, anchor(exe, "b"), anchor(jdg, "t"), "flown track", lxy=(42.8, 18.7), ha="left")
-    arrow(ax, anchor(jdg, "r"), anchor(rew, "l"), "outcome", lxy=(58, 13.2))
-    arrow(ax, anchor(rew, "t"), anchor(bra, "b"), "reward", lxy=(70.5, 18.4), ha="left")
-    arrow(ax, anchor(bra, "r"), (85, 28.5), "samples", lxy=(81.5, 29.6), fs=5.8)
-    arrow(ax, anchor(bas, "t"), (92, 23), "pull", lxy=(93, 17.2), ha="left")
-    ax.plot([92, 92, 42], [40, 53, 53], color=C["ink2"], lw=0.9, zorder=2)
-    arrow(ax, (42, 53), (42, 48), None)
-    ax.text(67, 53.7, "new weights", ha="center", fontsize=6.4, color=C["ink2"], va="bottom")
-    save(fig, "fig12_post_training_loop")
+    _post_training_loop("fig12_post_training_loop", "Branch training", "8 copies at each branch point;\nadvantage inside each group",
+                        "clipped ratio\n+ 0.04 × pull + data term")
+
+
+def fig17_landed_training() -> None:
+    _post_training_loop("fig17_landed_training", "Keep the landed sentence", "each window spoken several times;\nthe landing of highest reward kept",
+                        "log-likelihood\n+ 0.04 × pull + data term")
 
 
 # ------------------------------------------------------------------ Fig 13: branch training
@@ -223,6 +342,46 @@ def fig14_traffic_features() -> None:
     save(fig, "fig14_traffic_features")
 
 
+# ------------------------------------------------------------------ Fig 16: the four kinds of window
+def fig16_window_kinds() -> None:
+    fig, ax, H = canvas(DOUBLE, 3.2)
+    y0 = 29.0
+
+    def plane(x, y, col, label=None, hollow=False, size=1.0):
+        ax.add_patch(Polygon([[x + 2 * size, y], [x - 1.4 * size, y + 1.6 * size], [x - 1.4 * size, y - 1.6 * size]],
+                             fc="white" if hollow else col, ec=col, lw=1.0 if hollow else 0, ls=(0, (2, 1.5)) if hollow else "-", zorder=4))
+        if label:
+            ax.text(x, y + 4.2 * size, label, ha="center", fontsize=6.0, color=col, fontweight="bold")
+
+    panels = [("(a) Real", ["the recorded traffic", "of the commanded", "flight"]),
+              ("(b) A: inserted", ["one more flight, shifted", "to land within 180 s of", "the commanded one"]),
+              ("(c) D: leader moved", ["the aircraft ahead is", "shifted in time by", "−120 s to +120 s"]),
+              ("(d) B: start moved", ["the commanded aircraft's", "turn ±15°, height ±300 m,", "speed × (1 ± 0.1)"])]
+    for i, (title, lines) in enumerate(panels):
+        x = 1 + i * 25
+        ax.text(x + 1, 44, title, fontsize=7, fontweight="bold", va="center")
+        ax.plot([x + 1, x + 21], [y0, y0], color=C["ink3"], lw=1.0, ls=(0, (4, 3)))
+        ax.add_patch(Rectangle((x + 20.2, y0 - 1.0), 1.6, 2.0, fc=C["ink"], ec="none"))
+        ax.text(x + 21, y0 - 4.0, "threshold", ha="center", fontsize=5.4, color=C["ink2"])
+        plane(x + 4, y0, C["flown"], "commanded" if i != 3 else None)
+        plane(x + 13, y0, C["obs"], "leader" if i != 2 else None)
+        for k, t in enumerate(lines):
+            ax.text(x + 1, 19.5 - k * 3.2, t, fontsize=5.9, color=C["ink2"], va="center")
+    # (b) the inserted aircraft
+    plane(1 + 25 + 9, y0 + 8.5, C["corr"], "inserted"); ax.plot([26 + 1, 26 + 21], [y0 + 8.5, y0 + 8.5], color=C["ink3"], lw=0.7, ls=(0, (2, 3)))
+    # (c) the leader, before and after the shift
+    plane(1 + 50 + 13, y0, C["obs"], None, hollow=True)
+    plane(1 + 50 + 17.5, y0, C["corr"], "leader moved")
+    ax.annotate("", xy=(1 + 50 + 16.2, y0 - 2.6), xytext=(1 + 50 + 13, y0 - 2.6), arrowprops=dict(arrowstyle="-|>", color=C["corr"], lw=0.8))
+    # (d) the commanded aircraft, before and after the move
+    plane(1 + 75 + 4, y0, C["flown"], None, hollow=True)
+    plane(1 + 75 + 7, y0 + 7.5, C["corr"], "commanded, moved")
+    ax.annotate("", xy=(1 + 75 + 6.2, y0 + 5.6), xytext=(1 + 75 + 4, y0 + 1.6), arrowprops=dict(arrowstyle="-|>", color=C["corr"], lw=0.8))
+    ax.text(50, 6.0, "The commanded aircraft is always the one that speaks; the others fly their records. A round draws the four kinds from the same flights.",
+            ha="center", fontsize=6.0, color=C["ink2"], va="center")
+    save(fig, "fig16_window_kinds")
+
+
 # ------------------------------------------------------------------ Fig 15: the outcomes of the judge
 def fig15_judge_outcomes() -> None:
     fig, ax, H = canvas(DOUBLE, 4.6)
@@ -261,5 +420,5 @@ def fig15_judge_outcomes() -> None:
 
 
 if __name__ == "__main__":
-    for name in sys.argv[1:] or ["fig01_architecture", "fig08_prior_architecture", "fig10_decoding", "fig11_cv_design", "fig12_post_training_loop", "fig13_branch_training", "fig14_traffic_features", "fig15_judge_outcomes"]:
+    for name in sys.argv[1:] or ["fig01_architecture", "fig08_prior_architecture", "fig10_decoding", "fig11_cv_design", "fig12_post_training_loop", "fig13_branch_training", "fig14_traffic_features", "fig15_judge_outcomes", "fig16_window_kinds", "fig17_landed_training", "fig18_prior_layers", "fig19_traffic_attention"]:
         globals()[name]()

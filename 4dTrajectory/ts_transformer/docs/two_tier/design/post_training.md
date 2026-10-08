@@ -72,6 +72,7 @@ the measurements behind it are in §6 or in the readout named.
 | D171 | **Training with a value function** (C22; stage C's P54). A third method, `Settings.method` = `value`, in the same runner and campaign schema as the others (D165). Each window of a round is spoken one time; there is no second pass and no branch group. A value network V gives, from the state at each said row, the reward expected at the sentence's end; each said row's advantage is GAE's (γ = 1, λ = 0.95); the model's loss is §2 item 5's, every said row up to the event counted. V is used only in training: beside what the model reads, it reads the recorded aircraft's future and the time left before the judge's time limit, the one exception to outline principle 7 (vocabulary D90); the model reads no future and speaks without V, and no readout reads V. The first `value_warmup` rounds train V alone; the model does not move. V is kept in a file of its own beside each round's checkpoint (`ts-post-value-v1`); the checkpoint's format and identity do not change, so every reader of a round reads a value round as any other, and a start from a round (D162; multi-aircraft control D164) reads no V. The rules: §2 item 10; the centring and V's passes: D173; the readings of C22: D174. Why: a branch group gives the same advantage to every row after its branch point (§2 item 9); a value of each row's state gives each row its own, and one sentence a window frees most of a round's speaking. V's future comes from aircraft that do not react to the words, so the advantages stay unbiased (Claude's reading; close to the input-dependent baselines of Mao et al., 2019, and the asymmetric critic of Pinto et al., 2018; the texts were not read for this design) | Decided | User, 2026-10-07 (the method; V asymmetric, reading the recorded aircraft's future and the time left; one sentence a window; V warmed up alone, 2 rounds); the rest: Claude |
 | D173 | **The value method's centring and V's passes** (C23; stage C's P56). Two settings of the value method, each with the behaviour before it as its default (the user's standing permission, root `CLAUDE.md`, 2026-10-07): (a) `Settings.advantage_centering` (default False): after V at the round's start has read every sample (§2 item 10 point 4), each counted row's advantage is less the mean of the round's counted rows' advantages — the mean only, not divided by the spread; the targets stay A_t + v_t before the centring; both stay fixed for the round's passes. (b) `Settings.value_epochs` (default None: every pass, as before): V takes its steps only in the round's first `value_epochs` passes, on the same updates as the model; at most `epochs`; a warm-up round takes V's passes only. Each is refused by name, other than its default, under another method. Why: V fitted each round's samples closely after its passes and read the next round's new samples too low, so most advantages were positive and the model was pushed toward its own samples (stage C's experiment log); the centring takes that offset off each round, and fewer passes of V fit each round's samples less | Decided | User, 2026-10-08, on stage C's proposal |
 | D174 | **Stage C's readings of C22, accepted as built** (stage C's requests note, 2026-10-08): (a) an update of the value method takes `update_groups` samples, one sentence each and a piece each (as D165's kept sentences); (b) with `value`, `continuations` is 1 (one sentence a window), refused by name otherwise; (c) V's future of a recorded aircraft is its edge features (`EDGE_FEATURES`), not its own motion, each horizon with a flag that it is in the air then; the time to its landing reads its record's landing time, 0 once it has landed; (d) the time left is the executor's time limit in force (its go-arounds' extensions included) less the flight's time flown, over 900 s; (e) V's head is d + 1 → 64 → 1 with GELU, its first weights drawn from a seed derived from the campaign's (`value_seed`); (f) the warm-up's check: from the base, rounds 1 … against round 0 (round 0 has no readout before it); from a round, against that round's readout only when the select seed and the select windows an airport are the source's, else recorded as not compared | Decided | User, 2026-10-08 |
+| D175 | **The diagnostic readout** (C24; stage C's request, the user's choice of 2026-10-08: G2, then G1). A runner, `experiments/post_diagnose.py` (`runners.md` R66), reads chosen rounds of stage C's campaigns on their selection readout's windows with its numbers (`selection_windows`, `readout_numbers`): select days only, never val (outline D85), no training; a campaign of another schema than `ts-post-train-v1` is refused. **Traffic off.** Each model is read with its traffic attention, and with `--traffic-off` again with the output layer of every traffic module set to zero (`traffic_modules`, `TrafficAttention.out`: the start's initialisation, §2 item 1, prior §7 item 5), the rest of the model unchanged; the option is this runner's only. **Checks.** In one process, the read with traffic on comes first and must give its round's `round.json` readout again, refused by name otherwise (as D161's draw 0); the read with traffic off follows. The models compared read the same windows (by their flights and start times), refused by name otherwise. A model whose traffic output is zero (a campaign's start) is not read: its results per window are D161's draw 0 of that start, which read the same windows with the same numbers. **What a read writes.** One line per window: its place, airport, kind, outcome, reward, go-arounds, the loss's step, its other aircraft and `loss_reads_fault` (D114); for each window that lost separation, five fields: (1) the other aircraft — `no_landing` when its record has no landing; else `leader` or `follower` when it lands on the commanded aircraft's runway (its runway in force at the loss, else its recorded runway) or on one separated as one (`airport_separation`), ahead of it or behind it on the approach clock at the loss (`approach_clock_m`); else `other_runway`; (2) the commanded aircraft's horizontal distance to that runway's threshold at the loss: 0–10, 10–20, 20–40, over 40 km; (3) the time from its first predicted step to the loss: below 60, 60–120, 120–300, over 300 s; (4) in conflict at the start: the commanded aircraft moved along a straight line at its velocity at its first predicted step, the other aircraft on its record (as the loop flies it), the pair judged by the one judge (`inference/separation.py`, `VISUAL`) at each Δ row up to the loss or 120 s after the first predicted step, whichever is earlier — whether it loses separation there; (5) for a round that D161's readout read, whether the window lost separation in every one of its draws. **Outputs**: a directory per model, `outputs/POOLED/post/diagnose_<campaign>_r<round>_<date>`: `intent.json` (the decision rules, written before the read), `summary.json` (landed, lost separation and mean reward, in all and by airport, with traffic on and off; the paired differences between reads with a 95 % interval from 2,000 bootstrap resamples of the windows), `failures.json` (each field's counts and shares, in all and by airport), `per_window.jsonl`, the log and `SHA256SUMS`; read-only after the run. Why: before another training method, measure whether the model uses the traffic it reads, and which losses of separation are left; field 4 moves only the commanded aircraft along a straight line because the other aircraft flies its record whatever is said, and only for 120 s (D37's interval) because a straight line stands for a turning arrival only over a short time | Decided | User, 2026-10-08 (G2 then G1, the models and the fields on stage C's request); the definitions of the fields and the checks: Claude |
 
 ### 0.2 Open items
 
@@ -99,7 +100,9 @@ commits, the tests and the readings are in the implementation log.
 | C20 (D169) | Code `2e2e860f` (reviewed), merged into `dev-two-tier` (the user's word): `Settings.epochs` (default 1), `post.loss.passes`, each pass's numbers and means (log §30) |
 | C21 (D170) | Code `1ce26b63` (reviewed), merged into `dev-two-tier` (`a72829f3`, the user's word); its first campaign runs (log §30) |
 | C22 (D171) | Code `6a0e45fe` (reviewed), merged into `dev-two-tier` (`c1e39964`, the user's word); its first campaign ran (log §30) |
-| C23 (D173) | Code `9017541e` (reviewed), merged into `dev-two-tier` (`e1a3e123`, the user's word); its campaign runs (log §30) |
+| C23 (D173) | Code `9017541e` (reviewed), merged into `dev-two-tier` (`e1a3e123`, the user's word); its campaign ran (below its start) (log §30) |
+| C24 (D175) | Code `5880f26e` (reviewed, two rounds), on `dev-two-tier-v4-post`, not yet merged; dev-two-tier can fast-forward to it (log §30) |
+| The validation readout of the chosen round | Done 2026-10-08: the user chose `post_seg60_20261007` round 5 (D7); val read once: landed 88.9 %, mean reward 0.880 (log §30; the experiment log) |
 | The validation readout of the chosen round | Built and reviewed on synthetic artefacts (`post_validation`, `0c95a821`, log §23; D132 `483b81d7`) |
 | C12 | After C10 |
 
@@ -109,8 +112,8 @@ commits, the tests and the readings are in the implementation log.
 2. C15 (D161, the ceiling readout: `outputs/POOLED/post/ceiling_20261007`, log §28) and C16 (D162) are done.
 3. C17–C20 (D165, D167–D169) are built. The campaigns are experiments within the design: their settings and intents
    in `docs/experiments/intents.json`, their results in stage C's log, each run from a run worktree (outline D163) with
-   no other job on the host or the GPU. C21 (D170) and C22 (D171) are built; C23 (D173) next; the campaigns are the
-   user's choice.
+   no other job on the host or the GPU. C21–C23 (D170, D171, D173) are built; C24 (D175), the diagnostic readout,
+   next; the campaigns are the user's choice.
 4. The validation readout of the round that the user chooses, then its speed (frontend §3 item 10, `model_speed`), with
    no other job on the host or the GPU.
 5. C12.
@@ -122,7 +125,7 @@ commits, the tests and the readings are in the implementation log.
    nothing of them goes into C10's worktree.
 
 Every other milestone from now on is built by stage D's implementer (it takes over stage B's) on `dev-two-tier-v4`, in the worktree
-`.claude/worktrees/two-tier-v4` (outline §5 rule 1); C23 by stage C's implementer on `dev-two-tier-v4-post` (worktree
+`.claude/worktrees/two-tier-v4` (outline §5 rule 1); C24 by stage C's implementer on `dev-two-tier-v4-post` (worktree
 `.claude/worktrees/two-tier-v4-post`), first brought level with `dev-two-tier`.
 
 ---
@@ -533,6 +536,7 @@ campaign), `ts-post-checkpoint-v1`, `ts-post-value-v1` (V's file, D171), `post-w
 | The census (runner) | `experiments/post_windows.py` |
 | The campaign (runner, C10) | `experiments/post_train.py` `draw_round`, `batches`, `speak_round`, `train_pass`, `selection_readout`, `run_campaign` |
 | The profile (runner, C8) | `experiments/post_profile.py` |
+| The diagnostic readout (runner, C24, D175; to be built) | `experiments/post_diagnose.py` |
 | The Training export (runner, C11) | `experiments/post_training_export.py` |
 | The live segment of a window | `aeroviz_backend/autopilot_segment/window.py` (`POST /autopilot/window-segment`) |
 | The window view | `aeroviz-4d/src/data/trainingWindowSample.ts`, `trainingWindowAutopilot.ts`, `hooks/useTrainingWindowLayer.ts`, `components/training/TrainingWindowSession.tsx` |
@@ -542,9 +546,9 @@ campaign), `ts-post-checkpoint-v1`, `ts-post-value-v1` (V's file, D171), `post-w
 
 ## 8 Milestones not done
 
-C0–C7, C9, C10, C11 and C13–C22 are done; their specifications are in the implementation log (§22, §26–§30; C13's check in stage B's log §6). The rules of outline §5 apply:
+C0–C7, C9, C10, C11 and C13–C23 are done; their specifications are in the implementation log (§22, §26–§30; C13's check in stage B's log §6). The rules of outline §5 apply:
 from 2026-10-06 one implementer builds every milestone of every stage (outline §5 rule 1: stage D's, which takes over
-stage B's remaining steps); stage C's implementer builds C23 and runs the campaigns of its experiments.
+stage B's remaining steps); stage C's implementer builds C24 and runs the campaigns and readouts of its experiments.
 
 **C8. Profile and the go-around probability** (§2 item 6). After B5's base and Claude's check of stage B.
 
@@ -568,14 +572,14 @@ stage B's remaining steps); stage C's implementer builds C23 and runs the campai
   as §4 item 2. Tests: it refuses a second read; it reads no train or select window.
 - A formal campaign and its validation readout refuse a base that is not stage B's formal base (D132).
 
-**C23. The value method's centring and V's passes** (D173). `Settings.advantage_centering` (default False) and
-`Settings.value_epochs` (default None); the centring after V at the round's start has read the samples, before the
-passes; V's steps only in the first `value_epochs` passes; `round.json` records the mean taken off and V's passes.
-Tests: with the defaults a value round is the code's before, bit for bit; with the centring the round's counted rows'
-advantages have mean 0 and the targets are the ones before the centring; with `value_epochs` 1 and `epochs` 4, V's
-weights change in the first pass only and the model's in all four; `value_epochs` above `epochs` is refused; either
-setting other than its default is refused under another method; a record without the fields opens with the
-defaults; a resume compares them.
+**C24. The diagnostic readout** (D175). `experiments/post_diagnose.py` and its entry in `docs/reference/runners.md`
+(R66): the reads with traffic on and off, the checks, the five fields, the outputs. Built on `post_train`'s
+`selection_windows`, `read_batch` and a round's model, and on `post_ceiling`'s check. Tests on synthetic artefacts: a
+read with traffic on gives its round's readout again, and one that differs is refused; with traffic off every traffic
+module's output layer is zero and every other weight unchanged; a model whose traffic output is zero reads the same on
+and off; reads of other windows are refused; each value of field 1, the edges of the bins of fields 2 and 3, a
+straight-line loss before 120 s and one after it (field 4); it reads no train or val window; the outputs are written
+and sealed. Light tests while a campaign runs.
 
 **C12. Close of stage C.** The full ts suite passes. The implementation log and `docs/reference/runners.md` are
 updated; the report gives the code index for §7 (outline §5 rule 10). Report to the user: the commits, the rounds and
