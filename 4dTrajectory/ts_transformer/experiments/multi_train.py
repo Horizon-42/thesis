@@ -78,7 +78,7 @@ from ts_transformer.experiments.post_train import (
 )
 from ts_transformer.experiments.post_window_loop import LANDED, LOST_SEPARATION, WindowLoop, checked_edges
 from ts_transformer.multi import credit
-from ts_transformer.multi.census import WindowCount, flown_positions, window_losses
+from ts_transformer.multi.census import WindowCount, loop_positions, window_losses
 from ts_transformer.multi.separation import PAIRS, Answering
 from ts_transformer.multi.timing import (
     delays, landed, loop_spacings, order, quantiles, record_spacings, recorded_landings,
@@ -335,12 +335,8 @@ def window_losses_of(window: Window, ends: Sequence[Any], start: int, context: A
     code = window.scene.geometry.code
     count = WindowCount(airport=code, kind=kind_of(window), commanded=len(ends), recorded_at_first_steps=[],
                         left_out_by=[])
-    several = len(ends) > 1
-    positions = flown_positions(window, [(e.states, e.words, start,
-                                          int(e.crossing["runway_index"]) if several and e.crossing is not None else None)
-                                         for e in ends], context.words)
-    window_losses(window, positions, context.separations[code], context.finals[code], context.words.spec.step_s,
-                  count)
+    window_losses(window, loop_positions(window, ends, start, context.words), context.separations[code],
+                  context.finals[code], context.words.spec.step_s, count)
     return dict(count.loss_steps), count.steps
 
 

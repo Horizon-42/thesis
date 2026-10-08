@@ -220,6 +220,7 @@ def test_stage_d_s_positions_and_listed_parts_are_the_readout_s(tmp_path, monkey
     import numpy as np
 
     from ts_transformer.experiments import multi_train
+    from ts_transformer.multi import census
     from ts_transformer.post.window_lists import IDENTITY_FIELDS, SELECTION_FIELDS
 
     s, two, window, model, keys = two_window(tmp_path, monkeypatch)
@@ -233,7 +234,7 @@ def test_stage_d_s_positions_and_listed_parts_are_the_readout_s(tmp_path, monkey
         return read
 
     monkeypatch.setattr(multi_export, "flown_positions", capture("export"))
-    monkeypatch.setattr(multi_train, "flown_positions", capture("readout"))
+    monkeypatch.setattr(census, "flown_positions", capture("readout"))       # the readout's, through `loop_positions`
     settings = SimpleNamespace(spans_s=[window.span_s], batch_rows=[2], seed=2027, select_per_airport=1)
     flying = multi_export.stage_d_flying(two, settings, multi_export.STAGE_D.readout_numbers(settings))
     flown_ends = []
@@ -259,7 +260,7 @@ def test_stage_d_s_positions_and_listed_parts_are_the_readout_s(tmp_path, monkey
 
     landed = [replace(e, crossing={"runway_index": k}) for k, e in enumerate(ends)]
     monkeypatch.setattr(multi_export, "flown_positions", stop("export landed"))
-    monkeypatch.setattr(multi_train, "flown_positions", stop("readout landed"))
+    monkeypatch.setattr(census, "flown_positions", stop("readout landed"))
     with pytest.raises(Captured):
         multi_export.round_end(two, flown, 0, window, landed)
     with pytest.raises(Captured):

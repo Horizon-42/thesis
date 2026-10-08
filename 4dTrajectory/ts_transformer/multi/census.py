@@ -105,6 +105,19 @@ def flown_positions(window: Window, flown: Sequence[tuple[np.ndarray, np.ndarray
     return Positions(at, end_s, False)
 
 
+def loop_positions(window: Window, ends: Sequence, start: int, words: Words) -> Positions:
+    """The commanded aircraft of ``window`` at the states the window loop flew them (``ends``: their `WindowResult`s,
+    in the window's order; ``start`` the Δ rows to a first predicted step), as the loop judges them
+    (`post_window_loop.WindowLoop._landed`, `_judged`): `flown_positions` of each one's states and words, and its landed
+    runway only in a window of several commanded aircraft (one that landed is judged once more over its threshold, as a
+    recorded one). The positions stage D's readout and its Training export hand the census (`judged_steps`; frontend
+    D178 (6))."""
+    several = len(ends) > 1
+    return flown_positions(window, [(e.states, e.words, start,
+                                     int(e.crossing["runway_index"]) if several and e.crossing is not None else None)
+                                    for e in ends], words)
+
+
 @dataclass(frozen=True)
 class StepLoss:
     """A loss of a judged step that holds a commanded aircraft: its pair as `classify` reads it (``recorded_only``
