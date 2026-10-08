@@ -1380,3 +1380,12 @@ control of random traffic weights). Claude's readings of D175, for the designer:
 - a value on a bin's edge falls in the upper bin (60 s is "60–120", 40 km "over 40").
 The S3 left (one line each): the start refusal could come before the checks; a test passes the synthetic airport's
 2 s step as the loop's; `main()`'s loss branch is run by no test (its parts are).
+
+**C24 merged and read (2026-10-08):** dev-two-tier fast-forwarded to `bf2a4f04` (the user's word); the reads ran from
+the run worktree `run-post-diagnose` (unit `post-diagnose-194958`, GPU, 19:51–20:07 local, both exit 0; the worktree
+removed after, its data links unlinked). The read with traffic on equalled each round's `round.json` readout.
+`diagnose_post_seg60_20261007_r5_20261008`: on 87.7 %, off 82.2 % (+5.5, 95 % interval +3.5 to +7.6);
+`diagnose_post_train_20261006_r8_20261008`: on 85.7 %, off 80.9 % (+4.8, +2.8 to +6.9), the start (ceiling draw 0)
+79.5 %, off − start +1.4 (−0.8 to +3.6). G1 on P55 with traffic on: 99 losses, 10 % in conflict at the start, 79 % at
+10–20 km, others leader 34 / follower 37 / other runway 28 / no landing 0. Both directories read-only with
+`SHA256SUMS` (checked). The readings against the rules: the experiment log, "诊断读数".
