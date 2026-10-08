@@ -4,6 +4,8 @@
 question of a review is: can a model, the executor, a mask or a judge get information that it must not have, so that a
 result looks good for a wrong reason? The second question is: does the code do what the design says? The guide gives
 the principles, the procedure, a checklist for stages B and C, and the findings of the review of stage A as examples.
+It is for a review of a whole stage that the user orders. A review of one change before its commit follows the
+root `CLAUDE.md`'s "Code review" rules: the diff only, §3 step 6's severities, no tracing through the seams.
 
 **Language.** This guide uses the writing rules of ASD-STE100 (Simplified Technical English): short sentences, active
 voice, one meaning for each word. The words were not checked one by one against the STE dictionary. Units are SI only.
