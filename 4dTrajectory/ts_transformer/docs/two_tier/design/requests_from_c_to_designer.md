@@ -5,17 +5,10 @@ names a public interface must give, and the questions that only the user can dec
 it is rewritten in full each time, never appended to, and an item leaves when it is done. The evidence and the commits
 are in the implementation log (`readouts/2026-10-05_stage_c_implementation_log.md`, cited by §).
 
-**State: 2026-10-07, 18:50 (local).**
-- C19, C18 (`704879d7`) and C20 (`2e2e860f`) are merged into `dev-two-tier` (the user's word; log §30).
-- The campaign with K = 16 and the larger rates (`post_k16lr3_20261007`, the user's, 4 rounds) runs.
-- P54 and P55 decided by the user (items 4, 5); both wait for the designer's text before they are built.
+**State: 2026-10-08, 08:50 (local).**
+- C21, C22 and C23 are merged into `dev-two-tier` (`e1a3e123`); the second value campaign (`post_value2_20261008`, D173)
+  runs.
 
-**Resolved:** items 1–7 of the last version (D161, D162, D165, D167, D168, D169, §9 items 10 and 11).
+**Resolved:** items 1–5 of the last version (D174, §9 items 8 and 11, item 4 in the experiment log, P56 as D173).
 
-| # | Request | For | Log |
-|---|---|---|---|
-| 1 | **A reading of D167 (mine):** "more workers than the measure allows" read as more workers than the measure was checked for and admitted (its `speak_workers`); a launch with as many or fewer reads it. The measure is taken per pair of devices (the pass's, the workers'): a launch on other devices measures. D167 could say so in a line | The designer | §30 |
-| 2 | **`open_campaign`'s `settings_type` (C19).** A resume compares the recorded settings as the stage's settings class reads them, so a setting added with a default (D168, D169) matches an old record. Stage D's runner passes `MultiSettings` (changed in `multi_train.py` and its two tests in this commit). Post-training §9 item 11 could name it among the stage's parts of a campaign (beside `schema` and `reader`) | The designer, stage D | §30 |
-| 3 | **Stage D's merge of C18.** `dev-multi-control` changes `workers_fit` the same way (`held_now`), and its pass line drops the guard for workers on the CPU (`--speak-device`, `ac455d2e`); the merge has to keep the guard. Its `profiled_fit` already subtracts `passed["now"]` from the GPU, which C18's `workers_fit` now does for every caller with nothing held | Stage D | §30 |
-| 4 | **P55, finer credit without a value function — decided by the user (2026-10-07): (a) + (b) at 60 s.** Two campaign settings, each defaulting to the code's behaviour (no record edited): (a) `Settings.segment_only` (default False): a branch group's advantage and pull count only the rows from its branch point to the next one (the last segment to the event), the later words left to the later groups — `post.branches.samples` takes `segment_rows`, passed by stage C's pass only (stage D's pass counts as before); (b) `Settings.branch_every_s` (default 120 s, D37's constant made a setting; a whole number of Δ rows; refused under `--method landed`): `branch_points` and `stage_c_rules` take the interval, the continuations growing in proportion (60 s twice). First campaign: (a) + (b) at 60 s, K = 8, C10's rates, from C10's round 8, 4 rounds. Needs the designer's text (a D number, D37's line, §8 milestone, §9 items 10 and 11) before it is built | The designer | experiment log |
-| 5 | **P54, a value function — decided by the user (2026-10-07).** `--method ppo`: a value V of each row's state, each row's advantage by GAE (γ = 1, λ = 0.95, the sentence's reward at its end), the clipped surrogate per word with its row's advantage, a value loss (weight 0.5), E passes (C20) and the gradient clip (C19); the checkpoint holds V. The user's choices: (1) **V asymmetric**: a separate network, used only in training, that reads the window's recorded tracks, the future included; the model still sees no future and speaks without V; (2) **first sentences only**, V the baseline, no branch continuations (about a third of the speaking; the windows a round can grow); (3) **V warmed up alone for 2 rounds** on the start model's sentences, the policy not moving, before both train. Open for the designer: V's inputs and shape, its loss weight and learning rate, what the warm-up rounds record and read out, the checkpoint's identity with V, the method's name. A design change (about 500–700 lines with tests): the designer writes it into post_training, then I build it | The designer | experiment log |
+No open request.

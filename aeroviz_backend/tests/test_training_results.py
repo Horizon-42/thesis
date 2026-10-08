@@ -30,22 +30,24 @@ def write(path: Path, payload) -> Path:
     return path
 
 
-def listed(root: Path, stage_dir: str, files, set_dirs: list[str], change) -> str:
-    """The stage's fixture index and samples copied under ``root`` (its airport), each entry changed by ``change``."""
+def listed(root: Path, stage_dir: str, files, set_dirs: list[str], change, index_file: str | None = None) -> str:
+    """The stage's fixture index and samples copied under ``root`` (its airport), each entry changed by ``change``; the
+    index written as ``index_file`` (stage D's: the two-aircraft fixture, which stage C's export writes, under stage D's
+    index), else under its own name."""
     index = json.loads((FIXTURES / stage_dir / files.INDEX_FILE).read_text(encoding="utf-8"))
     training = root / index["airport"] / "training"
     training.mkdir(parents=True, exist_ok=True)
     for name in set_dirs:
         shutil.copytree(FIXTURES / stage_dir / name, training / name)
     index["sets"] = [change(entry) for entry in index["sets"]]
-    write(training / files.INDEX_FILE, index)
+    write(training / (index_file or files.INDEX_FILE), index)
     return index["airport"]
 
 
 @pytest.fixture()
 def world(tmp_path):
     outputs = tmp_path / "outputs"
-    roots = {stage: tmp_path / f"airports_{stage}" for stage in "ABC"}        # the fixtures share an airport and an id
+    roots = {stage: tmp_path / f"airports_{stage}" for stage in "ABCD"}       # the fixtures share an airport and an id
     # stage A: the labelling readout (its val block sealed) and the executor's replays at each Δ of the set
     instructions, executor = outputs / "instruction_language" / "v", outputs / "executor" / "v"
     split = {"labelled": 10, "refused": 2, "refusal_reasons": {"impossible ground speed": 2},
@@ -102,9 +104,19 @@ def world(tmp_path):
     airport_b = listed(roots["B"], "stage_b", prior_files, ["fixture_set", "fixture_val"], prior_entry)
     write(prior / f"val_read_{prior_files.CLAIM_READER}.json", {"out": str(val_readout)})
     write(prior / "val_read_prior_validation.json", {"out": str(validation)})
-    # stage C: a campaign of one round, its checks
+    # stage C: a campaign of one round, its checks, started from round 1 of another campaign (D162) on the same windows
+    source = outputs / "post" / "source"
+    write(source / "campaign.json", {"inputs": {"settings": {"start": None, "select_seed": 1337, "select_per_airport": 200}}})
+    write(source / "round_0" / "round.json", {
+        "round": 0, "selection_readout": {"KXXX": {"windows": 1, "reward_mean": 0.5, "outcomes": {"landed": 1}}}})
+    write(source / "round_1" / "round.json", {
+        "round": 1, "selection_readout": {"KXXX": {"windows": 1, "reward_mean": 0.0, "outcomes": {"lost_separation": 1},
+                                                   "faulty_steps": SEALED}}})
     post = outputs / "post" / "campaign"
-    write(post / "campaign.json", {"started_utc": "2026-10-06T00:00:00Z", "checks": {"labeller": {"flights": 3}}})
+    write(post / "campaign.json", {"started_utc": "2026-10-06T00:00:00Z", "checks": {"labeller": {"flights": 3}},
+                                   "inputs": {"settings": {"start": {"campaign": str(source), "round": 1,
+                                                                     "checkpoint_sha256": SEALED},
+                                                           "select_seed": 1337, "select_per_airport": 200}}})
     write(post / "round_0" / "round.json", {
         "round": 0, "speaking": {"windows": 5, "reward_sum": 4.0, "outcomes": {"landed": 4, "lost_separation": 1}},
         "selection_readout": {"KXXX": {"windows": 1, "reward_mean": 1.0, "outcomes": {"landed": 1}, "faulty_steps": SEALED}}})
@@ -114,9 +126,24 @@ def world(tmp_path):
     airport_c = listed(roots["C"], "stage_c", post_files, ["fixture-windows"], lambda e: {
         **e, "model": {**e["model"], "campaign": str(post)},
         "source": {**e["source"], "speed": {**e["source"]["speed"], "readout": str(c_speed)}}})
-    return {"results": {stage: TrainingResults(roots[stage], outputs) for stage in "ABC"},
-            "airports": dict(zip("ABC", (airport_a, airport_b, airport_c))), "outputs": outputs, "roots": roots,
-            "post": post}
+    # stage D: a campaign of one round from stage C's round (D164), its readout's cells by span and kind
+    multi = outputs / "multi" / "campaign"
+    write(multi / "campaign.json", {"started_utc": "2026-10-08T00:00:00Z", "checks": {"labeller": {"flights": 3}},
+                                    "inputs": {"settings": {"start": {"campaign": str(post), "round": 0,
+                                                                      "checkpoint_sha256": SEALED}}}})
+    d_cell = {"windows": 2, "aircraft": 5, "reward_sum": 3.9, "outcomes": {"landed": 4, "lost_separation": 1},
+              "go_arounds": 1, "silent": 1, "speed_mask_rows": SEALED,
+              "loss_windows": {"commanded_commanded": 1, "commanded_answers": 0, "records_kept": 0, "recorded_only": 2}}
+    write(multi / "round_0" / "round.json", {
+        "round": 0, "speaking": {"windows": 4, "reward_sum": 7.5, "outcomes": {"landed": 8, "lost_separation": 1}},
+        "selection_readout": {"KXXX": {"all": {"all": d_cell, "kind": SEALED}, "five": SEALED, "reward_mean": 0.78}}})
+    airport_d = listed(roots["D"], "stage_c_two", post_files, ["fixture-windows-two"], lambda e: {
+        **e, "model": {**e["model"], "campaign": str(multi)},
+        "source": {**e["source"], "speed": {**e["source"]["speed"], "readout": str(c_speed)}}},
+        index_file=post_files.MULTI_INDEX_FILE)
+    return {"results": {stage: TrainingResults(roots[stage], outputs) for stage in "ABCD"},
+            "airports": dict(zip("ABCD", (airport_a, airport_b, airport_c, airport_d))), "outputs": outputs, "roots": roots,
+            "post": post, "source": source}
 
 
 def answered(world, stage, set_id):
@@ -159,6 +186,39 @@ def test_stage_c_answers_its_rounds_and_checks(world):
     assert [r["round"] for r in sections["rounds"]["rounds"]] == [0]
     assert sections["checks"]["checks"] == {"labeller": {"flights": 3}}
     assert sections["speed"]["model"].endswith("campaign round 0")
+    # the start's readout: the source round's own, on the same select windows (frontend §4.3)
+    start = sections["rounds"]["start"]
+    assert start == {"campaign": str(world["source"]), "round": 1, "why": None,
+                     "selection": {"KXXX": {"windows": 1, "rewardMean": 0.0, "outcomes": {"lost_separation": 1}}}}
+
+
+def test_stage_c_answers_no_start_readout_from_the_base_and_none_on_other_windows(world):
+    record = json.loads((world["post"] / "campaign.json").read_text())
+    settings = record["inputs"]["settings"]
+    (world["post"] / "campaign.json").write_text(json.dumps({**record, "inputs": {"settings": {**settings, "start": None}}}))
+    assert answered(world, "C", "fixture-windows")["rounds"]["start"] is None
+    for other in ({"select_seed": 2024}, {"select_per_airport": 100}):
+        (world["post"] / "campaign.json").write_text(json.dumps({**record, "inputs": {"settings": {**settings, **other}}}))
+        start = answered(world, "C", "fixture-windows")["rounds"]["start"]
+        assert start["selection"] is None and "other select windows" in start["why"], other
+
+
+def test_stage_d_answers_its_rounds_by_their_all_cells_and_why_its_start_has_no_readout(world):
+    """`stage=D` (frontend §5.6): stage D's index lists the set; each round what it spoke and its readout at each airport
+    by the ``all`` span and kind (no other cell, no field it does not name); the start, stage C's round, read on stage C's
+    windows: no readout, and why."""
+    sections = answered(world, "D", "fixture-windows-two")
+    (round_,) = sections["rounds"]["rounds"]
+    assert round_["selection"] == {"KXXX": {"windows": 2, "aircraft": 5, "rewardSum": 3.9,
+                                            "outcomes": {"landed": 4, "lost_separation": 1}, "goArounds": 1, "silent": 1,
+                                            "lossWindows": {"commanded_commanded": 1, "commanded_answers": 0,
+                                                            "records_kept": 0, "recorded_only": 2}}}
+    assert round_["speaking"] == {"windows": 4, "rewardSum": 7.5, "outcomes": {"landed": 8, "lost_separation": 1}}
+    start = sections["rounds"]["start"]
+    assert start["selection"] is None and "stage C's windows" in start["why"]
+    assert sections["checks"]["checks"] == {"labeller": {"flights": 3}}
+    # stage C's index does not list it, nor stage D's stage C's set
+    assert world["results"]["C"].answer("C", world["airports"]["D"], "fixture-windows-two")[0] == 404
 
 
 def test_a_file_elsewhere_or_missing_is_answered_by_name(world, tmp_path):
@@ -172,7 +232,7 @@ def test_a_file_elsewhere_or_missing_is_answered_by_name(world, tmp_path):
 
 def test_the_route_refuses_a_bad_stage_and_names_a_set_not_listed(world):
     results = world["results"]["A"]
-    assert results.answer("D", "KXXX", "x")[0] == 400
+    assert results.answer("E", "KXXX", "x")[0] == 400
     status, answer = results.answer("A", world["airports"]["A"], "no_such_set")
     assert status == 404 and "no_such_set" in answer["error"]
     app = AeroVizBackendApp(training_results=results)
@@ -187,12 +247,12 @@ RESULTS_FIXTURE = FIXTURES / "training_results" / "answers.json"
 
 def test_the_frontend_fixture_of_the_answers_is_what_the_route_answers(world):
     """Each stage's answer on the fixture sets, its outputs' paths made fixed names; B's for the set and the claimed val
-    set; C's, and C's with its campaign's file missing."""
+    set; C's, and C's with its campaign's file missing; D's."""
     import os
 
     answers = {}
     for name, stage, set_id in (("A", "A", "fixture_set"), ("B", "B", "fixture_set"), ("Bval", "B", "fixture_val"),
-                                ("C", "C", "fixture-windows")):
+                                ("C", "C", "fixture-windows"), ("D", "D", "fixture-windows-two")):
         answers[name] = world["results"][stage].answer(stage, world["airports"][stage], set_id)[1]
     (world["post"] / "campaign.json").unlink()
     answers["Cmissing"] = world["results"]["C"].answer("C", world["airports"]["C"], "fixture-windows")[1]

@@ -85,7 +85,7 @@ def request(world, window=0, **changes):
     aircraft = aircraft_of(world, window)
     said = aircraft["rounds"][0]
     event = said["events"][0] if said["events"] else {"column": 0, "row": 0}
-    return {"clientId": "page", "seq": 1, "airport": world["sample"]["airport"], "setId": FIXTURE_SET,
+    return {"clientId": "page", "seq": 1, "stage": "C", "airport": world["sample"]["airport"], "setId": FIXTURE_SET,
             "window": window, "aircraft": aircraft["datasetId"], "round": "start", "column": COLUMNS[event["column"]],
             "row": event["row"], **changes}
 
@@ -163,6 +163,12 @@ def test_a_request_is_refused_or_not_listed_by_name(world):
     lost = aircraft_of(world, 1)["rounds"][0]
     with pytest.raises(RequestRefused, match="after the window's end"):           # the lost window ends at its loss
         backend.window.fly(request(world, window=1, seq=8, row=lost["track"]["lastCycle"] // 4 + 1))
+    with pytest.raises(RequestRefused, match="stage"):                               # and the stage whose index lists it
+        backend.window.fly({key: value for key, value in request(world, seq=9).items() if key != "stage"})
+    with pytest.raises(RequestRefused, match="stage 'B' is none of"):
+        backend.window.fly(request(world, stage="B", seq=10))
+    with pytest.raises(NotListed):                                                   # stage D's index lists no such set
+        backend.window.fly(request(world, stage="D", seq=11))
 
 
 class FakeAutopilot:
@@ -197,6 +203,23 @@ def test_the_warm_up_opens_every_listed_window_set(world):
     lines = []
     backend.window.warm_up(lines.append)
     assert any("1 sets ready" in line for line in lines) and post_files.INDEX_FILE == "index_post_v3.json"
+
+
+def test_a_set_of_stage_d_is_found_under_stage_d_s_index_and_warmed_up(world, tmp_path):
+    """Frontend §5.5, §5.7: stage D's sets are listed in ``index_multi_v1.json``, one format with stage C's; a request
+    naming stage D flies a set that index lists (here stage C's set listed there too), and the warm-up opens both."""
+    import shutil
+
+    root = tmp_path / "airports"
+    shutil.copytree(world["root"], root)
+    training = root / world["sample"]["airport"] / "training"
+    shutil.copy(training / post_files.INDEX_FILE, training / post_files.MULTI_INDEX_FILE)
+    backend = SyntheticBackend(root, world["flown"], world["setup"]["words"])
+    answer = backend.window.fly(request(world, stage="D"))
+    assert answer["schema"] == window_segments.SCHEMA and answer["setId"] == FIXTURE_SET
+    lines = []
+    backend.window.warm_up(lines.append)
+    assert any("2 sets ready" in line for line in lines)
 
 
 def test_a_lost_window_s_last_word_ends_at_the_loss(world):
@@ -263,7 +286,10 @@ def test_the_frontend_reads_the_names_the_backend_and_the_export_write():
 
     sample, autopilot = FRONTEND / "trainingWindowSample.ts", FRONTEND / "trainingWindowAutopilot.ts"
     assert ts_constant(sample, "TRAINING_WINDOW_INDEX_SCHEMA") == post_files.INDEX_SCHEMA
-    assert ts_constant(sample, "TRAINING_WINDOW_INDEX_FILE") == post_files.INDEX_FILE
+    files = re.search(r"TRAINING_WINDOW_INDEX_FILES: Record<TrainingWindowStage, string> = \{([^}]*)\}",
+                      sample.read_text(encoding="utf-8"))
+    assert dict(re.findall(r'(\w+): "([^"]*)"', files.group(1))) == {
+        stage: files_of.index_file for stage, files_of in window_segments.STAGE_FILES.items()}
     assert ts_constant(sample, "TRAINING_WINDOW_SAMPLE_SCHEMA") == post_files.SAMPLE_SCHEMA
     assert ts_constant(sample, "TRAINING_WINDOW_SET_KIND") == post_files.SET_KIND
     assert ts_constant(sample, "TRAINING_WINDOW_START") == post_training_export.START == window_segments.START

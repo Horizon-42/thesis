@@ -2,8 +2,8 @@
  * trainingTabs.ts
  * ---------------
  * WHICH SENTENCE IS ON SCREEN, in every stage (outline §6.2 item 2): the session of the set on screen gives the sentence
- * bar its tabs — stage A: Labelled and one per Δ; B: Labelled, Closed loop and the samples; C: Labelled, Start (base) and
- * the rounds — and the bar's tabs choose. One state holds the choice: the session publishes its tabs and the tab chosen
+ * bar its tabs — stage A: Labelled and one per Δ; B: Labelled, Closed loop and the samples; C: Labelled, the start (named
+ * by what the campaign starts from) and the rounds — and the bar's tabs choose. One state holds the choice: the session publishes its tabs and the tab chosen
  * (`publishTrainingTabs`), the bar calls `chooseTrainingTab`, and the session reads the choice back (`useTrainingTabs`)
  * and shows that sentence. The left panel has no second chooser.
  *

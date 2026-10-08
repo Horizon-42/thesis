@@ -541,6 +541,20 @@
       }
      }
     ],
+    "start": {
+     "campaign": "fixture/outputs/post/source",
+     "round": 1,
+     "selection": {
+      "KXXX": {
+       "outcomes": {
+        "lost_separation": 1
+       },
+       "rewardMean": 0.0,
+       "windows": 1
+      }
+     },
+     "why": null
+    },
     "started": "2026-10-06T00:00:00Z"
    },
    "speed": {
@@ -579,5 +593,70 @@
   },
   "set": "fixture-windows",
   "stage": "C"
+ },
+ "D": {
+  "airport": "KXXX",
+  "ok": true,
+  "provenance": "fixture/outputs/multi/campaign",
+  "sections": {
+   "checks": {
+    "checks": {
+     "labeller": {
+      "flights": 3
+     }
+    },
+    "ok": true
+   },
+   "rounds": {
+    "ok": true,
+    "rounds": [
+     {
+      "round": 0,
+      "selection": {
+       "KXXX": {
+        "aircraft": 5,
+        "goArounds": 1,
+        "lossWindows": {
+         "commanded_answers": 0,
+         "commanded_commanded": 1,
+         "recorded_only": 2,
+         "records_kept": 0
+        },
+        "outcomes": {
+         "landed": 4,
+         "lost_separation": 1
+        },
+        "rewardSum": 3.9,
+        "silent": 1,
+        "windows": 2
+       }
+      },
+      "speaking": {
+       "outcomes": {
+        "landed": 8,
+        "lost_separation": 1
+       },
+       "rewardSum": 7.5,
+       "windows": 4
+      }
+     }
+    ],
+    "start": {
+     "selection": null,
+     "why": "the start, round 0 of stage C's fixture/outputs/post/campaign, was read on stage C's windows, not stage D's"
+    },
+    "started": "2026-10-08T00:00:00Z"
+   },
+   "speed": {
+    "model": "fixture/outputs/post/campaign round 0",
+    "ok": true,
+    "settings": [],
+    "smoke": false,
+    "split": "select",
+    "warmupRows": 20
+   }
+  },
+  "set": "fixture-windows-two",
+  "stage": "D"
  }
 }

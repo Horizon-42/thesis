@@ -278,13 +278,21 @@ def _updates(model: Prior, start: PassStart, base: Prior, optimizer: torch.optim
     for pieces, rows in pairs:
         optimizer.zero_grad(set_to_none=True)
         parts = step(model, start, base, pieces, rows)
-        norm = torch.nn.utils.get_total_norm([p.grad for p in parameters if p.grad is not None])
-        clipped = clip_norm is not None and bool(norm > clip_norm)
-        if clip_norm is not None:
-            torch.nn.utils.clip_grads_with_norm_(parameters, clip_norm, norm)
-        out.append(replace(parts, grad_norm=norm.detach(), grad_clipped=clipped))
-        optimizer.step()
+        norm, clipped = clipped_step(optimizer, parameters, clip_norm)
+        out.append(replace(parts, grad_norm=norm, grad_clipped=clipped))
     return out
+
+
+def clipped_step(optimizer: torch.optim.Optimizer, parameters: Sequence[torch.nn.Parameter], clip_norm: float | None
+                 ) -> tuple[torch.Tensor, bool]:
+    """One step of ``optimizer`` on the gradients of ``parameters``, clipped first to ``clip_norm`` (D168; None: not
+    clipped): the gradients' norm before the clip (detached) and whether they were clipped."""
+    norm = torch.nn.utils.get_total_norm([p.grad for p in parameters if p.grad is not None])
+    clipped = clip_norm is not None and bool(norm > clip_norm)
+    if clip_norm is not None:
+        torch.nn.utils.clip_grads_with_norm_(parameters, clip_norm, norm)
+    optimizer.step()
+    return norm.detach(), clipped
 
 
 def stacked(parts: Sequence[LossParts]) -> dict[str, float]:

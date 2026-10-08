@@ -326,6 +326,35 @@ describe("the bar's chips and notes follow the kind of the sentence on screen (o
     expect(chips().some((text) => /correction|DA /.test(text))).toBe(false);
   });
 
+  it("stage D: the aircraft's place, its reward r, its silence instead of the loss, and the window's W", async () => {
+    const { stageDSample, stageDSelection } = await import("../../data/__tests__/stageD");
+    const { windowReward } = await import("../../data/trainingWindowSample");
+    const sample = stageDSample();
+    const window = sample.windows[0];
+    appState.trainingSelection = stageDSelection(sample, 0, 0, "start");
+    appState.trainingIntervalS = sample.model.rowIntervalS;
+    render(<TrainingSentenceBar />);
+    const said = window.commanded[0].rounds[0];
+    expect(chips()).toContain("1 of 2");
+    expect(chips()).toContain(`reward ${said.reward.toFixed(2)}`);
+    expect(chips()).toContain(`silent from row ${said.silentFromRow}`);
+    expect(chips().some((text) => text.startsWith("loss of separation"))).toBe(false);   // the silence says it
+    expect(chips()).toContain(`W ${windowReward(window, 0).toFixed(2)} of 2`);
+  });
+
+  it("stage D: an aircraft in a loss it does not answer for names the one it answers for", async () => {
+    const { stageDSample, stageDSelection } = await import("../../data/__tests__/stageD");
+    const sample = stageDSample();
+    const [anchor, copy] = sample.windows[0].commanded;
+    const own = sample.windows[0].rounds[0].losses.find((loss) => loss.answering.includes(copy.datasetId))!;
+    expect(sample.windows[0].rounds[0].losses.findIndex((loss) => loss === own)).toBeGreaterThan(0);  // not its first loss
+    appState.trainingSelection = stageDSelection(sample, 0, 1, "start");
+    appState.trainingIntervalS = sample.model.rowIntervalS;
+    render(<TrainingSentenceBar />);
+    const chip = [...document.querySelectorAll(".training-sentence-head .training-chip")].find((node) => node.textContent === `loss of separation · ${anchor.datasetId}`)!;
+    expect(chip.getAttribute("title")).toContain(`${own.distanceM.toFixed(0)} m of`);
+  });
+
   it("a labelled sentence: no chip of a flown flight", () => {
     open(null);
     expect(chips().some((text) => /correction|go-around|reward|DA /.test(text))).toBe(false);

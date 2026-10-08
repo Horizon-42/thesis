@@ -1,0 +1,7 @@
+{
+  "start": {
+    "campaign": "fixture/post_source_fixture",
+    "round": 0,
+    "checkpoint_sha256": "b7b2d6ecbe5c6d627e519ba0e0867177b8e2b3f016e8ac02ddd09e52dfac69c9"
+  }
+}

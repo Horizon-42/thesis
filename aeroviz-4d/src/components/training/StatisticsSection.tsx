@@ -51,6 +51,7 @@ export default function StatisticsSection({ table, results }: { table: TrainingS
         the go-arounds said, per sentence.
       </p>
       {readoutNote === null ? null : <p className="experiment-details-missing">The formal readout: {readoutNote}</p>}
+      {table.notes.map((note) => <p key={note} className="training-details-lede">{note}</p>)}
       <table className="training-flown-table training-stats-table" aria-label="The models' statistics">
         <thead>
           <tr><th scope="col" rowSpan={2}>sentences</th><th scope="colgroup" colSpan={columns.length}>this set</th>

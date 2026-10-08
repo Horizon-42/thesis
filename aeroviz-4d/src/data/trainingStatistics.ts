@@ -18,7 +18,9 @@
 import type { TrainingSentenceKind } from "../utils/trainingWordColors";
 import type { TrainingSample } from "./trainingSample";
 import type { TrainingPriorSample } from "./trainingPriorSample";
-import { TRAINING_WINDOW_START, type TrainingWindowRound, type TrainingWindowSample } from "./trainingWindowSample";
+import {
+  startName, TRAINING_WINDOW_START, type TrainingWindowRound, type TrainingWindowSample, type TrainingWindowStart,
+} from "./trainingWindowSample";
 import type { Counts, TrainingSetResults } from "./trainingSetResults";
 import { roundKind } from "./trainingSentenceKind";
 
@@ -47,6 +49,8 @@ export interface TrainingStatsTable {
   rows: TrainingStatsRow[];
   /** Why the route's answer holds no readout section for the table (its file elsewhere or missing), or null. */
   readoutProblem: string | null;
+  /** What a row's readout is when it is not the set's model's own (a start from another campaign's round, D162). */
+  notes: string[];
 }
 
 /** The problem of a section of the route's answer, or null (no answer: the page says why itself). */
@@ -84,7 +88,7 @@ export function stageAStatistics(sample: TrainingSample, results: TrainingSetRes
   const section = results !== null && results.stage === "A" ? results.closedLoop : null;
   const replays = section !== null && section.ok ? section.value : null;
   return {
-    windows: false, readoutProblem: problemOf(section),
+    windows: false, readoutProblem: problemOf(section), notes: [],
     rows: sample.vocabulary.rowIntervalsS.map((intervalS) => {
       const own = countOutcomes(sample.flights.map((flight) => flight.closedLoop[String(intervalS)].replay.outcome));
       const cells = (replays ?? []).filter((replay) => replay.intervalS === intervalS && splits.has(replay.split))
@@ -107,7 +111,7 @@ export function stageBStatistics(sample: TrainingPriorSample, results: TrainingS
   const strata = generation === null ? []
     : Object.values(generation.sides).flatMap((airports) => Object.values(airports[sample.airport] ?? {}));
   return {
-    windows: false, readoutProblem: problemOf(section),
+    windows: false, readoutProblem: problemOf(section), notes: [],
     rows: [
       { key: "closed-loop", label: `closed loop · Δ ${intervalS} s`, kind: "closedLoop",
         set: cellsOf(countOutcomes(sample.flights.map((flight) => flight.head.closedLoop[intervalS].replay.outcome)), null, false, null),
@@ -120,25 +124,72 @@ export function stageBStatistics(sample: TrainingPriorSample, results: TrainingS
   };
 }
 
-/** A round's row label, as the bar's tabs name it. */
-function roundName(round: TrainingWindowRound): string {
-  return round === TRAINING_WINDOW_START ? "start (base)" : `r${round}`;
+/** A round's row label, as the bar's tabs name it; the start by what it is (`startName`). */
+function roundName(round: TrainingWindowRound, start: TrainingWindowStart | null): string {
+  return round === TRAINING_WINDOW_START ? `start (${startName(start)})` : `r${round}`;
 }
 
-/** Stages C and D: a row for each round of the set (the start is the base's). */
+/** Stages C and D: a row for each round of the set (the start is the base's, or another campaign's round, D162). */
 export function windowStatistics(sample: TrainingWindowSample, results: TrainingSetResults | null): TrainingStatsTable {
+  return sample.stage === "D" ? multiStatistics(sample, results) : postStatistics(sample, results);
+}
+
+/** A round's sentences of every commanded aircraft of the set's windows, counted. */
+function setCells(sample: TrainingWindowSample, place: number): TrainingStatsCells {
+  const said = sample.windows.flatMap((window) => window.commanded.map((aircraft) => aircraft.rounds[place]));
+  return cellsOf(countOutcomes(said.map((sentence) => sentence.outcome)), sum(said.map((sentence) => sentence.goArounds)), true,
+    sum(said.map((sentence) => sentence.reward)));
+}
+
+/** Stage D (frontend §5.6): a row for each round, a sentence each commanded aircraft; the readout each round's cell at
+ *  the set's airport (its ``all`` span and kind; the start, stage C's round, has none: why, in a note); and a note for
+ *  each round with the windows that have a loss of separation of each kind, once a kind a window as the readout counts
+ *  them — on the set (between commanded aircraft, and with a recorded one) and on the readout (`multi.separation.PAIRS`). */
+function multiStatistics(sample: TrainingWindowSample, results: TrainingSetResults | null): TrainingStatsTable {
+  const section = results !== null && results.stage === "D" ? results.rounds : null;
+  const value = section !== null && section.ok ? section.value : null;
+  const notes = value === null ? [] : [`The start's readout is not shown: ${value.start.why}.`];
+  const rows = sample.model.rounds.map((round, place) => {
+    const read = round === TRAINING_WINDOW_START ? undefined : value?.rounds.find((item) => item.round === round)?.selection[sample.airport];
+    // windows with a loss of each kind, as the readout counts its pairs (once a kind a window)
+    let between = 0;
+    let withRecorded = 0;
+    for (const window of sample.windows) {
+      const ids = new Set(window.commanded.map((aircraft) => aircraft.datasetId));
+      const losses = window.rounds[place].losses;
+      if (losses.some((loss) => loss.aircraft.every((key) => ids.has(key)))) between += 1;
+      if (losses.some((loss) => !loss.aircraft.every((key) => ids.has(key)))) withRecorded += 1;
+    }
+    const label = roundName(round, sample.model.start);
+    notes.push(`${label}: windows with a loss of separation — this set: ${between} between commanded aircraft, ${withRecorded} with a recorded one` +
+      (read === undefined ? "" : `; the readout: ${Object.entries(read.lossWindows).map(([pair, n]) => `${pair.split("_").join(" ")} ${n}`).join(", ")}`));
+    return {
+      key: `round-${round}`, label, kind: roundKind(round, sample.model.start, sample.stage),
+      set: setCells(sample, place),
+      readout: read === undefined ? null : cellsOf(read.outcomes, read.goArounds, true, read.rewardSum),
+    };
+  });
+  return { windows: true, readoutProblem: problemOf(section), notes, rows };
+}
+
+/** Stage C: a row for each round of the set; the readout each round's selection at the set's airport, the start's its
+ *  source round's (frontend §4.3). */
+function postStatistics(sample: TrainingWindowSample, results: TrainingSetResults | null): TrainingStatsTable {
   const section = results !== null && results.stage === "C" ? results.rounds : null;
   const rounds = section !== null && section.ok ? section.value.rounds : null;
+  // the start's readout: the round it starts from, read on the same select windows (frontend §4.3); none from the base
+  const start = section !== null && section.ok ? section.value.start : null;
+  const notes = start === null || !sample.model.rounds.includes(TRAINING_WINDOW_START) ? []
+    : [start.selection === null ? `The start's readout is not shown: ${start.why}.`
+      : `The start's readout is ${startName(sample.model.start)}'s own, read on the same select windows.`];
   return {
-    windows: true, readoutProblem: problemOf(section),
+    windows: true, readoutProblem: problemOf(section), notes,
     rows: sample.model.rounds.map((round, place) => {
-      const said = sample.windows.flatMap((window) => window.commanded.map((aircraft) => aircraft.rounds[place]));
-      const read = round === TRAINING_WINDOW_START || rounds === null ? undefined
-        : rounds.find((item) => item.round === round)?.selection[sample.airport];
+      const read = round === TRAINING_WINDOW_START ? start?.selection?.[sample.airport]
+        : rounds?.find((item) => item.round === round)?.selection[sample.airport];
       return {
-        key: `round-${round}`, label: roundName(round), kind: roundKind(round),
-        set: cellsOf(countOutcomes(said.map((sentence) => sentence.outcome)), sum(said.map((sentence) => sentence.goArounds)), true,
-          sum(said.map((sentence) => sentence.reward))),
+        key: `round-${round}`, label: roundName(round, sample.model.start), kind: roundKind(round, sample.model.start, sample.stage),
+        set: setCells(sample, place),
         readout: read === undefined ? null : cellsOf(read.outcomes, null, true, read.rewardMean * read.windows),
       };
     }),

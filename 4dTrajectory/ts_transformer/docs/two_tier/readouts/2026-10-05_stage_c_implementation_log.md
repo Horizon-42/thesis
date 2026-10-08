@@ -1274,3 +1274,89 @@ with K = 16.
 84.9 / 85.6 / 85.4 / 84.4 % against the start's 85.7 %; KL 0.040 → 0.051; the ratio's clip 1.2–1.45 % of the words;
 29–43 % of the updates clipped at the gradient norm 1.0. Sealed (`logs/`, `SHA256SUMS` 15 files, read-only); the run
 worktree removed. C18's first measure is in its `campaign.json`. Table and my reading: the experiment log, experiment 3.
+
+**The campaign with K = 16 and the larger rates (`post_k16lr3_20261007`) ended 20:20 local**, 4 rounds, exit 0:
+landed 85.1 / 84.7 / 85.6 / 84.5 % against the start's 85.7 %, no gain; sealed (`logs/`, `SHA256SUMS` 11 files,
+read-only), its run worktree removed. While it spoke, the host's free memory fell to 1–2 GB with the swap full; I
+stopped my own test runs twice (rule 13). Table and reading: the experiment log, experiment 4.
+
+**C21 (D170), `1ce26b63`** on `dev-two-tier-v4-post` (built after the note of 2026-10-07 evening; stage D's merge
+`246eca69` taken in before the commit, my uncommitted work set aside and re-applied without a conflict): the branch
+interval and a group's segment as D170 says; `post.branches.branch_rows` is the one whole-rows rule. Tests: 138 passed
+(the changed modules, stage D's and the generalisation digest). Review (opus): S1 (a test's `samples` stub took three
+arguments) fixed; S2 (`update_pairs` passing the segment untested) tested; S3 the refusal message, the default rules'
+points and numbers tested.
+
+**C22 (D171), `6a0e45fe`** on `dev-two-tier-v4-post` (fast-forwards `dev-two-tier`; the user merges).
+- `post/value.py`: V (a copy of the start model, its own token part from zero, a head d + 1 → 64 → 1 on
+  `Prior.encode`'s last layer and the time left), V's reading beyond the model (`value_part`: each recorded aircraft's
+  `EDGE_FEATURES` at +30/60/120 s against the commanded state at the row, an in-air flag each, the time to its landing;
+  `time_left`), `ValueSample`, `value_batch`, `advantages` (GAE, γ 1, λ 0.95), `value_loss`.
+- `WindowLoop(value_reader=)`: the reading at each kept row, apart from the tokens (`values`); copied with the loop.
+- `post_train`: `Settings.method` `value`, `value_lr`, `value_warmup` (required with it, refused otherwise; a record
+  without them reads as None); `speak_value_batch` (one sentence a window, `sentences_<k>.pt`); `ValueRun` (V and its
+  AdamW, from a seed of the campaign's own; on a resume read from the last `value.pt`, its identity checked against the
+  checkpoint's); `value_train_pass` (V at the round's start reads every sample once; each update a model step and a V
+  step, both clipped; warm-up: V only); `close_value_round` (after the record, before the checkpoint: `value.pt` with
+  the round's identity; the warm-up's readout check); `value_pass_memory` (O15). The skeleton gains `Stage.companion`
+  and `Stage.close_round`; stage D takes the defaults (its digest unchanged).
+- Tests: 178 passed (the changed modules, stage D's, the generalisation digest, the ceiling and validation readouts).
+  The value tests: GAE on hand values (λ 1, λ 0); the model's log-probabilities unchanged when V's reading changes; V
+  shares no weight; V refuses training mode; V's loss = the mean of A_t² at the round's start; V's part read against
+  the recorded future; a campaign of 2 rounds (warm-up then training, two passes, a clip): the model and its optimizer
+  unmoved in warm-up, `value.pt` before each checkpoint with its identity, a run killed in round 1 resumed as one run,
+  the readout the same without `value.pt`, a start from a value round reads no V; the workers give the same samples as
+  one process; the warm-up check (a source round, other select windows, the base); speaking unchanged by V's reader;
+  the time left 4 s a row and 896 s at a go-around.
+- Review (opus, independent): no S1. S2 fixed: V's inputs kept their embedded tokens through an update (the GPU
+  memory grew with the update); `value.pt` lacked the round's identity (now written after the record, checked on a
+  resume). S3 fixed: the advantages computed once a round, the start copy's gradients, the memory measure with the
+  start copy, the reader past a window's end, the warm-up check with other select windows, a test that could not catch
+  shared weights, a parser error for a refused setting.
+- Readings (requests item 1): the update size, `continuations` 1, V's features, the time left, the head, the warm-up
+  check. The first value campaign's settings: requests item 4, the user's to choose.
+
+**P55's first campaign (`post_seg60_20261007`)** launched 20:32 local after C21's merge; round 0 ended 21:04: landed
+84.6 % (the start 85.7 %), 451 updates (1,711 informative groups of 3,678, segments of 60 s). Results: the experiment
+log, experiment 5.
+
+**The night of 2026-10-07/08 (the user's rule: P55 → 32 s → the value method; decide alone, recount the next day).**
+- C22 merged (`c1e39964`, the user's word). P55's campaign resumed to 8 rounds (the user's word; the resume read its
+  recorded measure, C18): round 5 87.7 %, the first past the readout's noise; sealed (21 files).
+- By the rule (my threshold: landed ≥ 87 %, KL ≤ 0.08, the highest), the 32 s campaign (`post_seg32_20261007`) started
+  from P55's round 5: 86.8 / 86.3 / 87.0 / 87.9 %, within its start's noise; sealed (11 files). Not resumed (my decision).
+- The value campaign (`post_value1_20261007`, the user's settings, C22's first formal run): the warm-up readouts equal
+  C10 round 8's; the training rounds 83.8 / 84.3 / 83.1 / 83.9 %, below the start; V overfits each round's samples
+  (in-sample error 0.004–0.008 against 0.017–0.17 on the next round's) and underestimates new ones (the advantages'
+  mean +0.20 → +0.05). Sealed (21 files). C22's O15 measure ran on the GPU for the first time (1.65 GB).
+- Results, readings and the decisions: the experiment log, experiments 5–7; requests item 5.
+
+**C23 (D173), `9017541e`, merged into `dev-two-tier` (`e1a3e123`, the user's word, 2026-10-08).** The value method's
+`advantage_centering` (the round's mean advantage off each counted row, the targets kept; `centred_by` recorded) and
+`value_epochs` (V steps in the round's first passes only; a warm-up round makes those only; `passes` recorded); both
+refused under another method; a record without them reads the defaults. Tests: 185 passed; with the defaults a value
+campaign of 2 rounds is the code's before bit for bit (a digest pinned from `c288ad77` on one thread; the reviewer
+reproduced it with the old module); the centring over two files of different advantages; V's weights in the first of
+4 passes only. Review (opus): no S1; S2 the digest's thread count and a centring test that could not fail, fixed; S3
+V's update count tested; noted (not changed): `--value-epochs E` written out equal to `epochs` is a second spelling of
+the default, refused on a resume against a record holding the default. The second value campaign
+(`post_value2_20261008`, `--advantage-centering --value-epochs 1`, seed 2031) launched 08:48 local.
+
+**The second value campaign (`post_value2_20261008`, D173) ended 09:42 local**, 6 rounds, exit 0: the warm-up readouts
+equal the start's; the training rounds 83.2 / 83.5 / 82.6 / 83.2 % (the first value campaign's 83.8 / 84.3 / 83.1 /
+83.9 %); the centring brought the surrogate to about 0, so the fall is not the advantages' offset. Sealed (21 files),
+the run worktree removed. Table and reading: the experiment log, experiment 8.
+
+**Experiment 9 (`post_seg60k16_20261008`, segments of 60 s with K = 16 from P55's round 5, the user's choice) ended
+14:55 local**, 4 rounds, exit 0: 87.7 / 86.8 / 87.0 / 86.2 %, within its start's noise. Sealed (11 files), the run
+worktree removed. The experiment log, experiment 9.
+
+**Experiment 10 (`post_seg60lr3_20261008`, segments of 60 s with 3e-5 / 3e-4 and clip 1.0, K = 8, from P55's round 5)
+ended 17:00 local**, 4 rounds, exit 0: 86.2 / 86.9 / 86.3 / 85.9 %, below its start; KL 0.060 → 0.077. Sealed (11
+files), the run worktree removed. The experiment log, experiment 10.
+
+**Stage C's result (2026-10-08, the user's word):** stopped at P55's round 5 (`post_seg60_20261007`, round 5); its val
+read (D132, once): `validation_post_seg60_r5_20261008`, landed 88.9 %, lost separation 9.1 %, mean reward 0.880 over
+1,000 windows of the val days (the select readout of the round: 87.7 %). The sealed campaign directory took the claim
+(the directory made writable for it alone, the claim and lock added to `SHA256SUMS`, sealed again). The experiment log,
+"阶段 C 的结果".

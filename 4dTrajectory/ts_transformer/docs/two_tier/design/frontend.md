@@ -53,8 +53,10 @@ Fronter keeps this table and its log, `readouts/2026-10-06_fronter_implementatio
 | F0 The user's three corrections (D159) | Done: `01a8ab58` on `dev-frontend` (reviewed; browser-checked) |
 | F1 The cursor slider (D155) | Done: `e6f5c5fd`, the three small points `8c4d6af4` on `dev-frontend` (reviewed; browser-checked) |
 | F2 Windows of several commanded aircraft: the format, stage C's export, the view's readers (D156) | Done: `05963721`, `1452cccb` on `dev-frontend` (reviewed; browser-checked on a v4 smoke set) |
-| F3 Stage D's parts of the window view (D156) | Not started; after stage D's MC0 |
+| F3 Stage D's parts of the window view (D156) | Done: `a7ab9bb6` on `dev-frontend` (reviewed; tests; stage D's browser check is F4's) |
 | F4 Stage D's export and sets | Not started; after stage D's MC4 |
+| The start's name after D162 (§4.3) | Done: `f10e9ee5`, the start's readout `a9d296d5` (reviewed, merged) |
+| Stage C's first formal set (P55 round 5) | Published 2026-10-08: `windows_seg60_r5_20261008`, five airports, 163 windows (browser-checked) |
 
 ### 0.4 Plan
 
@@ -372,7 +374,9 @@ C11 in the stages' implementation logs) and as §3 lays it out. The cursor slide
   inserted, kind A: pink; moved, kind D: amber); a loss of separation as a red line between the two aircraft at the
   loss's time, with two markers that give the distance and the distance required. The list names a window's runway as
   its recorded runway; the shift of a window A is shown in days or hours; the cursor starts at the window's row 0, so
-  that the other aircraft show from the start (D129).
+  that the other aircraft show from the start (D129). The start's tab, its statistics row and its readout name the
+  model the campaign starts from: the base (D29), or the round of another campaign (post-training D162: every campaign
+  after C10 starts so), read from the set's `model.settings.start`; one function gives the name.
 - **Live.** A click on a word flies its segment in the window (`POST /autopilot/window-segment`), the other aircraft on
   their records.
 

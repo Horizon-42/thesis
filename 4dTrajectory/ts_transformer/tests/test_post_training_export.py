@@ -70,7 +70,7 @@ def test_a_window_s_sentence_its_end_and_its_traffic(setup):
     context = _context(s)
     ahead, real = _ahead(s["windows"][0]), s["windows"][0]
     model = round_model(context, _settings(), s["directory"], None)
-    (lost, judged), (lost_end, judged_end), observed = export.fly_round(model, context, "train", [ahead, real], 2, 1337)
+    ([lost], [judged]), (lost_end, judged_end), observed = export.fly_round(model, context, "train", [ahead, real], 2, 1337)
     assert np.array_equal(observed[1], s["stored"].rows.states[: len(observed[1])])     # no move: the stored rows
     assert lost["outcome"] == "lost_separation" and lost["crossing"] is None and lost["reward"] == 0.0
     # the window's loss: its two aircraft, the commanded one answering for it, and it costs W (D30's reward 0)
@@ -79,7 +79,7 @@ def test_a_window_s_sentence_its_end_and_its_traffic(setup):
     assert loss["answering"] == [real.commanded.key] and loss["costsW"] is True
     assert loss["step"] == s["stored"].rows.start + 1
     assert judged["outcome"] != "lost_separation" and judged_end["losses"] == []
-    assert lost["silentFromRow"] is None and judged["silentFromRow"] is None             # stage C: none is silent
+    assert lost["silentFromRow"] is None and judged["silentFromRow"] is None   # stage C: its window ends at its loss
     for said in (lost, judged):
         track = said["track"]
         assert track["rows"] == len(track["eM"]) == len(track["heightMslM"]) == len(said["attitude"]["headingDeg"])
@@ -107,7 +107,7 @@ def test_a_window_s_sentence_its_end_and_its_traffic(setup):
     assert np.allclose(np.diff(inserted["tS"]), 2.0)
     assert len(inserted["tS"]) == len(inserted["latDeg"]) == len(inserted["heightMslM"])
     assert export.traffic_payload(real, real.commanded.end_s, _hae(s)) == []          # one flight: nobody else
-    window = export.window_payload(ahead, [export.START], [lost], [lost_end], observed[0], _hae(s),
+    window = export.window_payload(ahead, [export.START], [[lost]], [lost_end], observed[0], _hae(s),
                                    s["words"].spec.step_s)
     # the window format of stages C and D (frontend §5.7): stage C's one commanded aircraft, at the window's row 0
     (aircraft,) = window["commanded"]
@@ -257,3 +257,126 @@ def test_the_frontend_fixtures_are_what_the_export_writes(tmp_path, monkeypatch)
     for name, text in texts.items():
         assert (FIXTURES / name).read_text(encoding="utf-8") == text, (
             f"{FIXTURES / name} is not what the export writes now: AEROVIZ_WRITE_FIXTURES=1 writes it again")
+
+
+def test_a_loss_two_commanded_aircraft_answer_is_written_once_with_both(setup):
+    """`round_end_payload`: two commanded aircraft that answer the same loss (one step, one pair) give one loss, both
+    answering, reading a fault when either one's other aircraft read one; another step of the pair is another loss."""
+    from types import SimpleNamespace
+
+    s = setup
+    (window,) = s["windows"]
+    loss = SimpleNamespace(kind="radar_or_vertical", relation="same", required_m=5556.0, distance_m=3000.0,
+                           vertical_m=50.0, wake_known=True)
+
+    def end(other, step, fault):
+        return SimpleNamespace(loss=loss, loss_step=step, other=other, loss_reads_fault=fault, faulty_steps=0)
+
+    written = export.round_end_payload([end("b", 9, False), end("a", 9, True), end("a", 12, False)], ["a", "b", "c"],
+                                       window)
+    first, second = written["losses"]
+    assert first["aircraft"] == ["a", "b"] and first["answering"] == ["a", "b"] and first["readsFault"] is True
+    assert second["step"] == 12 and second["answering"] == ["c"]
+
+
+#: The set of §8 F3's fixture: stage C's export on a synthetic window of two commanded aircraft.
+TWO_SET = "fixture-windows-two"
+
+
+def stage_c_two_fixture(tmp_path, monkeypatch):
+    """Frontend §8 F3: stage C's export (`main`) on a synthetic window of two commanded aircraft (post-training §9
+    items 1, 3, 8; `test_post_window_multi._multi`'s window: the anchor and a copy of it under its own key joining 8
+    steps behind it, on the same path), flown by the start model under stage C's loop and rule of who answers — the
+    anchor answers its loss with the copy and is silent from there, flying on; the files as `stage_c_fixture` writes
+    them (the copy's head is the anchor's under the copy's key). Returns the texts of the set's index and sample."""
+    from dataclasses import fields
+
+    from ts_transformer.tests.test_post_window_multi import _multi
+
+    s = window_setup(tmp_path, monkeypatch)
+    context = _context(s)
+    window, loop_of = _multi(s, joins=(0, 8))
+    parts = loop_of.parts
+    keys = [record.key for record in window.commanded_all]
+    (signal,) = context.splits["train"]["signals"].values()
+    data = {**context.splits["train"], "windows": [window], "sentences": parts["sentences"], "flights": parts["flights"],
+            "signals": dict.fromkeys(keys, signal)}
+
+    class TwoContext(type(context)):
+        def start_loop(self, split, windows):
+            return parts["start"]
+
+    two = TwoContext(**{**{f.name: getattr(context, f.name) for f in fields(context)},
+                        "splits": {"train": data, "select": data}, "rosters": parts["rosters"]})
+    head = head_of(s)
+    campaign, root = tmp_path / "campaign", tmp_path / "airports_two"
+    inputs = {"prior": "p", "instructions": str(s["directory"]), "executor": str(tmp_path / "executor"),
+              "windows": str(tmp_path / "census"), "procedure_root": "c", "settings": asdict(_settings(rounds=1)),
+              "smoke": True}
+    open_campaign(campaign, inputs, {"head": "fixture", "dirty": False}, {})
+    with monkeypatch.context() as patch:
+        patch.setattr(export, "require_conforming_closed_loop",
+                      lambda *a: (test_start._params(), {"sha256": "fixture", "checks": {}}, s["words"]))
+        patch.setattr(export, "checked_edges", lambda reference: None)
+        patch.setattr(export, "open_context", lambda *a, **k: two)
+        patch.setattr(export, "chosen_windows", lambda *a, **k: ([window], {"pool": 1, "real": 1, "leftOut": {}}))
+        patch.setattr(export, "split_flights", lambda *a, **k: ([{**head, "datasetId": key} for key in keys],
+                                                                 s["geometry"]))
+        patch.setattr(export, "candidate_hae_minus_msl_m", lambda ends, geometry: _hae(s))
+        patch.setattr(export, "repo_relative", lambda path: f"fixture/{path.name}")
+        patch.setattr(model_speed, "repo_relative", lambda path: f"fixture/{path.name}")
+        patch.setattr(export, "git_state", lambda: {"head": "fixture", "dirty": False})
+        patch.setattr(stage_a_files, "utc_now", lambda: "fixture")
+        assert export.main(["--campaign", str(campaign), "--rounds", "start", "--split", "train", "--set-id",
+                            TWO_SET, "--root", str(root), "--per-airport", "1", "--speed",
+                            str(speed_readout(tmp_path / "speed", stage="C")), "--smoke"]) == 0
+    training = root / s["geometry"].code / "training"
+    return {name: (training / name).read_text(encoding="utf-8")
+            for name in (files.INDEX_FILE, f"{TWO_SET}/{files.SAMPLE_FILE}")}
+
+
+def test_a_window_of_two_commanded_aircraft_is_written_with_both_its_silence_and_its_loss_by_pair(tmp_path, monkeypatch):
+    """The two-aircraft window as the set holds it (frontend §5.7): both commanded aircraft in the order they join
+    (the copy 8 steps, 32 s, after the window's row 0), each with its own sentence; the anchor answers its loss with
+    the copy, so it is silent from that loss's row and flies on (outcome lost separation, reward 0), and the loss is
+    written once, the anchor answering; the copy is no traffic; written again it is the frontend's fixture
+    (`AEROVIZ_WRITE_FIXTURES=1`)."""
+    texts = stage_c_two_fixture(tmp_path, monkeypatch)
+    sample = json.loads(texts[f"{TWO_SET}/{files.SAMPLE_FILE}"])
+    (window,) = sample["windows"]
+    anchor, copy = window["commanded"]
+    assert [anchor["joinS"], copy["joinS"]] == [0.0, 8 * DELTA] and copy["firstStepS"] - anchor["firstStepS"] == 8 * DELTA
+    assert copy["datasetId"] not in {t["key"] for t in window["traffic"]}
+    (said,) = anchor["rounds"]
+    (end,) = window["rounds"]
+    answered = [loss for loss in end["losses"] if anchor["datasetId"] in loss["answering"]]
+    assert len(answered) == 1 and set(answered[0]["aircraft"]) == {anchor["datasetId"], copy["datasetId"]}
+    assert said["reward"] == 0.0 and said["silentFromRow"] is not None and said["silentFromRow"] < said["rows"]
+    if os.environ.get("AEROVIZ_WRITE_FIXTURES") == "1":
+        for name, text in texts.items():
+            (FIXTURES.parent / "stage_c_two" / name).parent.mkdir(parents=True, exist_ok=True)
+            (FIXTURES.parent / "stage_c_two" / name).write_text(text, encoding="utf-8")
+    for name, text in texts.items():
+        assert (FIXTURES.parent / "stage_c_two" / name).read_text(encoding="utf-8") == text, (
+            f"{FIXTURES.parent / 'stage_c_two' / name} is not what the export writes now: AEROVIZ_WRITE_FIXTURES=1 writes "
+            f"it again")
+
+
+START_FIXTURE = "start_from_round.json"
+
+
+def test_the_frontend_fixture_of_a_start_from_a_round_is_what_post_train_writes(tmp_path, monkeypatch):
+    """The setting of a start from another campaign's round (`Settings.start`, D162) as `post_train.start_of` writes it
+    — the value the export copies into a set's ``model.settings.start``: the frontend's reader is tested on it (frontend
+    §4.3), so a change of its keys moves this fixture (``AEROVIZ_WRITE_FIXTURES=1`` writes it again). The source is a
+    smoke campaign with round 0 done (a checkpoint of fixed bytes: `start_of` only names and hashes it)."""
+    source = tmp_path / "post_source_fixture"
+    open_campaign(source, {"settings": asdict(_settings(rounds=1)), "smoke": True}, {"head": "fixture", "dirty": False}, {})
+    (source / "round_0").mkdir()
+    (source / "round_0" / "checkpoint.pt").write_bytes(b"the fixture's round 0")
+    monkeypatch.setattr(post_train, "repo_relative", lambda path: f"fixture/{path.name}")
+    text = json.dumps({"start": post_train.start_of(source, 0, formal=False)}, indent=2) + "\n"
+    if os.environ.get("AEROVIZ_WRITE_FIXTURES") == "1":
+        (FIXTURES / START_FIXTURE).write_text(text, encoding="utf-8")
+    assert (FIXTURES / START_FIXTURE).read_text(encoding="utf-8") == text, (
+        f"{FIXTURES / START_FIXTURE} is not what post_train.start_of writes now: AEROVIZ_WRITE_FIXTURES=1 writes it again")

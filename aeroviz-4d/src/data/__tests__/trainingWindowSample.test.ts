@@ -14,15 +14,19 @@ import {
   onAircraftClock,
   onWindowClock,
   otherOf,
+  roundLabel,
+  startName,
   trainingWindowFlightView,
   trainingWindowOriginOf,
   TRAINING_WINDOW_INDEX_SCHEMA,
   TRAINING_WINDOW_SAMPLE_SCHEMA,
+  trackAt,
   windowShiftText,
 } from "../trainingWindowSample";
 import { TRAINING_LOST_SEPARATION } from "../trainingSample";
-import { positionAt } from "../../hooks/useTrainingWindowLayer";
-import { stageCIndex, stageCSample, stageCSampleFile, stageCSelection, WINDOW_SET_ID } from "./stageC";
+import {
+  stageCIndex, stageCSample, stageCSampleFile, stageCSampleFileFromRound, stageCSelection, WINDOW_SET_ID,
+} from "./stageC";
 
 describe("the index", () => {
   it("is read: one set with its model, cohort and source", () => {
@@ -33,6 +37,7 @@ describe("the index", () => {
     expect(set).toMatchObject({ id: WINDOW_SET_ID, file: `${WINDOW_SET_ID}/sample.json`, windows: 3, flights: 1 });
     expect(set.model.rounds).toEqual(["start"]);
     expect(set.model.rowIntervalS).toBe(4);
+    expect(set.model.start).toBeNull();                                // the fixture's campaign starts from the base
     expect(set.source.smoke).toBe(true);
   });
 
@@ -105,8 +110,39 @@ describe("the sample", () => {
     expect(start.altitudeHaeM[0]).toBeCloseTo(start.altitudeMslM[0] + moved.head.haeMinusMslM, 6);
   });
 
+  it("reads the campaign's start: the base, or another campaign's round (D162), named by one function", () => {
+    expect(sample.model.start).toBeNull();
+    expect(startName(sample.model.start)).toBe("base");
+    expect(roundLabel("start", sample.model.start)).toBe("start (base)");
+    const raw = stageCSampleFileFromRound();                           // post_train.start_of's setting (the fixture)
+    const parsed = parseTrainingWindowSample(raw, "C");
+    if (!parsed.ok) throw new Error(parsed.problem);
+    const { start } = parsed.value.model;
+    const written = raw.model.settings.start;
+    expect(start).toEqual({ campaign: written.campaign, round: written.round, checkpointSha256: written.checkpoint_sha256 });
+    expect(startName(start)).toBe(`${written.campaign.split("/").pop()} r${written.round}`);
+    expect(startName(start)).toBe("post_source_fixture r0");
+    expect(roundLabel("start", start)).toBe("start (post_source_fixture r0)");
+    expect(roundLabel(5, start)).toBe("round 5");
+  });
+
+  it("refuses a start of another shape, and settings without one", () => {
+    const refused = (change: (settings: Record<string, any>) => void, says: string) => {
+      const raw = stageCSampleFileFromRound();
+      change(raw.model.settings);
+      const parsed = parseTrainingWindowSample(raw, "C");
+      expect(parsed.ok).toBe(false);
+      if (!parsed.ok) expect(parsed.problem).toContain(says);
+    };
+    refused((settings) => { delete settings.start; }, "model.settings.start");
+    refused((settings) => { settings.start = settings.start.campaign; }, "model.settings.start");
+    refused((settings) => { settings.start.checkpoint_sha256 = "abc"; }, "not a SHA-256");
+    refused((settings) => { settings.start.round = -1; }, "model.settings.start.round");
+    refused((settings) => { delete settings.start.campaign; }, "model.settings.start.campaign");
+  });
+
   it("refuses another schema by name", () => {
-    const parsed = parseTrainingWindowSample({ ...stageCSampleFile(), schema: "aeroviz-training-prior-sample-v2" });
+    const parsed = parseTrainingWindowSample({ ...stageCSampleFile(), schema: "aeroviz-training-prior-sample-v2" }, "C");
     expect(parsed.ok).toBe(false);
     if (!parsed.ok) expect(parsed.problem).toContain(TRAINING_WINDOW_SAMPLE_SCHEMA);
   });
@@ -115,7 +151,7 @@ describe("the sample", () => {
     const refused = (change: (raw: Record<string, any>) => void, says: string) => {
       const raw = stageCSampleFile();
       change(raw);
-      const parsed = parseTrainingWindowSample(raw);
+      const parsed = parseTrainingWindowSample(raw, "C");
       expect(parsed.ok).toBe(false);
       if (!parsed.ok) expect(parsed.problem).toContain(says);
     };
@@ -198,11 +234,11 @@ describe("where an aircraft is at a time", () => {
   const track = { tS: [0, 2, 4], lon: [0, 1, 2], lat: [10, 10, 12], altitudeHaeM: [100, 200, 300] };
 
   it("is on the straight line between the two rows around it, and nowhere outside the track", () => {
-    expect(positionAt(track, 2)).toEqual([1, 10, 200]);
-    expect(positionAt(track, 3)).toEqual([1.5, 11, 250]);
-    expect(positionAt(track, 0)).toEqual([0, 10, 100]);
-    expect(positionAt(track, -1)).toBeNull();
-    expect(positionAt(track, 4.5)).toBeNull();
+    expect(trackAt(track, 2)).toEqual([1, 10, 200]);
+    expect(trackAt(track, 3)).toEqual([1.5, 11, 250]);
+    expect(trackAt(track, 0)).toEqual([0, 10, 100]);
+    expect(trackAt(track, -1)).toBeNull();
+    expect(trackAt(track, 4.5)).toBeNull();
   });
 });
 

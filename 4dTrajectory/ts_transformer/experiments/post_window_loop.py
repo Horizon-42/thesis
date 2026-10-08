@@ -91,6 +91,9 @@ Answering = Callable[[Window, int, Loss, AircraftAt, int], tuple[int, ...]]
 #: A caller's token part (module docstring): ``(loop, row, others)`` → ``[N, width]`` the part of each other aircraft
 #: of the row (``others``: for each, its row in the batch, None for a recorded aircraft), with its ``width``.
 TokenPartOf = Callable[["WindowLoop", int, Sequence["int | None"]], np.ndarray]
+#: A caller's reading of what a value network reads at a row beside the model (post-training D171): ``(loop, row b, tick
+#: t, b's aircraft, its other aircraft) -> (one row for each other aircraft, a number)``, kept apart from the tokens.
+ValueReaderOf = Callable[["WindowLoop", int, int, AircraftAt, AircraftAt], tuple[np.ndarray, float]]
 
 
 def responsible(window: Window, step: int, loss: Loss, aircraft: AircraftAt, commanded: int) -> tuple[int, ...]:
@@ -159,7 +162,10 @@ class WindowLoop:
                  finals: Mapping[str, Sequence[Final]], words: Words, *, interval_s: float, variant: str,
                  edges_reference: Path, faults: Mapping[str, Mapping[str, frozenset[int]]],
                  observed: Mapping[int, np.ndarray], device: torch.device, answering: Answering = responsible,
-                 token_part: TokenPartOf | None = None, part_width: int = 0) -> None:
+                 token_part: TokenPartOf | None = None, part_width: int = 0,
+                 value_reader: ValueReaderOf | None = None) -> None:
+        """``value_reader``: what a value network reads at each row beside the model (D171; `values`), never in the
+        model's tokens; None: nothing read."""
         checked_edges(edges_reference)
         if loop.most_go_arounds != MOST_GO_AROUNDS:
             raise ValueError(f"the loop was started for {loop.most_go_arounds} go-arounds a flight, not {MOST_GO_AROUNDS} "
@@ -226,6 +232,10 @@ class WindowLoop:
         #: each row's tokens at every row of its own, observed and said (``[N, features]`` each): the loss reads the
         #: words said with the same input of the traffic module (post-training C7)
         self._tokens: list[list[np.ndarray]] = [[] for _ in self.order]
+        #: each row's value reading at every row of its own (D171; ``value_reader``), and the present row's, pending
+        self.value_reader = value_reader
+        self._values: list[list[tuple[np.ndarray, float]]] = [[] for _ in self.order]
+        self._pending: list[tuple[np.ndarray, float] | None] = [None] * len(self.order)
 
     @property
     def landings(self) -> list[LandingIndex]:
@@ -303,6 +313,8 @@ class WindowLoop:
                 own, other, placed, _, _ = self._of_row(tick, b)
             g = self.geometries[b]
             row = tokens(own, other, g, self.separations[g.code], self.step_s)
+            if self.value_reader is not None:
+                self._pending[b] = self.value_reader(self, b, t, own, other)
             if self.token_part is not None:
                 row = np.concatenate((row, np.asarray(self.token_part(self, b, placed), dtype=np.float32)), axis=1)
             rows.append(row)
@@ -314,6 +326,8 @@ class WindowLoop:
         for b, row in enumerate(rows):
             if joined[b]:
                 self._tokens[b].append(row)
+                if self.value_reader is not None:
+                    self._values[b].append(self._pending[b])
         if applies is not None:
             self.speed_mask_rows += applies
 
@@ -459,7 +473,7 @@ class WindowLoop:
         """A loop of copies of the windows ``windows`` (places in ``windows``, repeats permitted; post-training D94): the
         closed loop's own copy of every row of each (`SpeakingLoop.copy`: the executor's loop, the speaker, the inputs
         and their records) and the window's own state — its scene, landings, separation judge, silent rows, speed-mask
-        counts and recorded tokens. Flown on with the same numbers, a copy says what its original says (D94); the loop
+        counts, recorded tokens and value readings (D171). Flown on with the same numbers, a copy says what its original says (D94); the loop
         copied is unchanged."""
         index = list(windows)
         rows = [b for w in index for b in self.members[w]]
@@ -490,6 +504,8 @@ class WindowLoop:
                 out._next[n] = _Tick(tick.t, [start + self.members[w].index(b) for b in tick.rows], tick.owns,
                                      tick.recorded, tick.aircraft, tick.scene)
         out._tokens = [list(self._tokens[b]) for b in rows]
+        out.value_reader = self.value_reader
+        out._values, out._pending = [list(self._values[b]) for b in rows], [self._pending[b] for b in rows]
         return out
 
     def end_step(self, b: int) -> int:
@@ -507,6 +523,16 @@ class WindowLoop:
         permitted = self.speaking.permitted()
         return [(rows, permitted.select([b]), self._tokens[b][: len(rows.time_s)])
                 for b, rows in enumerate(self.speaking.sentences(split))]
+
+    def values(self, split: str) -> list[tuple[list[np.ndarray], np.ndarray]]:
+        """Each row's value readings (D171, ``value_reader``) at the rows of its sentence for the loss (`samples`):
+        the part of each row and the numbers of its rows."""
+        if self.value_reader is None:
+            raise ValueError("a loop without a value reader reads no value")
+        lengths = [len(rows.time_s) for rows in self.speaking.sentences(split)]
+        return [([part for part, _ in self._values[b][:n]], np.array([x for _, x in self._values[b][:n]],
+                                                                    dtype=np.float32))
+                for b, n in enumerate(lengths)]
 
     def run(self, numbers: Sequence[np.random.Generator]) -> list[WindowResult]:
         """Fly every window to its end, ``numbers`` each row's source of random numbers (five a row it is said, as free

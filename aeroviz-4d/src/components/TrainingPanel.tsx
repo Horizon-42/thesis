@@ -33,7 +33,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useApp } from "../context/AppContext";
 import useTrainingAutopilot from "../hooks/useTrainingAutopilot";
 import useTrainingPriorIndex from "../hooks/useTrainingPriorIndex";
-import useTrainingWindowIndex from "../hooks/useTrainingWindowIndex";
+import useTrainingWindowIndex, { type TrainingWindowIndexState } from "../hooks/useTrainingWindowIndex";
 import TrainingPriorSession from "./training/TrainingPriorSession";
 import TrainingWindowSession from "./training/TrainingWindowSession";
 import ProblemBox from "./training/ProblemBox";
@@ -54,7 +54,10 @@ import {
   type TrainingSetEntry,
 } from "../data/trainingSample";
 import { trainingPriorIndexPath } from "../data/trainingPriorSample";
-import { trainingWindowIndexPath } from "../data/trainingWindowSample";
+import { trainingWindowIndexPath, type TrainingWindowStage } from "../data/trainingWindowSample";
+
+/** The sets the panel shows: stage A's, B's, C's windows or D's. */
+type Viewing = "stageA" | "prior" | "window" | "multi";
 
 type IndexState =
   | { status: "loading" }
@@ -91,16 +94,26 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
 
   const [indexState, setIndexState] = useState<IndexState>({ status: "loading" });
   const [setId, setSetId] = useState<string | null>(null);
-  /** Whose sets the panel shows: stage A's (`index_v5.json`), stage B's prior sets (`index_prior_v3.json`) or stage C's
-   *  window sets (`index_post_v3.json`) — B and C offered only where the airport has the file. */
-  const [viewing, setViewing] = useState<"stageA" | "prior" | "window">("stageA");
+  /** Whose sets the panel shows: stage A's (`index_v5.json`), stage B's prior sets (`index_prior_v3.json`), stage C's
+   *  window sets (`index_post_v3.json`) or stage D's (`index_multi_v1.json`, frontend §5.1) — B, C and D offered only
+   *  where the airport has the file. */
+  const [viewing, setViewing] = useState<Viewing>("stageA");
   const priorIndex = useTrainingPriorIndex(activeAirportCode || null);
-  const windowIndex = useTrainingWindowIndex(activeAirportCode || null);
+  const windowIndexes: Record<TrainingWindowStage, TrainingWindowIndexState> = {
+    C: useTrainingWindowIndex(activeAirportCode || null, "C"),
+    D: useTrainingWindowIndex(activeAirportCode || null, "D"),
+  };
   // a switch is offered where the airport has such sets (or an index to complain about); an airport without the one chosen
   // at the last airport shows stage A
-  const priorOffered = (priorIndex.status === "ready" && priorIndex.index.sets.length > 0) || priorIndex.status === "invalid";
-  const windowOffered = (windowIndex.status === "ready" && windowIndex.index.sets.length > 0) || windowIndex.status === "invalid";
-  const showing = (viewing === "prior" && priorOffered) || (viewing === "window" && windowOffered) ? viewing : "stageA";
+  const offered = (index: TrainingWindowIndexState | typeof priorIndex) =>
+    (index.status === "ready" && index.index.sets.length > 0) || index.status === "invalid";
+  const priorOffered = offered(priorIndex);
+  const windowOffered = { C: offered(windowIndexes.C), D: offered(windowIndexes.D) };
+  const showing: Viewing = (viewing === "prior" && priorOffered) || (viewing === "window" && windowOffered.C)
+    || (viewing === "multi" && windowOffered.D) ? viewing : "stageA";
+  /** The window stage on screen (C or D), or null. */
+  const windowStage: TrainingWindowStage | null = showing === "window" ? "C" : showing === "multi" ? "D" : null;
+  const windowIndex = windowStage === null ? null : windowIndexes[windowStage];
   // the details page's state, given to every stage's session (a panel hidden in another task keeps no page open)
   const details = useDetailsPage(hidden);
   useTrainingAutopilot();
@@ -145,11 +158,11 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
 
   const sample = setState.status === "ready" ? setState.sample : null;
   // whether a stage's session is on screen (it draws the details page then); otherwise why not
-  const windowShown = showing === "window" && windowIndex.status === "ready" && !!activeAirportCode && windowIndex.index.airport === activeAirportCode;
+  const windowShown = windowIndex !== null && windowIndex.status === "ready" && !!activeAirportCode && windowIndex.index.airport === activeAirportCode;
   const priorShown = showing === "prior" && priorIndex.status === "ready" && !!activeAirportCode;
   const stageAShown = showing === "stageA" && indexState.status === "ready" && entry !== null && !!activeAirportCode;
   const sessionShown = windowShown || priorShown || stageAShown;
-  const nothingShown = showing === "window" ? `no window set of ${airport} can be read (${trainingWindowIndexPath(airport)})`
+  const nothingShown = windowStage !== null ? `no window set of ${airport} can be read (${trainingWindowIndexPath(airport, windowStage)})`
     : showing === "prior" ? `no prior set of ${airport} can be read (${trainingPriorIndexPath(airport)})`
       : indexState.status === "loading" ? `reading ${trainingIndexPath(airport)}`
         : indexState.status === "ready" ? "the index lists no set" : `no Training export for ${airport} (${trainingIndexPath(airport)})`;
@@ -167,27 +180,28 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
         </button>
       </header>
 
-      {priorOffered || windowOffered ? (
-        <label className="training-field" title="Stage A: flights read back through the closed loop. Stage B: the sentences the prior said, flown by the executor. Stage C: windows of recorded traffic, the commanded aircraft flown on each round's words.">
+      {priorOffered || windowOffered.C || windowOffered.D ? (
+        <label className="training-field" title="Stage A: flights read back through the closed loop. Stage B: the sentences the prior said, flown by the executor. Stage C: windows of recorded traffic, the commanded aircraft flown on each round's words. Stage D: windows in which every arrival is commanded.">
           <span>Sets of</span>
-          <select value={showing} onChange={(event) => setViewing(event.target.value as "stageA" | "prior" | "window")}>
+          <select value={showing} onChange={(event) => setViewing(event.target.value as Viewing)}>
             <option value="stageA">Stage A · read-back</option>
             {priorOffered ? <option value="prior">Stage B · prior</option> : null}
-            {windowOffered ? <option value="window">Stage C · windows</option> : null}
+            {windowOffered.C ? <option value="window">Stage C · windows</option> : null}
+            {windowOffered.D ? <option value="multi">Stage D · all commanded</option> : null}
           </select>
         </label>
       ) : null}
-      {showing === "window" && windowIndex.status === "invalid" ? (
-        <ProblemBox title={`${trainingWindowIndexPath(airport)} cannot be read.`} detail={windowIndex.problem} />
+      {windowStage !== null && windowIndex !== null && windowIndex.status === "invalid" ? (
+        <ProblemBox title={`${trainingWindowIndexPath(airport, windowStage)} cannot be read.`} detail={windowIndex.problem} />
       ) : null}
-      {windowShown ? (
+      {windowShown && windowStage !== null ? (
         <>
           {windowIndex.index.rejected.map((item) => (
             <ProblemBox key={item.id} title={`Entry ${item.id} was rejected.`} detail={item.problem} />
           ))}
           {/* keyed by the airport: another airport's index never opens with this one's set, window or round */}
-          <TrainingWindowSession key={`${activeAirportCode}:${windowIndex.index.airport}`} airport={activeAirportCode} sets={windowIndex.index.sets}
-            details={details} />
+          <TrainingWindowSession key={`${windowStage}:${activeAirportCode}:${windowIndex.index.airport}`} airport={activeAirportCode}
+            stage={windowStage} sets={windowIndex.index.sets} details={details} />
         </>
       ) : null}
       {showing === "prior" && priorIndex.status === "invalid" ? (

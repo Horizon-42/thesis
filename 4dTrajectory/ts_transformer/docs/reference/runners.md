@@ -1692,6 +1692,13 @@ C10, C14, C16, C17). `--method` (required, a setting of the campaign):
   learned with the clipped surrogate;
 - `landed` (P49): each window spoken `--continuations` times, its best landed sentence kept, and the kept words
   learned (their negative log-likelihood).
+- `value` (D171, C22): each window spoken one time (`--continuations 1`), every sentence a sample; a value network V
+  (a copy of the start model with a token part of its own: the recorded aircraft's future at +30/60/120 s and the
+  time to their landing, and the time left, read only by V) gives each row its advantage (GAE, λ 0.95); V trained
+  beside the model (`--value-lr`), alone for the first `--value-warmup` rounds; V kept in `round_<r>/value.pt`
+  (`ts-post-value-v1`), written before the checkpoint, never read by a readout or a start.
+  `--advantage-centering` (D173, C23): the round's mean advantage taken off each counted row (the targets kept);
+  `--value-epochs N`: V steps in the round's first N passes only (default: every pass).
 
 Both keep the pull toward the base and the data term, and each round ends with the selection readout and a
 checkpoint.
@@ -1710,6 +1717,9 @@ checkpoint.
 - `--epochs` (D169, C20): the passes over a round's groups (default 1, the behaviour before it), each in its own order
   (the first the round's numbers, the others children of them), every pass's ratio against the model at the round's
   start; `round.json`'s pass gives the means over every pass and each pass's (`passes`).
+- `--branch-every-s` and `--segment-only` (D170, C21; branch training only): the branch points' interval (default
+  120 s, a whole number of Δ rows) and a group's advantage counted only up to the next branch point (default: to the
+  event).
 - A clean tree unless `--smoke`; formal runs from a detached run worktree (D163).
 - Writes `campaign.json` (`ts-post-train-v1`) and, for each round, `round.json` and `checkpoint.pt`
   (`ts-post-checkpoint-v1`).
