@@ -4,8 +4,9 @@ Fronter writes this file (outline §5 rule 10, frontend §0.3); it is rewritten 
 fronter made where the design says nothing, or a gap; a reading is a proposal until the user decides, and a decided item
 is removed. Paths are relative to `4dTrajectory/ts_transformer/`; frontend paths to `aeroviz-4d/src/`.
 
-State: 2026-10-08. The start's name after D162 (frontend §4.3) is built on `dev-frontend`; items 2 and 3 are its
-readings. Next: stage C's first formal set (P55 round 5), then F3.
+State: 2026-10-08. The start's name after D162 (frontend §4.3) is built and merged (`f10e9ee5`); item 2 is its reading.
+The start's formal readout (the old item 3) was decided by the user and is built (`a9d296d5`). Next: stage C's first
+formal set (P55 round 5), then F3.
 
 ## After D160
 
@@ -25,11 +26,3 @@ readings. Next: stage C's first formal set (P55 round 5), then F3.
    a post-trained one (e.g. C10's round 8), so `roundKind("start", start)` is `postTrained` unless the campaign starts
    from the base: its tab swatch, 3D track, read-back line and statistics row are yellow-green, like the rounds after
    it. The tab's name tells the start from the rounds (`Start (post_train_20261006 r8)`).
-
-3. **The start's row of the statistics has no readout (proposal, not built).** For a campaign from the base the start
-   has no selection readout, so its row shows "—". A D162 start has one: the source campaign's round's own
-   `round.json` `selection_readout` (on the same select windows when the readout seed and windows match, as for every
-   campaign of 2026-10-07). The results route (`aeroviz_backend/training_results.py` `rounds`) could read it from
-   `campaign.json` `inputs.settings.start` and answer it as the start's row, so the page shows e.g. 85.7 % beside
-   87.7 %. Small (the route and `trainingStatistics.ts`); needs the user's word, since the source's readout may have
-   been read on other windows (then: not shown, and why).
