@@ -154,7 +154,6 @@ State: 2026-10-08: everything of stage D merged into `dev-two-tier` (the census 
     the unit is an anchor (its windows of the spans are nested and share their aircraft); within a span, windows of
     other anchors may still share flights in a dense select set (stated).
 
-
 49. **The workers' fit underestimates the GPU at the formal size** (D172; MC5, 2026-10-08). The profile measured one
     worker on each span's first batch and the batch of the most rows (300 s: 1.41 GiB reserved at 64 rows; 600 s:
     1.91 GiB at 48; 1200 s: 0.78 GiB at 24; the pass 2.15 GiB) and found 1, 2 and 3 workers fit (`workers.short` empty,
@@ -165,4 +164,3 @@ State: 2026-10-08: everything of stage D merged into `dev-two-tier` (the census 
     fit keeps a margin on the measured GPU peak (e.g. 1.3×, stated in the record), or MC6 takes one worker fewer than
     the profile's largest fit; until decided, MC6's proposal to the user uses the workers that the profile's own round
     spoke without failing (2 if the run with 2 ends).
-\n
