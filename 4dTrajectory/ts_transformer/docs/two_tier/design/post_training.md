@@ -114,8 +114,8 @@ commits, the tests and the readings are in the implementation log.
 2. C15 (D161, the ceiling readout: `outputs/POOLED/post/ceiling_20261007`, log §28) and C16 (D162) are done.
 3. C17–C20 (D165, D167–D169) are built. The campaigns are experiments within the design: their settings and intents
    in `docs/experiments/intents.json`, their results in stage C's log, each run from a run worktree (outline D163) with
-   no other job on the host or the GPU. C21–C24 (D170, D171, D173, D175) are built; C25 (D176), the window lists,
-   next, then fronter's F5; the campaigns are the user's choice.
+   no other job on the host or the GPU. C21–C25 (D170, D171, D173, D175, D176) are built; C26 (frontend D177 (15))
+   next; fronter's F5 builds on C25; the campaigns are the user's choice.
 4. The validation readout of the round that the user chooses, then its speed (frontend §3 item 10, `model_speed`), with
    no other job on the host or the GPU.
 5. C12.
@@ -127,7 +127,7 @@ commits, the tests and the readings are in the implementation log.
    nothing of them goes into C10's worktree.
 
 Every other milestone from now on is built by stage D's implementer (it takes over stage B's) on `dev-two-tier-v4`, in the worktree
-`.claude/worktrees/two-tier-v4` (outline §5 rule 1); C25 by stage C's implementer on `dev-two-tier-v4-post` (worktree
+`.claude/worktrees/two-tier-v4` (outline §5 rule 1); C26 by stage C's implementer on `dev-two-tier-v4-post` (worktree
 `.claude/worktrees/two-tier-v4-post`), first brought level with `dev-two-tier`.
 
 ---
@@ -549,9 +549,9 @@ campaign), `ts-post-checkpoint-v1`, `ts-post-value-v1` (V's file, D171), `ts-win
 
 ## 8 Milestones not done
 
-C0–C7, C9, C10, C11 and C13–C24 are done; their specifications are in the implementation log (§22, §26–§30; C13's check in stage B's log §6). The rules of outline §5 apply:
+C0–C7, C9, C10, C11 and C13–C25 are done; their specifications are in the implementation log (§22, §26–§30; C13's check in stage B's log §6). The rules of outline §5 apply:
 from 2026-10-06 one implementer builds every milestone of every stage (outline §5 rule 1: stage D's, which takes over
-stage B's remaining steps); stage C's implementer builds C25 and runs the campaigns and readouts of its experiments.
+stage B's remaining steps); stage C's implementer builds C26 and runs the campaigns and readouts of its experiments.
 
 **C8. Profile and the go-around probability** (§2 item 6). After B5's base and Claude's check of stage B.
 
@@ -575,14 +575,10 @@ stage B's remaining steps); stage C's implementer builds C25 and runs the campai
   as §4 item 2. Tests: it refuses a second read; it reads no train or select window.
 - A formal campaign and its validation readout refuse a base that is not stage B's formal base (D132).
 
-**C25. Window lists** (D176). `post/window_lists.py`: the format `ts-window-list-v1` (written and read, refused by
-name for another schema, a split other than select, or a window without its place and identity), for stages C and D;
-`experiments/window_list.py` and its entry in `docs/reference/runners.md` (R67): the rule of D176 (2) on D175's
-per-window lines and D161's draw 0. Tests: a list written and read again; a val list refused; `--outcomes` with any and
-with `--all` on hand-made reads; the readers of both readouts; the outputs sealed. Then the hand-made index
-`outputs/POOLED/post/loss_windows_select_20261008` is written again by the runner (the losses of separation in any of
-its three reads), checked to name the same windows, and deleted (an artefact of ad-hoc code is superseded, root
-`CLAUDE.md`). Fronter's F5 (frontend §8) builds the export's option on it.
+**C26. A public reader of the faulty-point steps** (frontend D177 (15)). The window loop gives, for a window, the
+steps at which a recorded aircraft read a faulty point (D114) through a public name (today the private
+`WindowLoop._reading`, which the Training export reads); the loop's behaviour unchanged. Tests: the reader gives what
+the readouts count (D114) on a window with a faulty point; the export's test passes on it. Fronter then reads it (F5).
 
 **C12. Close of stage C.** The full ts suite passes. The implementation log and `docs/reference/runners.md` are
 updated; the report gives the code index for §7 (outline §5 rule 10). Report to the user: the commits, the rounds and
@@ -610,7 +606,7 @@ implementer's report gives the names that change, and Claude writes them here.
 | 5 | The speed-word mask | A caller's mask on the speed column (§3, D110) | `post/speed_mask.py` `speed_check`, `along_course_speeds` |
 | 6 | The reward | D30's reward of an aircraft; the present landing direction (D112) | `post/reward.py` `reward`, `present_runways` |
 | 7 | The traffic attention | The module at each layer, its input, its learning rate (`post-traffic-attention-v2`). Built (multi-aircraft control D149, MC0): a token part that a caller adds (its own token inputs beside the edge features, through its own projection that starts at zero, under its own format name); without it, today's module and tokens, bit for bit | `post/traffic_attention.py` `TrafficConfig`, `Traffic`, `traffic_of`, `TrafficTokens`, `TrafficAttention`, `add_traffic_attention`, `parameter_groups`; stage D's: `Traffic.part`, `Traffic.select`, `traffic_of(…, part_width=…)`, `TokenPart`, `add_token_part` |
-| 8 | The window loop | The commanded aircraft of a batch of windows through the speaker's closed loop (prior §7 item 7), the scene at each step, the judge, the masks of a caller, the copy of a window at a branch point. Built (multi-aircraft control D149, MC0): a window is one or more rows of the batch, each joining at its own tick (prior §7 item 7); an aircraft made silent (a caller's mask that permits only "unchanged" in every column); a window ends when every commanded aircraft is done or silent; each aircraft's result; a landing in the loop added to the other aircraft's landings; the copy copies every aircraft of the window. A reader of what a value network reads at each row, kept apart from the tokens (D171; stage D gives none) | `experiments/post_window_loop.py` `WindowLoop`, `WindowResult`, `moved_commanded`, `WindowLoop(…, value_reader=)`, `WindowLoop.values`; stage D's: `WindowLoop(…, answering=…, token_part=…, part_width=…)`, `responsible`, `Answering`, `TokenPartOf`, `WindowLoop.members`, `window_of`, `member_of`, `records`, `silent`, `landings` |
+| 8 | The window loop | The commanded aircraft of a batch of windows through the speaker's closed loop (prior §7 item 7), the scene at each step, the judge, the masks of a caller, the copy of a window at a branch point. Built (multi-aircraft control D149, MC0): a window is one or more rows of the batch, each joining at its own tick (prior §7 item 7); an aircraft made silent (a caller's mask that permits only "unchanged" in every column); a window ends when every commanded aircraft is done or silent; each aircraft's result; a landing in the loop added to the other aircraft's landings; the copy copies every aircraft of the window. A reader of what a value network reads at each row, kept apart from the tokens (D171; stage D gives none). A public reader of the steps at which a recorded aircraft read a faulty point (D114), for the Training export (frontend D177 (15); C26, to be built) | `experiments/post_window_loop.py` `WindowLoop`, `WindowResult`, `moved_commanded`, `WindowLoop(…, value_reader=)`, `WindowLoop.values`; stage D's: `WindowLoop(…, answering=…, token_part=…, part_width=…)`, `responsible`, `Answering`, `TokenPartOf`, `WindowLoop.members`, `window_of`, `member_of`, `records`, `silent`, `landings` |
 | 9 | Branch training | The random numbers of a round, the branch points, the groups and their samples (D37, D94). Built (multi-aircraft control D149, MC0): the numbers of each aircraft, the varied aircraft and their branch points, and a window's reward are rules that the caller gives (stage C's: D94's streams, its one aircraft with a reward below 1, its reward); a group names its varied aircraft. The branch interval and a group's segment (D170) are arguments with D37's defaults; stage D's rules and pass give none | `post/branches.py` `first_numbers`, `continuation_numbers`, `branch_points`, `Group`, `samples`, `BRANCH_EVERY_S`, `CONTINUATIONS`; `experiments/post_branches.py` `branch_round`; stage D's: `post_branches.Rules` (`Rules.varied(window, loop, rows, results)`), `stage_c_rules`, `Group.branch`, `Sentence.until`; D170: `branch_points(…, every_s=)`, `stage_c_rules` with the interval, `samples(…, segment_rows=)` |
 | 10 | The loss | The surrogate, the pull to the base and the data term of an update (§2 item 5, D107, D115); a campaign's gradient clipping (`Settings.clip_norm`, D168) and passes a round (`Settings.epochs`, D169), each with its default the behaviour before it (no clipping, one pass); stage D's campaign takes the defaults until its settings name them; the training with a value function (D171, D173) | `post/loss.py` `Samples`, `surrogate`, `pull_to_base`, `data_term`, `update_step` (an update in pieces, §2 item 5), `update_loss` (the whole update, the reference), `one_pass`, `landed_step` (D165); `post/value.py` `advantages`, `value_loss` (D171) |
 | 11 | The campaign's steps | The draw of a round, the batches, the speaking workers, the pass, the selection readout, the checks at the start, the resume. Built (multi-aircraft control D149, MC0): the round's skeleton given a stage's draw, window loop and readouts; stage C's campaign is that skeleton with its own; a campaign's method (`Settings.method`, D165) and its readout seed (`Settings.select_seed`, D162); the speaking workers on a device of their own (`--speak-device`, by default the campaign's: workers on the CPU beside the pass on the GPU; refused without two or more workers, or for workers on CUDA beside a campaign on the CPU; O15 counts no GPU for a worker on the CPU; `round.json` records the device); the stage's settings class through which a resume compares the recorded settings (a setting added with a default matches an old record; stage D's: `MultiSettings`); the method `value` (D171); what a campaign keeps beside its model from round to round and a round's close after its record and before its checkpoint (the value method's V and its file; the defaults keep and add nothing, and stage D's campaign takes them), the round and the companion handed to the stage's pass | `experiments/post_train.py` `draw_round`, `batches`, `Speakers`, `speak_round`, `train_pass`, `selection_readout`, `open_context`, `open_campaign(…, settings_type=)`, `run_campaign`; stage D's: `Stage` (`start`, `start_model`, `speak_batch`, `read_batch`, `part_width`, `selection(context, settings, split)`), `STAGE_C`, `Speakers(…, stage=)`, `train_pass(…, part_width=)`, `update_pairs(…, part_width=)`; `STAGE_C_LANDED`, `Stage.train`, `Stage.pass_memory`, `best_landed`, `landed_numbers`, `landed_train_pass`, `landed_pass_memory`; `Stage.companion`, `Stage.close_round`, `Stage.train(…, round_=, companion=)`, `STAGE_C_VALUE` |
