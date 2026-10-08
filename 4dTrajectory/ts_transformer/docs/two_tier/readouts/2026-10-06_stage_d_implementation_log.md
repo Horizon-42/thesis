@@ -464,3 +464,38 @@ output set aside as `outputs/POOLED/multi/profile_20261008.stopped-20261008T2041
 workers fit; MC6 can read it with `--profile`), the log as `tmp/mc5/campaign_2workers_stopped.log`; the run worktree
 `run-mc5-profile` removed (its four data links unlinked first).
 
+## 14 The positions helper; D179 and D180 (notes/stage_d.md 一; 2026-10-08, night)
+
+**The positions helper (frontend D178 (6)), a small change:** `multi.census.loop_positions(window, ends, start, words)`
+— the commanded aircraft at the states the window loop flew them, each one's landed runway read only in a window of
+several — the expression `multi_train.window_losses_of` held, moved; the readout calls it, fronter's export will (its
+MIRROR goes). The export's MIRROR test (`test_stage_d_s_positions_and_listed_parts_are_the_readout_s`) captured the
+readout's `flown_positions` through `multi_train`; it now captures it in `multi.census`, where it is called (two lines of
+that test; the export unchanged). `test_multi_train`, `test_multi_windows`, `test_multi_training_export`,
+`test_architecture`: 79 passed. Commit `a332466a`, no agent review (root `CLAUDE.md` "Code review").
+
+**D179 and D180 (48c21e50):**
+- `multi_profile` measures memory only: round 0's draw and its batches by span recorded; one speaking worker on each
+  span's first batch and the batch of the most rows (`post_train.measured_batches`, requests item 54) and the pass;
+  `short` for each N with each measured peak times `multi_train.MEASURE_MARGIN` = 1.3 (`with_margin`: the peaks of the
+  worker's host and GPU and of the pass; what they hold now unchanged); the workers' device and the margin recorded;
+  schema `ts-multi-profile-v2` (a v1 record — the whole round — refused by name). The round, the two readouts, the
+  spread and the one-process part are gone; `--speak-workers` is 2 or more (the measure is a worker's).
+- `--speak-device` on `multi_train` and `multi_profile` (default `--device`), refused as stage C's through one shared
+  `post_train.speak_device_refused` (stage C's `main` calls it, its messages unchanged); `profiled_fit(…, device,
+  speak_device)` refuses a measure of another speaking device ("speaking device") and a pass of another campaign device
+  ("device"), counts a worker on the CPU against the host only, and gives no GPU budget to workers off the GPU.
+- Tests: the profile records the device and the margin and speaks no round; the margin refuses where the measured peaks
+  fit (on the host, on the pass's GPU peak and on the worker's GPU peak, each pinned apart); a CPU worker counts the host
+  only; another speaking device refused; v1 refused; the runners' refusals; `multi_profile.main` builds its worker on
+  `--speak-device` (default `--device`); the default campaign as before. `test_multi_profile`, `test_multi_train`,
+  `test_post_train`, `test_architecture`: 104 passed, then 68 after the fixes (two processes).
+- Reviewed in two rounds: the first found two S2 (the margin on the pass's and the worker's GPU peaks untested; the
+  profile runner's device untested), fixed with tests; the second none. S3 left (one line each): the "no measure of the
+  speaking workers" hint names `--speak-workers 2 or more`, which every v2 profile has; `select_per_airport` still a
+  profiled setting (requests item 55); "each span's first and largest batch" read as stage C's `measured_batches`
+  (item 54); the tight host in the profile test computed from the first measure; a pinned "4.6 GiB" 6e-10 below a
+  rounding edge.
+- Next (notes 二): after the user's merge, the measure on the CPU and on the GPU (1200 s at 24 and at 48 rows), from a
+  run worktree in a systemd unit, then the report and MC6's proposal to the user.
+

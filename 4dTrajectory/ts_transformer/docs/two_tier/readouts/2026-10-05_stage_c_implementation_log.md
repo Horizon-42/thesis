@@ -1415,3 +1415,12 @@ for the far one; read-only. `test_post_window_loop`, `test_post_training_export`
 (one line each): the far case's "2 Δ" restated as `- 2` instead of `STEPS_BEFORE_EVENT`; the empty-set case is not
 tested; one window of one row cannot tell `w` from a row index; the docstring could say the view is live. When fronter
 switches, `test_a_loss_is_written_once_at_the_step_it_starts` must fake `fault_readings` instead of `_reading`.
+
+**§9 item 13 (frontend D178 (6)), 2026-10-08:** `post.window_lists.identity_of(stage, window)` — a window's identity in
+a list, one definition with `IDENTITY_FIELDS` (stage C: the commanded flight, `row0_s`, kind; stage D: the anchor
+flight, `row0_s`, span), refused by name for another stage; fronter's exports will call it in place of their two copies.
+The runner `window_list` reads its readouts' recorded windows (`post_train.window_record`), not `Window`s, so it takes
+their identities by the same `IDENTITY_FIELDS` (Claude's reading of "window_list uses it": the test pins that
+`identity_of` of a window equals its record's fields). Test `test_a_window_s_identity_in_each_stage_is_what_its_record_carries`;
+`test_window_lists` and `test_architecture`: 45 passed. Commit `8baf6468`, a small change with no agent review
+(root `CLAUDE.md` "Code review").
