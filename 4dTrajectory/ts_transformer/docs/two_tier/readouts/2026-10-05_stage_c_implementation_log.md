@@ -1341,3 +1341,8 @@ reproduced it with the old module); the centring over two files of different adv
 V's update count tested; noted (not changed): `--value-epochs E` written out equal to `epochs` is a second spelling of
 the default, refused on a resume against a record holding the default. The second value campaign
 (`post_value2_20261008`, `--advantage-centering --value-epochs 1`, seed 2031) launched 08:48 local.
+
+**The second value campaign (`post_value2_20261008`, D173) ended 09:42 local**, 6 rounds, exit 0: the warm-up readouts
+equal the start's; the training rounds 83.2 / 83.5 / 82.6 / 83.2 % (the first value campaign's 83.8 / 84.3 / 83.1 /
+83.9 %); the centring brought the surrogate to about 0, so the fall is not the advantages' offset. Sealed (21 files),
+the run worktree removed. Table and reading: the experiment log, experiment 8.
