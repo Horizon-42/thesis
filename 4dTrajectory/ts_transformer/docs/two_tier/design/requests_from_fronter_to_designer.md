@@ -5,8 +5,8 @@ fronter made where the design says nothing, or a gap; a reading is a proposal un
 is removed. Paths are relative to `4dTrajectory/ts_transformer/`; frontend paths to `aeroviz-4d/src/`.
 
 State: 2026-10-08. The start's name and readout (§4.3) are built and merged; stage C's first formal set is published
-(P55 round 5); F3 is built on `dev-frontend` (`a7ab9bb6`). Items 3–9 are F3's readings. Next: F4 after stage D's MC4
-(its runner is merged; F4's formal sets wait for MC6).
+(P55 round 5); F3 is merged; F4's export and smoke set are built on `dev-frontend` (`7b3e7ae5`). Items 3–9 are F3's
+readings, 10–15 F4's. Next: stage D's formal sets after MC6, their intent first.
 
 ## After D160
 
@@ -53,3 +53,23 @@ State: 2026-10-08. The start's name and readout (§4.3) are built and merged; st
 9. **Stage C's export flies a window of several commanded aircraft with stage C's loop and rule** (for §8 F3's
    fixture): each aircraft's numbers are the anchor's stage C readout numbers and, for a later member, a mirror of stage
    D's (`multi_train.readout_numbers`). Stage D's export (F4) uses stage D's loop options and numbers of its own.
+
+## F4 (2026-10-08, built so; the user can change any)
+
+10. **Stage D's sets name no speed readout.** `model_speed` times stages B and C (D136); a stage D set's `source.speed`
+    is null and the details page says so. A speed readout of stage D would need `model_speed` to speak stage D's loop.
+11. **A loss written once.** The loop records an answered loss at the step it answers it; the export adds every other
+    loss holding a commanded aircraft (D145: answered by none, dashed), one entry per run of a pair's loss over
+    successive steps, at its first step; a run holding an answered step is that answer's and is not written again.
+12. **The census is mirrored.** The unanswered losses come from a copy of the readout census's step loop
+    (`multi_training_export.census_losses`, declared a MIRROR and pinned against `multi_train.window_losses_of`).
+    Proposed to stage D: one generator in `multi/census.py` that both use (fronter does not change stage D's code).
+13. **A silent aircraft that flew on is written to its own end.** When the executor finishes an aircraft after it
+    went silent (D144), its block has the judge's outcome, end and crossing (e.g. landed); its reward stays 0 and its
+    loss stays answered. The details page's set column counts it as lost separation, as the readout does; the strip,
+    "This round" and the list count its written outcome (it did land) — the two counts can differ by such aircraft.
+14. **Stage D's sets: readout windows only.** A set draws from the campaign's readout windows (real, every span, D166
+    (33)), so a window is never compressed (`c` null); each aircraft flies with `multi_train.readout_numbers` of the
+    set's seed and its place in the set (not the readout's own places), as stage C's sets do.
+15. **The private record read.** The export reads `WindowLoop._reading` (the steps at which a recorded aircraft read a
+    faulty point) for the unanswered losses' `readsFault` (D114). Proposed to stage C: a public reader of it.
