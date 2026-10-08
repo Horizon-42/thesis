@@ -53,8 +53,9 @@ Fronter keeps this table and its log, `readouts/2026-10-06_fronter_implementatio
 | F0 The user's three corrections (D159) | Done: `01a8ab58` on `dev-frontend` (reviewed; browser-checked) |
 | F1 The cursor slider (D155) | Done: `e6f5c5fd`, the three small points `8c4d6af4` on `dev-frontend` (reviewed; browser-checked) |
 | F2 Windows of several commanded aircraft: the format, stage C's export, the view's readers (D156) | Done: `05963721`, `1452cccb` on `dev-frontend` (reviewed; browser-checked on a v4 smoke set) |
-| F3 Stage D's parts of the window view (D156) | Not started; after stage D's MC0 |
+| F3 Stage D's parts of the window view (D156) | Not started; MC0 is on `dev-two-tier`; after stage C's first formal set (orders 2026-10-08) |
 | F4 Stage D's export and sets | Not started; after stage D's MC4 |
+| The start's name after D162 (§4.3) | Done: `f10e9ee5` on `dev-frontend` (reviewed) |
 
 ### 0.4 Plan
 
