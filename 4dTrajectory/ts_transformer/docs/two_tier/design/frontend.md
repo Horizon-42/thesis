@@ -66,6 +66,7 @@ Fronter keeps this table and its log, `readouts/2026-10-06_fronter_implementatio
 4. F3 after stage D's MC0 is on `dev-two-tier` (post-training §9 items 1, 3 and 8: a window of several commanded
    aircraft, its losses, its loop), on fixtures that stage C's export writes for a synthetic window of two.
 5. F4 after stage D's MC4 (its runners): its export and a smoke set; its formal sets after MC6, their intent first.
+6. F5 after stage C's C25 (post-training D176): sets of listed windows, the sample v5.
 
 The user merges fronter's branch.
 
@@ -468,6 +469,12 @@ counted once a pair; the results route takes `stage=D` and reads stage D's campa
 - **D's sets** (`experiments/multi_training_export.py`, multi-aircraft control §10): a seeded draw of the select
   windows of each airport from the formal campaign (seed 1337), every round; a smoke set from MC4's smoke.
 - **The window segment** takes the aircraft: a new request name on both sides.
+- **Sets of listed windows** (post-training D176): the shared export takes `--windows <list>` (a `ts-window-list-v1`
+  of select windows) in place of its draw, for stages C and D (each stage's `StageExport.listed`: its selection
+  windows, its readout's numbers). The window sample v5 (`aeroviz-training-window-sample-v5`) and its indexes
+  (`index_post_v4.json`, `index_multi_v2.json`): the cohort is one of two forms, `drawn` (the fields of v4's cohort)
+  or `listed` (the list's path, sha256, sentence and count, and the select seed of its numbers); the details page's
+  first section says which, and gives a listed set's sentence.
 
 ### 5.8 What stage D's view does not have
 
@@ -532,7 +539,10 @@ Every changed format gets a new name; the view refuses an old one by name (outli
 layout (§3 item 7): stage A's index `index_v5.json` and sample v11, stage B's `index_prior_v3.json` and sample v4, stage
 C's `index_post_v2.json` and sample v3. Stage D's view (D156) renames stage C's: the window sample
 `aeroviz-training-window-sample-v4` for C and D, the indexes `index_post_v3.json` (C) and `index_multi_v1.json` (D), and
-the window segment's request. Stage C has no published set, so no set of C is exported again.
+the window segment's request. Stage C had no published set, so no set of C was exported again. The window sample v5
+and the indexes `index_post_v4.json` and `index_multi_v2.json` (post-training D176: the cohort `drawn` or `listed`)
+replace v4: the one published set of v4, `windows_seg60_r5_20261008`, is exported again in v5 (the user,
+2026-10-08).
 
 ---
 
@@ -585,6 +595,15 @@ their tests.
 writer and `flown_sentence`; a smoke set; the browser check of §2 item 6 in stage D (the strip selects, every
 aircraft's tabs choose its sentence, the losses show by pair, a word flies live); the formal sets after MC6, their
 intent first (§2 item 4).
+
+**F5. Sets of listed windows** (post-training D176, §5.7), after C25 is on `dev-two-tier`. The shared export's
+`--windows` (`StageExport.listed` of stages C and D), the window sample v5 and its indexes (writer and reader), the
+details page's line. Then, on the user's order (2026-10-08): the set `windows_seg60_r5_20261008` removed (its files
+and its index entries) and exported again in v5 with its arguments; then the listed sets that the user names, their
+intent first (§2 item 4). Tests: a listed set's windows and numbers are its readout's (on a fixture, a window's
+sentence equals the one that the selection readout's batch flies, within post-training §6.4); the refusals of
+D176 (3); a drawn set as before but for its cohort's form; the reader of both forms; v4 refused by name. About 150
+lines and their tests.
 
 **Close.** The report gives the code index of the parts (§6.2) and the formats (§7); Claude moves each finished
 milestone's specification to fronter's log.
