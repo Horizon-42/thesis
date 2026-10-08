@@ -99,6 +99,89 @@ def fig08_prior_architecture() -> None:
     save(fig, "fig08_prior_architecture")
 
 
+# ------------------------------------------------------------------ Fig 18: inside the prior: the input, one layer, the heads
+def fig18_prior_layers() -> None:
+    fig, ax, H = canvas(DOUBLE, 4.7)
+    plus = lambda x, y, c=None: (ax.add_patch(plt.Circle((x, y), 1.5, fc="white", ec=c or C["ink2"], lw=0.9, zorder=4)), ax.text(x, y - 0.1, "+", ha="center", va="center", fontsize=8, zorder=5, color=c or C["ink"]))
+    line = lambda xs, ys, c=None, lw=0.9, ls="-": ax.plot(xs, ys, color=c or C["ink2"], lw=lw, ls=ls, zorder=2)
+    A, B = 43.0, 21.5                        # the lower edges of panels (a) and (b); panel (c) starts at 0
+    for y, t in ((A + 22.4, "(a) The input of a row"), (B + 19.4, "(b) One layer (× 4, stacked)"), (18.0, "(c) The five heads, in the order of the columns")):
+        ax.text(1, y, t, fontsize=7.2, fontweight="bold", va="center")
+    # ---- (a) the input of a row: three inputs are added, then what the row reads of the candidates
+    ins = [box(ax, 1 + 22 * i, A + 13.4, 19.5, 7.2, t, FILL["n"], sub=sub, fs=6.6) for i, (t, sub) in enumerate(
+        [("Linear", "own state, time since, G, heading"), ("3 embeddings", "altitude, angle, speed words"), ("Linear", "token of the runway in force")])]
+    bus = A + 10.8
+    for bb in ins:
+        cx = bb[0] + bb[2] / 2
+        line([cx, cx], [A + 13.4, bus])
+    line([ins[0][0] + ins[0][2] / 2, 68.4], [bus, bus])
+    plus(70, bus); plus(90, bus)
+    arrow(ax, (71.6, bus), (88.4, bus), "x", lxy=(80, bus + 0.8), fs=6.4, lw=0.9, ms=6)
+    arrow(ax, (91.6, bus), (99.4, bus), None, lw=0.9, ms=6)
+    ax.text(95.5, bus - 1.6, "input of\nlayer 1", ha="center", va="top", fontsize=5.8, color=C["ink2"])
+    tok = box(ax, 23, A + 1.0, 29, 6.8, "Token network", FILL["a"], sub="Linear, GELU, Linear; the same for every candidate", fs=6.3)
+    pool = box(ax, 58, A + 1.0, 28, 6.8, "Candidate pool", FILL["a"], sub="attention: query = x, keys and values = tokens", fs=6.3)
+    ax.text(1, A + 4.4, "candidate vectors", fontsize=6.0, color=C["ink2"], va="center"); arrow(ax, (15.5, A + 4.4), (22.8, A + 4.4), lw=0.8, ms=5)
+    arrow(ax, anchor(tok, "r"), anchor(pool, "l"), lw=0.8, ms=5)
+    arrow(ax, (80, bus), (80, A + 7.9), None, lw=0.8, ms=5, ls=(0, (2, 2)))
+    line([86, 90, 90], [A + 4.4, A + 4.4, bus - 1.7]); arrow(ax, (90, bus - 3.6), (90, bus - 1.7), lw=0.9, ms=5)
+    # ---- (b) one layer: the rail is the vector of the row; each group reads a copy and adds to the rail
+    rail = B + 1.5
+    line([4, 99.4], [rail, rail], lw=1.4)
+    ax.text(1, rail, "x", fontsize=6.8, color=C["ink2"], va="center")
+    def group(x0, x1, title, boxes, fc, widths=None):
+        ax.add_patch(FancyBboxPatch((x0, B + 4.4), x1 - x0, 12.6, boxstyle="round,pad=0,rounding_size=1", fc="none", ec=C["ink3"], lw=0.8, ls=(0, (4, 3)), zorder=1))
+        ax.text(x0 + 1.2, B + 15.2, title, fontsize=6.2, color=C["ink2"], va="center", fontweight="bold")
+        line([x0 + 1.0, x0 + 1.0], [rail, B + 9.4]); arrow(ax, (x0 + 1.0, B + 9.4), (x0 + 2.2, B + 9.4), lw=0.9, ms=5)
+        placed = []
+        widths = widths or [(x1 - x0 - 3.4) / len(boxes) - 1.6] * len(boxes)
+        bx = x0 + 2.2
+        for (t, sub), w in zip(boxes, widths):
+            placed.append(box(ax, bx, B + 6.0, w, 6.8, t, fc, sub=sub, fs=6.0)); bx += w + 1.6
+        for lo, hi in zip(placed[:-1], placed[1:]): arrow(ax, anchor(lo, "r"), anchor(hi, "l"), lw=0.8, ms=4)
+        last = placed[-1]; cx = last[0] + last[2] / 2
+        arrow(ax, (cx, B + 6.0), (cx, rail + 1.7), lw=0.9, ms=5); plus(cx, rail)
+    group(4, 56, "causal time attention", [("LayerNorm", None), ("Q, K, V", "one Linear"), ("RoPE", "by time in s"), ("Attention", "rows ≤ this row"), ("Linear", None)], FILL["b"])
+    group(58, 74, "added module", [("Traffic attention", "no norm")], FILL["c"])
+    group(76, 99.4, "feed-forward", [("LayerNorm", None), ("Feed-forward", "Linear, GELU, Linear")], FILL["b"], widths=[7.5, 11.0])
+    # ---- (c) the five heads: h feeds all of them; each head passes its word on to the next
+    names = ["Runway", "Heading", "Altitude", "Angle", "Speed"]
+    xs = [1 + 21.7 * i for i in range(5)]
+    box(ax, 1, 10.4, 98.8, 4.6, "h: output of (b), after a final LayerNorm", FILL["n"], fs=6.8)
+    for i, n_ in enumerate(names):
+        box(ax, xs[i], 0, 11, 7.0, n_, FILL["b"], bold=True, fs=7.2)
+        arrow(ax, (xs[i] + 5.5, 10.3), (xs[i] + 5.5, 7.1), lw=0.9, ms=5)
+        if i < 4: arrow(ax, (xs[i] + 11, 3.5), (xs[i + 1], 3.5), lw=1.9, ms=7, color=C["word"])
+    ax.set_ylim(-0.3, H)
+    save(fig, "fig18_prior_layers")
+
+
+
+
+# ------------------------------------------------------------------ Fig 19: the traffic attention
+def fig19_traffic_attention() -> None:
+    fig, ax, H = canvas(DOUBLE, 2.4)
+    plus = lambda x, y: (ax.add_patch(plt.Circle((x, y), 1.5, fc="white", ec=C["ink2"], lw=0.9, zorder=4)), ax.text(x, y - 0.1, "+", ha="center", va="center", fontsize=8, zorder=5))
+    ax.text(1, 32.4, "Once for each step: the tokens of the other aircraft", fontsize=7.0, fontweight="bold", va="center")
+    ax.text(1, 15.6, "In each layer: one attention from the row to the tokens", fontsize=7.0, fontweight="bold", va="center")
+    oth = box(ax, 1, 20.5, 22, 8.0, "Other aircraft", FILL["n"], sub="20 features each", fs=6.6)
+    net = box(ax, 28, 20.5, 30, 8.0, "Token network", FILL["c"], sub="Linear, GELU, Linear; shared by the prior", fs=6.6)
+    tok = box(ax, 63, 20.5, 20, 8.0, "Tokens", FILL["c"], sub="N tokens, d numbers each", fs=6.6)
+    arrow(ax, anchor(oth, "r"), anchor(net, "l"), lw=0.9, ms=5); arrow(ax, anchor(net, "r"), anchor(tok, "l"), lw=0.9, ms=5)
+    ax.text(91.5, 24.5, "N: the other\naircraft of the\nstep (any number)", fontsize=5.8, color=C["ink2"], ha="center", va="center")
+    xb = box(ax, 1, 2.0, 11, 7.0, "x", FILL["n"], bold=True, sub="the row", fs=7.0)
+    ln = box(ax, 17, 2.0, 17, 7.0, "LayerNorm", FILL["b"], fs=6.6)
+    att = box(ax, 40, 2.0, 36, 7.0, "Attention, 4 heads", FILL["c"], sub="query: the row; keys, values: the tokens", fs=6.6)
+    lin = box(ax, 81, 2.0, 12, 7.0, "Linear", FILL["c"], sub="starts at 0", fs=6.6)
+    arrow(ax, anchor(xb, "r"), anchor(ln, "l"), lw=0.9, ms=5); arrow(ax, anchor(ln, "r"), anchor(att, "l"), lw=0.9, ms=5); arrow(ax, anchor(att, "r"), anchor(lin, "l"), lw=0.9, ms=5)
+    arrow(ax, (73, 20.4), (73, 9.1), "keys, values", lxy=(74.2, 13.2), ha="left", fs=6.0, lw=0.9, ms=5)
+    plus(97.5, 5.5)
+    arrow(ax, anchor(lin, "r"), (95.9, 5.5), lw=0.9, ms=5)
+    ax.text(97.5, 1.4, "added\nto x", fontsize=5.6, color=C["ink2"], ha="center", va="top")
+    ax.set_ylim(-1.8, H)
+    save(fig, "fig19_traffic_attention")
+
+
 # ------------------------------------------------------------------ Fig 10: one column of the speaker
 def fig10_decoding() -> None:
     fig = plt.figure(figsize=(DOUBLE, 2.7))
@@ -337,5 +420,5 @@ def fig15_judge_outcomes() -> None:
 
 
 if __name__ == "__main__":
-    for name in sys.argv[1:] or ["fig01_architecture", "fig08_prior_architecture", "fig10_decoding", "fig11_cv_design", "fig12_post_training_loop", "fig13_branch_training", "fig14_traffic_features", "fig15_judge_outcomes", "fig16_window_kinds", "fig17_landed_training"]:
+    for name in sys.argv[1:] or ["fig01_architecture", "fig08_prior_architecture", "fig10_decoding", "fig11_cv_design", "fig12_post_training_loop", "fig13_branch_training", "fig14_traffic_features", "fig15_judge_outcomes", "fig16_window_kinds", "fig17_landed_training", "fig18_prior_layers", "fig19_traffic_attention"]:
         globals()[name]()

@@ -543,19 +543,68 @@ The number is in seconds for every column, so that every row interval Δ reads t
 <p>Evidence for principle 4: in an earlier prior, the replacement of the airport embedding with the mean of the four other embeddings raised the loss by 0.024 for each step and lowered the landed share in free generation by 5.8 points. The five embeddings were almost orthogonal: an identity table, not a property of the airports (readout R46). The v4 prior has no airport embedding.</p>
 
 <h3 id="p-candidates" class="toc">9.2 Candidate tokens: any number of runways</h3>
-<p>Each candidate vector goes through <b>one shared network</b> and becomes a <t zh="词元">token</t>. The tokens reach a row through one <t zh="注意力">attention</t> whose weights sum to 1. A sum would grow with the number of candidates. An attention does not. The runway head also points at the candidate tokens, so the model has no fixed number of runway slots (<span class="pill d">D41</span>). A new airport can have 2 or 8 candidates.</p>
+<p>Each candidate vector goes through <b>one shared network</b> (a Linear layer, a GELU, and a second Linear layer, both <i>d</i> wide) and becomes a <t zh="词元">token</t>. The tokens reach a row through one <t zh="注意力">attention</t> whose weights sum to 1. A sum would grow with the number of candidates. An attention does not. The runway head also points at the candidate tokens, so the model has no fixed number of runway slots (<span class="pill d">D41</span>). A new airport can have 2 or 8 candidates.</p>
 <div data-demo="candidate_pool" data-title="KRDU candidates: the vectors that a row reads"></div>
 
 <h3 id="p-network" class="toc">9.3 The network</h3>
-<p>The network has <b>no airport embedding, no row-position embedding and no input “time from row 0”</b>. A row is the sum of: the projected own state, the time since each column’s word, G, the heading in force, an embedding for each other column’s word in force, the runway in force as its candidate token, and the attention over the candidate tokens.</p>
+<p>The network is a small <t zh="变换器">Transformer</t>, in the same family as the language models that say one word after another. It has three parts, and Figure 18 shows them:</p>
+<ol>
+<li><b>The input of a row.</b> All the inputs of 9.1 and 9.2 become <b>one vector of <i>d</i> numbers</b> for each row.</li>
+<li><b>Four layers.</b> Each layer lets a row <em>read the rows before it</em>, and then lets it read the other aircraft. The result is the hidden state <b>h</b>: what the network knows about the situation at this row.</li>
+<li><b>Five heads.</b> Each head turns the hidden state into the probabilities of the words of one column. The heads speak in the order of the columns.</li>
+</ol>
+<p>The network has <b>no airport embedding, no row-position embedding and no input “time from row 0”</b>. Which airport it is, and how late in the flight it is, must follow from the physical inputs.</p>
+
+<h4>Step 1: the input of a row (Figure 18a)</h4>
+<p>Four pieces are added together. Each piece first becomes a vector of <i>d</i> numbers.</p>
 <ul>
-<li><b>Layers.</b> Each layer is pre-normed and residual: a <b>causal time attention</b>, then a module that a caller can add (section 10), then a feed-forward network. A row reads the rows before it and itself.</li>
-<li><b><t zh="旋转位置编码">RoPE</t>.</b> The query and the key of a row are rotated by an angle that grows with the time of the row <em>in seconds</em>. So the attention reads only time differences (<span class="pill d">D16</span>). Seconds, not rows, so that every Δ reads the same time.</li>
-<li><b>Cache.</b> A speaker that adds one row at a time keeps each layer’s rotated keys and values, and encodes only the new rows. A key is rotated one time, when it is written.</li>
-<li><b>Five heads in the order of the columns.</b> Column k’s head reads the hidden state plus the embeddings of the words that the earlier columns chose <em>in this row</em>. The runway head scores each candidate token by q·token/√d, after “unchanged” and “go-around”. At the first predicted step, “unchanged” (and “go-around”) are impossible.</li>
+<li><b>A Linear layer on 12 numbers</b>: the own state (4 numbers, 9.1), the time since each of the 5 columns said its word (5), G (1) and the heading in force as sine and cosine (2). A <t zh="线性层">Linear layer</t> multiplies the numbers by a table of weights, and the training chooses the weights.</li>
+<li><b>Three embeddings</b>: one for each of the altitude, the angle and the speed word in force. An <t zh="嵌入">embedding</t> is a table with one learned vector for each word. Index 0 is “none yet”, the value before the first predicted step.</li>
+<li><b>The runway in force</b>: the token of that candidate (9.2) through a Linear layer. If no runway has been said yet, one learned vector stands in its place.</li>
+<li><b>The candidate pool</b> (9.2). This is one <t zh="注意力">attention</t> over the candidate tokens. It lets the row read the runway information that matters now, in a vector of fixed width, whatever the number of candidates. It works in four steps:
+<ol>
+<li>The <b>query</b> is the row built so far (the sum of the three pieces above). It asks: “In my situation, which candidate runways matter to me?”</li>
+<li>Each candidate token gives a <b>key</b> (a label) and a <b>value</b> (a content). The query is compared with every key, and each comparison gives a score.</li>
+<li>The scores go through a <t zh="归一化指数函数">softmax</t>. The result is one <b>weight</b> for each candidate. The weights are not negative, and <b>they sum to 1</b>. A padded slot, which is not a real candidate, gets the weight 0.</li>
+<li>The result is the <b>weighted average of the values</b>, through one more Linear layer. It is added to the row.</li>
+</ol>
+Why attention, and not a sum or a list. A sum of the tokens would grow with the number of candidates, and a list would need a fixed number of slots. The weights always sum to 1, so the result has the same size at an airport with 4 candidates and at one with 8. If the candidates are put in another order, the result does not change, so the network cannot use “the third slot” as a signal. This is a single attention head with its own weights. It is different from the causal time attention in step 2: that one looks <em>back in time</em> over the rows, and this one looks <em>across the runways</em> of one row. The choice of the runway word is not made here: the runway head scores the same tokens again (step 3).</li>
 </ul>
+<p>The sum is the vector <b>x</b> that enters layer 1. Where each of the pieces comes from was fixed in 9.1: the network gets only physical numbers.</p>
+
+<h4>Step 2: one layer (Figure 18b)</h4>
+<p>The same layer is used four times. A layer is <b>pre-normed and residual</b>. This means: the vector of the row, <b>x</b>, runs through the layer like a rail. Each block of the layer reads a <t zh="层归一化">normalised</t> copy of x, and adds its result back to x. The block cannot erase x, it can only add to it. A layer has three blocks:</p>
+<ol>
+<li><b>Causal time attention.</b> The row asks a question (a <i>query</i>), each earlier row has a label (a <i>key</i>) and a content (a <i>value</i>). The row takes the contents of the rows whose labels match its question best. “Causal” means that a row reads <b>the rows before it and itself</b>, and never a later row. The row always reads itself, so no row has all its keys blocked.
+  <br>The network has to know <em>how long ago</em> a row was. <t zh="旋转位置编码">RoPE</t> does it. Before the query and the key are compared, each is rotated by an angle that grows with the time of the row <em>in seconds</em> (<span class="pill d">D16</span>). Then the comparison depends only on the <em>difference</em> of two times, and never on the time itself. Seconds, not rows, so that every row interval Δ reads the same time. The attention has several <i>heads</i>, each 32 numbers wide, and each head can look for a different thing.</li>
+<li><b>The added module</b> (the traffic attention, section 10). It reads the other aircraft, and its result is added to x without a normalisation. In the base prior alone, this block is empty. The post-training adds it (its output starts at zero).</li>
+<li><b>Feed-forward.</b> A small network that works on each row alone: a Linear layer that makes the vector 4 times wider, a <t zh="GELU 激活函数">GELU</t> (a smooth switch that lets a number pass, or not), and a Linear layer back to <i>d</i>.</li>
+</ol>
+<p>After the four layers, one more normalisation gives the hidden state <b>h</b>. <b>Dropout</b> (a random 10 % of the numbers set to 0 during training, so that the network does not rely on one number) is in the attention, after the attention block, inside the feed-forward and after it. It is off when the prior speaks.</p>
+<p><b>Cache.</b> A speaker adds one row at a time. It keeps the keys and values of every layer, already rotated, and encodes only the new row. A key is rotated one time, when it is written. The result is the same as encoding all the rows again, up to the rounding of the sums.</p>
 <div data-demo="rope" data-title="RoPE: only the time difference counts"></div>
-<p>Configuration A of the design: <code>d_model</code> 192, 4 layers, 6 heads of width 32, feed-forward 768, dropout 0.1. It has <b>2,165,741 parameters</b> (counted from the code). The RoPE base is 10,000.</p>
+
+<h4>Step 3: the five heads (Figure 18c)</h4>
+<p>The heads speak <b>in the order of the columns</b>: runway, heading, altitude, angle, speed. Head <i>k</i> does not read h alone. It reads <b>g<sub>k</sub> = h + the embeddings of the words that the earlier columns said in this same row</b>. So the heading head knows the runway word of this row, and the speed head knows all four words before it. The model is thus <b>autoregressive over the columns</b>, and the rows before it give the second direction (Figure 8). In training the earlier words are the true words (<t zh="教师强制">teacher forcing</t>). When the prior speaks, they are the words it has drawn.</p>
+<ul>
+<li>A word head is one Linear layer from g<sub>k</sub> to the classes of its column: 73 for the heading, 42 for the altitude, 7 for the angle and 49 for the speed (each includes “unchanged”).</li>
+<li>The <b>runway head</b> has two fixed classes, “unchanged” and “go-around”, and one score for each candidate. The score of a candidate is q · token / √<i>d</i>, where q is a learned view of g<sub>1</sub> and token is the candidate token of 9.2. So the head <em>points at</em> a candidate, and the network has no fixed number of runway slots. A padded slot gets −∞.</li>
+<li>At the first predicted step, the heads must say a value: “unchanged” is impossible in every column, and so is “go-around” in the runway column.</li>
+</ul>
+<figure class="paper" data-fig="fig18_prior_layers"></figure>
+
+<h4>The sizes</h4>
+<p>Every attention head is 32 numbers wide, so <i>d</i> = 32 × the number of heads. The design starts from <b>configuration A</b> (<i>d</i> 192, 4 layers, 6 heads, feed-forward 768, dropout 0.1). The cross-validation by airport chose <b>configuration C</b> (<i>d</i> 256, 4 layers, 8 heads, feed-forward 1,024) for the base model. The RoPE base is 10,000: the periods of the rotations run from 6.3 s to about 35,000 s, which is ten times the longest sentence with a go-around. The parameters, counted from the code:</p>
+<table>
+<thead><tr><th>Part</th><th class="num">Configuration A</th><th class="num">Configuration C (the base model)</th></tr></thead>
+<tbody>
+<tr><td>Input of a row (Linear, embeddings, token network, candidate pool, runway in force)</td><td class="num">245,376</td><td class="num">425,472</td></tr>
+<tr><td>Four layers (attention, feed-forward, norms)</td><td class="num">1,779,456</td><td class="num">3,159,040</td></tr>
+<tr><td>Last normalisation</td><td class="num">384</td><td class="num">512</td></tr>
+<tr><td>Five heads, with the embeddings of the chosen words</td><td class="num">140,525</td><td class="num">220,077</td></tr>
+<tr><td><b>Total</b></td><td class="num"><b>2,165,741</b></td><td class="num"><b>3,805,101</b></td></tr>
+</tbody></table>
+<p>Most of the parameters are in the four layers, as expected for a Transformer. The candidate pool is large for what it does (148,224 in A) because it has its own query, key, value and output matrices.</p>
 <figure class="paper" data-fig="fig08_prior_architecture"></figure>
 
 <h3 id="p-decoding" class="toc">9.4 Decoding: the speaker, the masks and the draw</h3>
@@ -647,7 +696,7 @@ The number is in seconds for every column, so that every row interval Δ reads t
 <p>The other aircraft of a window are every other flight of the airport and the split that is in the air at that step. They fly their stored signals. Their motion is the displacement in the 2 s before the row, and their R is the runway of their record from their own first predicted step on.</p>
 <ul>
 <li><b>Edge features.</b> For each other aircraft: where it is in the commanded aircraft’s frame (front, left, height difference); its place on the <t zh="进近时钟">approach clock</t> and whether the two can be compared; the relation of the two runways in force (same, single, dependent, independent, unrelated); the closing rate; the closest point of approach (time, horizontal distance, height difference); the distance that the rules require between the two; and a flag for an unknown motion. Every scale is a constant in SI units.</li>
-<li><b>Traffic attention.</b> At each layer, a module reads one token for each other aircraft: the edge features and the aircraft’s own motion (<span class="pill d">D98</span>). <b>Its output layer starts at zero</b>, and its output is zero when a row has no other aircraft. So the start model equals the base, and a window with no traffic is free generation. One token network is shared by the layers (<span class="pill d">D116</span>).</li>
+<li><b>Traffic attention.</b> At each layer of the prior, a module reads the other aircraft of the step (<span class="pill d">D98</span>). It is explained below, with Figure 19.</li>
 <li><b>Established on the final.</b> A function of one row: G false, the aircraft inside the region of the final of R, and its track within 20° of the course (<span class="pill d">D92</span>). After “go-around” the aircraft is not established until a runway word ends G.</li>
 <li><b>Separation judge.</b> It uses the radar minima of FAA JO 7110.65BB with the rules for visual approaches. Parallel runways at least 2,500 ft (762 m) apart are free once both aircraft are turned in. An event of a window is the first loss of separation for which the commanded aircraft answers.</li>
 <li><b>Speed-word mask.</b> A mask of the caller on the speed column. It acts only when the aircraft and the one next ahead are both established, and while the aircraft is more than 5 NM from its threshold. It is a <b>stated approximation</b>: constant rate, no turn, no wind. It acts in a band that is only 0.1–2 km wide at most runways (<span class="pill d">D101</span>).</li>
@@ -655,6 +704,43 @@ The number is in seconds for every column, so that every row interval Δ reads t
 <p>There is no mask for the spacing on the final. The reward (0 for a loss of separation) teaches it. A mask is designed only if the readouts show that the losses at the join dominate.</p>
 <div data-demo="traffic_scene" data-title="Edge features, and the speed-word mask"></div>
 <figure class="paper" data-fig="fig14_traffic_features"></figure>
+
+<h4>The traffic attention in detail</h4>
+<p>The base prior sees only its own aircraft. In traffic, the commanded aircraft must also react to the others. The <b>traffic attention</b> is the module that lets it: a small attention, added at each of the 4 layers (the “added module” of Figure 18b), that lets the row <em>read the other aircraft of the same instant</em>. Figure 19 shows it.</p>
+<p><b>The token of an other aircraft: 20 features.</b> A token is not the state of the other aircraft. It says what the other aircraft is <em>to the commanded aircraft</em>, in 20 numbers. All of them are computed from the recorded state of the other aircraft, before the training, and none uses a row after the step. 16 are <b>edge features</b> (a relation between the two aircraft). 4 describe the <b>motion</b> of the other aircraft. Horizontal distances are scaled as asinh(<i>d</i> / 5,556 m), where 5,556 m is 3 NM, the radar minimum (the scale is linear for short distances and compresses long ones).</p>
+<table>
+<thead><tr><th>Group</th><th>Feature</th><th>What it says</th><th>Scale</th></tr></thead>
+<tbody>
+<tr><td rowspan="3">Position (edge)</td><td><code>front</code></td><td>How far the other aircraft is ahead of the commanded aircraft (positive) or behind it (negative), along the direction in which the commanded aircraft moves</td><td>asinh(<i>d</i> / 3 NM)</td></tr>
+<tr><td><code>left</code></td><td>How far it is to the left (positive) or to the right (negative) of the commanded aircraft</td><td>asinh(<i>d</i> / 3 NM)</td></tr>
+<tr><td><code>height</code></td><td>Its height minus the height of the commanded aircraft</td><td><i>h</i> / 1 km</td></tr>
+<tr><td rowspan="2">Approach clock (edge)</td><td><code>clock_ahead</code></td><td>Its place on the approach clock, minus that of the commanded aircraft. The approach clock measures how far each aircraft is from its threshold along the final. Positive: the other aircraft will reach its runway first</td><td>asinh(<i>d</i> / 3 NM)</td></tr>
+<tr><td><code>clock_incomparable</code></td><td>1 if the two places cannot be compared (a runway is not in force, or the runways have other directions), else 0</td><td>0 or 1</td></tr>
+<tr><td rowspan="5">Runway relation (edge)</td><td><code>same</code></td><td>Both are on the same runway</td><td rowspan="5">one-hot; all 0 if a runway is not in force</td></tr>
+<tr><td><code>single</code></td><td>A parallel pair so close that it is separated as one runway</td></tr>
+<tr><td><code>dependent</code></td><td>Staggered parallel runways that depend on each other</td></tr>
+<tr><td><code>independent</code></td><td>Parallel runways that are independent: no mutual minimum</td></tr>
+<tr><td><code>unrelated</code></td><td>Another direction: no rule links the two</td></tr>
+<tr><td>Closing (edge)</td><td><code>closing</code></td><td>How fast the horizontal distance between the two gets smaller (positive: they come closer)</td><td><i>v</i> / 100 m/s</td></tr>
+<tr><td rowspan="3">Closest approach (edge)</td><td><code>cpa_time</code></td><td>If both fly straight on at their present motion: in how many seconds the horizontal distance is the smallest (0 to 120 s)</td><td><i>t</i> / 120 s</td></tr>
+<tr><td><code>cpa_horizontal</code></td><td>That smallest horizontal distance</td><td>asinh(<i>d</i> / 3 NM)</td></tr>
+<tr><td><code>cpa_vertical</code></td><td>The height difference at that time</td><td><i>h</i> / 1 km</td></tr>
+<tr><td>Rule (edge)</td><td><code>required</code></td><td>The distance that the separation rules require between the two, as leader and follower (the one ahead on the approach clock leads). 0 if the clock cannot compare them</td><td>asinh(<i>d</i> / 3 NM)</td></tr>
+<tr><td>Unknown (edge)</td><td><code>motion_unknown</code></td><td>1 if the motion of either aircraft is not known (the first row of an aircraft), else 0</td><td>0 or 1</td></tr>
+<tr><td rowspan="4">Own motion</td><td><code>ground_speed</code></td><td>Its ground speed</td><td><i>v</i> / 100 m/s</td></tr>
+<tr><td><code>vertical_rate</code></td><td>Its vertical rate (positive in a climb)</td><td><i>v</i> / 10 m/s</td></tr>
+<tr><td><code>direction_sin</code>, <code>direction_cos</code></td><td>Its direction of motion minus the direction of motion of the commanded aircraft, as a sine and a cosine (0 if a motion is not known)</td><td>−1 to 1</td></tr>
+</tbody></table>
+<p>So the 20 numbers are 3 + 2 + 5 + 1 + 3 + 1 + 1 = 16 edge features, and 4 motion numbers. The ground speed and the vertical rate are the 2 s displacements before the row, as for the commanded aircraft (9.1). The edge features are built from the same quantities as the separation rules and the speed-word mask (the approach clock, the relation of the runways, the required distance). So the module gets what it needs to learn to avoid a loss of separation, with fixed physical scales and without any name of an airport.</p>
+<ol>
+
+<li><b>The token network.</b> The 20 numbers go through <b>Linear → GELU → Linear</b> (20 → 64 → <i>d</i>) and become a vector of <i>d</i> numbers, as in the candidate tokens of 9.2. <b>One network is shared by the prior</b>, and the tokens are made once for each step (<span class="pill d">D116</span>). A token network in each layer would need about 9 GB at the formal size (configuration A), more than the GPU has.</li>
+<li><b>The attention in each layer.</b> It is built like the candidate pool of 9.3, but it looks at the other aircraft and not at the runways. The query comes from the row, after a LayerNorm. The keys and the values come from the tokens. It has <b>4 heads</b>, so that each head can look for something different in the other aircraft. The weights sum to 1 over the real other aircraft. The result goes through a Linear layer and is <b>added to the row</b>.</li>
+</ol>
+<p><b>Why the output starts at zero.</b> The last Linear layer of the module starts with all weights 0. So at the start of the post-training, the output is exactly 0, and the model says exactly what the base says. Where a row has <em>no other aircraft</em>, the output is 0 for any weights, so a window with no traffic is the same as free generation (<span class="pill d">D29</span>). The model can only learn to use the traffic. It cannot lose the base.</p>
+<p><b>What it does not do.</b> The other aircraft are not run through the prior. A token comes from their recorded state, and not from a hidden state of the network: a hidden state would change with each round of the training, and it would need words said to that aircraft, which a recorded flight does not have (<span class="pill d">D98</span>). The order of the other aircraft does not matter, and their number does not matter.</p>
+<p><b>Size.</b> With 64 hidden numbers in the token network and 4 heads, the module has 1,072,704 parameters (the token network 17,984, and each layer 263,680), so the prior grows from 3,805,101 to 4,877,805. It has its own learning rate, 1e-4 against 1e-5 for the prior.</p>
+<figure class="paper" data-fig="fig19_traffic_attention"></figure>
 <figure class="paper" data-fig="fig12_post_training_loop"></figure>
 
 <h3 id="t-evidence" class="toc">10.6 What the earlier design measured</h3>
@@ -721,7 +807,7 @@ The number is in seconds for every column, so that every row interval Δ reads t
 
 <section id="s-figures">
 <h2 id="figures" data-toc="13 Paper figures">13 Figures for the thesis</h2>
-<p>The page shows 17 figures in the sections where they belong. Each one has a PNG file (300 dpi) and a PDF file (vector, with embedded fonts). All text in the images is English. Each image has <b>no title and no caption</b>. The suggested caption is under the figure on this page, and you can copy and change it. The panel letters (a), (b) and so on are part of the images.</p>
+<p>The page shows 19 figures in the sections where they belong. Each one has a PNG file (300 dpi) and a PDF file (vector, with embedded fonts). All text in the images is English. Each image has <b>no title and no caption</b>. The suggested caption is under the figure on this page, and you can copy and change it. The panel letters (a), (b) and so on are part of the images.</p>
 <p>The files are in <code>docs/two_tier/tutorial/figures/png/</code> and <code>figures/pdf/</code>. <code>scripts/two_tier_tutorial/make_figures.py</code> makes all of them again.</p>
 <table>
 <thead><tr><th class="num">Fig.</th><th>File</th><th>Content</th><th>Source of the data</th></tr></thead>
@@ -743,6 +829,8 @@ The number is in seconds for every column, so that every row interval Δ reads t
 <tr><td class="num">15</td><td><code>fig15_judge_outcomes</code></td><td>The outcomes of the judge</td><td>Diagram</td></tr>
 <tr><td class="num">16</td><td><code>fig16_window_kinds</code></td><td>The four kinds of window of a round</td><td>Diagram</td></tr>
 <tr><td class="num">17</td><td><code>fig17_landed_training</code></td><td>The post-training loop with training on the landed sentences</td><td>Diagram</td></tr>
+<tr><td class="num">18</td><td><code>fig18_prior_layers</code></td><td>The input of a row, one layer and the five heads</td><td>Diagram of <code>prior/model.py</code></td></tr>
+<tr><td class="num">19</td><td><code>fig19_traffic_attention</code></td><td>The traffic attention</td><td>Diagram of <code>post/traffic_attention.py</code></td></tr>
 </tbody></table>
 <div class="note warn"><p><b>Before you put a figure in the thesis.</b> Figures 4, 6, 10 and 13 are sketches or illustrations. They show a mechanism, not a measurement. Say so in the caption. Figures 3, 5 and 7 use one real flight of the train split. Figure 9 uses the published values of one runway. No figure shows a result of a trained prior, because there is none yet. The simulation figures use the same JavaScript code as the demos on this page.</p></div>
 </section>
@@ -1261,7 +1349,9 @@ The number is in seconds for every column, so that every row interval Δ reads t
     fig14_traffic_features: { n: 14, kind: 'diagram', alt: 'Approach clock and relative geometry', caption: 'Traffic in the post-training. (a) The gap on the approach clock and the prediction of the speed-word mask. (b) The geometry that the edge features of another aircraft describe.' },
     fig15_judge_outcomes: { n: 15, kind: 'diagram', alt: 'The outcomes of the judge', caption: 'The outcomes of the judge, in the order in which it asks its questions. The first event is the outcome.' },
     fig16_window_kinds: { n: 16, kind: 'diagram', alt: 'The four kinds of window', caption: 'The four kinds of window of a round. (a) A real window. (b) Window A: one more flight is inserted, shifted to land within 180 s of the commanded flight. (c) Window D: the aircraft ahead is shifted in time by −120 s to +120 s. (d) Window B: the start of the commanded aircraft is moved by a turn of up to ±15°, a height change of up to ±300 m and a speed scale of 1 ± 0.1. The commanded aircraft is the one that speaks; the others fly their records.' },
-    fig17_landed_training: { n: 17, kind: 'diagram', alt: 'The post-training loop with training on the landed sentences', caption: 'The post-training loop with training on the landed sentences. The top row is as in Fig. 12. For each window the model speaks several times and the landing of the highest reward is kept. The update is the log-likelihood of the kept sentences, with the pull to the base model and the data term.' }
+    fig17_landed_training: { n: 17, kind: 'diagram', alt: 'The post-training loop with training on the landed sentences', caption: 'The post-training loop with training on the landed sentences. The top row is as in Fig. 12. For each window the model speaks several times and the landing of the highest reward is kept. The update is the log-likelihood of the kept sentences, with the pull to the base model and the data term.' },
+    fig18_prior_layers: { n: 18, kind: 'diagram', alt: 'The input of a row, one layer and the five heads', caption: 'Inside the prior. (a) The input of a row: three kinds of input are added, and the candidate pool adds what the row reads of the candidate tokens; the token network that makes the tokens is a Linear layer, a GELU and a Linear layer. (b) One layer (four are stacked): the vector of the row is a rail, and each block adds to it; the causal time attention uses RoPE on the time in seconds, the traffic attention is an added module, and the feed-forward comes last. (c) The five heads in the order of the columns: each head reads the hidden state plus the embeddings of the words that the earlier columns said in the same row.' },
+    fig19_traffic_attention: { n: 19, kind: 'diagram', alt: 'The traffic attention', caption: 'The traffic attention. Once for each step, the other aircraft become tokens: 20 numbers each go through a token network (Linear, GELU, Linear) that all the layers of the prior share. In each layer, the row attends to the tokens (four heads; the keys and values come from the tokens), and the result goes through a Linear layer that starts at zero and is added to the row. Where a row has no other aircraft, the output is zero.' }
   };
   TT.buildFigures = () => {
     document.querySelectorAll('figure.paper[data-fig]').forEach(f => {
