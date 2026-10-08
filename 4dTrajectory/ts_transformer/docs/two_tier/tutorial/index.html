@@ -40,10 +40,11 @@ body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.62 var(
 a { color: var(--accent); }
 code, kbd, .mono { font-family: var(--mono); font-size: .88em; }
 code { background: var(--bg-3); padding: .08em .35em; border-radius: 4px; }
-h1, h2, h3, h4 { line-height: 1.22; letter-spacing: -.01em; margin: 1.6em 0 .5em; }
+h1, h2, h3, h4, h5 { line-height: 1.22; letter-spacing: -.01em; margin: 1.6em 0 .5em; }
 h1 { font-size: 2.15rem; margin-top: 0; }
 h2 { font-size: 1.55rem; padding-top: .6em; border-top: 1px solid var(--line); }
 h3 { font-size: 1.15rem; }
+h5 { font-size: 1rem; margin: 1.3em 0 .4em; }
 h4 { font-size: 1rem; color: var(--ink-2); text-transform: uppercase; letter-spacing: .06em; font-size: .78rem; }
 p { margin: .7em 0; }
 ul, ol { padding-left: 1.3em; } li { margin: .25em 0; }
@@ -706,8 +707,11 @@ Why attention, and not a sum or a list. A sum of the tokens would grow with the 
 <figure class="paper" data-fig="fig14_traffic_features"></figure>
 
 <h4>The traffic attention in detail</h4>
-<p>The base prior sees only its own aircraft. In traffic, the commanded aircraft must also react to the others. The <b>traffic attention</b> is the module that lets it: a small attention, added at each of the 4 layers (the “added module” of Figure 18b), that lets the row <em>read the other aircraft of the same instant</em>. Figure 19 shows it.</p>
-<p><b>The token of an other aircraft: 20 features.</b> A token is not the state of the other aircraft. It says what the other aircraft is <em>to the commanded aircraft</em>, in 20 numbers. All of them are computed from the recorded state of the other aircraft, before the training, and none uses a row after the step. 16 are <b>edge features</b> (a relation between the two aircraft). 4 describe the <b>motion</b> of the other aircraft. Horizontal distances are scaled as asinh(<i>d</i> / 5,556 m), where 5,556 m is 3 NM, the radar minimum (the scale is linear for short distances and compresses long ones).</p>
+<p>The base prior sees only its own aircraft. In traffic, the commanded aircraft must also react to the others. The <b>traffic attention</b> is the module that lets it. It is a small attention, added at each of the 4 layers of the prior (the “added module” of Figure 18b), that lets the row <em>read the other aircraft of the same instant</em>. Figure 19 shows it in two parts: the tokens are made <b>once for each step</b>, and then <b>each layer</b> reads them with its own attention.</p>
+<figure class="paper" data-fig="fig19_traffic_attention"></figure>
+
+<h5>Part 1. The tokens: one for each other aircraft, made once for each step</h5>
+<p>A token is not the state of the other aircraft. It says what the other aircraft is <em>to the commanded aircraft</em>, in <b>20 features</b>. All of them are computed from the recorded state of the other aircraft, before the training, and none uses a row after the step. 16 are <b>edge features</b> (a relation between the two aircraft). 4 describe the <b>motion</b> of the other aircraft. Horizontal distances are scaled as asinh(<i>d</i> / 5,556 m), where 5,556 m is 3 NM, the radar minimum (the scale is linear for short distances and compresses long ones).</p>
 <table>
 <thead><tr><th>Group</th><th>Feature</th><th>What it says</th><th>Scale</th></tr></thead>
 <tbody>
@@ -731,16 +735,20 @@ Why attention, and not a sum or a list. A sum of the tokens would grow with the 
 <tr><td><code>vertical_rate</code></td><td>Its vertical rate (positive in a climb)</td><td><i>v</i> / 10 m/s</td></tr>
 <tr><td><code>direction_sin</code>, <code>direction_cos</code></td><td>Its direction of motion minus the direction of motion of the commanded aircraft, as a sine and a cosine (0 if a motion is not known)</td><td>−1 to 1</td></tr>
 </tbody></table>
-<p>So the 20 numbers are 3 + 2 + 5 + 1 + 3 + 1 + 1 = 16 edge features, and 4 motion numbers. The ground speed and the vertical rate are the 2 s displacements before the row, as for the commanded aircraft (9.1). The edge features are built from the same quantities as the separation rules and the speed-word mask (the approach clock, the relation of the runways, the required distance). So the module gets what it needs to learn to avoid a loss of separation, with fixed physical scales and without any name of an airport.</p>
-<ol>
+<p>So the 20 features are 3 + 2 + 5 + 1 + 3 + 1 + 1 = 16 edge features, and 4 motion numbers. The ground speed and the vertical rate are the 2 s displacements before the row, as for the commanded aircraft (9.1). The edge features are built from the same quantities as the separation rules and the speed-word mask (the approach clock, the relation of the runways, the required distance). So the module gets what it needs to learn to avoid a loss of separation, with fixed physical scales and without any name of an airport.</p>
+<p>The <b>traffic token network</b> turns the 20 features into a vector of <i>d</i> numbers: <b>Linear → GELU → Linear</b> (20 → 64 → <i>d</i>), as the token network of the candidates in 9.2, but with its own weights. <b>The tokens are made once for each step, and all the layers read them</b> (<span class="pill d">D116</span>). A token depends only on the other aircraft and the step, and not on the layer, so there is nothing to compute again in a later layer. A token network in each layer would also need about 9 GB at the formal size (configuration A), more than the GPU has.</p>
 
-<li><b>The token network.</b> The 20 numbers go through <b>Linear → GELU → Linear</b> (20 → 64 → <i>d</i>) and become a vector of <i>d</i> numbers, as in the candidate tokens of 9.2. <b>One network is shared by the prior</b>, and the tokens are made once for each step (<span class="pill d">D116</span>). A token network in each layer would need about 9 GB at the formal size (configuration A), more than the GPU has.</li>
-<li><b>The attention in each layer.</b> It is built like the candidate pool of 9.3, but it looks at the other aircraft and not at the runways. The query comes from the row, after a LayerNorm. The keys and the values come from the tokens. It has <b>4 heads</b>, so that each head can look for something different in the other aircraft. The weights sum to 1 over the real other aircraft. The result goes through a Linear layer and is <b>added to the row</b>.</li>
-</ol>
-<p><b>Why the output starts at zero.</b> The last Linear layer of the module starts with all weights 0. So at the start of the post-training, the output is exactly 0, and the model says exactly what the base says. Where a row has <em>no other aircraft</em>, the output is 0 for any weights, so a window with no traffic is the same as free generation (<span class="pill d">D29</span>). The model can only learn to use the traffic. It cannot lose the base.</p>
+<h5>Part 2. The attention in each layer</h5>
+<p>Each of the 4 layers has <b>its own attention</b>, with its own weights. It is built like the candidate pool of 9.3, but it looks at the other aircraft and not at the runways:</p>
+<ul>
+<li>The <b>query</b> comes from the row <em>in this layer</em>, after a LayerNorm. The row has changed since the layer before, so each layer asks a different question.</li>
+<li>The <b>keys</b> and the <b>values</b> come from the tokens, through the layer’s own Linear layers. So each layer reads another side of the same tokens.</li>
+<li>It has <b>4 heads</b>, so that each head can look for something different in the other aircraft. The weights sum to 1 over the real other aircraft.</li>
+<li>The result goes through a last Linear layer and is <b>added to the row</b>. The 4 layers thus add 4 different results to the row.</li>
+</ul>
+<p><b>Why the output starts at zero.</b> The last Linear layer of each module starts with all weights 0. So at the start of the post-training, the output is exactly 0, and the model says exactly what the base says. Where a row has <em>no other aircraft</em>, the output is 0 for any weights, so a window with no traffic is the same as free generation (<span class="pill d">D29</span>). The model can only learn to use the traffic. It cannot lose the base.</p>
 <p><b>What it does not do.</b> The other aircraft are not run through the prior. A token comes from their recorded state, and not from a hidden state of the network: a hidden state would change with each round of the training, and it would need words said to that aircraft, which a recorded flight does not have (<span class="pill d">D98</span>). The order of the other aircraft does not matter, and their number does not matter.</p>
-<p><b>Size.</b> With 64 hidden numbers in the token network and 4 heads, the module has 1,072,704 parameters (the token network 17,984, and each layer 263,680), so the prior grows from 3,805,101 to 4,877,805. It has its own learning rate, 1e-4 against 1e-5 for the prior.</p>
-<figure class="paper" data-fig="fig19_traffic_attention"></figure>
+<p><b>Size.</b> With 64 hidden numbers in the token network and 4 heads, the module has 1,072,704 parameters: the token network 17,984, and 263,680 in each of the 4 layers. The prior then grows from 3,805,101 to 4,877,805 parameters. The module has its own learning rate, 1e-4 against 1e-5 for the rest of the prior.</p>
 <figure class="paper" data-fig="fig12_post_training_loop"></figure>
 
 <h3 id="t-evidence" class="toc">10.6 What the earlier design measured</h3>
@@ -1351,7 +1359,7 @@ Why attention, and not a sum or a list. A sum of the tokens would grow with the 
     fig16_window_kinds: { n: 16, kind: 'diagram', alt: 'The four kinds of window', caption: 'The four kinds of window of a round. (a) A real window. (b) Window A: one more flight is inserted, shifted to land within 180 s of the commanded flight. (c) Window D: the aircraft ahead is shifted in time by −120 s to +120 s. (d) Window B: the start of the commanded aircraft is moved by a turn of up to ±15°, a height change of up to ±300 m and a speed scale of 1 ± 0.1. The commanded aircraft is the one that speaks; the others fly their records.' },
     fig17_landed_training: { n: 17, kind: 'diagram', alt: 'The post-training loop with training on the landed sentences', caption: 'The post-training loop with training on the landed sentences. The top row is as in Fig. 12. For each window the model speaks several times and the landing of the highest reward is kept. The update is the log-likelihood of the kept sentences, with the pull to the base model and the data term.' },
     fig18_prior_layers: { n: 18, kind: 'diagram', alt: 'The input of a row, one layer and the five heads', caption: 'Inside the prior. (a) The input of a row: three kinds of input are added, and the candidate pool adds what the row reads of the candidate tokens; the token network that makes the tokens is a Linear layer, a GELU and a Linear layer. (b) One layer (four are stacked): the vector of the row is a rail, and each block adds to it; the causal time attention uses RoPE on the time in seconds, the traffic attention is an added module, and the feed-forward comes last. (c) The five heads in the order of the columns: each head reads the hidden state plus the embeddings of the words that the earlier columns said in the same row.' },
-    fig19_traffic_attention: { n: 19, kind: 'diagram', alt: 'The traffic attention', caption: 'The traffic attention. Once for each step, the other aircraft become tokens: 20 numbers each go through a token network (Linear, GELU, Linear) that all the layers of the prior share. In each layer, the row attends to the tokens (four heads; the keys and values come from the tokens), and the result goes through a Linear layer that starts at zero and is added to the row. Where a row has no other aircraft, the output is zero.' }
+    fig19_traffic_attention: { n: 19, kind: 'diagram', alt: 'The traffic attention', caption: 'The traffic attention. Once for each step, the other aircraft become tokens: 20 numbers each go through a token network (Linear, GELU, Linear), once for each step. All the layers read these tokens. In each layer, the row attends to the tokens (four heads; the keys and values come from the tokens), and the result goes through a Linear layer that starts at zero and is added to the row. Where a row has no other aircraft, the output is zero.' }
   };
   TT.buildFigures = () => {
     document.querySelectorAll('figure.paper[data-fig]').forEach(f => {
