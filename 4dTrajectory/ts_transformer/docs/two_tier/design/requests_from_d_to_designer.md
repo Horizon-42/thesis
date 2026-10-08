@@ -7,11 +7,10 @@ notes; the items the user decided are deleted (D166: 6, 7, 19, 21, 22, 25, 29–
 census's sample: 18; D172: 46–48), item 23 (it asked for 6 and 7), item 20 (built: item 40) and the names of MC0–MC4
 (written into the interfaces).
 
-State: 2026-10-08, night: everything of stage D merged into `dev-two-tier` (the census generator
-`multi.census.judged_steps`, 9ca282dd, frontend D177 (12)). MC5's profile: with 3 workers ended by the GPU's memory
-(item 49, `outputs/POOLED/multi/profile_20261008.aborted-20261008T200415Z`); with 2 workers **stopped at the user's word**
-after its measures and 16 of 198 batches (`outputs/POOLED/multi/profile_20261008.stopped-20261008T204116Z`): items 50
-and 51 are the user's decisions of 2026-10-08 for the design; items 52 and 53 the speed-ups the user asked to request.
+State: 2026-10-08, night: items 49–53 decided (D179, D180) and deleted. On `dev-multi-control`, not merged: the census's
+positions helper `multi.census.loop_positions` (a332466a, frontend D178 (6), a small change) and D179 / D180
+(48c21e50: MC5 the memory measure only with the margin 1.3, `--speak-device` for stage D). Items 54–55 are readings of
+that code for the designer.
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -156,81 +155,15 @@ and 51 are the user's decisions of 2026-10-08 for the design; items 52 and 53 th
     the unit is an anchor (its windows of the spans are nested and share their aircraft); within a span, windows of
     other anchors may still share flights in a dense select set (stated).
 
-49. **The workers' fit underestimates the GPU at the formal size** (D172; MC5, 2026-10-08). The profile measured one
-    worker on each span's first batch and the batch of the most rows (300 s: 1.41 GiB reserved at 64 rows; 600 s:
-    1.91 GiB at 48; 1200 s: 0.78 GiB at 24; the pass 2.15 GiB) and found 1, 2 and 3 workers fit (`workers.short` empty,
-    6.15 GiB free on the GPU). With 3 workers the round's speaking stopped at batch 25 of 198 (a 600 s batch) with
-    `torch.OutOfMemoryError`: one worker held 2.48 GiB, another 1.59 GiB, the campaign's process 2.11 GiB, 58 MiB free
-    of 7.59 GiB. So a batch other than the measured ones needs about 30 % more than the measured peak of its span (the
-    words said, the aircraft joined and the go-arounds differ by batch). Proposal (Claude's reading, for the user): the
-    fit keeps a margin on the measured GPU peak (e.g. 1.3×, stated in the record), or MC6 takes one worker fewer than
-    the profile's largest fit; until decided, MC6's proposal to the user uses the workers that the profile's own round
-    spoke without failing (2 if the run with 2 ends).
+## MC5 · the memory measure (D179, D180; 48c21e50)
 
-## MC5–MC6 · the user's decisions of 2026-10-08 (night)
-
-50. **The profile's design is to change: a whole round before the campaign is a waste** (the user, 2026-10-08: stop
-    the profile — "这个行为很愚蠢", this behaviour is very stupid — and change its design). What MC5 does now
-    (§11 MC5, D172, `experiments/multi_profile.py`): a full round at the formal size before MC6 — the round's draw, one
-    worker's memory on each span's first and largest batch, the whole round spoken (198 batches, about 2.5 h of speaking with two
-    workers, about 3 h with the readouts and the pass), the selection readout read twice, the pass, the spread. Only the memory measure must come before a
-    campaign (how many workers fit); everything else is what MC6's own round 0 records anyway (its speaking, readout
-    and pass times are in its `round.json`), so the profile spends a round of GPU time to learn what the campaign's
-    first round would tell. And the one thing it was trusted for failed: its fit judged 3 workers to fit and the round
-    ran out of GPU memory at batch 25 (item 49). Asked of the design:
-    - MC5 is the memory measure only: one worker on each span's first and largest batch and the pass (`multi_profile`
-      parts 1–2, minutes), with a margin on the measured GPU peak (item 49), recorded as today in `profile.json`; no
-      round spoken, no readouts, no spread. `profiled_fit` reads it as today (its `workers` block; the stopped profile
-      above holds exactly that, and its `short` for 1 and 2 workers is empty).
-    - The round's time and the readout's noise come from MC6's own records (round 0's `round.json`); the select set's
-      size is fixed before the campaign from stage C's experience (stage C: 200 windows an airport, about ±1.2 points
-      on landed; a stage D window holds several commanded aircraft), not from a measured spread.
-    - The same lesson for any later profile (MC9): measure only what must be known before the first round.
-51. **MC6's start and settings** (the user, 2026-10-08: "A, stop the profile; the start is stage C's best model").
-    - Start: `post_seg60_20261007` round 5 (P55's round 5, stage C's chosen model: select 87.7 % landed, its one val read
-      88.9 %), a formal campaign that has done its 8 rounds (D166 item 19); seed: one other than its source's 2028
-      (D162), Claude's proposal 2035.
-    - Workers: 2 on the GPU (`--speak-workers 2`), sized from the stopped profile
-      (`--profile outputs/POOLED/multi/profile_20261008.stopped-20261008T204116Z`: the same inputs and the settings
-      that `PROFILED_SETTINGS` compares; 1 and 2 workers fit; the run with 2 spoke 16 batches without a failure; 3 did
-      not fit, item 49).
-    - Settings as the profile's (Claude's proposal; D142, D143 kept, O19): 1,000 real and 1,000 compressed windows a
-      round, spans 300 / 600 / 1200 s, c_min 0.8, batch rows 64 / 48 / 24, K = 8, prior lr 1e-5, traffic lr 1e-4,
-      weight decay 0.01, 4 groups an update, 64 data sentences, 100 select anchors an airport (each read in every span:
-      1,500 windows a readout).
-    - Rounds: Claude's proposal 8, with stage C's stop rule (a round's select landed not above the start's by more than
-      the noise: stop; else continue by D157); about 3 h a round: the round's speaking about 5.1 h for one worker
-      from the profile's measured batches (300 s: 23 batches, 62 min; 600 s: 41, 141 min; 1200 s: 134, 101 min), so
-      about 2.5 h with 2 workers, plus the selection readout and the pass; about a day for 8 rounds. (An earlier
-      "5–6 h" came from the first 16 batches alone, all of the slowest span: corrected.)
-    - From a run worktree at the merged commit (D163), in a systemd unit; the intent in `docs/experiments/intents.json`
-      before publication.
-
-## MC6 · making a round faster (the user, 2026-10-08: "write these two as requests")
-
-A round of MC6 at the profile's settings is about 3 h (item 51): its speaking about 5.1 h for one worker (300 s: 23
-batches, 62 min; 600 s: 41, 141 min; 1200 s: 134, 101 min, from the profile's measured batches), about 2.5 h with the 2
-workers the GPU holds, plus the readout and the pass. Speaking is a loop of Δ rows, each a small forward pass of the
-model and the executor's flight of the row: the GPU is mostly idle, and its memory caps the workers at 2 (item 49).
-
-52. **Speaking workers on the CPU for stage D** (as stage C's `post_train --speak-device`, C13 / C18: workers on the
-    CPU beside the pass on the GPU). Stage C runs its campaigns so (P55: 9 workers on the CPU; the host has 28 cores and
-    31 GiB); stage D's `multi_train` (and `multi_profile`) puts every worker on `--device`. Asked:
-    - `multi_train --speak-device` (default `--device`, the behaviour today; refused with one worker, and `cuda` beside
-      a campaign on the CPU, as stage C), the workers sized from the profile as D172 (`profiled_fit`: the measure's
-      device kind must be the workers'), a worker on the CPU capped by the host's memory, none of the GPU;
-    - `multi_profile --speak-device` likewise, so that its measure (item 50: the memory measure only) is taken on the
-      workers' device, and records each measured batch's time on it.
-    - Then, before MC6 (when the frontend's exports are done and the host is free): one measure of a worker on each
-      span's first and largest batch on the CPU and on the GPU (minutes), and MC6's workers chosen from the two
-      speeds: e.g. 8–10 CPU workers if a CPU worker is within a few times a GPU worker's time (Claude's estimate,
-      untested on stage D: the closed loop alone runs about 5× faster on one CPU thread than on the GPU, the memory
-      note of 2026-10-04; the model's forward pass is the unknown). The round's other parts (readout, pass) as today.
-53. **The 1200 s span's batch twice as large** (`--batch-rows 64 48 48` in place of `64 48 24`; D172: one number a
-    span). Its measured GPU peak is 0.65–0.78 GiB at 24 rows, against 1.41–1.51 GiB for 300 s at 64 and 1.91–2.04 GiB
-    for 600 s at 48; it holds 134 of the round's 198 batches. At 48 rows its batches halve (67), its peak about doubles
-    (about 1.3–1.6 GiB, under the 600 s span's), and its time a batch grows less than twice (the rows are spoken
-    together). A setting only, but `batch_rows` is among `PROFILED_SETTINGS`, so it needs the new measure of item 52
-    (or item 50's) before MC6; with workers on the CPU (item 52) the GPU bound no longer applies to speaking, and the
-    rows a batch are read against the host's memory instead.
-
+54. **"Each span's first and largest batch."** D179 says one worker on each span's first batch and on its batch of the
+    most rows. Built with stage C's `post_train.measured_batches` (unchanged): the first batch of each span and the one
+    batch of the most rows over all spans. In stage D a span's batches are filled to its `batch_rows` in order, so a
+    span's first batch is its batch of the most rows but for a shorter one where a window's rows do not divide the
+    setting (the profile of 2026-10-08: 64 / 64, 48 / 48, 24 / 24); the reading measures 3 or 4 batches. Proposal:
+    keep it (the measure stays minutes); a batch of the most rows of each span would be at most one more a span.
+55. **`select_per_airport` is still among `PROFILED_SETTINGS`.** The measure no longer reads the select set (D179), so a
+    campaign with another select size than its profile's is refused and must be measured again, for nothing the
+    measure reads (the reviewer's judgement, not a decided rule). Proposal: drop it from `PROFILED_SETTINGS` (one
+    name, a small change), so that the select size is set freely before the campaign (D179).
