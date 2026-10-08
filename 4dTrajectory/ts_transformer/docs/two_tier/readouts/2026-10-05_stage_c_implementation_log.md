@@ -1350,3 +1350,7 @@ the run worktree removed. Table and reading: the experiment log, experiment 8.
 **Experiment 9 (`post_seg60k16_20261008`, segments of 60 s with K = 16 from P55's round 5, the user's choice) ended
 14:55 local**, 4 rounds, exit 0: 87.7 / 86.8 / 87.0 / 86.2 %, within its start's noise. Sealed (11 files), the run
 worktree removed. The experiment log, experiment 9.
+
+**Experiment 10 (`post_seg60lr3_20261008`, segments of 60 s with 3e-5 / 3e-4 and clip 1.0, K = 8, from P55's round 5)
+ended 17:00 local**, 4 rounds, exit 0: 86.2 / 86.9 / 86.3 / 85.9 %, below its start; KL 0.060 → 0.077. Sealed (11
+files), the run worktree removed. The experiment log, experiment 10.
