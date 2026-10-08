@@ -1402,3 +1402,16 @@ readouts' layout, `seal` imported from `post_diagnose` (torch for a JSON runner)
 and the C10 start's ceiling draw 0; 193 windows: KMSY 22, KRDU 52, KSJC 40, KSMF 38, KSTL 41; read-only, `SHA256SUMS`).
 It names the same windows (place, airport, flight, start time, kind) and the same reads per window as the hand-made
 `loss_windows_select_20261008`, which is deleted (the note; root `CLAUDE.md`). The export by list is fronter's (F5).
+
+**C26 (§9 item 8; frontend D177 (15)), built 2026-10-08:** `WindowLoop.fault_readings(w)` in
+`experiments/post_window_loop.py` — the public name fronter's export reads in place of the private `_reading[w]`: a
+read-only view (`MappingProxyType`) of window `w`'s steps read so far, each with the keys of its recorded aircraft that
+read a faulty point there (D114; an empty set where none does) — the dict `WindowResult.faulty_steps` and
+`loss_reads_fault` are counted from; the loop's behaviour unchanged (the diff adds the method only). Test: on the
+window with a marked row (`test_a_window_reports_the_faulty_points_its_recorded_aircraft_read`), the reading gives the
+one step the result counts, by the inserted aircraft's key, at the event for the marked row and more than 2 Δ before it
+for the far one; read-only. `test_post_window_loop`, `test_post_training_export`, `test_multi_training_export` and
+`test_architecture`: 62 passed (two processes; the export unchanged). Commit `aff8d279`; reviewed, no S1/S2. S3 left
+(one line each): the far case's "2 Δ" restated as `- 2` instead of `STEPS_BEFORE_EVENT`; the empty-set case is not
+tested; one window of one row cannot tell `w` from a row index; the docstring could say the view is live. When fronter
+switches, `test_a_loss_is_written_once_at_the_step_it_starts` must fake `fault_readings` instead of `_reading`.

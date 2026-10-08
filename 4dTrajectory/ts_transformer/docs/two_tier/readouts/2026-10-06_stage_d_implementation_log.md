@@ -418,3 +418,33 @@ workers asked. Started 05:39 UTC, stopped by name at part 2 at 06:19 UTC (exit 1
   campaign): 114 passed, 1 failed (stage D's runner test replaced `MultiSettings`, now records the spans through
   `settings_from`; passed). Reviewed in parallel (opus: no S1; S2 `test_post_landed.py` to be staged — done; two S3).
 
+## 13 The census's step loop as one generator; MC5's profile launched (notes/stage_d.md 一, 二; 2026-10-08)
+
+**MC5's profile, launched 2026-10-08 21:17 local** (orders 二): the host free (no campaign, no GPU job; only fronter's
+test services), from a detached run worktree `.claude/worktrees/run-mc5-profile` at `ad564a87` (dev-two-tier, holding
+fffe900d; data trees linked), systemd unit `mc5-profile-211748`, the command of §0.1 item 1 with
+`--out 4dTrajectory/outputs/POOLED/multi/profile_20261008` (start `post_train_20261006` round 6, seed 2027, batch rows
+64 / 48 / 24, 3 workers on the GPU); launch script and log in the session's scratch (`tmp/mc5/`). The checks passed
+(the labeller's 336 reference flights, the executor's, the closed loop's 258). Running; MC6's proposals follow its end.
+
+**The generator (orders 一; frontend D177 (12)):** `dev-two-tier` fast-forwarded into `dev-multi-control` first
+(`ad564a87`, no conflict). In `multi/census.py`, `judged_steps(window, positions, separation, finals, step_s)` yields a
+`JudgedStep(step, aircraft, commanded, losses)` for each Δ step from the anchor's first predicted step to the end of
+the positions at which a commanded aircraft is in the air; its `losses` are `StepLoss(pair, keys, loss)`, each loss
+of the judge that holds a commanded aircraft, its pair as `classify` reads it (a landed commanded aircraft over its
+threshold counted as recorded; `recorded_only` before the records are read). `window_losses` (the readout's census,
+through `multi_train.window_losses_of`) counts its steps and splits off `records_kept` from it as before. Fronter's
+`census_losses` becomes `[(s.step, x.pair, list(x.keys), x.loss) for s in judged_steps(...) for x in s.losses]` (the
+reviewer checked the same list, order and objects); `multi_training_export.py` unchanged (fronter's, F5).
+Tests (`tests/test_multi_windows.py`): the census counts bit for bit as the old loop, kept in the test as the reference
+(`_counts_before`), on twelve fixed inputs reaching every pair and every branch of the loop (a landed commanded aircraft
+over its threshold, losses holding none, two recorded-only losses in a step, a recorded-only loss on the records); the
+generator's steps on a flight alone and with a follower 8 s behind. `test_multi_windows`, `test_multi_train`,
+`test_multi_training_export` (the MIRROR test) and `test_architecture`: 78 passed (two processes, beside the profile).
+Reviewed in two rounds: the first found one S2 (the fixed inputs reached none of the moved branches), fixed with the
+reviewer's three inputs; the second none. S3 left (one line each): the last checks compare with `window_count`, which
+runs on the generator; `JudgedStep.aircraft` is read by no consumer and a frozen dataclass of numpy arrays cannot be
+compared; the export will still repeat the positions rule (a helper in `multi_train` would remove it, F5); `judged_step`
+and `judged_steps` in one module read alike; a case picked by its place from the end of `_cases`; the two-recorded-only
+count also met on the records. Commit `897e433f`.
+
