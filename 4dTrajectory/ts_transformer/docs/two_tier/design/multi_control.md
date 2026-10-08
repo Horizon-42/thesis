@@ -702,7 +702,8 @@ of listed windows (post-training D176, frontend F5) takes stage D's selection wi
 its readout's numbers (D166 (34)); a list of stage D's windows comes from the runner of D176 once stage D's readouts
 write a line per window. The losses that no aircraft answers for (D145) come to the readout and to the export from
 one generator of the census's step loop in `multi/census.py` (frontend D177 (12); built by stage D's implementer, then
-the export's mirror goes).
+the export's mirror goes). The positions that the generator reads come from one helper of stage D, which the readout
+and the export call (frontend D178 (6); to be built by stage D's implementer).
 
 **MC8. Version 2's code** (§6.4, D153), after MC6. First Claude writes its interface changes into prior §7 items 4
 and 7 and post-training §9 items 9 and 10. Then: the sentences of a loop on its ticks (stage B), stage C's samples of
