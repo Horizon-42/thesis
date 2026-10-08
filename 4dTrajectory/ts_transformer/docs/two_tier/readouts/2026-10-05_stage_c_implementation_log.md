@@ -1346,3 +1346,7 @@ the default, refused on a resume against a record holding the default. The secon
 equal the start's; the training rounds 83.2 / 83.5 / 82.6 / 83.2 % (the first value campaign's 83.8 / 84.3 / 83.1 /
 83.9 %); the centring brought the surrogate to about 0, so the fall is not the advantages' offset. Sealed (21 files),
 the run worktree removed. Table and reading: the experiment log, experiment 8.
+
+**Experiment 9 (`post_seg60k16_20261008`, segments of 60 s with K = 16 from P55's round 5, the user's choice) ended
+14:55 local**, 4 rounds, exit 0: 87.7 / 86.8 / 87.0 / 86.2 %, within its start's noise. Sealed (11 files), the run
+worktree removed. The experiment log, experiment 9.
