@@ -106,3 +106,23 @@ Climb      & $1.25^\circ$ (go-around: $1.885^\circ$--$3^\circ$) & $0.5^\circ$ to
 \bottomrule
 \end{tabular}
 \end{table}
+
+% ---- Envelopes: how far a path may stray from a word and still count as following it ----
+\begin{table}[t]
+\centering
+\caption{Envelope of each word: how far the flown path may deviate and still count as following the word.}
+\label{tab:envelopes}
+\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\textwidth}{@{}l >{\raggedright\arraybackslash}X@{}}
+\toprule
+Column & Tolerance \\
+\midrule
+Runway   & None; the word is exact. The aircraft must land on the runway in force. \\
+Heading  & Track within $\pm 4.5^\circ$ of the commanded heading. \\
+Altitude & Height within a band around the level: $\pm 40$\,m up to 1,200\,m, $\pm 70$\,m up to 2,580\,m, $\pm 235$\,m above. \\
+Angle    & Climb or descent angle within the range of its class (Table~\ref{tab:grids}). \\
+Speed    & Ground speed within $\pm 5\,\mathrm{m/s}$ of the commanded speed. \\
+\bottomrule
+\end{tabularx}
+\end{table}

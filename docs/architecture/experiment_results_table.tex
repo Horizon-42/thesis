@@ -1,0 +1,86 @@
+% Results of the three stages of the two-tier model (source: the output directories on SP-AI under
+% 4dTrajectory/outputs/POOLED/, read 2026-10-08). Requires: \usepackage{booktabs,tabularx,array}
+
+\begin{table}[t]
+\centering
+\caption{Stage A: the executor flies the closed-loop sentences of observed flights. Landing rate at three row intervals
+$\Delta$ (a landing is the judge's outcome \emph{landed}); the observed flights themselves are the reference.}
+\label{tab:result-stage-a}
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}l rr rr@{}}
+\toprule
+ & \multicolumn{2}{c}{Train sample} & \multicolumn{2}{c}{Select days} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+Row interval $\Delta$ & Flights & Landed (\%) & Flights & Landed (\%) \\
+\midrule
+2\,s & 1{,}999 & 97.65 & 6{,}199 & 97.23 \\
+\textbf{4\,s (used)} & 1{,}999 & 97.45 & 6{,}199 & 97.08 \\
+8\,s & 1{,}999 & 96.85 & 6{,}198 & 96.43 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\centering
+\caption{Stage B: landing rate of the prior in free generation (200 aircraft $\times$ 2 samples per airport,
+single aircraft, no traffic). The base model is trained on all five airports and read once on the validation days.
+In the leave-one-airport-out column, each airport is read with a model of the selected configuration that was trained on the
+other four airports only, so the airport was never seen in training; it is read on the select days of that airport.
+The base model's teacher-forced loss on the validation days is 1.084 per step.}
+\label{tab:result-stage-b}
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}l rr rr@{}}
+\toprule
+ & \multicolumn{2}{c}{Base model (val days)} & \multicolumn{2}{c}{Leave-one-airport-out (select days)} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+Airport & Sentences & Landed (\%) & Sentences & Landed (\%) \\
+\midrule
+KMSY & 370 & 93.0 & 360 & 91.7 \\
+KRDU & 380 & 96.6 & 380 & 83.4 \\
+KSJC & 382 & 95.8 & 388 & 90.7 \\
+KSMF & 382 & 94.5 & 366 & 75.7 \\
+KSTL & 380 & 93.2 & 374 & 71.4 \\
+\midrule
+All  & 1{,}894 & \textbf{94.6} & 1{,}868 & \textbf{82.6} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\centering
+\caption{Stage C: post-training in windows of recorded traffic, read on the same 1{,}000 select windows (200 per airport)
+with the same random numbers. Landed: the window ends in \emph{landed}. Lost: the commanded aircraft loses separation.
+Reward: mean reward (1 for a landing without a go-around on a runway of the present landing direction, $0.9^n$ after $n$
+go-arounds, 0 for every other outcome and every loss of separation). Each line gives its best round (by landing rate).
+Differences below about 1.2 points are within the noise of 1{,}000 windows.}
+\label{tab:result-stage-c}
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}X l c rrr@{}}
+\toprule
+Method & Start & Rounds & Landed (\%) & Lost (\%) & Reward \\
+\midrule
+Base model, no post-training          & ---       & ---  & 79.5 & 14.9 & 0.787 \\
+\midrule
+Branch training ($K{=}8$)             & base      & 14   & 85.7 & 11.7 & 0.849 \\
+Branch training, $K{=}16$             & round 8   & 4    & 85.8 & 11.5 & 0.849 \\
+Branch training, $3\times$ learning rate & round 8 & 6    & 85.8 & 11.3 & 0.847 \\
+Branch training, $K{=}16$, $3\times$ learning rate & round 8 & 4 & 85.6 & 11.8 & 0.849 \\
+Training on the landed sentences      & round 8   & 4    & 85.1 & 11.3 & 0.843 \\
+Value function (advantage per row)    & round 8   & 6$^{\mathrm{a}}$ & 84.3 & 12.5 & 0.834 \\
+Branch training, credit per 60\,s segment & round 8 & 8  & \textbf{87.7} & 9.9 & \textbf{0.869} \\
+Branch training, credit per 32\,s segment & segment-60, round 5 & 4 & \textbf{87.9} & \textbf{9.5} & \textbf{0.869} \\
+\bottomrule
+\end{tabularx}
+
+\vspace{0.3em}
+\begin{minipage}{\textwidth}
+\footnotesize
+``Round 8'' is round 8 of the first branch-training run. $^{\mathrm{a}}$The first two rounds only train the value function
+(the model does not move). A model that says a landing sentence in at least one of 32 draws lands in 99.3\,\% of the windows
+(base and round 8: 99.3 / 99.4\,\%), so the gap to the one-draw rates above is probability, not capacity. Select days only;
+the validation days are read once, for the round that is chosen.
+\end{minipage}
+\end{table}

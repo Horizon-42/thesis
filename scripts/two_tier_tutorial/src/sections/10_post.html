@@ -1,12 +1,14 @@
 <section id="s-post">
 <h2 id="post" data-toc="10 The post-training">10 The post-training</h2>
-<p>The prior learned to imitate. But a good imitation is not the same as a skill: the prior must <em>reach the runway</em> with its own words. The post-training trains the prior again in a closed loop. The prior speaks, the executor flies, the judge decides, and the reward comes from the outcome. Stage C builds it. The code is on the branch <code>dev-two-tier-v4-post</code>.</p>
+<p>The prior learned to imitate. But a good imitation is not the same as a skill: the prior must <em>reach the runway</em> with its own words. The post-training trains the prior again in a closed loop. The prior speaks, the executor flies, the judge decides, and the reward comes from the outcome.</p>
 <div class="note warn"><p><b>Status.</b> The parts C0–C7 and C9 are built on synthetic artefacts. The parts C8 and C10–C12 (the formal runs) wait for the base model of stage B and for the review of stage B. So this section shows no result of a post-trained model. The evidence it quotes comes from the earlier design (<code>instruction-v3</code>), and the text says so.</p></div>
 
 <h3 id="t-window" class="toc">10.1 One stage, one commanded aircraft, a window of traffic</h3>
 <p>The closed loop is a <b>window of recorded traffic</b> with <b>one commanded aircraft</b> (<span class="pill d">D29</span>). The model speaks for that aircraft. The other aircraft fly their records. A window starts at row 0 of the commanded aircraft. It ends where the commanded aircraft is done, or when it loses separation that it answers for (<span class="pill d">D93</span>). The usual length is about 20 minutes, but it is not a bound.</p>
 <p>The start model is the base model <em>with a traffic attention whose output is zero</em>. There is no single-aircraft stage, for three reasons. A window with no other aircraft is exactly single-aircraft free generation. A single-aircraft reward does not see when an aircraft lands, so it does not limit the spread of the landing times. And the model must learn to land one time, in the loop where it lands. On the train days, 60 % of the windows have no leader in the air at their first predicted step.</p>
-<p><b>Windows.</b> A round draws real windows and augmented windows in equal counts (<span class="pill d">D100</span>). Window A inserts one aircraft that flies its record. Window D moves the aircraft ahead. Window B (a moved start) comes after milestone C9. A window that opens inside a loss of separation is left out of the draw (<span class="pill d">D113</span>).</p>
+<p><b>Windows.</b> A round draws real windows and augmented windows in equal counts (<span class="pill d">D100</span>). Window A inserts one aircraft that flies its record. Window D moves the aircraft ahead. Window B moves the start of the commanded aircraft: a turn about the airport of up to ±15°, a change of height of up to ±300 m and a scale of the speed of 1 ± 0.1 (<span class="pill d">D123</span>). The four kinds are drawn from the same flights of a round, and a real window and its A, B or D go to different batches (<span class="pill d">D124</span>). A window that opens inside a loss of separation is left out of the draw (<span class="pill d">D113</span>).</p>
+
+<figure class="paper" data-fig="fig16_window_kinds"></figure>
 
 <h3 id="t-reward" class="toc">10.2 The reward</h3>
 <p>The reward comes <b>only from the outcome</b> (<span class="pill d">D30</span>). It is 1 for a landing without a go-around on a runway of the airport’s present landing direction. It is 0.9<sup>n</sup> for a landing after n go-arounds. It is 0 for every other outcome, and for every loss of separation. There is no payment for a go-around without a landing.</p>
@@ -26,6 +28,8 @@
 <p>Why this design? (1) <b>Cost.</b> In the earlier design, speaking took about 55 % of a round, and only 37–47 % of the sentences carried a gradient. Branch training spends the extra sentences only where the first sentence failed. A continuation flies only the part after its branch point. (2) <b>Credit.</b> Only the words after the branch point differ inside a group. (3) <b>Branch points.</b> A readout of the earlier design found that a new sentence from the start rescues the most events; from 120 s before the event, fewer; from 60 s or less, few. The branch points are fixed before the run, at the start and at fixed times.</p>
 <p>A test in the code checks that a continuation with the random numbers of the first sentence says the <b>same words</b> and flies the same states, within 1e-6 m. The probabilities can differ in their last bits when the batch differs. A window that differs is counted, reported, and gives no sample in the round.</p>
 <figure class="paper" data-fig="fig13_branch_training"></figure>
+<p><b>A second method: train on the landed sentences</b> (<span class="pill d">D165</span>). A measurement of the ceiling found that the model can say a sentence that lands in almost every window (99 % in at least one of 32 draws), but it gives that sentence too little probability. The clipped surrogate of branch training did not raise it further. So this method has no advantage and no clipped ratio. Each window is spoken several times by the model of the round. For each window, the sentence that landed with the highest reward is kept; a window with no landing gives nothing. The loss is the negative log-likelihood of the commanded aircraft’s words in the kept sentences, teacher-forced under its traffic, with the same data term and the same pull to the base model. Choosing the best sentence at speaking time is not wanted: only what the model is trained to say counts. Figure 12 draws the loop with branch training and Figure 17 the loop with this method.</p>
+<figure class="paper" data-fig="fig17_landed_training"></figure>
 
 <h3 id="t-loss" class="toc">10.4 The loss</h3>
 <p>The loss has three parts: the <t zh="裁剪比率代理目标">clipped-ratio surrogate</t> (ε = 0.2) with the advantage of each branch group, the <t zh="KL 散度">pull to the base model</t> (weight 0.04, a KL estimate on the sampled words), and the <b>teacher-forced data term</b> (weight 1) on single-aircraft samples of the sentences in the selection <code>landed</code>. The traffic attention has its own learning rate.</p>
@@ -41,7 +45,7 @@
 <p>The other aircraft of a window are every other flight of the airport and the split that is in the air at that step. They fly their stored signals. Their motion is the displacement in the 2 s before the row, and their R is the runway of their record from their own first predicted step on.</p>
 <ul>
 <li><b>Edge features.</b> For each other aircraft: where it is in the commanded aircraft’s frame (front, left, height difference); its place on the <t zh="进近时钟">approach clock</t> and whether the two can be compared; the relation of the two runways in force (same, single, dependent, independent, unrelated); the closing rate; the closest point of approach (time, horizontal distance, height difference); the distance that the rules require between the two; and a flag for an unknown motion. Every scale is a constant in SI units.</li>
-<li><b>Traffic attention.</b> At each layer, a module reads one token for each other aircraft: the edge features and the aircraft’s own motion (<span class="pill d">D98</span>). <b>Its output layer starts at zero</b>, and its output is zero when a row has no other aircraft. So the start model equals the base, and a window with no traffic is free generation. One token network is shared by the layers (<span class="pill d">D116</span>).</li>
+<li><b>Traffic attention.</b> At each layer of the prior, a module reads the other aircraft of the step (<span class="pill d">D98</span>). It is explained below, with Figure 19.</li>
 <li><b>Established on the final.</b> A function of one row: G false, the aircraft inside the region of the final of R, and its track within 20° of the course (<span class="pill d">D92</span>). After “go-around” the aircraft is not established until a runway word ends G.</li>
 <li><b>Separation judge.</b> It uses the radar minima of FAA JO 7110.65BB with the rules for visual approaches. Parallel runways at least 2,500 ft (762 m) apart are free once both aircraft are turned in. An event of a window is the first loss of separation for which the commanded aircraft answers.</li>
 <li><b>Speed-word mask.</b> A mask of the caller on the speed column. It acts only when the aircraft and the one next ahead are both established, and while the aircraft is more than 5 NM from its threshold. It is a <b>stated approximation</b>: constant rate, no turn, no wind. It acts in a band that is only 0.1–2 km wide at most runways (<span class="pill d">D101</span>).</li>
@@ -49,6 +53,50 @@
 <p>There is no mask for the spacing on the final. The reward (0 for a loss of separation) teaches it. A mask is designed only if the readouts show that the losses at the join dominate.</p>
 <div data-demo="traffic_scene" data-title="Edge features, and the speed-word mask"></div>
 <figure class="paper" data-fig="fig14_traffic_features"></figure>
+
+<h4>The traffic attention in detail</h4>
+<p>The base prior sees only its own aircraft. In traffic, the commanded aircraft must also react to the others. The <b>traffic attention</b> is the module that lets it. It is a small attention, added at each of the 4 layers of the prior (the “added module” of Figure 18b), that lets the row <em>read the other aircraft of the same instant</em>. Figure 19 shows it in two parts: the tokens are made <b>once for each step</b>, and then <b>each layer</b> reads them with its own attention.</p>
+<figure class="paper" data-fig="fig19_traffic_attention"></figure>
+
+<h5>Part 1. The tokens: one for each other aircraft, made once for each step</h5>
+<p>A token is not the state of the other aircraft. It says what the other aircraft is <em>to the commanded aircraft</em>, in <b>20 features</b>. All of them are computed from the recorded state of the other aircraft, before the training, and none uses a row after the step. 16 are <b>edge features</b> (a relation between the two aircraft). 4 describe the <b>motion</b> of the other aircraft. Horizontal distances are scaled as asinh(<i>d</i> / 5,556 m), where 5,556 m is 3 NM, the radar minimum (the scale is linear for short distances and compresses long ones).</p>
+<table>
+<thead><tr><th>Group</th><th>Feature</th><th>What it says</th><th>Scale</th></tr></thead>
+<tbody>
+<tr><td rowspan="3">Position (edge)</td><td><code>front</code></td><td>How far the other aircraft is ahead of the commanded aircraft (positive) or behind it (negative), along the direction in which the commanded aircraft moves</td><td>asinh(<i>d</i> / 3 NM)</td></tr>
+<tr><td><code>left</code></td><td>How far it is to the left (positive) or to the right (negative) of the commanded aircraft</td><td>asinh(<i>d</i> / 3 NM)</td></tr>
+<tr><td><code>height</code></td><td>Its height minus the height of the commanded aircraft</td><td><i>h</i> / 1 km</td></tr>
+<tr><td rowspan="2">Approach clock (edge)</td><td><code>clock_ahead</code></td><td>Its place on the approach clock, minus that of the commanded aircraft. The approach clock measures how far each aircraft is from its threshold along the final. Positive: the other aircraft will reach its runway first</td><td>asinh(<i>d</i> / 3 NM)</td></tr>
+<tr><td><code>clock_incomparable</code></td><td>1 if the two places cannot be compared (a runway is not in force, or the runways have other directions), else 0</td><td>0 or 1</td></tr>
+<tr><td rowspan="5">Runway relation (edge)</td><td><code>same</code></td><td>Both are on the same runway</td><td rowspan="5">one-hot; all 0 if a runway is not in force</td></tr>
+<tr><td><code>single</code></td><td>A parallel pair so close that it is separated as one runway</td></tr>
+<tr><td><code>dependent</code></td><td>Staggered parallel runways that depend on each other</td></tr>
+<tr><td><code>independent</code></td><td>Parallel runways that are independent: no mutual minimum</td></tr>
+<tr><td><code>unrelated</code></td><td>Another direction: no rule links the two</td></tr>
+<tr><td>Closing (edge)</td><td><code>closing</code></td><td>How fast the horizontal distance between the two gets smaller (positive: they come closer)</td><td><i>v</i> / 100 m/s</td></tr>
+<tr><td rowspan="3">Closest approach (edge)</td><td><code>cpa_time</code></td><td>If both fly straight on at their present motion: in how many seconds the horizontal distance is the smallest (0 to 120 s)</td><td><i>t</i> / 120 s</td></tr>
+<tr><td><code>cpa_horizontal</code></td><td>That smallest horizontal distance</td><td>asinh(<i>d</i> / 3 NM)</td></tr>
+<tr><td><code>cpa_vertical</code></td><td>The height difference at that time</td><td><i>h</i> / 1 km</td></tr>
+<tr><td>Rule (edge)</td><td><code>required</code></td><td>The distance that the separation rules require between the two, as leader and follower (the one ahead on the approach clock leads). 0 if the clock cannot compare them</td><td>asinh(<i>d</i> / 3 NM)</td></tr>
+<tr><td>Unknown (edge)</td><td><code>motion_unknown</code></td><td>1 if the motion of either aircraft is not known (the first row of an aircraft), else 0</td><td>0 or 1</td></tr>
+<tr><td rowspan="4">Own motion</td><td><code>ground_speed</code></td><td>Its ground speed</td><td><i>v</i> / 100 m/s</td></tr>
+<tr><td><code>vertical_rate</code></td><td>Its vertical rate (positive in a climb)</td><td><i>v</i> / 10 m/s</td></tr>
+<tr><td><code>direction_sin</code>, <code>direction_cos</code></td><td>Its direction of motion minus the direction of motion of the commanded aircraft, as a sine and a cosine (0 if a motion is not known)</td><td>−1 to 1</td></tr>
+</tbody></table>
+<p>So the 20 features are 3 + 2 + 5 + 1 + 3 + 1 + 1 = 16 edge features, and 4 motion numbers. The ground speed and the vertical rate are the 2 s displacements before the row, as for the commanded aircraft (9.1). The edge features are built from the same quantities as the separation rules and the speed-word mask (the approach clock, the relation of the runways, the required distance). So the module gets what it needs to learn to avoid a loss of separation, with fixed physical scales and without any name of an airport.</p>
+<p>The <b>traffic token network</b> turns the 20 features into a vector of <i>d</i> numbers: <b>Linear → GELU → Linear</b> (20 → 64 → <i>d</i>), as the token network of the candidates in 9.2, but with its own weights. <b>The tokens are made once for each step, and all the layers read them</b> (<span class="pill d">D116</span>). A token depends only on the other aircraft and the step, and not on the layer, so there is nothing to compute again in a later layer. A token network in each layer would also need about 9 GB at the formal size (configuration A), more than the GPU has.</p>
+
+<h5>Part 2. The attention in each layer</h5>
+<p>Each of the 4 layers has <b>its own attention</b>, with its own weights. It is built like the candidate pool of 9.3, but it looks at the other aircraft and not at the runways:</p>
+<ul>
+<li>The <b>query</b> comes from the row <em>in this layer</em>, after a LayerNorm. The row has changed since the layer before, so each layer asks a different question.</li>
+<li>The <b>keys</b> and the <b>values</b> come from the tokens, through the layer’s own Linear layers. So each layer reads another side of the same tokens.</li>
+<li>It has <b>4 heads</b>, so that each head can look for something different in the other aircraft. The weights sum to 1 over the real other aircraft.</li>
+<li>The result goes through a last Linear layer and is <b>added to the row</b>. The 4 layers thus add 4 different results to the row.</li>
+</ul>
+<p><b>Why the output starts at zero.</b> The last Linear layer of each module starts with all weights 0. So at the start of the post-training, the output is exactly 0, and the model says exactly what the base says. Where a row has <em>no other aircraft</em>, the output is 0 for any weights, so a window with no traffic is the same as free generation (<span class="pill d">D29</span>). The model can only learn to use the traffic. It cannot lose the base.</p>
+<p><b>What it does not do.</b> The other aircraft are not run through the prior. A token comes from their recorded state, and not from a hidden state of the network: a hidden state would change with each round of the training, and it would need words said to that aircraft, which a recorded flight does not have (<span class="pill d">D98</span>). The order of the other aircraft does not matter, and their number does not matter.</p>
+<p><b>Size.</b> With 64 hidden numbers in the token network and 4 heads, the module has 1,072,704 parameters: the token network 17,984, and 263,680 in each of the 4 layers. The prior then grows from 3,805,101 to 4,877,805 parameters. The module has its own learning rate, 1e-4 against 1e-5 for the rest of the prior.</p>
 <figure class="paper" data-fig="fig12_post_training_loop"></figure>
 
 <h3 id="t-evidence" class="toc">10.6 What the earlier design measured</h3>

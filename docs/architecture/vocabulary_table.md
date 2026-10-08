@@ -54,3 +54,15 @@ Angle classes:
 | Descent 3 | 3.0° | 2.75° to 3.75° |
 | Descent 4 | 4.5° | 3.75° to 10° |
 | Climb | 1.25° (go-around: 1.885°–3°) | 0.5° to 15° (labelled pieces) |
+
+## Table 3 — Envelope (tolerance) of each word
+
+How far the flown path may deviate and still count as following the word.
+
+| Column | Tolerance |
+|---|---|
+| Runway | None; the word is exact. The aircraft must land on the runway in force. |
+| Heading | Track within ±4.5° of the commanded heading. |
+| Altitude | Height within a band around the level: ±40 m up to 1,200 m, ±70 m up to 2,580 m, ±235 m above. |
+| Angle | Climb or descent angle within the range of its class (Table 2). |
+| Speed | Ground speed within ±5 m/s of the commanded speed. |

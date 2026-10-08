@@ -1,0 +1,86 @@
+% The point-mass equations of the executor, their inverse in one cycle, and the limits that act on the result
+% (sources: aerodynamic_model/casadi_simulator.py `make_dynamics_model`, 4dTrajectory/ts_transformer/docs/two_tier/design/vocabulary.md §5.3, §8).
+% Requires: \usepackage{amsmath,booktabs,tabularx,array}
+
+\paragraph{Symbols.} One symbol has one meaning in everything below.
+
+\begin{table}[h]
+\centering
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}l l l@{}}
+\toprule
+Symbol & Meaning & Unit \\
+\midrule
+$x,\ y,\ h$ & east and north position in the local frame; height & m \\
+$V$ & airspeed & m/s \\
+$\psi$ & heading, mathematical convention (0 at east, counter-clockwise) & rad \\
+$\chi$ & track, compass convention (0 at north, clockwise); $\chi = \pi/2 - \psi$ & rad \\
+$\gamma$ & path angle & rad \\
+$m$ & mass (constant) & kg \\
+\midrule
+$T$ & thrust (control) & N \\
+$\varphi$ & bank angle (control) & rad \\
+$n$ & load factor (control) & --- \\
+\midrule
+$D,\ \rho$ & drag; air density (ISA at the height $h$) & N; kg/m$^3$ \\
+$S,\ C_{L,\max},\ C_{D0},\ k$ & reference area, maximum lift coefficient, zero-lift drag coefficient, induced-drag factor & various \\
+$g$ & acceleration of gravity & m/s$^2$ \\
+$\dot{\chi}^{*},\ \dot{\gamma}^{*},\ \dot{V}^{*}$ & the wanted track rate, path-angle rate and airspeed rate (from the laws of the executor) & rad/s, rad/s, m/s$^2$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{The point-mass equations.} The state is $(x, y, h, V, \psi, \gamma, m)$ and the controls are $(T, \varphi, n)$:
+\begin{align}
+\dot{x} &= V \cos\gamma \cos\psi, \\
+\dot{y} &= V \cos\gamma \sin\psi, \\
+\dot{h} &= V \sin\gamma, \\
+\dot{V} &= \frac{T - D}{m} - g \sin\gamma, \\
+\dot{\psi} &= \frac{g\, n \sin\varphi}{V \cos\gamma}, \\
+\dot{\gamma} &= \frac{g\left(n \cos\varphi - \cos\gamma\right)}{V}, \\
+\dot{m} &= 0.
+\end{align}
+The drag is $D = \tfrac{1}{2}\rho V^{2} C_D S$. The lift coefficient that the load factor needs is
+$C_L = n\, m g / (\tfrac{1}{2}\rho V^{2} S)$, and $C_D = C_{D0} + k\, C_L^{2}$ plus a smooth stall term. Where $C_L$ would be
+larger than $C_{L,\max}$, the wing stalls: $C_L = C_{L,\max}$, and the load factor that acts is
+$n = \tfrac{1}{2}\rho V^{2} C_{L,\max} S / (m g)$. The air density is $\rho = \rho_0\,(1 - 0.0065\,h / 288.15)^{4.25588}$
+with $\rho_0 = 1.225$\,kg/m$^3$ (ISA).
+
+\paragraph{The inverse in one cycle.} Each cycle lasts 1\,s. The three laws of the executor give the wanted rates
+$\dot{\chi}^{*}$, $\dot{\gamma}^{*}$ and $\dot{V}^{*}$. The compass track and the mathematical heading turn in opposite
+directions, $\dot{\chi} = -\dot{\psi}$. Putting $\dot{\psi} = -\dot{\chi}^{*}$, $\dot{\gamma} = \dot{\gamma}^{*}$ and
+$\dot{V} = \dot{V}^{*}$ into the equations above and solving for the controls gives the exact inverse:
+\begin{align}
+A &= n \sin\varphi = -\frac{\dot{\chi}^{*}\, V \cos\gamma}{g}, \\[4pt]
+B &= n \cos\varphi = \frac{\dot{\gamma}^{*}\, V}{g} + \cos\gamma, \\[4pt]
+\varphi &= \operatorname{atan2}(A,\, B), \qquad n = \frac{B}{\cos\varphi}, \\[4pt]
+T &= m\left(\dot{V}^{*} + g \sin\gamma\right) + D(V,\, n,\, h).
+\end{align}
+$D(V, n, h)$ is the drag of the equations above at the load factor $n$ and the density at the height $h$.
+
+\begin{table}[t]
+\centering
+\caption{The limits of one cycle, in the order in which they act. Each acts on the value that it bounds.}
+\label{tab:executor-limits}
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabularx}{\textwidth}{@{}c l >{\raggedright\arraybackslash}p{4.4cm} >{\raggedright\arraybackslash}X@{}}
+\toprule
+\# & Limit & Value & Effect when it binds \\
+\midrule
+1 & Bank $\varphi$
+  & $|\varphi| \le 32^\circ$; changes by at most $5^\circ$/s from the first cycle; the start bank is $0$
+  & A limited bank costs turn rate, not path angle: $n = B/\cos\varphi$ keeps $\dot{\gamma}^{*}$. \\
+2 & Load factor $n$
+  & $0.5 \le n \le 2.0$
+  & The turn and the path angle get less than wanted. \\
+3 & Stall floor
+  & The speed law asks for no airspeed below $1.10\,V_{\mathrm{stall}}(n)$ at the load factor in force
+  & The speed word is not flown below this speed. \\
+4 & Thrust $T$
+  & $-0.2\,T_{\max} \le T \le 1.0\,T_{\max}$; the polar is clean (no flaps, landing gear or speedbrakes), and the negative part stands for them
+  & A limited thrust costs airspeed rate. \\
+\bottomrule
+\end{tabularx}
+\end{table}
