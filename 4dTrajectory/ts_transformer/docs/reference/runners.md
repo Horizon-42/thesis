@@ -1753,3 +1753,19 @@ val; the closed loop's and the edges' checks first; a clean tree unless `--smoke
     python run_ts.py post_diagnose --campaign 4dTrajectory/outputs/POOLED/post/<campaign id> --round 8 \
         --intent <intent.json> --out 4dTrajectory/outputs/POOLED/post/diagnose_<campaign>_r<round>_<date> \
         [--ceiling 4dTrajectory/outputs/POOLED/post/<ceiling id>] [--speak-workers 4]
+
+### R67 · `run_ts.py window_list` — a list of select windows chosen by one rule from per-window readouts (post-training D176)
+
+2026-10-08. A window list (`post/window_lists.py`, `ts-window-list-v1`, C25): the select windows whose outcome is one of
+`--outcomes` in any of the reads given, or with `--all` in every one. Reads: `--diagnose DIR READ` (a D175 readout,
+R66: its `per_window.jsonl` lines of read `on` or `off`) and `--ceiling DIR MODEL` (a D161 readout, R64: draw 0 of a
+model), any number of each. Every read must index the same selection windows (the same windows in the same places
+under the same select seed and windows an airport), refused by name otherwise; a ceiling's selection is its campaign's
+`campaign.json` beside it. Writes, into a new directory, `list.json` (stage C; the select windows only, none moved out
+of the split; each window's place, airport and identity — flight, `row0_s`, kind — and, as information no reader acts
+on, each read's outcome and D175's fields; the reads by path and sha256) and `SHA256SUMS`; read-only. The Training
+export takes a list (`--windows`, D176 (3), frontend F5). Tests: `tests/test_window_lists.py`.
+
+    python run_ts.py window_list --diagnose 4dTrajectory/outputs/POOLED/post/<diagnose id> on \
+        --ceiling 4dTrajectory/outputs/POOLED/post/<ceiling id> start --outcomes lost_separation \
+        --out 4dTrajectory/outputs/POOLED/post/<list id> [--all]
