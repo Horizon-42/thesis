@@ -50,6 +50,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
@@ -507,6 +508,13 @@ class WindowLoop:
         out.value_reader = self.value_reader
         out._values, out._pending = [list(self._values[b]) for b in rows], [self._pending[b] for b in rows]
         return out
+
+    def fault_readings(self, w: int) -> Mapping[int, frozenset[str]]:
+        """Window ``w``'s steps read so far, each with the keys of its recorded aircraft that read a faulty point there
+        (D114: its row or the row before it is a fault row; an empty set at a step where none does) — what its results
+        count (`WindowResult.faulty_steps`: the steps with one; ``loss_reads_fault``: the loss's other aircraft among
+        them at the event or in the 2 Δ before it). A read-only view (post-training C26, frontend D177 (15))."""
+        return MappingProxyType(self._reading[w])
 
     def end_step(self, b: int) -> int:
         """The Δ row of its own at which row ``b`` ended (post-training §2 item 9, t_E): the row of its loss of
