@@ -74,7 +74,7 @@ rule 10); its readings and requests go to `requests_from_d_to_designer.md`. MC0�
 | MC2, MC3 | Built, reviewed, committed (fd720c75): stage D's rule of who answers, its token part, its credit |
 | MC4 | The round's stage committed (054727db); the user's items 6 and 7 built (ac919f9c); C15 and C16 merged in (fc962015); the one start function (D164) and the runner `multi_train` committed (2b370d37); the O18 readouts and `multi_validation` committed (fccbab8d); the windows of several spans, one L a batch (D146) and D166 item 19 committed (6cc49ad1); the smoke and its resume passed (2026-10-07) |
 | MC5 | The profile runner `multi_profile` committed (bd6dd1be), D172's sizing built (fffe900d); the profile at the formal size running since 2026-10-08 21:17 from the run worktree `run-mc5-profile` at `ad564a87` (systemd unit `mc5-profile-211748`, out `outputs/POOLED/multi/profile_20261008`) |
-| The census's step loop as one generator (frontend D177 (12)) | `multi.census.judged_steps` (`JudgedStep`, `StepLoss`), `window_losses` on it, bit for bit as before; committed `897e433f` on `dev-multi-control` (reviewed, two rounds), not yet merged; fronter's export then reads it (log §13) |
+| The census's step loop as one generator (frontend D177 (12)) | `multi.census.judged_steps` (`JudgedStep`, `StepLoss`), `window_losses` on it, bit for bit as before; committed `897e433f` (reviewed, two rounds), merged into `dev-two-tier` (`9ca282dd`, the user's word); fronter's export then reads it (log §13) |
 | MC6–MC10 | Not started |
 
 ### 0.4 Plan
