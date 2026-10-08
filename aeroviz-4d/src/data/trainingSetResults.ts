@@ -14,7 +14,7 @@ import { asNumber, attempt, recordOf, Reader, Refusal, type Parsed } from "./tra
 /** MIRROR of the backend's route (`aeroviz_backend/http_server.py`, `training_results.TrainingResults`). */
 export const TRAINING_RESULTS_PATH = "/training/results";
 
-export type TrainingStage = "A" | "B" | "C";
+export type TrainingStage = "A" | "B" | "C" | "D";
 export type Counts = Record<string, number>;
 /** A section: its fields, or why it has none (a file elsewhere or missing; a reading the design keeps unshown). */
 export type TrainingResultSection<T> = { ok: true; value: T } | { ok: false; problem: string };
@@ -109,6 +109,30 @@ export interface TrainingStageCResults {
   checks: TrainingResultSection<{ checks: Record<string, unknown> }>;
   speed: TrainingResultSection<TrainingSpeed>;
 }
+/** A cell of stage D's readout at an airport (its ``all`` span and kind): its windows and commanded aircraft, their
+ *  reward sum, outcomes, go-arounds said and silent ones, and the windows with a loss of each pair
+ *  (`multi.separation.PAIRS`, once a pair a window). */
+export interface TrainingMultiCell {
+  windows: number;
+  aircraft: number;
+  rewardSum: number;
+  outcomes: Counts;
+  goArounds: number;
+  silent: number;
+  lossWindows: Counts;
+}
+export interface TrainingMultiRoundResult {
+  round: number;
+  speaking: { windows: number; rewardSum: number; outcomes: Counts };
+  selection: Record<string, TrainingMultiCell>;
+}
+export interface TrainingStageDResults {
+  stage: "D";
+  /** ``start``: stage C's round, read on stage C's windows — never a readout here, only why (frontend §5.6). */
+  rounds: TrainingResultSection<{ started: string; rounds: TrainingMultiRoundResult[]; start: TrainingStartReadout }>;
+  checks: TrainingResultSection<{ checks: Record<string, unknown> }>;
+  speed: TrainingResultSection<TrainingSpeed>;
+}
 /** The model's speed readout (D136): the model it timed (B: the prior; C: the campaign's round) and each setting. */
 export interface TrainingSpeed {
   model: string;
@@ -117,7 +141,7 @@ export interface TrainingSpeed {
   smoke: boolean;
   settings: TrainingSpeedSetting[];
 }
-export type TrainingSetResults = (TrainingStageAResults | TrainingStageBResults | TrainingStageCResults) & {
+export type TrainingSetResults = (TrainingStageAResults | TrainingStageBResults | TrainingStageCResults | TrainingStageDResults) & {
   /** The path of the readout or campaign the set was made from: the one line of provenance. */
   provenance: string;
 };
@@ -172,7 +196,7 @@ export function parseTrainingSetResults(ok: boolean, raw: unknown, setId: string
   }
   return attempt(() => {
     const reader = Reader.of(raw, "results");
-    const stage = reader.oneOf("stage", ["A", "B", "C"] as const);
+    const stage = reader.oneOf("stage", ["A", "B", "C", "D"] as const);
     const provenance = reader.string("provenance");
     const sections = reader.child("sections");
     if (stage === "A") {
@@ -229,6 +253,34 @@ export function parseTrainingSetResults(ok: boolean, raw: unknown, setId: string
             variant: { ...choiceStep(variant), scores: variant.record("scores", asNumber) },
           };
         }),
+        speed: section(sections, "speed", speed),
+      };
+    }
+    if (stage === "D") {
+      return {
+        stage, provenance,
+        rounds: section(sections, "rounds", (s) => {
+          const start = startOf(s.child("start"))!;
+          if (start.selection !== null) s.fail("stage D's start was read on stage C's windows: no readout of it");
+          return {
+            started: s.string("started"),
+            rounds: s.children("rounds").map((r) => {
+              const speaking = r.child("speaking");
+              return {
+                round: r.count("round"),
+                speaking: { windows: speaking.count("windows"), rewardSum: speaking.number("rewardSum"), outcomes: speaking.record("outcomes", asNumber) },
+                selection: r.record("selection", (value, where) => {
+                  const c = Reader.of(value, where);
+                  return { windows: c.count("windows"), aircraft: c.count("aircraft"), rewardSum: c.number("rewardSum"),
+                    outcomes: c.record("outcomes", asNumber), goArounds: c.count("goArounds"), silent: c.count("silent"),
+                    lossWindows: c.record("lossWindows", asNumber) };
+                }),
+              };
+            }),
+            start,
+          };
+        }),
+        checks: section(sections, "checks", (s) => ({ checks: s.record("checks", (value) => value) })),
         speed: section(sections, "speed", speed),
       };
     }

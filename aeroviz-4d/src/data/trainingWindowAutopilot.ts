@@ -26,19 +26,20 @@ import { trainingWindowOriginOf } from "./trainingWindowSample";
 import type { TrainingSelection } from "./trainingSample";
 
 /** MIRROR of `aeroviz_backend/autopilot_segment/window.py` `SCHEMA`: the backend's answer; anything else is refused by
- *  name. A name changes with the payload's shape, on both sides, in one change (v2: the request names the aircraft). */
-export const TRAINING_WINDOW_AUTOPILOT_SCHEMA = "aeroviz-autopilot-window-segment-v2";
+ *  name. A name changes with the payload's shape, on both sides, in one change (v2: the request names the aircraft; v3:
+ *  and the stage whose index lists the set). */
+export const TRAINING_WINDOW_AUTOPILOT_SCHEMA = "aeroviz-autopilot-window-segment-v3";
 export const TRAINING_WINDOW_AUTOPILOT_PATH = "/autopilot/window-segment";
 /** This page's window requests, as the backend knows them: a client id of their own, apart from stage A's and B's. */
 export const TRAINING_WINDOW_CLIENT_ID = `${TRAINING_AUTOPILOT_CLIENT_ID}-window`;
 let requestSeq = 0;
 
-/** The body of the request for the flown flight's pick: the set's window, the aircraft and the round, not the derived
- *  flight. */
+/** The body of the request for the flown flight's pick: the set's stage and window, the aircraft and the round, not
+ *  the derived flight. */
 export function trainingWindowRequestBody(request: TrainingAutopilotRequest, selection: TrainingSelection): Record<string, unknown> {
   const origin = trainingWindowOriginOf(selection.flight);
   if (origin === undefined) throw new Error(`${selection.flight.flightKey} is not a window of a window set`);
-  return { airport: request.airport, setId: request.setId, window: origin.window.index, aircraft: origin.aircraft.datasetId,
+  return { stage: origin.sample.stage, airport: request.airport, setId: request.setId, window: origin.window.index, aircraft: origin.aircraft.datasetId,
     round: origin.round, column: request.column, row: request.row };
 }
 

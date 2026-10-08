@@ -11,13 +11,16 @@ import { TRAINING_SENTENCE_COLOR, type TrainingSentenceKind } from "../utils/tra
 import { trainingPriorOriginOf } from "./trainingPriorSample";
 import type { TrainingFlight } from "./trainingSample";
 import {
-  roundLabel, TRAINING_WINDOW_START, trainingWindowOriginOf, type TrainingWindowRound, type TrainingWindowStart,
+  roundLabel, TRAINING_WINDOW_START, trainingWindowOriginOf, type TrainingWindowRound, type TrainingWindowStage,
+  type TrainingWindowStart,
 } from "./trainingWindowSample";
 
-/** The kind of the sentences a round of a campaign says: the start is the base's when the campaign starts from the base,
- *  a post-trained model's when it starts from another campaign's round (D162). */
-export function roundKind(round: TrainingWindowRound, start: TrainingWindowStart | null): TrainingSentenceKind {
-  return round === TRAINING_WINDOW_START && start === null ? "base" : "postTrained";
+/** The kind of the sentences a round of a campaign of ``stage`` says: the start is the base's when the campaign starts
+ *  from the base, a post-trained model's when it starts from another campaign's round (D162; stage D's from stage C's,
+ *  D164); a round after it is stage C's post-trained model's, or stage D's model's (§3 item 11). */
+export function roundKind(round: TrainingWindowRound, start: TrainingWindowStart | null, stage: TrainingWindowStage): TrainingSentenceKind {
+  if (round === TRAINING_WINDOW_START) return start === null ? "base" : "postTrained";
+  return stage === "D" ? "multi" : "postTrained";
 }
 
 /** What each kind is, in a few words (the legends' names). */
@@ -44,7 +47,7 @@ export function sentenceName(flight: TrainingFlight, intervalS: number | null): 
 export function flownSentenceKind(flight: TrainingFlight): TrainingSentenceKind {
   if (trainingPriorOriginOf(flight)?.sentence) return "base";
   const window = trainingWindowOriginOf(flight);
-  if (window !== undefined) return roundKind(window.round, window.sample.model.start);
+  if (window !== undefined) return roundKind(window.round, window.sample.model.start, window.sample.stage);
   return "closedLoop";
 }
 

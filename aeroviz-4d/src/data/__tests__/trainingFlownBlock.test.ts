@@ -15,7 +15,7 @@ describe("the flown block of every stage", () => {
   it("gives every flown sentence its envelopes: stage A's replays, stage B's samples, stage C's rounds", () => {
     const a = parseTrainingSample(stageASampleFile(), TRAINING_SET_SPLITS);
     const b = parseTrainingPriorSample(stageBSampleFile());
-    const c = parseTrainingWindowSample(stageCSampleFile());
+    const c = parseTrainingWindowSample(stageCSampleFile(), "C");
     if (!a.ok || !b.ok || !c.ok) throw new Error("a fixture does not parse");
     const replays = Object.values(a.value.flights[0].closedLoop).map((closed) => closed.replay.envelopes);
     const samples = b.value.flights.flatMap((flight) => flight.sentences.map((sentence) => sentence.envelopes));
@@ -42,7 +42,7 @@ describe("the flown block of every stage", () => {
     const more = round.track.rows + 2 - last.stopRow;
     last.stopRow += more;
     last.inside = [...last.inside, ...Array(more).fill(1)];
-    const windows = parseTrainingWindowSample(c);
+    const windows = parseTrainingWindowSample(c, "C");
     expect(windows.ok).toBe(false);
     if (!windows.ok) expect(windows.problem).toContain("past the");
   });

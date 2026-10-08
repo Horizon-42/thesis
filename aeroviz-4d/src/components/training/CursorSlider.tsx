@@ -81,6 +81,11 @@ export default function CursorSlider({ marks }: { marks: TrainingSliderMark[] })
               vectorEffect="non-scaling-stroke" data-mark={mark.key}>
               <title>{mark.title}</title>
             </line>
+          ) : mark.kind === "band" ? (
+            <rect key={mark.key} x={x(mark.fromS)} width={Math.max(0, x(mark.toS) - x(mark.fromS))} y={4} height={6}
+              fill={mark.colour} fillOpacity={0.45} data-mark={mark.key}>
+              <title>{mark.title}</title>
+            </rect>
           ) : (
             <polyline key={mark.key} points={mark.points.map(([atS, value]) => `${x(atS)},${11 - value * 10}`).join(" ")} fill="none"
               stroke={mark.colour} strokeWidth={1} vectorEffect="non-scaling-stroke" data-mark={mark.key}>

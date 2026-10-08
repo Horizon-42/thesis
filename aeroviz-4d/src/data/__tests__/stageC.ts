@@ -35,13 +35,13 @@ export function stageCSampleFileFromRound(): Record<string, any> {
 
 /** `stageCSample` with its campaign starting from another campaign's round (`stageCSampleFileFromRound`). */
 export function stageCSampleFromRound(): TrainingWindowSample {
-  const parsed = parseTrainingWindowSample(stageCSampleFileFromRound());
+  const parsed = parseTrainingWindowSample(stageCSampleFileFromRound(), "C");
   if (!parsed.ok) throw new Error(parsed.problem);
   return parsed.value;
 }
 
 export function stageCSample(): TrainingWindowSample {
-  const parsed = parseTrainingWindowSample(stageCSampleFile());
+  const parsed = parseTrainingWindowSample(stageCSampleFile(), "C");
   if (!parsed.ok) throw new Error(parsed.problem);
   return parsed.value;
 }

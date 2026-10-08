@@ -135,10 +135,10 @@ describe("each kind of sentence has its colour (frontend §3 item 11, D159)", ()
     expect(flownSentenceKind(trainingPriorFlightView(b, b.flights[0], 0))).toBe("base");
     expect(flownSentenceKind(trainingPriorFlightView(b, b.flights[0], "closedLoop"))).toBe("closedLoop");
     expect(flownSentenceKind(trainingWindowFlightView(c, c.windows[0], c.windows[0].commanded[0], "start"))).toBe("base");
-    expect(roundKind(3, null)).toBe("postTrained");
+    expect(roundKind(3, null, "C")).toBe("postTrained");
     // a campaign that starts from another campaign's round (D162): its start is a post-trained model
     const d = stageCSampleFromRound();
-    expect(roundKind("start", d.model.start)).toBe("postTrained");
+    expect(roundKind("start", d.model.start, "C")).toBe("postTrained");
     expect(flownSentenceKind(trainingWindowFlightView(d, d.windows[0], d.windows[0].commanded[0], "start"))).toBe("postTrained");
     expect(TRAINING_SENTENCE_COLOR).toEqual({
       observed: "#e2e8f0", closedLoop: "#14b8a6", base: "#d946ef", postTrained: "#a3e635", multi: "#b82e7a" });

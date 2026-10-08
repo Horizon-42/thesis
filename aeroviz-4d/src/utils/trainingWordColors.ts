@@ -58,6 +58,10 @@ export const TRAINING_ENVELOPE_ALPHA = {
   tube: 0.28, selected: 0.45,
 } as const;
 
+/** A window's recorded traffic, and a commanded aircraft from the row it is silent on (stage D, D144: it flies on its
+ *  words in force, the model no longer speaking to it) — slate (frontend §5.4). */
+export const TRAINING_TRAFFIC_COLOR = "#94a3b8";
+
 /** Every candidate runway (the runway word's choices) — and the one the flight lands on. */
 export const TRAINING_CANDIDATE_COLOR = "#94a3b8";
 export const TRAINING_DESIGNATED_COLOR = TRAINING_COLUMN_COLOR.runway;

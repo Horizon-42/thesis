@@ -1,4 +1,4 @@
-"""`GET /training/results?stage=<A|B|C>&airport=<ICAO>&set=<id>` (outline §6.2 items 3, 4; D134): the results of the
+"""`GET /training/results?stage=<A|B|C|D>&airport=<ICAO>&set=<id>` (outline §6.2 items 3, 4; D134): the results of the
 experiment that made a Training set, for its details page.
 
 The set is found in its stage's index of the airport (`TrainingFiles.listed_set`); only the files its ``source`` and
@@ -13,7 +13,7 @@ exported from the base's claimed, written validation readout (`source.validation
 the val counts of a run's identity (prior D120: no identity is read). Stage C's validation readout: not read.
 
 Sections — A: ``labelling``, ``closedLoop``; B: ``freeGeneration``, ``training``, ``validation``, ``speed``,
-``choice``; C: ``rounds``, ``speed``, ``checks``. An airport that is no airport code is refused (400), a set of another
+``choice``; C and D: ``rounds``, ``speed``, ``checks`` (D's rounds by its readout's ``all`` cells, with its losses by pair). An airport that is no airport code is refused (400), a set of another
 format answered by name (409). Each is ``{"ok": true, ...}`` or ``{"ok": false, "problem": "..."}``.
 """
 
@@ -33,7 +33,7 @@ from ts_transformer.repo_layout import REPO_ROOT
 #: Where every file a section reads must lie.
 OUTPUTS = REPO_ROOT / "4dTrajectory" / "outputs"
 #: Each stage's Training files (its index and sets).
-STAGES = {"A": stage_a_files.FILES, "B": prior_files.FILES, "C": post_files.FILES}
+STAGES = {"A": stage_a_files.FILES, "B": prior_files.FILES, "C": post_files.FILES, "D": post_files.MULTI_FILES}
 #: Stage A's labelling and closed loop: these splits only (never val, vocabulary D85).
 STAGE_A_SPLITS = ("train", "select")
 #: The variants whose scores a variant choice holds: MIRROR of `experiments/prior_select.py` `choose_variant`, which
@@ -64,7 +64,7 @@ class TrainingResults:
         self.airports_root, self.outputs = Path(airports_root), Path(outputs)
 
     def answer(self, stage: str, airport: str, set_id: str) -> tuple[int, dict[str, Any]]:
-        """400 for a stage that is none of A, B, C; 404 for a set the stage's index of the airport does not list (or no
+        """400 for a stage that is none of A, B, C, D; 404 for a set the stage's index of the airport does not list (or no
         index); else 200 with each section's fields or reason, and the one line of provenance."""
         if stage not in STAGES:
             return 400, {"ok": False, "error": f"stage {stage!r} is none of {sorted(STAGES)}"}
@@ -94,7 +94,8 @@ class TrainingResults:
         else:
             model = entry["model"]
             provenance = model["campaign"]
-            sections = {"rounds": self.section(lambda: self.rounds(model["campaign"])),
+            read = self.rounds if stage == "C" else self.multi_rounds
+            sections = {"rounds": self.section(lambda: read(model["campaign"])),
                         "speed": self.section(lambda: self.speed(source)),
                         "checks": self.section(lambda: self.checks(model["campaign"]))}
         return 200, {"ok": True, "stage": stage, "airport": airport, "set": set_id, "provenance": provenance,
@@ -263,6 +264,34 @@ class TrainingResults:
                     "why": "the source campaign read other select windows (its select seed or windows per airport differ)"}
         return {**named, "selection": self.selection(self.read(f"{start['campaign']}/round_{start['round']}/round.json")),
                 "why": None}
+
+    # ---- stage D
+    def multi_rounds(self, campaign: str) -> dict[str, Any]:
+        """Stage D's rounds (frontend §5.6): what each spoke (its windows, the commanded aircraft's reward sum and
+        outcomes) and its readout by airport — the airport's ``all`` span and ``all`` kind: its windows and commanded
+        aircraft, their reward sum, outcomes, go-arounds and silent ones, and the windows with a loss of each pair
+        (`multi.separation.PAIRS`, once a pair a window). The start (stage C's round, D164) is read on stage C's windows,
+        never stage D's: no readout of it, and why."""
+        record = self.read(f"{campaign}/campaign.json")
+        out = []
+        while self.path(f"{campaign}/round_{len(out)}/round.json").is_file():
+            made = self.read(f"{campaign}/round_{len(out)}/round.json")
+            out.append({"round": made["round"],
+                        "speaking": {"windows": made["speaking"]["windows"], "rewardSum": made["speaking"]["reward_sum"],
+                                     "outcomes": made["speaking"]["outcomes"]},
+                        "selection": {code: self.multi_cell(spans["all"]["all"])
+                                      for code, spans in made["selection_readout"].items()}})
+        start = record["inputs"]["settings"]["start"]
+        return {"started": record["started_utc"], "rounds": out,
+                "start": {"selection": None, "why": f"the start, round {start['round']} of stage C's {start['campaign']}, "
+                                                    f"was read on stage C's windows, not stage D's"}}
+
+    @staticmethod
+    def multi_cell(cell: Mapping[str, Any]) -> dict[str, Any]:
+        """A cell of stage D's readout as the route answers it."""
+        return {"windows": cell["windows"], "aircraft": cell["aircraft"], "rewardSum": cell["reward_sum"],
+                "outcomes": cell["outcomes"], "goArounds": cell["go_arounds"], "silent": cell["silent"],
+                "lossWindows": cell["loss_windows"]}
 
     def checks(self, campaign: str) -> dict[str, Any]:
         """The labeller's and the executor's checks at the campaign's start."""

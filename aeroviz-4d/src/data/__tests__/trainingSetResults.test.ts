@@ -41,6 +41,19 @@ describe("a set's results", () => {
     if (!parsed.ok) expect(parsed.problem).toContain("start");
   });
 
+  it("reads stage D's rounds by their airports' all cells, and its start's why — a start with a readout refused", () => {
+    const d = parseTrainingSetResults(true, resultsAnswer("D"), "fixture-windows-two");
+    if (!d.ok || d.value.stage !== "D" || !d.value.rounds.ok) throw new Error("stage D's answer does not parse");
+    const written = resultsAnswer("D").sections.rounds;
+    expect(d.value.rounds.value.rounds[0].selection).toEqual(written.rounds[0].selection);
+    expect(d.value.rounds.value.start).toEqual({ selection: null, why: written.start.why });
+    const read = resultsAnswer("D");
+    read.sections.rounds.start = { selection: resultsAnswer("C").sections.rounds.start.selection, why: null };
+    const parsed = parseTrainingSetResults(true, read, "fixture-windows-two");
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.problem).toContain("stage C's windows");
+  });
+
   it("names a refused answer, and an answer of another shape", () => {
     const refused = parseTrainingSetResults(false, { ok: false, error: "lists no set x" }, "x");
     expect(refused).toEqual({ ok: false, problem: "No results for x: lists no set x" });

@@ -1,9 +1,9 @@
 """``POST /autopilot/window-segment``: a word's segment of a commanded aircraft's sentence in a window of a Training set
-of stage C (post-training §8 C11), flown live by the same single-flight executor as stage A's
+of stage C or D (post-training §8 C11, frontend §5.5), flown live by the same single-flight executor as stage A's
 (`backend.AutopilotSegmentBackend`, whose request lock, page numbering, executor spec and flown-set caches this shares).
 
-WHICH SENTENCE. The request names a window set (``airport``, ``setId``: `post.training_files.FILES.listed_set`, the airport's
-``training/index_post_v3.json``), a window of it (``window``: its place in the set's ``windows``), one of the window's
+WHICH SENTENCE. The request names a window set (``stage`` C or D, ``airport``, ``setId``: `STAGE_FILES`' ``listed_set``,
+the airport's ``training/index_post_v3.json`` or ``training/index_multi_v1.json``), a window of it (``window``: its place in the set's ``windows``), one of the window's
 commanded aircraft (``aircraft``: its ``datasetId``; the window format of stages C and D holds a list of them, frontend
 D156 — stage C's one) and ``round``: a round of the set's ``model.rounds`` (``"start"`` or a round's number). The
 commanded flight is the set's flight of that ``datasetId``; the sentence's Δ is the set's ``model.rowIntervalS``. The
@@ -52,8 +52,11 @@ from aeroviz_backend.autopilot_segment.prior import apart_from_exported, on_word
 #: MIRROR of `aeroviz-4d/src/data/trainingWindowAutopilot.ts` (`TRAINING_WINDOW_AUTOPILOT_SCHEMA`); the reader refuses
 #: anything else by name. A name changes with the payload's shape, on both sides, in one change. v1 (C11, 2026-10-05):
 #: stage A's segment answer with the window and the round whose sentence it flew. v2 (frontend D156, 2026-10-07): the
-#: request names the commanded aircraft (``aircraft``), the answer gives it back with the window's end in that round.
-SCHEMA = "aeroviz-autopilot-window-segment-v2"
+#: request names the commanded aircraft (``aircraft``), the answer gives it back with the window's end in that round. v3
+#: (frontend F3, 2026-10-08): the request names the stage whose index lists the set (``stage``, C or D).
+SCHEMA = "aeroviz-autopilot-window-segment-v3"
+#: Each stage's window sets (frontend §5.7: one format, the stage the index file's).
+STAGE_FILES = {"C": post_files.FILES, "D": post_files.MULTI_FILES}
 #: The round of a set's ``model.rounds`` that names the model at the start of the campaign (`post_training_export.START`).
 START = "start"
 
@@ -106,20 +109,22 @@ def is_moved(move: dict[str, float]) -> bool:
 
 
 class WindowSegments:
-    """``fly(payload)`` for ``POST /autopilot/window-segment``: ``{clientId, seq, airport, setId, window, aircraft,
+    """``fly(payload)`` for ``POST /autopilot/window-segment``: ``{clientId, seq, stage, airport, setId, window, aircraft,
     round, column, row}``, on ``backend``'s caches, lock and page numbering."""
 
     def __init__(self, backend: Any) -> None:
         self.backend = backend
 
-    def listed(self, airport: str, set_id: str) -> dict[str, Any]:
-        """The window set's sample (`post.training_files.FILES.listed_set`)."""
+    def listed(self, stage: str, airport: str, set_id: str) -> dict[str, Any]:
+        """The window set's sample, listed in ``stage``'s index (`STAGE_FILES`)."""
         from aeroviz_backend.autopilot_segment.backend import AIRPORT_CODE
 
+        if stage not in STAGE_FILES:
+            raise RequestRefused(f"stage {stage!r} is none of {sorted(STAGE_FILES)}")
         if not AIRPORT_CODE.fullmatch(airport):
             raise RequestRefused(f"airport {airport!r} is not an airport code")
         try:
-            return post_files.FILES.listed_set(self.backend.airports_root / airport / "training", airport, set_id)[1]
+            return STAGE_FILES[stage].listed_set(self.backend.airports_root / airport / "training", airport, set_id)[1]
         except training_files.NotListed as error:
             raise NotListed(str(error)) from None
 
@@ -128,17 +133,19 @@ class WindowSegments:
         its own lock (stage A's `set_flown`), never under the request lock; a set it cannot open is skipped with its
         reason."""
         started, opened_sets = time.perf_counter(), 0
-        for index in sorted(self.backend.airports_root.glob(f"*/training/{post_files.INDEX_FILE}")):
+        indexes = [(stage, index) for stage, files in STAGE_FILES.items()
+                   for index in sorted(self.backend.airports_root.glob(f"*/training/{files.index_file}"))]
+        for stage, index in indexes:
             airport = index.parent.parent.name
             try:
-                sets = post_files.FILES.index_sets(json.loads(index.read_text(encoding="utf-8")), index, airport)
+                sets = STAGE_FILES[stage].index_sets(json.loads(index.read_text(encoding="utf-8")), index, airport)
             except Exception as error:       # noqa: BLE001 — a prefetch: logged; a request gets it whole
                 log(f"window warm-up: {airport} skipped — {index}: {type(error).__name__}: {error}")
                 continue
             for entry in sets:
                 began = time.perf_counter()
                 try:
-                    sample = self.listed(airport, entry["id"])
+                    sample = self.listed(stage, airport, entry["id"])
                     instructions, _, params, _, words = self.backend.executor_for(sample)
                     self.backend.set_flown(sample, sample["cohort"]["split"], float(sample["model"]["rowIntervalS"]),
                                            instructions, params, words)
@@ -157,6 +164,7 @@ class WindowSegments:
         backend = self.backend
         client = str(_field(payload, "clientId"))
         seq = _whole(_field(payload, "seq"), "seq")
+        stage = str(_field(payload, "stage"))
         airport = str(_field(payload, "airport"))
         set_id = str(_field(payload, "setId"))
         place = _whole(_field(payload, "window"), "window")
@@ -175,7 +183,7 @@ class WindowSegments:
             if superseded():
                 raise Superseded("a newer request from this page came in while this one waited")
             started = time.perf_counter()
-            sample = self.listed(airport, set_id)
+            sample = self.listed(stage, airport, set_id)
             interval = float(sample["model"]["rowIntervalS"])
             if place >= len(sample["windows"]):
                 raise NotListed(f"Training set {set_id} at {airport} has {len(sample['windows'])} windows, no window "

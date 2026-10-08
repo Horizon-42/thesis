@@ -64,8 +64,15 @@ import {
  *  one format for stages C and D (the stage is the index file's). A name changes with its file's shape, on both sides, in
  *  the same change. */
 export const TRAINING_WINDOW_INDEX_SCHEMA = "aeroviz-training-window-index-v3";
-/** MIRROR of `training_files.INDEX_FILE`: stage C's index. */
-export const TRAINING_WINDOW_INDEX_FILE = "index_post_v3.json";
+/** The stages whose sets are windows (frontend §5.7): one format, the stage the index FILE's. */
+export const TRAINING_WINDOW_STAGES = ["C", "D"] as const;
+export type TrainingWindowStage = (typeof TRAINING_WINDOW_STAGES)[number];
+/** Each stage's index: MIRROR of `post/training_files.INDEX_FILE` (stage C's) and of frontend §5.7's name of stage D's
+ *  (`index_multi_v1.json`, its export's module, F4). */
+export const TRAINING_WINDOW_INDEX_FILES: Record<TrainingWindowStage, string> = {
+  C: "index_post_v3.json",
+  D: "index_multi_v1.json",
+};
 /** MIRROR of `training_files.SAMPLE_SCHEMA` (v4: the window format of stages C and D, frontend D156). */
 export const TRAINING_WINDOW_SAMPLE_SCHEMA = "aeroviz-training-window-sample-v4";
 /** MIRROR of `training_files.SET_KIND`. */
@@ -252,6 +259,9 @@ export interface TrainingWindow {
 }
 
 export interface TrainingWindowSample {
+  /** The stage whose index lists the set (C or D): what the view adds for several commanded aircraft, and the colour of
+   *  a round's sentences (§3 item 11). */
+  stage: TrainingWindowStage;
   setId: string;
   airport: string;
   executor: { cycleS: number };
@@ -512,7 +522,7 @@ function parseWindow(
 
 /** Parse a set's sample. A schema other than `TRAINING_WINDOW_SAMPLE_SCHEMA` is refused whole, naming the one found and
  *  the one expected. */
-export function parseTrainingWindowSample(raw: unknown): Parsed<TrainingWindowSample> {
+export function parseTrainingWindowSample(raw: unknown, stage: TrainingWindowStage): Parsed<TrainingWindowSample> {
   return attempt(() => {
     const sample = Reader.of(raw, "sample");
     sample.oneOf("schema", [TRAINING_WINDOW_SAMPLE_SCHEMA]);
@@ -534,7 +544,7 @@ export function parseTrainingWindowSample(raw: unknown): Parsed<TrainingWindowSa
     const windows = sample.children("windows").map((window, index) => parseWindow(window, index, heads, model, candidates, vocabulary, cycleS));
     if (windows.length !== cohort.windows) sample.fail(`cohort.windows is ${cohort.windows}, but the set holds ${windows.length}`);
     return {
-      setId: sample.string("setId"), airport: sample.string("airport"), executor: { cycleS }, formats: parseFormats(sample),
+      stage, setId: sample.string("setId"), airport: sample.string("airport"), executor: { cycleS }, formats: parseFormats(sample),
       vocabulary, airportFrame: { code: frame.string("code"), lat: frame.number("lat"), lon: frame.number("lon"), elevationM: frame.number("elevationM") },
       candidates, model, cohort, source: parseSource(sample.child("source")), flights, windows,
     };
@@ -547,22 +557,24 @@ export function trainingWindowDirectory(airportCode: string): string {
   return `data/airports/${airportCode}/training`;
 }
 
-export function trainingWindowIndexPath(airportCode: string): string {
-  return `${trainingWindowDirectory(airportCode)}/${TRAINING_WINDOW_INDEX_FILE}`;
+export function trainingWindowIndexPath(airportCode: string, stage: TrainingWindowStage): string {
+  return `${trainingWindowDirectory(airportCode)}/${TRAINING_WINDOW_INDEX_FILES[stage]}`;
 }
 
-/** The airport's index, refused unless it is the one asked for. */
-export async function fetchTrainingWindowIndex(airportCode: string): Promise<Parsed<TrainingWindowIndex>> {
-  const parsed = parseTrainingWindowIndex(await fetchJson<unknown>(trainingWindowIndexPath(airportCode)));
+/** The airport's index of ``stage``'s window sets, refused unless it is the one asked for. */
+export async function fetchTrainingWindowIndex(airportCode: string, stage: TrainingWindowStage): Promise<Parsed<TrainingWindowIndex>> {
+  const path = trainingWindowIndexPath(airportCode, stage);
+  const parsed = parseTrainingWindowIndex(await fetchJson<unknown>(path));
   if (parsed.ok && parsed.value.airport !== airportCode) {
-    return { ok: false, problem: `${trainingWindowIndexPath(airportCode)} is ${parsed.value.airport}'s index, not ${airportCode}'s` };
+    return { ok: false, problem: `${path} is ${parsed.value.airport}'s index, not ${airportCode}'s` };
   }
   return parsed;
 }
 
-/** A set's sample, refused unless it is the set and airport asked for. */
-export async function fetchTrainingWindowSample(airportCode: string, file: string, setId: string): Promise<Parsed<TrainingWindowSample>> {
-  const parsed = parseTrainingWindowSample(await fetchJson<unknown>(`${trainingWindowDirectory(airportCode)}/${file}`));
+/** A set's sample of ``stage``, refused unless it is the set and airport asked for. */
+export async function fetchTrainingWindowSample(airportCode: string, file: string, setId: string, stage: TrainingWindowStage
+): Promise<Parsed<TrainingWindowSample>> {
+  const parsed = parseTrainingWindowSample(await fetchJson<unknown>(`${trainingWindowDirectory(airportCode)}/${file}`), stage);
   if (parsed.ok && (parsed.value.airport !== airportCode || parsed.value.setId !== setId)) {
     return { ok: false, problem: `${file} holds set ${parsed.value.setId} of ${parsed.value.airport}, not ${setId} of ${airportCode}` };
   }
@@ -590,6 +602,59 @@ export function startName(start: TrainingWindowStart | null): string {
 /** A round as the view's lines and titles name it; the start by what it is (`startName`). */
 export function roundLabel(round: TrainingWindowRound, start: TrainingWindowStart | null): string {
   return round === TRAINING_WINDOW_START ? `start (${startName(start)})` : `round ${round}`;
+}
+
+/** Where a commanded aircraft is silent from (D144), on its flight clock: the start of its sentence's row
+ *  ``silentFromRow`` (rows of Δ ``rowIntervalS`` from its first predicted step); null when it is not silent. */
+export function silentFromS(aircraft: TrainingWindowAircraft, sentence: TrainingWindowSentence, rowIntervalS: number): number | null {
+  return sentence.silentFromRow === null ? null : aircraft.firstStepS + sentence.silentFromRow * rowIntervalS;
+}
+
+/** The window's reward W of a round (multi-aircraft control D141): the sum of its commanded aircraft's rewards. */
+export function windowReward(window: TrainingWindow, place: number): number {
+  return window.commanded.reduce((sum, aircraft) => sum + aircraft.rounds[place].reward, 0);
+}
+
+/** The most recorded aircraft in the air at one time over the window (its traffic's tracks, by their first and last row). */
+export function mostTrafficAtOnce(window: TrainingWindow): number {
+  const edges = window.traffic.flatMap((aircraft) => [[aircraft.tS[0], 1], [aircraft.tS[aircraft.tS.length - 1], -1]] as Array<[number, number]>);
+  edges.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
+  let now = 0;
+  let most = 0;
+  for (const [, step] of edges) {
+    now += step;
+    most = Math.max(most, now);
+  }
+  return most;
+}
+
+/** Where aircraft ``key`` of the window is at window time ``windowS`` in round ``place``: a commanded aircraft from the
+ *  row it joins — on its observed rows before its first predicted step (window B's: as its start moved them, which end
+ *  one 2 s row before that step: null between), then on its round's flown track (its flight clock); another on its
+ *  record; null outside its track. */
+export function windowAircraftAt(window: TrainingWindow, place: number, key: string, windowS: number): [number, number, number] | null {
+  const commanded = window.commanded.find((aircraft) => aircraft.datasetId === key);
+  if (commanded !== undefined) {
+    if (windowS < commanded.joinS) return null;
+    const t = onAircraftClock(commanded, windowS);
+    if (t >= commanded.firstStepS) return trackAt(commanded.rounds[place].flown, t);
+    return trackAt(commanded.movedStart ?? commanded.head.observed, t);
+  }
+  const traffic = window.traffic.find((aircraft) => aircraft.key === key);
+  return traffic === undefined ? null : trackAt(traffic, windowS);
+}
+
+/** Where a track is at time ``t`` of its own clock (on the straight line between the two rows around it — the only
+ *  number computed here, between two of the exporter's points); null outside it. */
+export function trackAt(track: { tS: number[]; lon: number[]; lat: number[]; altitudeHaeM: number[] }, t: number): [number, number, number] | null {
+  const times = track.tS;
+  if (times.length === 0 || t < times[0] || t > times[times.length - 1]) return null;
+  const hi = times.findIndex((value) => value >= t);
+  if (times[hi] === t) return [track.lon[hi], track.lat[hi], track.altitudeHaeM[hi]];
+  const lo = hi - 1;
+  const f = (t - times[lo]) / (times[hi] - times[lo]);
+  const mix = (values: number[]) => values[lo] + f * (values[hi] - values[lo]);
+  return [mix(track.lon), mix(track.lat), mix(track.altitudeHaeM)];
 }
 
 /** A window time (s from its row 0) on ``aircraft``'s flight clock. */

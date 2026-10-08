@@ -14,7 +14,7 @@ only stage C's constants (`FILES`).
 
 **One window format for stages C and D (frontend D156, §5.7).** A window holds a list of commanded aircraft — stage C's
 one, stage D's several — and the index format is one for both stages: the stage is the index FILE's (stage C's
-``index_post_v3.json``; stage D's ``index_multi_v1.json``, its own module).
+``index_post_v3.json``, `FILES`; stage D's ``index_multi_v1.json``, `MULTI_FILES`).
 """
 
 from __future__ import annotations
@@ -40,5 +40,11 @@ SAMPLE_SCHEMA = "aeroviz-training-window-sample-v4"
 SAMPLE_FILE = "sample.json"
 SET_KIND = "training-windows"
 
+#: Stage D's index (frontend §5.7): the same format as stage C's, the stage the file's.
+MULTI_INDEX_FILE = "index_multi_v1.json"
+
 #: Stage C's Training files.
 FILES = TrainingFiles(index_schema=INDEX_SCHEMA, index_file=INDEX_FILE, sample_schema=SAMPLE_SCHEMA, set_kind=SET_KIND)
+#: Stage D's Training files: stage C's format under stage D's index.
+MULTI_FILES = TrainingFiles(index_schema=INDEX_SCHEMA, index_file=MULTI_INDEX_FILE, sample_schema=SAMPLE_SCHEMA,
+                            set_kind=SET_KIND)

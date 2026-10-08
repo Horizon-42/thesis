@@ -53,7 +53,7 @@ import useMeasuredWidth from "../hooks/useMeasuredWidth";
 import { chooseTrainingTab, tabForKey, useTrainingTabs } from "../data/trainingTabs";
 import { useTrainingSetIntent } from "../data/trainingSetIntent";
 import { trainingPriorOriginOf } from "../data/trainingPriorSample";
-import { lossesOf, otherOf, trainingWindowOriginOf } from "../data/trainingWindowSample";
+import { lossesOf, otherOf, trainingWindowOriginOf, windowReward } from "../data/trainingWindowSample";
 import { flownSentenceKind } from "../data/trainingSentenceKind";
 import { EXPERIMENT_SECTION, requestTrainingDetails } from "./training/PanelParts";
 import {
@@ -66,6 +66,7 @@ import {
   TRAINING_OUTSIDE_COLOR,
   TRAINING_RAW_COLOR,
   TRAINING_SENTENCE_COLOR,
+  TRAINING_TRAFFIC_COLOR,
   TRAINING_WORD_COLOR,
   trainingOutcomeColour,
 } from "../utils/trainingWordColors";
@@ -266,8 +267,10 @@ export default function TrainingSentenceBar() {
   // THE KIND OF THE SENTENCE ON SCREEN — its chips and notes follow it (outline §6.2 item 2)
   const priorOrigin = trainingPriorOriginOf(flight);
   const windowOrigin = trainingWindowOriginOf(flight);
-  // a round's loss of separation that the commanded aircraft on screen is in (stage C's: the one that ended its window)
-  const windowLoss = windowOrigin === undefined ? null : lossesOf(windowOrigin.end, windowOrigin.aircraft.datasetId)[0] ?? null;
+  // a round's loss of separation that the commanded aircraft on screen answers for (stage C's: the one that ended its
+  // window; stage D's: the one it went silent at — it may be in others it does not answer for)
+  const windowLoss = windowOrigin === undefined ? null
+    : lossesOf(windowOrigin.end, windowOrigin.aircraft.datasetId).find((loss) => loss.answering.includes(windowOrigin.aircraft.datasetId)) ?? null;
   const kind: "labelled" | "closed" | "sample" | "round" = intervalS === null ? "labelled"
     : priorOrigin?.sentence ? "sample" : windowOrigin !== undefined ? "round" : "closed";
   const stepS = vocabulary.stepS;
@@ -343,6 +346,11 @@ export default function TrainingSentenceBar() {
           ))}
         </span>
         <strong title={flightFacts}>{flight.callsign}</strong>
+        {windowOrigin !== undefined && windowOrigin.window.commanded.length > 1 ? (
+          <span className="training-chip" title={`commanded aircraft ${windowOrigin.aircraft.place + 1} of the window's ${windowOrigin.window.commanded.length}, in the order they join it (the strip and [ ] choose)`}>
+            {windowOrigin.aircraft.place + 1} of {windowOrigin.window.commanded.length}
+          </span>
+        ) : null}
         <span className="training-chip">runway {flight.runway}</span>
         {replay !== null ? (
           <span className="training-chip" style={{ color: trainingOutcomeColour(replay.outcome), borderColor: "currentColor" }}
@@ -363,13 +371,27 @@ export default function TrainingSentenceBar() {
         ) : null}
         {kind === "round" && windowOrigin !== undefined ? (
           <>
-            <span className="training-chip" title="the round's reward for the commanded aircraft">reward {windowOrigin.sentence.reward.toFixed(2)}</span>
-            <span className="training-chip" title={windowLoss === null ? "no loss of separation ended the round"
-              : `a loss of separation with ${otherOf(windowLoss, windowOrigin.aircraft.datasetId)}: ${windowLoss.distanceM.toFixed(0)} m of ` +
-                `${windowLoss.requiredM.toFixed(0)} m required`}
-              style={windowLoss === null ? undefined : { color: TRAINING_DECISION_FAIL_COLOR, borderColor: "currentColor" }}>
-              {windowLoss === null ? "no loss of separation" : `loss of separation · ${otherOf(windowLoss, windowOrigin.aircraft.datasetId)}`}
-            </span>
+            <span className="training-chip" title="the round's reward r for the commanded aircraft">reward {windowOrigin.sentence.reward.toFixed(2)}</span>
+            {windowOrigin.sentence.silentFromRow !== null ? (
+              <span className="training-chip" style={{ color: TRAINING_TRAFFIC_COLOR, borderColor: "currentColor" }}
+                title={`it answered for a loss of separation${windowLoss === null ? "" : ` with ${otherOf(windowLoss, windowOrigin.aircraft.datasetId)}`}` +
+                  ` and is silent from row ${windowOrigin.sentence.silentFromRow}: the model says it "unchanged" alone, and it flies on its words in force (D144)`}>
+                silent from row {windowOrigin.sentence.silentFromRow}
+              </span>
+            ) : (
+              <span className="training-chip" title={windowLoss === null ? "no loss of separation ended the round"
+                : `a loss of separation with ${otherOf(windowLoss, windowOrigin.aircraft.datasetId)}: ${windowLoss.distanceM.toFixed(0)} m of ` +
+                  `${windowLoss.requiredM.toFixed(0)} m required`}
+                style={windowLoss === null ? undefined : { color: TRAINING_DECISION_FAIL_COLOR, borderColor: "currentColor" }}>
+                {windowLoss !== null ? `loss of separation · ${otherOf(windowLoss, windowOrigin.aircraft.datasetId)}`
+                  : lossesOf(windowOrigin.end, windowOrigin.aircraft.datasetId).length > 0 ? "no loss it answers for" : "no loss of separation"}
+              </span>
+            )}
+            {windowOrigin.window.commanded.length > 1 ? (
+              <span className="training-chip" title="the window's reward W: the sum of its commanded aircraft's rewards r in the round (multi-aircraft control D141), of their count">
+                W {windowReward(windowOrigin.window, windowOrigin.window.rounds.indexOf(windowOrigin.end)).toFixed(2)} of {windowOrigin.window.commanded.length}
+              </span>
+            ) : null}
           </>
         ) : null}
         {kind === "closed" && closed !== null ? (
@@ -607,6 +629,14 @@ export default function TrainingSentenceBar() {
               The sentence a round's model said for the commanded aircraft at Δ = {reading.intervalS} s, flown by the executor among the
               window's other aircraft; no word was added by a reading. The solid line at the right is where the flown flight ended:{" "}
               {replayText(closed.replay)}.
+              {windowOrigin !== undefined && windowOrigin.window.commanded.length > 1 ? (
+                <>
+                  {" "}Each commanded aircraft's reward r is its own outcome's: 0.9ⁿ landed after n go-arounds (1 with none), 0 when it
+                  answered for a loss of separation; then it is silent — the model says it "unchanged" alone and it flies on
+                  its words in force (multi-aircraft control D140, D144). The window's reward W is the sum of its commanded
+                  aircraft's r, not divided by their count (D141).
+                </>
+              ) : null}
             </span>
           ) : closed !== null ? (
             <span>

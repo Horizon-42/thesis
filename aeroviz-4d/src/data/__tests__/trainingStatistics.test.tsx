@@ -11,6 +11,8 @@ import { resultsAnswer, type ResultsAnswer } from "./trainingResults";
 import { stageASample } from "./stageA";
 import { stageBSample } from "./stageB";
 import { stageCSample, stageCSampleFromRound } from "./stageC";
+import { stageDSample } from "./stageD";
+import { startName } from "../trainingWindowSample";
 import StatisticsSection from "../../components/training/StatisticsSection";
 
 function results(name: ResultsAnswer): TrainingSetResults {
@@ -113,6 +115,36 @@ describe("the rows of each stage", () => {
     const apart = windowStatistics(from, other);
     expect(apart.rows[0].readout).toBeNull();
     expect(apart.notes).toEqual(["The start's readout is not shown: the source campaign read other select windows."]);
+  });
+});
+
+describe("stage D's rows (frontend §5.6)", () => {
+  it("a row for each round, a sentence each commanded aircraft; the readout its airport's all cell; losses by pair in notes", () => {
+    const sample = stageDSample();
+    const table = windowStatistics(sample, results("D"));
+    expect(table.windows).toBe(true);
+    const [start] = table.rows;
+    expect([start.label, start.kind]).toEqual([`start (${startName(sample.model.start)})`, sample.model.start === null ? "base" : "postTrained"]);
+    const said = sample.windows.flatMap((window) => window.commanded.map((aircraft) => aircraft.rounds[0]));
+    expect(start.set).toMatchObject({ sentences: said.length, lost: said.filter((s) => s.outcome === "lost_separation").length,
+      rewardSum: said.reduce((sum, s) => sum + s.reward, 0) });
+    expect(start.readout).toBeNull();                                     // stage C's round: read on stage C's windows
+    expect(table.notes[0]).toContain("stage C's windows");
+    // windows with a loss of each kind (the readout's unit): the fixture's one window, its two losses between the same two
+    expect(table.notes[1]).toMatch(/windows with a loss of separation — this set: 1 between commanded aircraft, 0 with a recorded one$/);
+    // a stage D round: stage D's colour, its readout the airport's all cell, the readout's loss windows by pair
+    sample.model.rounds = ["start", 0];
+    for (const window of sample.windows) {
+      for (const aircraft of window.commanded) aircraft.rounds.push({ ...aircraft.rounds[0], round: 0 });
+      window.rounds.push({ ...window.rounds[0], round: 0 });
+    }
+    const two = windowStatistics(sample, results("D"));
+    const cell = resultsAnswer("D").sections.rounds.rounds[0].selection.KXXX;
+    expect([two.rows[1].label, two.rows[1].kind]).toEqual(["r0", "multi"]);
+    expect(two.rows[1].readout).toEqual({ sentences: cell.aircraft, landed: cell.outcomes.landed, goArounds: cell.goArounds,
+      timedOut: 0, lost: cell.outcomes.lost_separation, rewardSum: cell.rewardSum });
+    expect(two.notes[2]).toContain("; the readout: ");
+    for (const pair of ["commanded commanded 1", "commanded answers 0", "records kept 0", "recorded only 2"]) expect(two.notes[2]).toContain(pair);
   });
 });
 

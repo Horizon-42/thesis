@@ -18,12 +18,15 @@ import {
   TRAINING_CORRECTION_COLOR,
   TRAINING_EXECUTOR_COLOR,
   TRAINING_FAILURE_COLOR,
+  TRAINING_TRAFFIC_COLOR,
 } from "../utils/trainingWordColors";
 
-/** A mark on the slider's track: a tick at one time, or a line of values in [0, 1] over times. */
+/** A mark on the slider's track: a tick at one time, a line of values in [0, 1] over times, or a band over a span of
+ *  times (stage D: an aircraft's silence to its end, frontend §6.1). */
 export type TrainingSliderMark =
   | { kind: "tick"; key: string; atS: number; colour: string; title: string }
-  | { kind: "line"; key: string; points: Array<[number, number]>; colour: string; title: string };
+  | { kind: "line"; key: string; points: Array<[number, number]>; colour: string; title: string }
+  | { kind: "band"; key: string; fromS: number; toS: number; colour: string; title: string };
 
 /** The times the slider stops at (see the module's note), ascending. */
 export function sliderStops(reading: TrainingReading, stepS: number): number[] {
@@ -90,5 +93,13 @@ export function lossMark(atS: number, other: string): TrainingSliderMark {
   return {
     kind: "tick", key: `loss-${other}-${atS}`, atS, colour: TRAINING_FAILURE_COLOR,
     title: `a loss of separation with ${other}, ${atS.toFixed(0)} s`,
+  };
+}
+
+/** Stage D: a slate band from the row the aircraft on screen is silent on to its end (frontend §6.1, D144). */
+export function silenceMark(fromS: number, toS: number): TrainingSliderMark {
+  return {
+    kind: "band", key: "silent", fromS, toS, colour: TRAINING_TRAFFIC_COLOR,
+    title: `silent from ${fromS.toFixed(0)} s: it answered for a loss of separation and flies on its words in force`,
   };
 }

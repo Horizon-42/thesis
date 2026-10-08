@@ -20,10 +20,10 @@ import {
   trainingWindowOriginOf,
   TRAINING_WINDOW_INDEX_SCHEMA,
   TRAINING_WINDOW_SAMPLE_SCHEMA,
+  trackAt,
   windowShiftText,
 } from "../trainingWindowSample";
 import { TRAINING_LOST_SEPARATION } from "../trainingSample";
-import { positionAt } from "../../hooks/useTrainingWindowLayer";
 import {
   stageCIndex, stageCSample, stageCSampleFile, stageCSampleFileFromRound, stageCSelection, WINDOW_SET_ID,
 } from "./stageC";
@@ -115,7 +115,7 @@ describe("the sample", () => {
     expect(startName(sample.model.start)).toBe("base");
     expect(roundLabel("start", sample.model.start)).toBe("start (base)");
     const raw = stageCSampleFileFromRound();                           // post_train.start_of's setting (the fixture)
-    const parsed = parseTrainingWindowSample(raw);
+    const parsed = parseTrainingWindowSample(raw, "C");
     if (!parsed.ok) throw new Error(parsed.problem);
     const { start } = parsed.value.model;
     const written = raw.model.settings.start;
@@ -130,7 +130,7 @@ describe("the sample", () => {
     const refused = (change: (settings: Record<string, any>) => void, says: string) => {
       const raw = stageCSampleFileFromRound();
       change(raw.model.settings);
-      const parsed = parseTrainingWindowSample(raw);
+      const parsed = parseTrainingWindowSample(raw, "C");
       expect(parsed.ok).toBe(false);
       if (!parsed.ok) expect(parsed.problem).toContain(says);
     };
@@ -142,7 +142,7 @@ describe("the sample", () => {
   });
 
   it("refuses another schema by name", () => {
-    const parsed = parseTrainingWindowSample({ ...stageCSampleFile(), schema: "aeroviz-training-prior-sample-v2" });
+    const parsed = parseTrainingWindowSample({ ...stageCSampleFile(), schema: "aeroviz-training-prior-sample-v2" }, "C");
     expect(parsed.ok).toBe(false);
     if (!parsed.ok) expect(parsed.problem).toContain(TRAINING_WINDOW_SAMPLE_SCHEMA);
   });
@@ -151,7 +151,7 @@ describe("the sample", () => {
     const refused = (change: (raw: Record<string, any>) => void, says: string) => {
       const raw = stageCSampleFile();
       change(raw);
-      const parsed = parseTrainingWindowSample(raw);
+      const parsed = parseTrainingWindowSample(raw, "C");
       expect(parsed.ok).toBe(false);
       if (!parsed.ok) expect(parsed.problem).toContain(says);
     };
@@ -234,11 +234,11 @@ describe("where an aircraft is at a time", () => {
   const track = { tS: [0, 2, 4], lon: [0, 1, 2], lat: [10, 10, 12], altitudeHaeM: [100, 200, 300] };
 
   it("is on the straight line between the two rows around it, and nowhere outside the track", () => {
-    expect(positionAt(track, 2)).toEqual([1, 10, 200]);
-    expect(positionAt(track, 3)).toEqual([1.5, 11, 250]);
-    expect(positionAt(track, 0)).toEqual([0, 10, 100]);
-    expect(positionAt(track, -1)).toBeNull();
-    expect(positionAt(track, 4.5)).toBeNull();
+    expect(trackAt(track, 2)).toEqual([1, 10, 200]);
+    expect(trackAt(track, 3)).toEqual([1.5, 11, 250]);
+    expect(trackAt(track, 0)).toEqual([0, 10, 100]);
+    expect(trackAt(track, -1)).toBeNull();
+    expect(trackAt(track, 4.5)).toBeNull();
   });
 });
 
