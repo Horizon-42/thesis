@@ -29,3 +29,15 @@ State: 2026-10-08. Items 1–15 were decided (frontend D177) and are removed. F5
    helper both call. A window's identity and the selection's fields as a list names them are spelled in each stage's
    `StageExport` beside `post.window_lists.IDENTITY_FIELDS` / `SELECTION_FIELDS` (pinned by a test): proposed to stage
    C, `identity_of(stage, window)` in `post/window_lists.py`.
+
+## The speed readout (2026-10-08, the user's word)
+
+7. **`model_speed` should time a sample, not every selection window (the user: "sample 一部分就可以").** For stage C
+   it speaks every window of the campaign's selection readout (`post_train.selection_windows`: 1,000 at 200 an airport),
+   one at a time at batch 1 on the CPU and on the GPU — about 75 min a model (P55 round 5's took 75 min). Stage B's
+   already draws `--per-airport` flights (20). Proposed: stage C (and stage D, once timed) takes `--per-airport` too,
+   a seeded draw of the selection windows of each airport, recorded in `speed.json`; the batch-400 settings speak the
+   same drawn windows. `model_speed` is stage B's runner (R63, D136): not fronter's to change. Meanwhile the Training
+   export of C10's round 8 (`loss_windows_c10_20261008`) waits for its speed readout; the readout of all 1,000 windows
+   was stopped at the user's word.
+

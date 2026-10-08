@@ -163,6 +163,31 @@ Full text, with the investigation behind each line: `docs/environment.md` (E1–
   `get(key) or DEFAULT` when a null must read as "unspecified"; and a check comparing two
   optional fields to each other passes when BOTH are missing.
 
+## Code review
+
+Every review of a code change before its commit (the user, 2026-10-05 to 10-08; the severity standard is the two-tier
+outline's D131). Reviews cost time and tokens: keep each one to the change.
+
+- **Who.** The reviewer is never the author: code you wrote goes to the agent `opus-code-reviewer`; code a subagent
+  wrote, you review yourself. No agent reviews documents or reports — check them yourself.
+- **When.** One review for each change, before its commit (a UI request batch is one change), started together with
+  the change's tests. **A small change needs no agent** (the user, 2026-10-08): a merge without conflicts, a change of
+  tests only, one constant or one name, or one place of about 30 changed lines at most — the author reads the diff
+  once, runs the changed files' tests and commits, the message saying "small change, no agent review".
+- **Scope: the diff.** The order gives the commit range (a merge: its conflict resolutions only), what the change must
+  do and what must stay the same. The reviewer reads `git diff` and the functions that hold the changed lines; it
+  opens another file only where the diff changes an interface (a signature, a return, a meaning), and then only that
+  name's call sites (one `grep` for the name). No search of the repository; never ask for the whole module, "every
+  reader elsewhere", "less exercised cases" or mutation depth.
+- **Standard.** S1 — a leak, a split violation, a second val read, a number the user reads moved beyond its
+  tolerance: fix. S2 — a latent leak, a boundary that does not refuse, a decided rule with no test, an unmeasured
+  effect: fix when cheap, else an open item of the design. S3 — a rare corner, a difference within a stated bound,
+  style: one line, no change. A scenario against common sense (code changed during a run, an input no pipeline step
+  makes, a file edited by hand to defeat a rule, someone working against the project) is not a finding.
+- **Rounds.** A second round only when an S1 or S2 was fixed, and on the fixed lines only; never a third.
+- **A stage audit** (`4dTrajectory/ts_transformer/docs/two_tier/review_guide.md`: every channel traced through the
+  seams) is another job, done only on the user's order; a commit's review never takes its depth.
+
 ## Cross-Cutting Invariants
 
 Short index; the full text (with measurements) is in the named file, which loads when you work there.
