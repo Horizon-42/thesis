@@ -230,7 +230,7 @@ class TrainingResults:
     # ---- stage C
     def rounds(self, campaign: str) -> dict[str, Any]:
         """Each round the campaign holds (``round_<n>/round.json``, n from 0 while one exists): what it spoke and its
-        selection readout by airport."""
+        selection readout by airport; and the start's (`start`)."""
         record = self.read(f"{campaign}/campaign.json")
         out = []
         while self.path(f"{campaign}/round_{len(out)}/round.json").is_file():
@@ -238,10 +238,31 @@ class TrainingResults:
             out.append({"round": made["round"],
                         "speaking": {"windows": made["speaking"]["windows"], "rewardSum": made["speaking"]["reward_sum"],
                                      "outcomes": made["speaking"]["outcomes"]},
-                        "selection": {code: {"windows": cell["windows"], "rewardMean": cell["reward_mean"],
-                                             "outcomes": cell["outcomes"]}
-                                      for code, cell in made["selection_readout"].items()}})
-        return {"started": record["started_utc"], "rounds": out}
+                        "selection": self.selection(made)})
+        return {"started": record["started_utc"], "rounds": out, "start": self.start(record["inputs"]["settings"])}
+
+    @staticmethod
+    def selection(made: Mapping[str, Any]) -> dict[str, Any]:
+        """A round's selection readout by airport (its ``round.json``)."""
+        return {code: {"windows": cell["windows"], "rewardMean": cell["reward_mean"], "outcomes": cell["outcomes"]}
+                for code, cell in made["selection_readout"].items()}
+
+    def start(self, settings: Mapping[str, Any]) -> dict[str, Any] | None:
+        """The selection readout of the model a campaign starts from (frontend §4.3): None from the base (it has none);
+        from another campaign's round (post-training D162), that round's own readout — read on the same select windows
+        with the same numbers only when the two campaigns' ``select_seed`` and ``select_per_airport`` are equal — a MIRROR
+        of the condition of the value method's warm-up check (`post_train.close_value_round`, a runner the backend does
+        not import) — else ``selection`` None and ``why``."""
+        start = settings["start"]
+        if start is None:
+            return None
+        named = {"campaign": start["campaign"], "round": start["round"]}
+        source = self.read(f"{start['campaign']}/campaign.json")["inputs"]["settings"]
+        if (source["select_seed"], source["select_per_airport"]) != (settings["select_seed"], settings["select_per_airport"]):
+            return {**named, "selection": None,
+                    "why": "the source campaign read other select windows (its select seed or windows per airport differ)"}
+        return {**named, "selection": self.selection(self.read(f"{start['campaign']}/round_{start['round']}/round.json")),
+                "why": None}
 
     def checks(self, campaign: str) -> dict[str, Any]:
         """The labeller's and the executor's checks at the campaign's start."""

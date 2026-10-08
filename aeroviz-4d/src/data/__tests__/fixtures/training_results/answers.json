@@ -541,6 +541,20 @@
       }
      }
     ],
+    "start": {
+     "campaign": "fixture/outputs/post/source",
+     "round": 1,
+     "selection": {
+      "KXXX": {
+       "outcomes": {
+        "lost_separation": 1
+       },
+       "rewardMean": 0.0,
+       "windows": 1
+      }
+     },
+     "why": null
+    },
     "started": "2026-10-06T00:00:00Z"
    },
    "speed": {

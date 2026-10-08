@@ -96,9 +96,16 @@ export interface TrainingStageBResults {
   choice: TrainingResultSection<{ configuration: TrainingChoiceConfiguration; variant: TrainingChoiceVariant }>;
   speed: TrainingResultSection<TrainingSpeed>;
 }
+/** The selection readout of the round a campaign starts from (post-training D162, frontend §4.3): ``selection`` null
+ *  with ``why`` when that campaign read other select windows. The round is the set's `model.start` (the same record). */
+export interface TrainingStartReadout {
+  selection: TrainingRoundResult["selection"] | null;
+  why: string | null;
+}
 export interface TrainingStageCResults {
   stage: "C";
-  rounds: TrainingResultSection<{ started: string; rounds: TrainingRoundResult[] }>;
+  /** ``start``: null for a campaign from the base (the base has no selection readout). */
+  rounds: TrainingResultSection<{ started: string; rounds: TrainingRoundResult[]; start: TrainingStartReadout | null }>;
   checks: TrainingResultSection<{ checks: Record<string, unknown> }>;
   speed: TrainingResultSection<TrainingSpeed>;
 }
@@ -234,17 +241,32 @@ export function parseTrainingSetResults(ok: boolean, raw: unknown, setId: string
           return {
             round: r.count("round"),
             speaking: { windows: speaking.count("windows"), rewardSum: speaking.number("rewardSum"), outcomes: speaking.record("outcomes", asNumber) },
-            selection: r.record("selection", (value, where) => {
-              const c = Reader.of(value, where);
-              return { windows: c.count("windows"), rewardMean: c.number("rewardMean"), outcomes: c.record("outcomes", asNumber) };
-            }),
+            selection: selectionOf(r),
           };
         }),
+        start: startOf(s.nullableChild("start")),
       })),
       checks: section(sections, "checks", (s) => ({ checks: s.record("checks", (value) => value) })),
       speed: section(sections, "speed", speed),
     };
   });
+}
+
+/** A round's selection readout by airport, as the route answers it. */
+function selectionOf(reader: Reader): TrainingRoundResult["selection"] {
+  return reader.record("selection", (value, where) => {
+    const c = Reader.of(value, where);
+    return { windows: c.count("windows"), rewardMean: c.number("rewardMean"), outcomes: c.record("outcomes", asNumber) };
+  });
+}
+
+/** The start's readout: its selection, or why there is none (exactly one of the two). */
+function startOf(reader: Reader | null): TrainingStartReadout | null {
+  if (reader === null) return null;
+  const why = reader.nullableString("why");
+  const selection = reader.raw("selection") === null ? null : selectionOf(reader);
+  if ((selection === null) === (why === null)) reader.fail("a start readout holds its selection or why it has none, one of the two");
+  return { selection, why };
 }
 
 export async function fetchTrainingSetResults(stage: TrainingStage, airport: string, setId: string,

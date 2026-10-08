@@ -20,6 +20,27 @@ describe("a set's results", () => {
     expect(missing.value.stage === "C" && !missing.value.rounds.ok && missing.value.rounds.problem).toContain("does not exist");
   });
 
+  it("reads stage C's start readout (frontend §4.3): its source round and selection, or why it has none — one of the two", () => {
+    const c = parseTrainingSetResults(true, resultsAnswer("C"), "fixture-windows");
+    if (!c.ok || c.value.stage !== "C" || !c.value.rounds.ok) throw new Error("stage C's answer does not parse");
+    const written = resultsAnswer("C").sections.rounds.start;
+    expect(c.value.rounds.value.start).toEqual({ selection: written.selection, why: null });
+    const shape = (change: (start: Record<string, any>) => void, says: string) => {
+      const raw = resultsAnswer("C");
+      change(raw.sections.rounds.start);
+      const parsed = parseTrainingSetResults(true, raw, "fixture-windows");     // a malformed section refuses the answer
+      expect(parsed.ok).toBe(false);
+      if (!parsed.ok) expect(parsed.problem).toContain(says);
+    };
+    shape((start) => { start.why = "other windows"; }, "one of the two");
+    shape((start) => { start.selection = null; }, "one of the two");
+    const missing = resultsAnswer("C");
+    delete missing.sections.rounds.start;
+    const parsed = parseTrainingSetResults(true, missing, "fixture-windows");
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.problem).toContain("start");
+  });
+
   it("names a refused answer, and an answer of another shape", () => {
     const refused = parseTrainingSetResults(false, { ok: false, error: "lists no set x" }, "x");
     expect(refused).toEqual({ ok: false, problem: "No results for x: lists no set x" });

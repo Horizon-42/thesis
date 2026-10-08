@@ -69,9 +69,15 @@ describe("the rows of each stage", () => {
       timedOut: (cell.outcomes.timeout ?? 0) + 1, lost: null, rewardSum: null });
   });
 
-  it("C: a row for each round, the start the base's; the readout each round's selection at the airport, or why not", () => {
+  it("C: a row for each round; the readout each round's selection at the airport, the start's its source round's, or why not", () => {
+    // a campaign from the base: the start has no selection readout
     const sample = stageCSample();
-    const table = windowStatistics(sample, results("C"));
+    const answer = results("C");
+    if (answer.stage !== "C" || !answer.rounds.ok) throw new Error("not stage C's answer");
+    const fromBase = structuredClone(answer) as typeof answer;
+    if (!fromBase.rounds.ok) throw new Error("not stage C's answer");
+    fromBase.rounds.value.start = null;
+    const table = windowStatistics(sample, fromBase);
     expect(table.windows).toBe(true);
     expect(table.rows.map((row) => [row.label, row.kind])).toEqual([["start (base)", "base"]]);
     const said = sample.windows.map((window) => window.commanded[0].rounds[0]);
@@ -79,24 +85,34 @@ describe("the rows of each stage", () => {
       sentences: said.length, lost: said.filter((s) => s.outcome === "lost_separation").length,
       rewardSum: said.reduce((sum, s) => sum + s.reward, 0),
     });
-    expect(table.rows[0].readout).toBeNull();                                     // the start has no selection readout
+    expect(table.rows[0].readout).toBeNull();                                     // the base has no selection readout
+    expect(table.notes).toEqual([]);
     expect(table.readoutProblem).toBeNull();
     expect(windowStatistics(sample, results("Cmissing")).readoutProblem).toContain("campaign.json");
-    // a post-trained round: its row yellow-green, its readout the round's selection at the set's airport
-    sample.model.rounds = ["start", 0];
-    for (const window of sample.windows) {
+    // a campaign from another campaign's round (the route's fixture): the start's row reads that round's own readout
+    const from = stageCSampleFromRound();
+    from.model.rounds = ["start", 0];
+    for (const window of from.windows) {
       for (const aircraft of window.commanded) aircraft.rounds.push({ ...aircraft.rounds[0], round: 0 });
       window.rounds.push({ ...window.rounds[0], round: 0 });
     }
-    const answer = resultsAnswer("C").sections.rounds.rounds[0];
-    const two = windowStatistics(sample, results("C"));
-    expect(two.rows.map((row) => [row.label, row.kind])).toEqual([["start (base)", "base"], ["r0", "postTrained"]]);
-    expect(two.rows[1].readout).toEqual({ sentences: answer.selection.KXXX.windows, landed: answer.selection.KXXX.outcomes.landed,
-      goArounds: null, timedOut: 0, lost: 0, rewardSum: answer.selection.KXXX.rewardMean * answer.selection.KXXX.windows });
-    // a campaign that starts from another campaign's round (D162): the start named by it, a post-trained row
-    sample.model.start = stageCSampleFromRound().model.start;
-    expect(windowStatistics(sample, results("C")).rows.map((row) => [row.label, row.kind]))
+    const two = windowStatistics(from, answer);
+    expect(two.rows.map((row) => [row.label, row.kind]))
       .toEqual([["start (post_source_fixture r0)", "postTrained"], ["r0", "postTrained"]]);
+    const source = resultsAnswer("C").sections.rounds.start.selection.KXXX;
+    expect(two.rows[0].readout).toEqual({ sentences: source.windows, landed: 0, goArounds: null, timedOut: 0,
+      lost: source.outcomes.lost_separation, rewardSum: source.rewardMean * source.windows });
+    expect(two.notes).toEqual(["The start's readout is post_source_fixture r0's own, read on the same select windows."]);
+    const round = resultsAnswer("C").sections.rounds.rounds[0].selection.KXXX;
+    expect(two.rows[1].readout).toEqual({ sentences: round.windows, landed: round.outcomes.landed,
+      goArounds: null, timedOut: 0, lost: 0, rewardSum: round.rewardMean * round.windows });
+    // a source read on other windows: no start readout, and why
+    const other = structuredClone(answer) as typeof answer;
+    if (!other.rounds.ok || other.rounds.value.start === null) throw new Error("no start in the fixture");
+    other.rounds.value.start = { ...other.rounds.value.start, selection: null, why: "the source campaign read other select windows" };
+    const apart = windowStatistics(from, other);
+    expect(apart.rows[0].readout).toBeNull();
+    expect(apart.notes).toEqual(["The start's readout is not shown: the source campaign read other select windows."]);
   });
 });
 

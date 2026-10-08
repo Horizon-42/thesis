@@ -102,9 +102,19 @@ def world(tmp_path):
     airport_b = listed(roots["B"], "stage_b", prior_files, ["fixture_set", "fixture_val"], prior_entry)
     write(prior / f"val_read_{prior_files.CLAIM_READER}.json", {"out": str(val_readout)})
     write(prior / "val_read_prior_validation.json", {"out": str(validation)})
-    # stage C: a campaign of one round, its checks
+    # stage C: a campaign of one round, its checks, started from round 1 of another campaign (D162) on the same windows
+    source = outputs / "post" / "source"
+    write(source / "campaign.json", {"inputs": {"settings": {"start": None, "select_seed": 1337, "select_per_airport": 200}}})
+    write(source / "round_0" / "round.json", {
+        "round": 0, "selection_readout": {"KXXX": {"windows": 1, "reward_mean": 0.5, "outcomes": {"landed": 1}}}})
+    write(source / "round_1" / "round.json", {
+        "round": 1, "selection_readout": {"KXXX": {"windows": 1, "reward_mean": 0.0, "outcomes": {"lost_separation": 1},
+                                                   "faulty_steps": SEALED}}})
     post = outputs / "post" / "campaign"
-    write(post / "campaign.json", {"started_utc": "2026-10-06T00:00:00Z", "checks": {"labeller": {"flights": 3}}})
+    write(post / "campaign.json", {"started_utc": "2026-10-06T00:00:00Z", "checks": {"labeller": {"flights": 3}},
+                                   "inputs": {"settings": {"start": {"campaign": str(source), "round": 1,
+                                                                     "checkpoint_sha256": SEALED},
+                                                           "select_seed": 1337, "select_per_airport": 200}}})
     write(post / "round_0" / "round.json", {
         "round": 0, "speaking": {"windows": 5, "reward_sum": 4.0, "outcomes": {"landed": 4, "lost_separation": 1}},
         "selection_readout": {"KXXX": {"windows": 1, "reward_mean": 1.0, "outcomes": {"landed": 1}, "faulty_steps": SEALED}}})
@@ -116,7 +126,7 @@ def world(tmp_path):
         "source": {**e["source"], "speed": {**e["source"]["speed"], "readout": str(c_speed)}}})
     return {"results": {stage: TrainingResults(roots[stage], outputs) for stage in "ABC"},
             "airports": dict(zip("ABC", (airport_a, airport_b, airport_c))), "outputs": outputs, "roots": roots,
-            "post": post}
+            "post": post, "source": source}
 
 
 def answered(world, stage, set_id):
@@ -159,6 +169,21 @@ def test_stage_c_answers_its_rounds_and_checks(world):
     assert [r["round"] for r in sections["rounds"]["rounds"]] == [0]
     assert sections["checks"]["checks"] == {"labeller": {"flights": 3}}
     assert sections["speed"]["model"].endswith("campaign round 0")
+    # the start's readout: the source round's own, on the same select windows (frontend §4.3)
+    start = sections["rounds"]["start"]
+    assert start == {"campaign": str(world["source"]), "round": 1, "why": None,
+                     "selection": {"KXXX": {"windows": 1, "rewardMean": 0.0, "outcomes": {"lost_separation": 1}}}}
+
+
+def test_stage_c_answers_no_start_readout_from_the_base_and_none_on_other_windows(world):
+    record = json.loads((world["post"] / "campaign.json").read_text())
+    settings = record["inputs"]["settings"]
+    (world["post"] / "campaign.json").write_text(json.dumps({**record, "inputs": {"settings": {**settings, "start": None}}}))
+    assert answered(world, "C", "fixture-windows")["rounds"]["start"] is None
+    for other in ({"select_seed": 2024}, {"select_per_airport": 100}):
+        (world["post"] / "campaign.json").write_text(json.dumps({**record, "inputs": {"settings": {**settings, **other}}}))
+        start = answered(world, "C", "fixture-windows")["rounds"]["start"]
+        assert start["selection"] is None and "other select windows" in start["why"], other
 
 
 def test_a_file_elsewhere_or_missing_is_answered_by_name(world, tmp_path):
