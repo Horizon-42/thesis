@@ -583,15 +583,19 @@ def test_a_round_of_stage_d_is_refused_unless_its_identity_is_the_campaigns(setu
         multi_train.round_model(context, settings, out, 1)
 
 
-def _profile(tmp_path, settings, inputs, *, gpu=True, workers=True, schema=multi_train.MULTI_PROFILE_SCHEMA):
-    """A profile record of stage D (`multi_profile`'s ``profile.json``) of ``settings`` and ``inputs``."""
+def _profile(tmp_path, settings, inputs, *, gpu=True, workers=True, schema=multi_train.MULTI_PROFILE_SCHEMA,
+             margin=1.0, speak_device=None, campaign_gpu=None):
+    """A profile record of stage D (`multi_profile`'s ``profile.json``) of ``settings`` and ``inputs``: its worker
+    measured on the GPU (``gpu``) or the CPU, its pass on the GPU (``campaign_gpu``, by default as the worker)."""
     gib = 1 << 30
     held = {"reader_model": gib // 4, "series": gib // 2, "round_flights": 100}
     measured = {"host": {"peak": 2 * gib, "now": gib}, "gpu": {"peak": gib, "now": gib // 4} if gpu else None,
                 "held": held}
     record = {"schema": schema, "inputs": {**inputs, "settings": asdict(settings)}}
+    on_gpu = gpu if campaign_gpu is None else campaign_gpu
     if workers:
-        record["workers"] = {"measured": measured, "pass": {"peak": 3 * gib, "now": gib // 2} if gpu else None}
+        record["workers"] = {"measured": measured, "pass": {"peak": 3 * gib, "now": gib // 2} if on_gpu else None,
+                             "speak_device": speak_device or ("cuda" if gpu else "cpu"), "margin": margin}
     directory = tmp_path / "profile"
     directory.mkdir(exist_ok=True)
     (directory / "profile.json").write_text(json.dumps(record))
@@ -609,32 +613,83 @@ def test_the_workers_are_sized_from_the_profile_and_the_memory_free_now(tmp_path
     cuda = torch.device("cuda")
     monkeypatch.setattr(multi_train, "available_memory", lambda device: {"host": 8 * gib, "gpu": 5 * gib})
     profile = _profile(tmp_path, settings, inputs)
-    fit = multi_train.profiled_fit(profile, replace(settings, rounds=9, seed=7), inputs, 3, cuda)
+    fit = multi_train.profiled_fit(profile, replace(settings, rounds=9, seed=7), inputs, 3, cuda, cuda)
     assert fit["gpu_budget"] == (5 * gib - gib // 2) // 3 and fit["speak_workers"] == 3
     with pytest.raises(SystemExit, match=r"do not fit \(O15, from the profile\): host"):
-        multi_train.profiled_fit(profile, settings, inputs, 4, cuda)            # 4 × 2.5 = 10 > 8 GiB
+        multi_train.profiled_fit(profile, settings, inputs, 4, cuda, cuda)      # 4 × 2.5 = 10 > 8 GiB
     monkeypatch.setattr(multi_train, "available_memory", lambda device: {"host": 16 * gib, "gpu": 5 * gib})
     # the workers speak beside what this process holds after a pass (D167's form, subtracted once): 4 × 1.25 = 5 GiB
     # against 5 − 0.5 = 4.5 refused, where the pass alone (3 + 4 × 0.5 = 5 ≤ 5) fits
     with pytest.raises(SystemExit, match=r"profile\): gpu: 4 workers speaking need 5.0 GiB .* 4.5 GiB available"):
-        multi_train.profiled_fit(profile, settings, inputs, 4, cuda)
+        multi_train.profiled_fit(profile, settings, inputs, 4, cuda, cuda)
     monkeypatch.setattr(multi_train, "available_memory", lambda device: {"host": 8 * gib, "gpu": 5 * gib})
     for other, named in ((replace(settings, batch_rows=[32, 48]), "batch_rows"), (replace(settings, spans_s=[300.0, 1200.0]),
                                                                             "spans_s")):
         with pytest.raises(SystemExit, match=f"other {named} than this campaign's"):
-            multi_train.profiled_fit(profile, other, inputs, 2, cuda)
+            multi_train.profiled_fit(profile, other, inputs, 2, cuda, cuda)
     with pytest.raises(SystemExit, match="other prior than"):
-        multi_train.profiled_fit(profile, settings, {**inputs, "prior": str(tmp_path / "another")}, 2, cuda)
-    with pytest.raises(SystemExit, match="other device than"):
-        multi_train.profiled_fit(profile, settings, inputs, 2, torch.device("cpu"))
-    with pytest.raises(SystemExit, match="not ts-multi-profile-v1"):
-        multi_train.profiled_fit(_profile(tmp_path, settings, inputs, schema="ts-post-profile-v3"), settings, inputs, 2,
-                                 cuda)
+        multi_train.profiled_fit(profile, settings, {**inputs, "prior": str(tmp_path / "another")}, 2, cuda, cuda)
+    cpu = torch.device("cpu")
+    with pytest.raises(SystemExit, match="other device, speaking device than"):
+        multi_train.profiled_fit(profile, settings, inputs, 2, cpu, cpu)
+    with pytest.raises(SystemExit, match="other speaking device than"):          # D180: a measure of another device
+        multi_train.profiled_fit(profile, settings, inputs, 2, cuda, cpu)
+    with pytest.raises(SystemExit, match=f"not {multi_train.MULTI_PROFILE_SCHEMA}"):
+        multi_train.profiled_fit(_profile(tmp_path, settings, inputs, schema="ts-multi-profile-v1"), settings, inputs,
+                                 2, cuda, cuda)                       # a profile of the whole round (before D179)
     with pytest.raises(SystemExit, match="no measure of the speaking workers"):
-        multi_train.profiled_fit(_profile(tmp_path, settings, inputs, workers=False), settings, inputs, 2, cuda)
+        multi_train.profiled_fit(_profile(tmp_path, settings, inputs, workers=False), settings, inputs, 2, cuda, cuda)
     monkeypatch.setattr(multi_train, "available_memory", lambda device: {"host": 8 * gib, "gpu": None})
     on_cpu = _profile(tmp_path, settings, inputs, gpu=False)
-    assert multi_train.profiled_fit(on_cpu, settings, inputs, 2, torch.device("cpu"))["gpu_budget"] is None
+    assert multi_train.profiled_fit(on_cpu, settings, inputs, 2, cpu, cpu)["gpu_budget"] is None
+
+
+def test_the_fit_takes_each_measured_peak_times_its_margin(tmp_path, monkeypatch):
+    """D179: the profile's measured peaks (the worker's host and GPU, the pass's) times its recorded margin before the
+    workers are counted; what they hold now as measured. 3 workers on the host: 3 × (2 + 0.5) = 7.5 GiB fit 8; with a
+    margin of 1.3, 3 × (2.6 + 0.5) = 9.3 GiB do not."""
+    gib = 1 << 30
+    settings = _multi_settings(spans_s=[300.0], batch_rows=[64])
+    inputs = {key: str(tmp_path / key) for key in multi_train.PROFILED_INPUTS}
+    cuda = torch.device("cuda")
+    monkeypatch.setattr(multi_train, "available_memory", lambda device: {"host": 8 * gib, "gpu": 8 * gib})
+    plain = multi_train.profiled_fit(_profile(tmp_path, settings, inputs), settings, inputs, 3, cuda, cuda)
+    assert plain["margin"] == 1.0
+    (tmp_path / "margined").mkdir()
+    margined = _profile(tmp_path / "margined", settings, inputs, margin=1.3)   # a directory of its own
+    with pytest.raises(SystemExit, match=r"host: 3 workers speaking need 9\.3 GiB \(one worker's peak 2\.60 GiB"):
+        multi_train.profiled_fit(margined, settings, inputs, 3, cuda, cuda)
+    assert multi_train.profiled_fit(margined, settings, inputs, 2, cuda, cuda)["margin"] == 1.3
+    # the pass's peak carries the margin too: 3 workers on a 5.2 GiB GPU fit at 1.0 (the pass 3 + 3 × 0.5 = 4.5), not at
+    # 1.3 (3.9 + 1.5 = 5.4), while the workers themselves (3 × 1.55 = 4.65 ≤ 4.7) still fit
+    monkeypatch.setattr(multi_train, "available_memory", lambda device: {"host": 16 * gib, "gpu": int(5.2 * gib)})
+    assert multi_train.profiled_fit(_profile(tmp_path, settings, inputs), settings, inputs, 3, cuda, cuda)
+    with pytest.raises(SystemExit, match=r"from the profile\): gpu: the pass beside 3 workers needs 5\.4 GiB"):
+        multi_train.profiled_fit(margined, settings, inputs, 3, cuda, cuda)
+    # and so does the worker's GPU peak: on 4.6 GiB, 3 × (1.3 + 0.25) GiB do not fit beside the pass's 0.5
+    monkeypatch.setattr(multi_train, "available_memory", lambda device: {"host": 16 * gib, "gpu": int(4.6 * gib)})
+    assert multi_train.profiled_fit(_profile(tmp_path, settings, inputs), settings, inputs, 3, cuda, cuda)
+    with pytest.raises(SystemExit, match=r"from the profile\): gpu: 3 workers speaking need 4\.6 GiB"):
+        multi_train.profiled_fit(margined, settings, inputs, 3, cuda, cuda)
+    record = {"host": {"peak": 10, "now": 4}, "gpu": None, "held": {}}
+    assert multi_train.with_margin(record, 1.3) == {"host": {"peak": 13, "now": 4}, "gpu": None, "held": {}}
+    assert multi_train.with_margin({"peak": 10, "now": 4, "groups": 2}, 1.3) == {"peak": 13, "now": 4, "groups": 2}
+    assert multi_train.with_margin(None, 1.3) is None
+
+
+def test_workers_on_the_cpu_beside_a_pass_on_the_gpu_count_the_host_only(tmp_path, monkeypatch):
+    """D180: a worker measured on the CPU (its GPU none) beside the pass on the GPU — the workers counted against the
+    host's memory, none of the GPU but the pass's; no GPU budget for them."""
+    gib = 1 << 30
+    settings = _multi_settings(spans_s=[300.0], batch_rows=[64])
+    inputs = {key: str(tmp_path / key) for key in multi_train.PROFILED_INPUTS}
+    cuda, cpu = torch.device("cuda"), torch.device("cpu")
+    profile = _profile(tmp_path, settings, inputs, gpu=False, campaign_gpu=True)
+    monkeypatch.setattr(multi_train, "available_memory", lambda device: {"host": 32 * gib, "gpu": 4 * gib})
+    fit = multi_train.profiled_fit(profile, settings, inputs, 10, cuda, cpu)      # 10 × 2.5 = 25 ≤ 32 GiB host
+    assert fit["gpu_budget"] is None and fit["speak_device"] == "cpu"
+    with pytest.raises(SystemExit, match="host: 13 workers"):                       # 13 × 2.5 = 32.5 > 32
+        multi_train.profiled_fit(profile, settings, inputs, 13, cuda, cpu)
 
 
 def test_a_workers_gpu_is_capped_at_its_budget_less_its_context(monkeypatch):
@@ -663,6 +718,12 @@ def test_the_runner_takes_a_profile_with_its_speaking_workers_only(tmp_path, cap
         with pytest.raises(SystemExit):
             multi_train.main(argv + extra)
         assert "--profile goes with --speak-workers above 1" in capsys.readouterr().err
+    for extra, message in ((["--speak-device", "cpu"], "it needs --speak-workers 2 or more"),
+                           (["--device", "cpu", "--speak-workers", "2", "--speak-device", "cuda",
+                             "--profile", str(tmp_path / "profile")], "--speak-device cuda needs --device cuda")):
+        with pytest.raises(SystemExit):
+            multi_train.main(argv + extra)
+        assert message in capsys.readouterr().err
 
 
 def test_the_runner_sizes_its_workers_from_the_profile_before_any_process_uses_the_gpu(tmp_path, monkeypatch):
@@ -686,12 +747,13 @@ def test_the_runner_sizes_its_workers_from_the_profile_before_any_process_uses_t
     monkeypatch.setattr(multi_train, "open_context", lambda *a, **k: (calls.append(("context", a[4].type)),
                                                                       FakeContext(a[4], base))[1])
     monkeypatch.setattr(multi_train, "stage_d", lambda: SimpleNamespace(start=lambda c, s: calls.append(("start",))))
-    monkeypatch.setattr(multi_train, "profiled_fit", lambda profile, settings, inputs, workers, device: (
-        calls.append(("fit", profile, workers, inputs["settings"]["batch_rows"])), {"gpu_budget": 123})[1])
+    monkeypatch.setattr(multi_train, "profiled_fit", lambda profile, settings, inputs, workers, device, speak_device: (
+        calls.append(("fit", profile, workers, inputs["settings"]["batch_rows"], speak_device.type)),
+        {"gpu_budget": 123})[1])
 
     class FakeSpeakers:
         def __init__(self, context, settings, workers, device, *, stage, gpu_budget):
-            calls.append(("speakers", context.device.type, workers, gpu_budget))
+            calls.append(("speakers", context.device.type, workers, device.type, gpu_budget))
 
         def close(self):
             calls.append(("closed",))
@@ -707,8 +769,12 @@ def test_the_runner_sizes_its_workers_from_the_profile_before_any_process_uses_t
             "--start-campaign", "s", "--start-round", "0", "--device", "cuda", "--speak-workers", "2", "--smoke",
             "--profile", str(tmp_path / "profile")]
     assert multi_train.main(argv) == 0
-    assert calls == [("context", "cpu"), ("start",), ("fit", tmp_path / "profile", 2, [64, 24]),
-                     ("speakers", "cpu", 2, 123), ("campaign",), ("run", "cuda", True), ("closed",)]   # forked, then moved
+    assert calls == [("context", "cpu"), ("start",), ("fit", tmp_path / "profile", 2, [64, 24], "cuda"),
+                     ("speakers", "cpu", 2, "cuda", 123), ("campaign",), ("run", "cuda", True), ("closed",)]   # forked, then moved
+    calls.clear()                                   # D180: the workers on the CPU, the campaign on the GPU
+    assert multi_train.main(argv[:argv.index("--out") + 1] + [str(tmp_path / "c2")] + argv[argv.index("--out") + 2:]
+                            + ["--speak-device", "cpu"]) == 0
+    assert calls[2][-1] == "cpu" and calls[3] == ("speakers", "cpu", 2, "cpu", 123)
 
 
 def test_a_worker_caps_its_gpu_once_at_its_first_task_and_only_with_a_budget(monkeypatch):

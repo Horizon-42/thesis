@@ -1000,6 +1000,18 @@ def workers_fit(workers: int, measured: Mapping[str, Any], passed: Mapping[str, 
     return out
 
 
+def speak_device_refused(speak_device: str | None, workers: int, device: str) -> str | None:
+    """Why ``--speak-device`` ``speak_device`` (None: the campaign's ``device``) is refused beside ``workers`` speaking
+    workers, None where it is not (post-training §9 item 11; stage D's runners too, multi-aircraft control D180): a
+    device of the workers needs two or more of them, and workers on CUDA need the campaign on CUDA (their memory is read
+    against its GPU)."""
+    if speak_device is not None and workers == 1:
+        return "--speak-device is the speaking workers' device: it needs --speak-workers 2 or more"
+    if speak_device is not None and torch.device(speak_device).type == "cuda" and torch.device(device).type != "cuda":
+        return "--speak-device cuda needs --device cuda (the workers' memory is read against the campaign's GPU)"
+    return None
+
+
 def available_memory(device: torch.device) -> dict[str, int | None]:
     """The host's available memory (``MemAvailable``) and the GPU's free memory (a CUDA device; else None), bytes."""
     meminfo = dict(line.split(":", 1) for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines())
@@ -1849,11 +1861,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.speak_workers < 1:
         parser.error("--speak-workers is at least 1")
-    if args.speak_device is not None and args.speak_workers == 1:
-        parser.error("--speak-device is the speaking workers' device: it needs --speak-workers 2 or more")
-    if (args.speak_device is not None and torch.device(args.speak_device).type == "cuda"
-            and torch.device(args.device).type != "cuda"):
-        parser.error("--speak-device cuda needs --device cuda (the workers' memory is read against the campaign's GPU)")
+    refused = speak_device_refused(args.speak_device, args.speak_workers, args.device)
+    if refused is not None:
+        parser.error(refused)
     if (args.start_campaign is None) != (args.start_round is None):
         parser.error("--start-campaign and --start-round go together")
     start = None

@@ -43,8 +43,9 @@ A formal campaign (not ``--smoke``) runs from a clean checkout (a run worktree a
 intent is written by hand before the publication, not checked here), on stage B's formal base, from a formal campaign
 of stage C. Its campaign record is `MULTI_CAMPAIGN_SCHEMA`, resumable as stage C's (`post_train.open_campaign` with stage
 D's format and reader). Its speaking workers (``--speak-workers`` above 1) are sized from stage D's profile of these
-inputs and settings (``--profile``, `profiled_fit`: the profile's measure and the memory free now, each worker's GPU
-capped at its share), never measured before a run (the user, 2026-10-07).
+inputs and settings (``--profile``, `profiled_fit`: the profile's measure with its margin and the memory free now, each
+worker's GPU capped at its share), never measured before a run (the user, 2026-10-07); ``--speak-device`` puts them on
+a device of their own, e.g. the CPU beside the pass on the GPU (D180; by default the campaign's ``--device``).
 
     python run_ts.py multi_train --prior <the base> --instructions <A34's artefact> --executor <its spec> \\
         --windows <stage C's census: its edge reference> --start-campaign <stage C's campaign> --start-round <r> \\
@@ -64,7 +65,7 @@ from collections import Counter
 from itertools import product
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 import torch
@@ -74,7 +75,8 @@ from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
 from ts_transformer.experiments.post_branches import Rules, branch_round
 from ts_transformer.experiments.post_train import (
     Context, Speakers, Stage, available_memory, batches, done_rounds, open_campaign, open_context, round_start,
-    run_campaign, settings_of, source_campaign, speak_round, start_checkpoint, start_model, start_of, workers_fit,
+    run_campaign, settings_of, source_campaign, speak_device_refused, speak_round, start_checkpoint, start_model,
+    start_of, workers_fit,
 )
 from ts_transformer.experiments.post_window_loop import LANDED, LOST_SEPARATION, WindowLoop, checked_edges
 from ts_transformer.multi import credit
@@ -98,7 +100,10 @@ MULTI_CHECKPOINT_SCHEMA = "ts-multi-checkpoint-v1"
 #: The reader's name in the claim of a campaign's val read (the validation readout of stage D).
 MULTI_CLAIM_READER = "multi_validation"
 #: The format of stage D's profile (`multi_profile`), which a campaign's speaking workers are sized from (`profiled_fit`).
-MULTI_PROFILE_SCHEMA = "ts-multi-profile-v1"
+MULTI_PROFILE_SCHEMA = "ts-multi-profile-v2"
+#: The factor on each measured peak before the workers are counted (D179: a batch that was not measured needed about
+#: 30 % more than its span's measured peak), recorded in the profile.
+MEASURE_MARGIN = 1.3
 #: The settings that set a round's memory, which a campaign shares with its profile (`profiled_fit`); the others (its
 #: rounds, seed, learning rates, and a start of the same traffic shape) change the words spoken, not the shapes — a
 #: worker past its share stops by name.
@@ -421,15 +426,29 @@ def round_model(context: Context, settings: MultiSettings, out: Path, round_: in
     return model.eval()
 
 
+def with_margin(measure: Mapping[str, Any] | None, margin: float) -> dict[str, Any] | None:
+    """A measure of `Speakers.measure` or `post_train.pass_memory_of` with each peak (its own, or its host's and its
+    GPU's) multiplied by ``margin`` (D179) — what it holds now unchanged; None stays None."""
+    if measure is None:
+        return None
+    if "peak" in measure:
+        return {**measure, "peak": int(measure["peak"] * margin)}
+    return {**measure, **{name: None if measure[name] is None else {**measure[name],
+                                                                    "peak": int(measure[name]["peak"] * margin)}
+                          for name in ("host", "gpu")}}
+
+
 def profiled_fit(profile: Path, settings: MultiSettings, inputs: dict[str, Any], workers: int,
-                 device: torch.device) -> dict[str, Any]:
+                 device: torch.device, speak_device: torch.device) -> dict[str, Any]:
     """The speaking workers' memory read from stage D's profile (the user, 2026-10-07: measured once, never before each
-    run): the profile's measure of one worker and of the pass (`multi_profile` part 2) and the memory free now
-    (`post_train.available_memory`, before any worker or this process uses the GPU), ``workers`` workers refused by name
-    where they do not fit (`post_train.workers_fit` with nothing held yet), and each worker's GPU budget (the GPU free
-    now less what this process holds beside its pass, in equal shares: `Speakers`' ``gpu_budget``, None on the CPU).
-    Refused by name besides unless the profile is of these inputs (`PROFILED_INPUTS`, as this checkout reads them) and
-    these settings (`PROFILED_SETTINGS`), on this kind of device, with its workers measured."""
+    run): the profile's measure of one worker and of the pass (`multi_profile`), each peak times its recorded margin
+    (D179), and the memory free now (`post_train.available_memory`, before any worker or this process uses the GPU),
+    ``workers`` workers refused by name where they do not fit (`post_train.workers_fit` with nothing held yet: a worker
+    on the CPU counts the host's memory only, D180), and each worker's GPU budget (the GPU free now less what this
+    process holds beside its pass, in equal shares: `Speakers`' ``gpu_budget``; None for workers off the GPU). Refused
+    by name besides unless the profile is of these inputs (`PROFILED_INPUTS`, as this checkout reads them) and these
+    settings (`PROFILED_SETTINGS`), its pass on this kind of device and its worker measured on the workers' kind of
+    device (``speak_device``)."""
     from ts_transformer.experiments.training_export import this_checkout
 
     record = json.loads((profile / "profile.json").read_text(encoding="utf-8"))
@@ -440,19 +459,24 @@ def profiled_fit(profile: Path, settings: MultiSettings, inputs: dict[str, Any],
     held = record["inputs"]
     other = [key for key in PROFILED_INPUTS if this_checkout(held[key]) != this_checkout(inputs[key])]
     other += [key for key in PROFILED_SETTINGS if held["settings"][key] != asdict(settings)[key]]
-    measured, passed = record["workers"]["measured"], record["workers"]["pass"]
-    if (measured["gpu"] is None) != (device.type != "cuda"):
+    measure = record["workers"]
+    if (measure["pass"] is None) != (device.type != "cuda"):
         other.append("device")
+    if torch.device(measure["speak_device"]).type != speak_device.type:
+        other.append("speaking device")
     if other:
         raise SystemExit(f"{profile} is a profile of other {', '.join(other)} than this campaign's: profile these "
                          f"(multi_profile)")
+    measured, passed = (with_margin(measure[k], measure["margin"]) for k in ("measured", "pass"))
     available = available_memory(device)
     short = workers_fit(workers, measured, passed, available, held_now=False)
     if short:
         raise SystemExit("the speaking workers do not fit (O15, from the profile): " + "; ".join(short)
                          + " — start fewer (--speak-workers)")
-    budget = None if passed is None else (available["gpu"] - passed["now"]) // workers   # at least its peak: fitted
-    return {"profile": str(profile), "speak_workers": workers, "available": available, "gpu_budget": budget}
+    budget = (None if speak_device.type != "cuda" else
+              (available["gpu"] - passed["now"]) // workers)                      # at least its peak: fitted
+    return {"profile": str(profile), "speak_workers": workers, "speak_device": str(speak_device),
+            "margin": measure["margin"], "available": available, "gpu_budget": budget}
 
 
 def require_finished(campaign: Path) -> None:
@@ -545,6 +569,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--select-per-airport", type=int, required=True)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--speak-workers", type=int, default=1)
+    parser.add_argument("--speak-device",
+                        help="the speaking workers' device (default: --device); e.g. cpu beside a pass on cuda (D180)")
 
 
 def settings_from(args: argparse.Namespace, start: dict[str, Any]) -> MultiSettings:
@@ -565,6 +591,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.speak_workers < 1:
         parser.error("--speak-workers is at least 1")
+    refused = speak_device_refused(args.speak_device, args.speak_workers, args.device)
+    if refused is not None:
+        parser.error(refused)
     if (args.speak_workers > 1) != (args.profile is not None):
         parser.error("--profile goes with --speak-workers above 1 (the workers are sized from it)")
     source = args.start_campaign if args.start_campaign.is_absolute() else REPO_ROOT / args.start_campaign
@@ -596,9 +625,11 @@ def main(argv: list[str] | None = None) -> int:
     speakers = None
     if args.speak_workers > 1:                      # O15 from the profile, before any process uses the GPU
         profile = args.profile if args.profile.is_absolute() else REPO_ROOT / args.profile
-        fit = profiled_fit(profile, settings, inputs, args.speak_workers, device)
+        speak_device = torch.device(args.speak_device or args.device)
+        fit = profiled_fit(profile, settings, inputs, args.speak_workers, device, speak_device)
         print(json.dumps({"profiled_fit": fit}), flush=True)
-        speakers = Speakers(context, settings, args.speak_workers, device, stage=stage, gpu_budget=fit["gpu_budget"])
+        speakers = Speakers(context, settings, args.speak_workers, speak_device, stage=stage,
+                            gpu_budget=fit["gpu_budget"])
     context = replace(context, device=device, base=context.base.to(device).eval())
     try:
         open_campaign(out, inputs, git, opened["checks"], schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER,
