@@ -68,10 +68,12 @@ export default function ReadbackPlan({ m }: { m: ReadbackModel }) {
           );
         })}
 
-        <polyline points={planPoints(observed)} fill="none" stroke={TRAINING_TRACE_COLOR} strokeWidth={1.4}
-          className="training-readback-trace">
-          <title>the observed track</title>
-        </polyline>
+        {layers.observed ? (
+          <polyline points={planPoints(observed)} fill="none" stroke={TRAINING_TRACE_COLOR} strokeWidth={1.4}
+            className="training-readback-trace">
+            <title>the observed track</title>
+          </polyline>
+        ) : null}
         {/* the rows a heading word's band judged outside, on the judged track */}
         {layers.headingBands && m.envelopes !== null ? m.envelopes.heading.flatMap((band, index) =>
           outsideSpans(band.inside, band.firstRow, m.judged.tS.length - 1).map(([first, last]) =>
@@ -120,7 +122,7 @@ export default function ReadbackPlan({ m }: { m: ReadbackModel }) {
             <circle cx={endOf(m.live.track).x} cy={endOf(m.live.track).y} r={4} fill={m.liveColour} stroke="black" strokeWidth={0.6} />
           </g>
         ) : null}
-        {m.cursorS >= observed.tS[0] ? (
+        {layers.observed && m.cursorS >= observed.tS[0] ? (
           <circle cx={px(observed.eM[m.indexAt(observed.tS, m.cursorS)])} cy={py(observed.nM[m.indexAt(observed.tS, m.cursorS)])}
             r={4.5} className="training-readback-cursor-dot" />
         ) : null}

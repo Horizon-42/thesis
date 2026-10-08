@@ -16,8 +16,12 @@
  *    thinner and at half opacity, and its point at the cursor (always; a click selects it); a commanded aircraft's track
  *    from the row it is silent on is slate and dashed (D144), the one on screen's too.
  *  • THE AIRCRAFT'S OTHER ROUNDS (`otherRounds` switch): their flown paths, thin and faded, in their end's colour.
+ *  • THE PROCEDURE'S LIMITS (`procedure` switch), per candidate runway, as a prior set draws them
+ *    (`scene/trainingProcedure.ts`): the runway in force at the cursor's row in the round's sentence on screen in the
+ *    designated colour, the others in the candidates' grey.
  *  • WINDOW B'S MOVED START: its observed rows to the first predicted step as the start moved them, beside the recorded
- *    flight's observed track (stage A's layer draws that one; the flown path starts from the moved start).
+ *    flight's observed track (stage A's layer draws that one; the flown path starts from the moved start) — with the
+ *    observed track's switch (`trainingLayers.observed`).
  *
  * Static entities, never time-sampled (`viewer.clock` belongs to Evaluation); the points follow the Training cursor. Called
  * from a leaf (`TrainingWindowScene`).
@@ -48,6 +52,8 @@ import {
 } from "../utils/trainingWordColors";
 import { TRAINING_OUTCOME_TAG } from "../data/trainingText";
 import { airLine, entityGroup, lonLatHeights, marker } from "../scene/trainingEntities";
+import { runwayInForce } from "../data/trainingProcedure";
+import { drawProcedureLimits } from "../scene/trainingProcedure";
 
 /** The id prefix of another commanded aircraft's point at the cursor: a click on one selects that aircraft. */
 const COMMANDED_AT = "training-window-commanded-at-";
@@ -221,11 +227,21 @@ function drawOtherRounds(viewer: Cesium.Viewer, origin: TrainingWindowOrigin) {
 }
 
 export default function useTrainingWindowLayer(): void {
-  const { viewer, mode, trainingSelection } = useApp();
+  const { viewer, mode, trainingSelection, trainingLayers } = useApp();
   const layers = useTrainingWindowLayers();
   const flight = mode === "training" && trainingSelection !== null ? trainingSelection.flight : null;
   const origin = flight === null ? undefined : trainingWindowOriginOf(flight);
   const { trainingCursorS } = useTrainingCursor();
+
+  // the runway the procedure's masks act on: the one in force at the cursor's row in the round's sentence on screen
+  const closed = flight === null || origin === undefined ? null : flight.closedLoop[String(origin.sample.model.rowIntervalS)];
+  const designated = closed === null ? -1
+    : runwayInForce(closed.events, Math.max(Math.floor((trainingCursorS - closed.startS) / closed.rowIntervalS + 1e-9), 0));
+  useEffect(() => {
+    if (!isCesiumViewerUsable(viewer) || origin === undefined || !layers.procedure) return;
+    const group = drawProcedureLimits(viewer, origin.sample.procedure, designated);
+    return () => group.remove();
+  }, [viewer, origin, designated, layers.procedure]);
 
   useEffect(() => {
     if (!isCesiumViewerUsable(viewer) || origin === undefined || !layers.trafficTracks) return;
@@ -246,10 +262,10 @@ export default function useTrainingWindowLayer(): void {
   }, [viewer, origin, layers.loss]);
 
   useEffect(() => {
-    if (!isCesiumViewerUsable(viewer) || origin === undefined) return;
+    if (!isCesiumViewerUsable(viewer) || origin === undefined || !trainingLayers.observed) return;
     const group = drawMovedStart(viewer, origin);
     return () => group.remove();
-  }, [viewer, origin]);
+  }, [viewer, origin, trainingLayers.observed]);
 
   useEffect(() => {
     if (!isCesiumViewerUsable(viewer) || origin === undefined || !layers.otherRounds) return;

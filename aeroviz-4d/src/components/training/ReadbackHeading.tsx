@@ -77,8 +77,10 @@ export default function ReadbackHeading({ m, onCursorChange, onColumnChange }: {
           );
         }) : null}
       </g>
-      <Line xs={observed.tS.map(m.xTime)} ys={observed.trackPlotDeg.map(yHeading)} stroke={TRAINING_TRACE_COLOR} width={1.4}
-        className="training-readback-trace" title="the observed track" />
+      {layers.observed ? (
+        <Line xs={observed.tS.map(m.xTime)} ys={observed.trackPlotDeg.map(yHeading)} stroke={TRAINING_TRACE_COLOR} width={1.4}
+          className="training-readback-trace" title="the observed track" />
+      ) : null}
       {flown ? (
         <Line xs={flown.tS.map(m.xTime)} ys={flown.trackPlotDeg.map(yHeading)} stroke={m.flownColour} width={1.6}
           className="training-readback-executor" title="the flown path: the sentence on screen flown by the executor" />

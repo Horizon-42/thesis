@@ -42,7 +42,7 @@ export default function TrainingLegend({ layers, vocabulary, flown, corrections,
 }) {
   const [open, setOpen] = useState<boolean>(false);
   const rows: Array<{ key: string; swatch: Swatch; text: string; title: string; shown: boolean }> = [
-    { key: "track", swatch: { kind: "line", colour: TRAINING_TRACE_COLOR }, shown: true, text: "the observed track",
+    { key: "track", swatch: { kind: "line", colour: TRAINING_TRACE_COLOR }, shown: layers.observed, text: "the observed track",
       title: "the observed track, and — faint on the ground — its ground trace" },
     { key: "flown", swatch: { kind: "line", colour: TRAINING_SENTENCE_COLOR[flown ?? "closedLoop"] }, shown: flown !== null,
       text: "the flown path",
@@ -57,6 +57,10 @@ export default function TrainingLegend({ layers, vocabulary, flown, corrections,
       text: "heading word: judged rows",
       title: `a heading word's judged rows, on the ground: from ${vocabulary.headingLeadS} s after it is said, where the track must ` +
         `stay within ±${vocabulary.headingToleranceDeg}° of it` },
+    { key: "fan", swatch: { kind: "area", colour: TRAINING_HEADING_BAND_COLOR, opacity: TRAINING_ENVELOPE_ALPHA.fan }, shown: layers.headingBands,
+      text: "heading word: its band",
+      title: `a heading word's band in plan: its target track ± ${vocabulary.headingToleranceDeg}° from its first judged row, as long ` +
+        "as the rows it judges — a picture; the verdict is row by row (red rows outside)" },
     { key: "tube", swatch: { kind: "area", colour: TRAINING_TUBE_COLOR, opacity: TRAINING_ENVELOPE_ALPHA.tube }, shown: layers.vertical,
       text: "altitude tube", title: "an altitude word's tube, between its lower and upper edge (a level above the airport elevation E)" },
     { key: "outside", swatch: { kind: "line", colour: TRAINING_OUTSIDE_COLOR }, shown: true, text: "outside a check",

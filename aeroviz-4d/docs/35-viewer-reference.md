@@ -1144,3 +1144,21 @@ lose what was set up in it.
   unmounts or the scene is not drawn — **unless the viewer is already destroyed** (the app's teardown destroys it before its
   components unmount; its widgets are gone and touching them threw into a white screen).
 - Not here: a job result is never a category; nothing is written to `public/data` or `categories.json`.
+
+### AV49 · Training in 3D: the heading fan, the procedure's limits of every stage with them, the observed track's switch (2026-10-09)
+
+- **A heading word's FAN** (`scene/trainingEntities.trainingBandFan`): under its judged rows, a fill on the ground from
+  the judged track at its first judged row, centred on the word's target track, opening its tolerance to each side, as
+  long as the farthest row it judges is from there (`headingBands` switch; it recedes and deepens with the selected word
+  as a tube does). It is the one shape the view computes, from the exported target and tolerance: a picture of the band.
+  The verdict stays the export's, row by row (red rows) — the band judges the track's direction, not its position, so a
+  track that came back on to the target heading after leaving it can run parallel outside the fan.
+- **The procedure's limits** (each candidate runway's region inside the FAF and the LPV cone, the glidepath lower edge,
+  the DA and FAF points: `prior_training_export.procedure_block`) are read once (`data/trainingProcedure.ts`) and drawn
+  once (`scene/trainingProcedure.ts`) for a prior set (stage B) and a window set (stages C and D) alike, each under its
+  own `procedure` switch; the runway in force at the cursor's row of the sentence on screen in the designated colour.
+  A stage A set carries none.
+- **The observed track's switch** (`trainingLayers.observed`, the first line of every stage's Draw box): the observed
+  track and its ground trace, its aircraft at the cursor, window B's moved-start rows, its lines on the read-back charts
+  — and the labelled sentence's envelopes and selected-word marks, which judge it (`trainingEnvelopeSwitches`; a
+  closed-loop reading's judge its flown path and stay). 3D visibility is per entity: every switch it needs must be on.

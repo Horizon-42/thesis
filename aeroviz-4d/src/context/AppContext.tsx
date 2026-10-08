@@ -306,6 +306,9 @@ interface TrainingSessionState {
 }
 
 export interface TrainingLayers {
+  /** The observed (ground-truth) track and everything drawn on it: its line and ground trace, its aircraft at the cursor,
+   *  its lines on the read-back charts — and the labelled sentence's envelopes, which judge it. */
+  observed: boolean;
   /** The heading words' bands: each word's target ± the tolerance over the rows it is judged on, on the heading chart;
    *  those rows on the ground in 3D; the rows outside in red wherever the track is drawn. */
   headingBands: boolean;
@@ -436,7 +439,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [pickScope]);
   const [trainingColumn, setTrainingColumn] = useState<TrainingColumn | null>(null);
   const [trainingLayers, setTrainingLayers] = useState<TrainingLayers>({
-    headingBands: true, vertical: true, candidates: true,
+    observed: true, headingBands: true, vertical: true, candidates: true,
   });
   const setTrainingLayer = useCallback((layer: keyof TrainingLayers, on: boolean) => {
     setTrainingLayers((current) => ({ ...current, [layer]: on }));

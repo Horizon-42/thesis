@@ -21,9 +21,13 @@ export interface TrainingWindowLayers {
   otherRounds: boolean;
   /** Stage D: the flown tracks of the window's other commanded aircraft in the round (never their points). */
   otherCommanded: boolean;
+  /** The procedure's limits of every candidate runway: the region outline, the glidepath lower edge, the DA and FAF points. */
+  procedure: boolean;
 }
 
-let layers: TrainingWindowLayers = { traffic: true, trafficTracks: true, loss: true, otherRounds: true, otherCommanded: true };
+let layers: TrainingWindowLayers = {
+  traffic: true, trafficTracks: true, loss: true, otherRounds: true, otherCommanded: true, procedure: true,
+};
 const listeners = new Set<() => void>();
 
 export function setTrainingWindowLayer(name: keyof TrainingWindowLayers, shown: boolean): void {

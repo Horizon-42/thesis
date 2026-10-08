@@ -10,7 +10,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 const { appState, setTrainingSelection, setTrainingIntervalS, setTrainingAutopilot, setTrainingCursorS, fetchMock } = vi.hoisted(() => ({
   appState: {
     activeAirportCode: "KXXX" as string,
-    trainingLayers: { headingBands: true, vertical: true, candidates: true },
+    trainingLayers: { observed: true, headingBands: true, vertical: true, candidates: true },
     trainingIntervalS: 4 as number | null,
     trainingSelection: null as unknown, trainingPick: null,
     cursorS: 0,

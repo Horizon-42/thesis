@@ -7,7 +7,6 @@ import { describe, expect, it } from "vitest";
 import {
   parseTrainingPriorIndex,
   parseTrainingPriorSample,
-  runwayInForce,
   trainingPriorFlightView,
   trainingPriorOriginOf,
   TRAINING_PRIOR_BLOCKED_COLUMNS,
@@ -16,6 +15,7 @@ import {
   TRAINING_PRIOR_SAMPLE_SCHEMA,
   TRAINING_PRIOR_SET_KIND,
 } from "../trainingPriorSample";
+import { runwayInForce } from "../trainingProcedure";
 import { wordUnreached } from "../trainingSample";
 import { readingRowAt, sentenceColumnRuns, trainingReadingOf, TRAINING_READING_RULE, TRAINING_SAMPLE_SCHEMA } from "../trainingSample";
 import { PRIOR_SET_ID, PRIOR_VAL_SET_ID, stageBIndex, stageBSample, stageBSampleFile, stageBValSampleFile } from "./stageB";

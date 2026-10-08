@@ -8,14 +8,17 @@ import {
   airLine,
   GROUND_LINE_ALPHA,
   GROUND_LINE_WIDTH,
+  groundFill,
   groundLine,
   groundRows,
   lonLatHeights,
   planDegrees,
   TRAINING_ENTITY,
+  trainingBandFan,
   trainingBandGround,
   trainingBandOutsideGround,
   trainingEnvelopeEntities,
+  trainingEnvelopeSwitches,
   trainingFocusEntity,
   trainingFocusStretch,
   trainingTubeWall,
@@ -26,6 +29,7 @@ import { stageBSample } from "../../data/__tests__/stageB";
 import { stageCSample, stageCSampleFromRound } from "../../data/__tests__/stageC";
 import { trainingPriorFlightView } from "../../data/trainingPriorSample";
 import { trainingWindowFlightView } from "../../data/trainingWindowSample";
+import { bearingRad, haversineDistanceM, toDegrees } from "../../utils/procedureGeoMath";
 import { flownSentenceColour, flownSentenceKind, roundKind } from "../../data/trainingSentenceKind";
 import {
   TRAINING_DECISION_PASS_COLOR,
@@ -57,6 +61,31 @@ describe("the coordinates", () => {
     expect(trainingBandGround(reading.judged, { ...band, stopRow: band.firstRow })).toEqual([]);
   });
 
+  it("draws a heading band as a fan: from the first judged row, the target ± the tolerance, as long as the farthest judged row", () => {
+    // a straight track due east (090°), one row every 0.001° of longitude
+    const track = { lon: Array.from({ length: 10 }, (_, row) => 0.001 * row), lat: Array(10).fill(0) } as never;
+    const band = { row: 0, firstRow: 2, stopRow: 8, targetDeg: 90, toleranceDeg: 4.5, inside: Array(10).fill(true) };
+    const fan = trainingBandFan(track, band);
+    const point = (i: number) => ({ lonDeg: fan[2 * i], latDeg: fan[2 * i + 1], altM: 0 });
+    const points = fan.length / 2;
+    expect(point(0)).toEqual({ lonDeg: 0.002, latDeg: 0, altM: 0 });                   // the apex: the first judged row
+    expect(point(points - 1)).toEqual(point(0));                                       // closed
+    const arc = Array.from({ length: points - 2 }, (_, i) => point(i + 1));
+    expect(arc).toHaveLength(10);                                                      // 9° in 1° steps
+    const bearings = arc.map((p) => (toDegrees(bearingRad(point(0), p)) + 360) % 360);
+    expect(bearings[0]).toBeCloseTo(85.5, 6);
+    expect(bearings[bearings.length - 1]).toBeCloseTo(94.5, 6);
+    const farthest = haversineDistanceM(point(0), { lonDeg: 0.008, latDeg: 0, altM: 0 });
+    for (const p of arc) expect(haversineDistanceM(point(0), p)).toBeCloseTo(farthest, 3);
+    expect(trainingBandFan(track, { ...band, stopRow: band.firstRow })).toEqual([]);  // no row of its own: nothing
+  });
+
+  it("a fan is a fill on the ground in its colour", () => {
+    const fill = groundFill("id", "name", [0, 0, 1, 0, 0, 1, 0, 0], "#38bdf8", 0.2);
+    expect(fill.polygon!.classificationType).toBe(Cesium.ClassificationType.BOTH);
+    expect((fill.polygon!.material as Cesium.Color).alpha).toBeCloseTo(0.2, 6);
+  });
+
   it("puts a tube on the judged track's ground position, at the exported edges plus the flight's HAE − MSL", () => {
     const reading = trainingReadingOf(flight, stepS, null);
     const tube = reading.envelopes!.altitude[0];
@@ -78,7 +107,18 @@ describe("the selected word", () => {
     const altitude = sentenceColumnRuns(reading, "altitude").map((run) => trainingFocusEntity(reading, stepS, "altitude", run));
     expect(altitude.filter((id) => id !== null)).toEqual(reading.envelopes!.altitude.map((_, index) => TRAINING_ENTITY.tube(index)));
     expect(trainingFocusEntity(reading, stepS, "angle", sentenceColumnRuns(reading, "angle")[0])).toBeNull();
-    expect(trainingEnvelopeEntities(reading)).toHaveLength(reading.envelopes!.heading.length + reading.envelopes!.altitude.length);
+    // a heading word owns its judged rows and its fan, an altitude word its tube
+    expect(trainingEnvelopeEntities(reading)).toHaveLength(2 * reading.envelopes!.heading.length + reading.envelopes!.altitude.length);
+    expect(trainingEnvelopeEntities(reading)).toContain(TRAINING_ENTITY.fan(TRAINING_ENTITY.heading(0)));
+  });
+
+  it("an envelope of the labelled sentence needs the observed track's switch too; a closed-loop one only its own", () => {
+    const labelled = trainingReadingOf(flight, stepS, null);
+    const closed = trainingReadingOf(flight, stepS, 2);
+    expect(trainingEnvelopeSwitches(labelled, "headingBands")).toEqual(["headingBands", "observed"]);
+    expect(trainingEnvelopeSwitches(labelled, "vertical")).toEqual(["vertical", "observed"]);
+    expect(trainingEnvelopeSwitches(closed, "headingBands")).toEqual(["headingBands"]);
+    expect(trainingEnvelopeSwitches(closed, "vertical")).toEqual(["vertical"]);
   });
 
   it("gives the stretch of the judged track a word is in force", () => {
@@ -102,9 +142,10 @@ describe("the envelopes of every stage's flown sentences (D135)", () => {
     for (const reading of readings) {
       expect(reading.loop).toBe("closed");
       expect(reading.envelopes!.heading.length).toBeGreaterThan(0);
-      expect(trainingEnvelopeEntities(reading)).toHaveLength(reading.envelopes!.heading.length + reading.envelopes!.altitude.length);
+      expect(trainingEnvelopeEntities(reading)).toHaveLength(2 * reading.envelopes!.heading.length + reading.envelopes!.altitude.length);
       const band = reading.envelopes!.heading.find((one) => one.stopRow > one.firstRow)!;
       expect(trainingBandGround(reading.judged, band).length).toBeGreaterThan(0);              // its judged rows on the ground
+      expect(trainingBandFan(reading.judged, band).length).toBeGreaterThan(0);                 // and its fan
     }
   });
 });

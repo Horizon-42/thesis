@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const { appState, DEFAULT_LAYERS, setTrainingPick, setTrainingIntervalS } = vi.hoisted(() => {
-  const DEFAULT_LAYERS = { headingBands: true, vertical: true, candidates: true };
+  const DEFAULT_LAYERS = { observed: true, headingBands: true, vertical: true, candidates: true };
   return {
     DEFAULT_LAYERS,
     setTrainingPick: vi.fn(),
