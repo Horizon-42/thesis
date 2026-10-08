@@ -32,7 +32,7 @@ from ts_transformer.experiments.post_ceiling import CEILING_SCHEMA
 from ts_transformer.experiments.post_diagnose import DIAGNOSE_SCHEMA, OFF, ON, seal
 from ts_transformer.experiments.training_export import this_checkout
 from ts_transformer.io_utils import file_sha256
-from ts_transformer.post.window_lists import SPLIT, ListedWindow, WindowList, write_window_list
+from ts_transformer.post.window_lists import IDENTITY_FIELDS, SPLIT, ListedWindow, WindowList, write_window_list
 from ts_transformer.repo_layout import REPO_ROOT, repo_relative
 
 #: The stage whose readouts this runner reads (D176 (2): stage D's join once they write a line per window).
@@ -46,14 +46,16 @@ class Read:
 
     name: str
     selection: Mapping[str, int]
-    identities: tuple[tuple[str, float, str], ...]
+    identities: tuple[tuple[Any, ...], ...]
     outcomes: tuple[str, ...]
     fields: Mapping[int, Mapping[str, Any]]
     path: Path
 
 
-def _identities(config: Mapping[str, Any]) -> tuple[tuple[str, float, str], ...]:
-    return tuple((w["flight"], w["row0_s"], w["kind"]) for w in config["windows"])
+def _identities(config: Mapping[str, Any]) -> tuple[tuple[Any, ...], ...]:
+    """Each recorded window's identity (`IDENTITY_FIELDS`, as `post.window_lists.identity_of` gives it of a window:
+    the readouts record their windows by `post_train.window_record`, which writes those fields), in place order."""
+    return tuple(tuple(w[name] for name in IDENTITY_FIELDS[STAGE]) for w in config["windows"])
 
 
 def diagnose_read(directory: Path, read: str) -> Read:
@@ -119,12 +121,12 @@ def window_list(reads: Sequence[Read], outcomes: Sequence[str], every: bool) -> 
     first = reads[0]
     windows = []
     for place in chosen(reads, outcomes, every):
-        flight, row0_s, kind = first.identities[place]
+        identity = dict(zip(IDENTITY_FIELDS[STAGE], first.identities[place]))
         info: dict[str, Any] = {"outcomes": {read.name: read.outcomes[place] for read in reads}}
         fields = {read.name: read.fields[place] for read in reads if place in read.fields}
         if fields:
             info["fields"] = fields
-        windows.append(ListedWindow(place, flight.partition(":")[0], {"flight": flight, "row0_s": row0_s, "kind": kind},
+        windows.append(ListedWindow(place, identity["flight"].partition(":")[0], identity,
                                     info))
     rule = f"whose outcome is one of {list(outcomes)} in {'every one' if every else 'any'} of the reads " \
            f"{[read.name for read in reads]}"

@@ -137,3 +137,29 @@ def test_reads_of_other_selection_windows_or_unknown_reads_are_refused_by_name(t
     with pytest.raises(SystemExit, match="smoke readout"):
         runner.main(["--diagnose", str(diagnose), "on", "--outcomes", lost, "--out", str(tmp_path / "x")])
     assert not (tmp_path / "x").exists()
+
+
+def test_a_window_s_identity_in_each_stage_is_what_its_record_carries():
+    """Post-training §9 item 13 (frontend D178 (6)): stage C's identity is the commanded flight, row 0 and kind; stage
+    D's the anchor flight, row 0 and span; the readouts' window records carry the same fields with the same values
+    (the runner reads a list's identities off them)."""
+    from dataclasses import replace
+
+    import numpy as np
+
+    from ts_transformer.experiments.post_train import window_record
+    from ts_transformer.post.scene import REAL, Recorded, Scene, Window
+    from ts_transformer.post.window_lists import identity_of
+    from ts_transformer.tests.support import parallel_airport
+
+    rows = 40
+    own = Recorded(key="KXXX:own", airport="KXXX", runway_index=0, category=None, start_s=1000.0, step_s=2.0,
+                   first_step_s=1016.0, landing_s=1080.0, e_m=np.linspace(-9000.0, 0.0, rows), n_m=np.zeros(rows),
+                   height_m=np.full(rows, 500.0), go_around=np.zeros(rows, dtype=bool))
+    window = Window(REAL, own, 0, Scene(parallel_airport(), "select", (own,), 4.0))
+    assert identity_of("C", window) == {"flight": "KXXX:own", "row0_s": 1000.0, "kind": REAL}
+    assert identity_of("C", window) == {k: window_record(window)[k] for k in ("flight", "row0_s", "kind")}
+    wide = replace(window, span_s=600.0)
+    assert identity_of("D", wide) == {"flight": "KXXX:own", "row0_s": 1000.0, "span_s": 600.0}
+    with pytest.raises(ValueError, match="stage C or D"):
+        identity_of("E", window)
