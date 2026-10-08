@@ -16,9 +16,10 @@ import json
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from ts_transformer.io_utils import utc_now, write_json_atomic
+from ts_transformer.post.scene import Window
 
 #: The format of a window list.
 WINDOW_LIST_SCHEMA = "ts-window-list-v1"
@@ -28,8 +29,20 @@ STAGES = ("C", "D")
 SPLIT = "select"
 #: A window's identity in each stage (D176 (1)).
 IDENTITY_FIELDS = {"C": ("flight", "row0_s", "kind"), "D": ("flight", "row0_s", "span_s")}
+#: How each field of an identity is read off a window (`identity_of`).
+_IDENTITY_OF: dict[str, Callable[[Window], Any]] = {"flight": lambda w: w.commanded.key, "row0_s": lambda w: w.row0_s,
+                                                   "kind": lambda w: w.kind, "span_s": lambda w: w.span_s}
 #: The selection windows a list indexes, in each stage.
 SELECTION_FIELDS = {"C": ("select_seed", "per_airport"), "D": ("select_seed", "per_airport", "spans_s")}
+
+
+def identity_of(stage: str, window: Window) -> dict[str, Any]:
+    """``window``'s identity in a list of ``stage`` (`IDENTITY_FIELDS`: stage C, its commanded flight, ``row0_s`` and
+    kind; stage D, its anchor flight, ``row0_s`` and span): what a list writes and a reader checks a window by
+    (post-training §9 item 13, frontend D178 (6))."""
+    if stage not in STAGES:
+        raise ValueError(f"a window list is of stage {' or '.join(STAGES)}, not {stage!r}")
+    return {name: _IDENTITY_OF[name](window) for name in IDENTITY_FIELDS[stage]}
 
 
 @dataclass(frozen=True)
