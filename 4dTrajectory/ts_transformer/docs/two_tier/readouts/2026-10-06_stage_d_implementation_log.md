@@ -448,3 +448,11 @@ compared; the export will still repeat the positions rule (a helper in `multi_tr
 and `judged_steps` in one module read alike; a case picked by its place from the end of `_cases`; the two-recorded-only
 count also met on the records. Commit `897e433f`.
 
+**MC5's profile with 3 workers ended by the GPU's memory (2026-10-08 22:03):** after the measures (one worker on each
+span's first and largest batch: 300 s 1.41 GiB reserved, 600 s 1.91, 1200 s 0.78; the pass 2.15; 1–3 workers judged to
+fit) the round's speaking stopped at batch 25 of 198 (600 s span) with `torch.OutOfMemoryError` (a worker at 2.48 GiB,
+another at 1.59, the campaign's process 2.11, 58 MiB of 7.59 GiB free); exit 1. The output set aside as
+`outputs/POOLED/multi/profile_20261008.aborted-20261008T200415Z` (its measures kept), the log as
+`tmp/mc5/campaign_3workers_oom.log`; the same command run again with `--speak-workers 2` (unit `mc5-profile-220415`,
+22:04). The fit's underestimate is the requests' item 49.
+

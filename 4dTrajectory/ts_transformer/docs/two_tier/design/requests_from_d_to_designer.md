@@ -7,10 +7,9 @@ notes; the items the user decided are deleted (D166: 6, 7, 19, 21, 22, 25, 29–
 census's sample: 18; D172: 46–48), item 23 (it asked for 6 and 7), item 20 (built: item 40) and the names of MC0–MC4
 (written into the interfaces).
 
-State: 2026-10-07: MC0–MC4 merged into `dev-two-tier` (b967d2b1). On `dev-multi-control`, not merged: the windows of
-several spans (D146) and D166 item 19 (6cc49ad1, items 37–43), MC4's smoke passed, MC5's runner (bd6dd1be, items
-44–45), its profile read (one worker fits at 64 rows), D172 built (fffe900d); dev-two-tier merged in (C17–C20,
-f2bb4a5d). MC5's profile at 64 / 48 / 24 rows waits for the host (stage C's campaign runs).
+State: 2026-10-08: everything of stage D merged into `dev-two-tier` (the census generator `multi.census.judged_steps`,
+9ca282dd, frontend D177 (12)). MC5's profile at 64 / 48 / 24 rows: the run with 3 workers ended by the GPU's memory
+(item 49), set aside as `outputs/POOLED/multi/profile_20261008.aborted-20261008T200415Z`; running again with 2 workers.
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -154,3 +153,16 @@ f2bb4a5d). MC5's profile at 64 / 48 / 24 rows waits for the host (stage C's camp
     independent numbers: an upper bound of the noise of comparing two rounds, which share their numbers. Over all spans
     the unit is an anchor (its windows of the spans are nested and share their aircraft); within a span, windows of
     other anchors may still share flights in a dense select set (stated).
+
+
+49. **The workers' fit underestimates the GPU at the formal size** (D172; MC5, 2026-10-08). The profile measured one
+    worker on each span's first batch and the batch of the most rows (300 s: 1.41 GiB reserved at 64 rows; 600 s:
+    1.91 GiB at 48; 1200 s: 0.78 GiB at 24; the pass 2.15 GiB) and found 1, 2 and 3 workers fit (`workers.short` empty,
+    6.15 GiB free on the GPU). With 3 workers the round's speaking stopped at batch 25 of 198 (a 600 s batch) with
+    `torch.OutOfMemoryError`: one worker held 2.48 GiB, another 1.59 GiB, the campaign's process 2.11 GiB, 58 MiB free
+    of 7.59 GiB. So a batch other than the measured ones needs about 30 % more than the measured peak of its span (the
+    words said, the aircraft joined and the go-arounds differ by batch). Proposal (Claude's reading, for the user): the
+    fit keeps a margin on the measured GPU peak (e.g. 1.3×, stated in the record), or MC6 takes one worker fewer than
+    the profile's largest fit; until decided, MC6's proposal to the user uses the workers that the profile's own round
+    spoke without failing (2 if the run with 2 ends).
+\n
