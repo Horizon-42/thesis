@@ -63,18 +63,18 @@ import {
 /** MIRROR of the exporter's `INDEX_SCHEMA` (`ts_transformer/post/training_files.py`): the airport's index of window sets,
  *  one format for stages C and D (the stage is the index file's). A name changes with its file's shape, on both sides, in
  *  the same change. */
-export const TRAINING_WINDOW_INDEX_SCHEMA = "aeroviz-training-window-index-v3";
+export const TRAINING_WINDOW_INDEX_SCHEMA = "aeroviz-training-window-index-v4";
 /** The stages whose sets are windows (frontend §5.7): one format, the stage the index FILE's. */
 export const TRAINING_WINDOW_STAGES = ["C", "D"] as const;
 export type TrainingWindowStage = (typeof TRAINING_WINDOW_STAGES)[number];
-/** Each stage's index: MIRROR of `post/training_files.INDEX_FILE` (stage C's) and of frontend §5.7's name of stage D's
- *  (`index_multi_v1.json`, its export's module, F4). */
+/** Each stage's index: MIRROR of `post/training_files.INDEX_FILE` (stage C's) and `MULTI_INDEX_FILE` (stage D's). */
 export const TRAINING_WINDOW_INDEX_FILES: Record<TrainingWindowStage, string> = {
-  C: "index_post_v3.json",
-  D: "index_multi_v1.json",
+  C: "index_post_v4.json",
+  D: "index_multi_v2.json",
 };
-/** MIRROR of `training_files.SAMPLE_SCHEMA` (v4: the window format of stages C and D, frontend D156). */
-export const TRAINING_WINDOW_SAMPLE_SCHEMA = "aeroviz-training-window-sample-v4";
+/** MIRROR of `training_files.SAMPLE_SCHEMA` (v4: the window format of stages C and D, frontend D156; v5: a cohort drawn
+ *  or listed, post-training D176). */
+export const TRAINING_WINDOW_SAMPLE_SCHEMA = "aeroviz-training-window-sample-v5";
 /** MIRROR of `training_files.SET_KIND`. */
 export const TRAINING_WINDOW_SET_KIND = "training-windows";
 /** MIRROR of `post_training_export.START`: the round that names the model at the start of the campaign. */
@@ -109,7 +109,11 @@ export interface TrainingWindowModel {
   start: TrainingWindowStart | null;
 }
 
-export interface TrainingWindowCohort {
+/** A set's windows (post-training D176, frontend §5.7): drawn by the export, or a window list's. */
+export type TrainingWindowCohort = TrainingWindowDrawn | TrainingWindowListed;
+
+export interface TrainingWindowDrawn {
+  form: "drawn";
   split: string;
   perAirport: number;
   kinds: TrainingWindowKind[];
@@ -121,6 +125,20 @@ export interface TrainingWindowCohort {
   /** By kind: the windows a drawn real window admitted none of, or that opened inside a loss. */
   leftOut: Record<string, number>;
   drawnFrom: string;
+}
+
+export interface TrainingWindowListed {
+  form: "listed";
+  split: string;
+  /** The window list (repository-relative), its sha256 and the sentence of what chose its windows. */
+  list: string;
+  sha256: string;
+  chose: string;
+  /** The list's windows, and this airport's of them (the set's). */
+  listCount: number;
+  windows: number;
+  /** The select seed of the readout numbers each window flew with. */
+  selectSeed: number;
 }
 
 export interface TrainingWindowSource {
@@ -305,14 +323,24 @@ function parseModel(reader: Reader): TrainingWindowModel {
 }
 
 function parseCohort(reader: Reader): TrainingWindowCohort {
+  const form = reader.oneOf("form", ["drawn", "listed"] as const);
+  const split = reader.string("split");
+  if (!(TRAINING_SPLITS as readonly string[]).includes(split)) reader.fail(`split ${split} is none of ${TRAINING_SPLITS}`);
+  if (form === "listed") {
+    const listCount = reader.count("listCount", 1);
+    const windows = reader.count("windows", 1);
+    if (windows > listCount) reader.fail(`the set holds ${windows} of the list's ${listCount} windows`);
+    return {
+      form, split, list: reader.string("list"), sha256: reader.string("sha256"), chose: reader.string("chose"), listCount,
+      windows, selectSeed: reader.number("selectSeed"),
+    };
+  }
   const kinds = reader.strings("kinds").map((kind) => {
     if (!(TRAINING_WINDOW_KINDS as readonly string[]).includes(kind)) reader.fail(`kind ${kind} is none of ${TRAINING_WINDOW_KINDS}`);
     return kind as TrainingWindowKind;
   });
-  const split = reader.string("split");
-  if (!(TRAINING_SPLITS as readonly string[]).includes(split)) reader.fail(`split ${split} is none of ${TRAINING_SPLITS}`);
   return {
-    split, perAirport: reader.count("perAirport", 1), kinds, seed: reader.number("seed"), windows: reader.count("windows"),
+    form, split, perAirport: reader.count("perAirport", 1), kinds, seed: reader.number("seed"), windows: reader.count("windows"),
     pool: reader.count("pool"), real: reader.count("real"),
     leftOut: reader.record("leftOut", (value, where) => {
       if (!Number.isInteger(value) || (value as number) < 0) throw new Error(`${where} is not a count`);

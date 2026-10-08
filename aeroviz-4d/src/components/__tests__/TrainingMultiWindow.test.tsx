@@ -34,9 +34,9 @@ import { pickTrainingWindowAircraft } from "../../data/trainingWindowLayers";
 const json = (body: unknown) => ({ ok: true, status: 200, headers: { get: () => "application/json" }, text: async () => JSON.stringify(body) });
 const notFound = () => ({ ok: false, status: 404, headers: { get: () => "text/html" }, text: async () => "<!doctype html>" });
 const D_FILES: Record<string, unknown> = {
-  "data/airports/KXXX/training/index_multi_v1.json": stageDIndex(),
+  "data/airports/KXXX/training/index_multi_v2.json": stageDIndex(),
   [`data/airports/KXXX/training/${TWO_SET_ID}/sample.json`]: stageDSampleFile(),
-  "data/airports/KXXX/training/index_post_v3.json": stageCIndex(),
+  "data/airports/KXXX/training/index_post_v4.json": stageCIndex(),
   [`data/airports/KXXX/training/${WINDOW_SET_ID}/sample.json`]: stageCSampleFile(),
 };
 const lastOrigin = () => {

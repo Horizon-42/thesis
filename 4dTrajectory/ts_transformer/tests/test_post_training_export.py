@@ -71,7 +71,7 @@ def test_a_window_s_sentence_its_end_and_its_traffic(setup):
     ahead, real = _ahead(s["windows"][0]), s["windows"][0]
     model = round_model(context, _settings(), s["directory"], None)
     ([lost], [judged]), (lost_end, judged_end), observed = export.fly_round(model, context, "train", [ahead, real],
-                                                                            export.stage_c_flying(2, 1337))
+                                                                            export.stage_c_flying(2, lambda place, member: export.member_numbers(1337, place, member)))
     assert np.array_equal(observed[1], s["stored"].rows.states[: len(observed[1])])     # no move: the stored rows
     assert lost["outcome"] == "lost_separation" and lost["crossing"] is None and lost["reward"] == 0.0
     # the window's loss: its two aircraft, the commanded one answering for it, and it costs W (D30's reward 0)
@@ -95,7 +95,7 @@ def test_a_window_s_sentence_its_end_and_its_traffic(setup):
     payload = export.sentence_payload
     try:
         export.sentence_payload = lambda loop, b, result, *a: (spy.append(result.states), payload(loop, b, result, *a))[1]
-        export.fly_round(model, context, "train", [ahead], export.stage_c_flying(2, 1337))
+        export.fly_round(model, context, "train", [ahead], export.stage_c_flying(2, lambda place, member: export.member_numbers(1337, place, member)))
     finally:
         export.sentence_payload = payload
     flown_rows = spy[0][lost["flownFromRow"]:]
@@ -136,7 +136,8 @@ def test_the_rounds_stand_side_by_side_and_a_foreign_checkpoint_is_refused(setup
     monkeypatch.setattr(export, "split_flights", lambda *a, **k: ([head_of(s)], s["geometry"]))
     flights, windows = export.window_set(
         context, "train", [ahead], [export.START, 0],
-        lambda r: export.STAGE_C.model_of(context, settings, campaign, r), export.STAGE_C.flying(context, settings, 1337),
+        lambda r: export.STAGE_C.model_of(context, settings, campaign, r), export.STAGE_C.flying(
+            context, settings, export.STAGE_C.drawn_numbers(settings, 1337)),
         test_start._params(), _hae(s))
     (window,) = windows
     assert [r["round"] for r in window["rounds"]] == [export.START, 0] and flights[0]["haeMinusMslM"] == -33.0
@@ -244,6 +245,120 @@ def stage_c_fixture(tmp_path, monkeypatch, *, texts=False):
         out["texts"] = {name: (training / name).read_text(encoding="utf-8")
                         for name in (files.INDEX_FILE, f"{FIXTURE_SET}/{files.SAMPLE_FILE}")}
     return out
+
+
+def listed_export(tmp_path, monkeypatch, listed, *more):
+    """Stage C's export (`main`) of the synthetic flight's selection window (`_context`: its select days are its train
+    days; one window) from the window list ``listed`` (`post.window_lists.WindowList`, written to a file), with the
+    arguments ``more``; the stand-ins of `stage_c_fixture`. Returns the set's sample, the window setup, the context, the
+    campaign's settings, and the model at its start."""
+    from ts_transformer.post import window_lists
+
+    s = window_setup(tmp_path, monkeypatch)
+    context = _context(s)
+    # a select seed that is not the draw's default, and the flight's window second among two selection windows (its
+    # own flight inserted ahead first), so that a listed window flies with its place's readout numbers or the test fails
+    settings = _settings(rounds=1, select_seed=7)
+    real = s["windows"][0]
+    selection = [_ahead(real), real]
+    campaign, root, path = tmp_path / "campaign", tmp_path / "airports", tmp_path / "list.json"
+    with monkeypatch.context() as patch:
+        patch.setattr(window_lists, "utc_now", lambda: "fixture")              # the list's sha256 is the fixture's
+        window_lists.write_window_list(path, listed(s))
+    open_campaign(campaign, {"prior": "p", "instructions": str(s["directory"]), "executor": str(tmp_path / "executor"),
+                             "windows": str(tmp_path / "census"), "procedure_root": "c", "settings": asdict(settings),
+                             "smoke": True}, {"head": "fixture", "dirty": False}, {})
+    with monkeypatch.context() as patch:
+        patch.setattr(export, "require_conforming_closed_loop",
+                      lambda *a: (test_start._params(), {"sha256": "fixture", "checks": {}}, s["words"]))
+        patch.setattr(export, "checked_edges", lambda reference: None)
+        patch.setattr(export, "open_context", lambda *a, **k: context)
+        patch.setattr(export, "selection_windows", lambda *a: selection)
+        patch.setattr(export, "split_flights", lambda *a, **k: ([head_of(s)], s["geometry"]))
+        patch.setattr(export, "candidate_hae_minus_msl_m", lambda ends, geometry: _hae(s))
+        patch.setattr(export, "repo_relative", lambda path_: f"fixture/{path_.name}")
+        patch.setattr(model_speed, "repo_relative", lambda path_: f"fixture/{path_.name}")
+        patch.setattr(export, "git_state", lambda: {"head": "fixture", "dirty": False})
+        patch.setattr(stage_a_files, "utc_now", lambda: "fixture")
+        export.main(["--campaign", str(campaign), "--rounds", "start", "--split", "select", "--set-id", "listed",
+                     "--root", str(root), "--windows", str(path), "--speed",
+                     str(speed_readout(tmp_path / "speed", stage="C")), "--smoke", *more])
+    training = root / s["geometry"].code / "training"
+    _, sample = files.FILES.listed_set(training, s["geometry"].code, "listed")
+    texts = {name: (training / name).read_text(encoding="utf-8") for name in (files.INDEX_FILE, f"listed/{files.SAMPLE_FILE}")}
+    return sample, s, context, settings, texts, selection
+
+
+def _the_list(s, **changed):
+    """A window list naming the synthetic flight's selection window at place 1 (its identity; `listed_export`'s
+    selection), ``changed`` its fields."""
+    from ts_transformer.post.window_lists import ListedWindow, WindowList
+
+    (window,) = s["windows"]
+    item = ListedWindow(1, s["geometry"].code, {"flight": window.commanded.key, "row0_s": window.row0_s,
+                                                "kind": window.kind}, {"outcome": "lost_separation"})
+    values = {"stage": "C", "split": "select", "selection": {"select_seed": 7, "per_airport": 1},
+              "chose": "the select windows that lost separation in the fixture's read", "readouts": (), "windows": (item,)}
+    return WindowList(**{**values, **changed})
+
+
+def test_a_listed_set_flies_each_window_as_its_selection_readout_did(tmp_path, monkeypatch):
+    """D176 (3): a set of a window list holds the list's windows, each flown with its selection readout's numbers — the
+    sentence the readout's batch says for it (`post_train.read_batch`, the same model and window alone in its batch,
+    so post-training §6.4's boundary does not enter) —, and its cohort is the list's: path, sha256, sentence, counts and
+    select seed."""
+    from ts_transformer.io_utils import file_sha256
+
+    sample, s, context, settings, texts, selection = listed_export(tmp_path, monkeypatch, _the_list)
+    (window,) = sample["windows"]
+    said = window["commanded"][0]["rounds"][0]
+    (read,) = post_train.read_batch(round_model(context, settings, tmp_path / "campaign", None), context, selection,
+                                    [1], settings, "select")
+    assert said["words"] == read.words.astype(int).tolist() and said["outcome"] == read.outcome
+    assert sample["cohort"] == {"form": "listed", "split": "select", "list": "fixture/list.json",
+                                "sha256": file_sha256(tmp_path / "list.json"),
+                                "chose": "the select windows that lost separation in the fixture's read",
+                                "listCount": 1, "selectSeed": 7, "windows": 1}
+    # written again, the frontend's fixture of a listed set (``AEROVIZ_WRITE_FIXTURES=1``)
+    listed_fixtures = FIXTURES.parent / "stage_c_listed"
+    if os.environ.get("AEROVIZ_WRITE_FIXTURES") == "1":
+        for name, text in texts.items():
+            (listed_fixtures / name).parent.mkdir(parents=True, exist_ok=True)
+            (listed_fixtures / name).write_text(text, encoding="utf-8")
+    for name, text in texts.items():
+        assert (listed_fixtures / name).read_text(encoding="utf-8") == text, (
+            f"{listed_fixtures / name} is not what the export writes now: AEROVIZ_WRITE_FIXTURES=1 writes it again")
+
+
+@pytest.mark.parametrize("listed, more, says", [
+    (lambda s: _the_list(s, stage="D", selection={"select_seed": 7, "per_airport": 1, "spans_s": [300.0]},
+                         windows=(replace(_the_list(s).windows[0], identity={
+                             "flight": s["windows"][0].commanded.key, "row0_s": s["windows"][0].row0_s,
+                             "span_s": 300.0}),)), (), "of stage D"),
+    (lambda s: _the_list(s, selection={"select_seed": 1337, "per_airport": 1}), (), "indexes the selection"),
+    (lambda s: _the_list(s, windows=(replace(_the_list(s).windows[0], place=3),)), (), "selection windows"),
+    (lambda s: _the_list(s, windows=(replace(_the_list(s).windows[0], place=0),)), (), "is not the campaign's"),
+    (lambda s: _the_list(s, windows=(replace(_the_list(s).windows[0], airport="KYYY"),)), (), "is not the campaign's"),
+    (lambda s: _the_list(s, windows=(replace(_the_list(s).windows[0], identity={
+        **_the_list(s).windows[0].identity, "row0_s": 0.0}),)), (), "is not the campaign's"),
+    (_the_list, ("--split", "train"), "the set is of train windows"),
+    (_the_list, ("--per-airport", "2"), "refused with --per-airport"),
+    (_the_list, ("--seed", "2", "--kinds", "real"), "refused with --seed, --kinds"),
+    (_the_list, ("--airports", "KXXX"), "refused with --airports"),
+])
+def test_a_window_list_is_refused_by_name(tmp_path, monkeypatch, capsys, listed, more, says):
+    """D176 (3): a list of another stage or selection, a window not at its place (none there, another window there,
+    another airport, another identity), and a list given with the draw's arguments or --airports (a listed set's
+    airports are the list's), each refused by name before anything is written."""
+    with pytest.raises(SystemExit):
+        listed_export(tmp_path, monkeypatch, listed, *more)
+    assert says in capsys.readouterr().err
+
+
+def test_a_drawn_set_says_its_cohort_is_drawn(tmp_path, monkeypatch):
+    """Frontend §5.7 (D176): a drawn set's cohort is the form ``drawn`` with the draw's fields, as before."""
+    cohort = stage_c_fixture(tmp_path, monkeypatch)["sample"]["cohort"]
+    assert cohort["form"] == "drawn" and (cohort["perAirport"], cohort["seed"], cohort["kinds"]) == (1, 1337, ["real"])
 
 
 def test_the_frontend_fixtures_are_what_the_export_writes(tmp_path, monkeypatch):

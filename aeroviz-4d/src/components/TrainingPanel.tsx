@@ -95,7 +95,7 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
   const [indexState, setIndexState] = useState<IndexState>({ status: "loading" });
   const [setId, setSetId] = useState<string | null>(null);
   /** Whose sets the panel shows: stage A's (`index_v5.json`), stage B's prior sets (`index_prior_v3.json`), stage C's
-   *  window sets (`index_post_v3.json`) or stage D's (`index_multi_v1.json`, frontend §5.1) — B, C and D offered only
+   *  window sets (`index_post_v4.json`) or stage D's (`index_multi_v2.json`, frontend §5.1) — B, C and D offered only
    *  where the airport has the file. */
   const [viewing, setViewing] = useState<Viewing>("stageA");
   const priorIndex = useTrainingPriorIndex(activeAirportCode || null);

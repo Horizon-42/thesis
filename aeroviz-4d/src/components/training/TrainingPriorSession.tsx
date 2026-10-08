@@ -175,7 +175,7 @@ export default function TrainingPriorSession({ airport, sets, details }: {
     // the first section always has a body: the set's intent and provenance come from its index entry, not its sample
     entry === null ? { id: EXPERIMENT_SECTION, title: "The set and the experiment", body: <p className="training-details-lede">The index lists no set.</p> } : {
       id: EXPERIMENT_SECTION, title: "The set and the experiment",
-      body: <ExperimentSection setId={entry.id} intent={intent} provenance={entry.source.readout} /> },
+      body: <ExperimentSection setId={entry.id} intent={intent} provenance={entry.source.readout} windows={null} /> },
     sample === null ? { id: STATISTICS_SECTION, title: "The models' statistics", body: null, absent }
       : { id: STATISTICS_SECTION, title: "The models' statistics",
         body: <StatisticsSection table={stageBStatistics(sample, b)} results={results} /> },

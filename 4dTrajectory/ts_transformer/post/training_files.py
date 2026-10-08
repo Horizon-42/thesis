@@ -7,14 +7,14 @@ Not a runner, and torch-free: its reader and writer (`FILES`) raise `ValueError`
 handler and drop the request unanswered.
 
 **Beside the other sets (outline §6 item 3).** A window set is ``<airport>/training/<set-id>/sample.json``
-(`SAMPLE_SCHEMA`), listed in ``<airport>/training/index_post_v3.json`` (`INDEX_FILE`, `INDEX_SCHEMA`) — an index of its
+(`SAMPLE_SCHEMA`), listed in ``<airport>/training/index_post_v4.json`` (`INDEX_FILE`, `INDEX_SCHEMA`) — an index of its
 own beside stage A's and stage B's, which this code never reads or writes. Read
 and written by the one definition of the three stages (`instructions.training_files.TrainingFiles`): this module holds
 only stage C's constants (`FILES`).
 
 **One window format for stages C and D (frontend D156, §5.7).** A window holds a list of commanded aircraft — stage C's
 one, stage D's several — and the index format is one for both stages: the stage is the index FILE's (stage C's
-``index_post_v3.json``, `FILES`; stage D's ``index_multi_v1.json``, `MULTI_FILES`).
+``index_post_v4.json``, `FILES`; stage D's ``index_multi_v2.json``, `MULTI_FILES`).
 """
 
 from __future__ import annotations
@@ -33,15 +33,18 @@ from ts_transformer.instructions.training_files import TrainingFiles
 #: sample v4 (frontend D156, 2026-10-07): the window format of stages C and D — a window's commanded aircraft are a list
 #: (stage C writes one), each with its join offset, its move, its first predicted step and each round's flown sentence
 #: with its reward and the row from which it is silent; each round's losses of separation are the window's, each with its
-#: two aircraft, the ones that answer for it and whether it costs W; the set kind is the two stages' one.
-INDEX_SCHEMA = "aeroviz-training-window-index-v3"
-INDEX_FILE = "index_post_v3.json"
-SAMPLE_SCHEMA = "aeroviz-training-window-sample-v4"
+#: two aircraft, the ones that answer for it and whether it costs W; the set kind is the two stages' one. Index v4
+#: (``index_post_v4.json``; stage D's ``index_multi_v2.json``) / sample v5 (post-training D176, frontend F5,
+#: 2026-10-08): a set's cohort is one of two forms — ``drawn`` (v4's fields) or ``listed`` (a window list's path,
+#: sha256, sentence and count, and the select seed of the readout numbers its windows flew with).
+INDEX_SCHEMA = "aeroviz-training-window-index-v4"
+INDEX_FILE = "index_post_v4.json"
+SAMPLE_SCHEMA = "aeroviz-training-window-sample-v5"
 SAMPLE_FILE = "sample.json"
 SET_KIND = "training-windows"
 
 #: Stage D's index (frontend §5.7): the same format as stage C's, the stage the file's.
-MULTI_INDEX_FILE = "index_multi_v1.json"
+MULTI_INDEX_FILE = "index_multi_v2.json"
 
 #: Stage C's Training files.
 FILES = TrainingFiles(index_schema=INDEX_SCHEMA, index_file=INDEX_FILE, sample_schema=SAMPLE_SCHEMA, set_kind=SET_KIND)

@@ -100,8 +100,11 @@ export const TRAINING_AUTOPILOT_COLOR = "#2563eb";
  *  outcome other than a landing. ΔE 41.6 from the autopilot blue (29.0 under CVD); contrast 5.0:1. */
 export const TRAINING_FAILURE_COLOR = "#ff2d2d";
 
-/** The DA point — the decision-altitude check of the crossing: green when it passed, the failure red when it did not. */
-export const TRAINING_DECISION_PASS_COLOR = "#4ade80";
+/** The DA point — the decision-altitude check of the crossing: green when it passed, the failure red when it did not;
+ *  and a landed outcome (`trainingOutcomeColour`). Green-600 (frontend D177 (1), 2026-10-08): OKLab ΔE 23.5 from the
+ *  post-trained yellow-green and 12.2 from the closed loop's teal (the palette's floor is 11.9; the former #4ade80 was
+ *  9.5 from the yellow-green), 47.5 from the bar's surface (#0f131e). */
+export const TRAINING_DECISION_PASS_COLOR = "#16a34a";
 export const TRAINING_DECISION_FAIL_COLOR = TRAINING_FAILURE_COLOR;
 
 /** How a flown flight ended, in one colour where it is said (the bar's chip, tab dots and end mark, the read-back's

@@ -14,7 +14,13 @@ WHICH WINDOWS. ``--per-airport`` real windows of each airport of ``--split`` (tr
 only by a planned readout, outline §6 item 4), drawn once with ``--seed`` from those that do not open inside a loss
 (D113); for each, the windows of ``--kinds`` built from it (A, D, B: `post_train.candidate`, the census's ranges; a
 kind the window admits none of, or one that opens inside a loss, is left out and counted). Every round flies the same
-windows with the same numbers (`post_train.readout_numbers`), so the rounds stand side by side.
+windows with the same numbers (`post_train.readout_numbers`), so the rounds stand side by side. Or ``--windows`` (a
+window list, `post.window_lists`, post-training D176 (3)): the list's windows in place of the draw — refused with
+``--per-airport``, ``--seed`` or ``--kinds`` —, each found at its place among the campaign's selection windows by its
+identity (a list of another stage, split or selection, or a window that differs, refused by name) and flown with its
+selection readout's numbers (`StageExport.readout_numbers`), so that each round says the sentence its readout judged
+(within post-training §6.4: a batch of other windows can change a word drawn near a boundary). The set's cohort is
+``drawn`` or ``listed`` (the list's path, sha256, sentence and count, and its select seed).
 
 WHICH ROUNDS. ``--rounds``: ``start`` (the model at the start, `post_train.campaign_start`: the base with zero-output
 traffic modules, D29, or the round of another campaign it starts from, D162; the set names it by
@@ -32,12 +38,14 @@ CHECKS: the closed loop's (`require_conforming_closed_loop`, D69, with the label
 features' reference of the campaign's census (D104), here first.
 
 WRITES a set ``<root>/<airport>/training/<set-id>/sample.json`` and its entry in
-``<root>/<airport>/training/index_post_v3.json`` (`post.training_files`); refused when the set exists. Every airport is
+``<root>/<airport>/training/index_post_v4.json`` (`post.training_files`); refused when the set exists. Every airport is
 built before any is written. From a clean tree (the set records the commit) unless ``--smoke``; a smoke campaign gives
 only a smoke set.
 
     python run_ts.py post_training_export --campaign <a post_train directory> --rounds start 0 4 --split select \\
         --per-airport 10 --set-id <id> --speed <a model_speed directory of stage C>
+    python run_ts.py post_training_export --campaign <a post_train directory> --rounds start 8 --split select \
+        --windows <a window_list directory>/list.json --set-id <id> --speed <a model_speed directory of stage C>
 """
 
 from __future__ import annotations
@@ -58,7 +66,7 @@ from ts_transformer.autopilot.judge import TIMEOUT
 from ts_transformer.experiments.training_flights import crossing_payload, last_state_cycle
 from ts_transformer.experiments.post_train import (
     CAMPAIGN_SCHEMA, KINDS, POST_CHECKPOINT_SCHEMA, Context, batches, candidate, open_context, readout_numbers,
-    round_model, settings_of,
+    round_model, selection_windows, settings_of,
 )
 from ts_transformer.experiments.model_speed import speed_source
 from ts_transformer.experiments.post_window_loop import WindowLoop, WindowResult, checked_edges, moved_commanded
@@ -70,7 +78,9 @@ from ts_transformer.experiments.training_export import (
 from ts_transformer.instructions import training_files as stage_a_files
 from ts_transformer.instructions.spec import READING_RULE
 from ts_transformer.instructions.words import Words
+from ts_transformer.io_utils import file_sha256
 from ts_transformer.post import training_files as files
+from ts_transformer.post.window_lists import WindowList, read_window_list
 from ts_transformer.post.scene import INSERTED_SUFFIX, MOVED_START, NO_START_MOVE, REAL, StartMove, Window
 from ts_transformer.post.traffic import opens_inside_loss
 from ts_transformer.prior.checkpoint import CHECKPOINT_SCHEMA
@@ -202,11 +212,14 @@ class Flying:
     end: Callable[[WindowLoop, int, Window, Sequence[WindowResult]], dict[str, Any]]
 
 
-def stage_c_flying(batch_windows: int, seed: int) -> Flying:
-    """Stage C's flying (module docstring): `post_train.batches` of ``batch_windows`` rows, `member_numbers`, stage C's
-    loop (no options) and `round_end_payload` (the losses its commanded aircraft answer for)."""
-    return Flying(batches=lambda windows: batches(windows, batch_windows),
-                  numbers=lambda place, member: member_numbers(seed, place, member), options={},
+#: Each commanded aircraft's numbers in a set: (the window's place in the set, the aircraft's in the window) → numbers.
+Numbers = Callable[[int, int], np.random.Generator]
+
+
+def stage_c_flying(batch_windows: int, numbers: Numbers) -> Flying:
+    """Stage C's flying (module docstring): `post_train.batches` of ``batch_windows`` rows, the set's ``numbers``, stage
+    C's loop (no options) and `round_end_payload` (the losses its commanded aircraft answer for)."""
+    return Flying(batches=lambda windows: batches(windows, batch_windows), numbers=numbers, options={},
                   end=lambda flown, w, window, ends: round_end_payload(
                       ends, [flown.records[b].key for b in flown.members[w]], window))
 
@@ -361,10 +374,11 @@ STAGE_FILES = {"C": files.FILES, "D": files.MULTI_FILES}
 
 
 def index_entry(stage: str, set_id: str, sample: dict[str, Any]) -> dict[str, Any]:
-    """A set of ``stage`` as its airport's index lists it."""
+    """A set of ``stage`` as its airport's index lists it (a listed set's title says so)."""
     model, cohort = sample["model"], sample["cohort"]
+    windows = "listed windows" if cohort["form"] == "listed" else "windows"
     return {"id": set_id, "kind": files.SET_KIND, "readingRule": READING_RULE,
-            "title": f"Stage {stage} · windows · rounds {', '.join(str(r) for r in model['rounds'])} · Δ "
+            "title": f"Stage {stage} · {windows} · rounds {', '.join(str(r) for r in model['rounds'])} · Δ "
                      f"{model['rowIntervalS']:g} s · {cohort['split']}",
             "file": f"{set_id}/{files.SAMPLE_FILE}", "windows": len(sample["windows"]),
             "flights": len(sample["flights"]), "formats": sample["formats"], "model": model, "cohort": cohort,
@@ -374,10 +388,13 @@ def index_entry(stage: str, set_id: str, sample: dict[str, Any]) -> dict[str, An
 @dataclass(frozen=True)
 class StageExport:
     """What a stage gives the shared export of window sets (`export_sets`): its stage (C or D: its index,
-    `STAGE_FILES`), its campaign's schema and formats, its settings from a campaign record, an airport's windows and the
-    counts of their draw (context, settings, split, airport, ``--per-airport``, ``--kinds``, ``--seed``), a round's model
-    (context, settings, campaign directory, round), its flying (context, settings, ``--seed``), the cohort's sentence on
-    the draw, and whether a set names a speed readout of the stage (D136; ``--speed``)."""
+    `STAGE_FILES`), its campaign's schema and formats, its settings from a campaign record, an airport's drawn windows
+    and the counts of their draw (context, settings, split, airport, ``--per-airport``, ``--kinds``, ``--seed``), a
+    round's model (context, settings, campaign directory, round), its flying with given numbers (context, settings,
+    `Numbers`), the numbers of a drawn set (settings, ``--seed``) and of the readout (settings: by a window's place
+    among the selection windows, post-training D176 (3)), the campaign's selection windows (context, settings), a
+    window's identity and the selection's fields as a window list names them (`post.window_lists`), the cohort's
+    sentence on the draw, and whether a set names a speed readout of the stage (D136; ``--speed``)."""
 
     stage: str
     campaign_schema: str
@@ -385,24 +402,37 @@ class StageExport:
     settings_of: Callable[[Mapping[str, Any]], Any]
     windows: Callable[..., tuple[list[Window], dict[str, Any]]]
     model_of: Callable[[Context, Any, Path, str | int], Prior]
-    flying: Callable[[Context, Any, int], Flying]
+    flying: Callable[[Context, Any, Numbers], Flying]
+    drawn_numbers: Callable[[Any, int], Numbers]
+    readout_numbers: Callable[[Any], Numbers]
+    selection: Callable[[Context, Any], list[Window]]
+    identity: Callable[[Window], dict[str, Any]]
+    selection_fields: Callable[[Any], dict[str, Any]]
     drawn_from: str
     speed: bool
 
 
+#: A drawn set's windows an airport and seed when the arguments do not say (``--per-airport``, ``--seed``; stage C's
+#: ``--kinds`` real): they are refused with ``--windows``, so they have no argparse default.
+DRAWN_PER_AIRPORT, DRAWN_SEED = 10, 1337
+
+
 def add_arguments(parser: argparse.ArgumentParser, stage: StageExport) -> None:
     """The arguments of a stage's export (``--kinds`` stage C's only: stage D's sets are of real windows, D166 (33);
-    ``--speed`` where the stage has a speed readout)."""
+    ``--speed`` where the stage has a speed readout; ``--windows`` a window list, post-training D176 (3))."""
     parser.add_argument("--campaign", type=Path, required=True, help="the campaign's directory")
     parser.add_argument("--rounds", nargs="+", required=True, help=f"{START!r} and/or round numbers")
     parser.add_argument("--split", choices=SPLITS, required=True)
     parser.add_argument("--set-id", required=True)
     parser.add_argument("--root", type=Path, default=REPO_ROOT / "aeroviz-4d" / "public" / "data" / "airports")
-    parser.add_argument("--airports", nargs="+", default=None, help="default: every airport of the artefact")
-    parser.add_argument("--per-airport", type=int, default=10)
+    parser.add_argument("--airports", nargs="+", default=None,
+                        help="a drawn set: default every airport of the artefact (a listed set: the list's)")
+    parser.add_argument("--windows", type=Path, default=None,
+                        help="a window list (`window_list`'s list.json, ts-window-list-v1), in place of the draw (D176)")
+    parser.add_argument("--per-airport", type=int, default=None, help=f"a drawn set: default {DRAWN_PER_AIRPORT}")
     if stage.stage == "C":
-        parser.add_argument("--kinds", nargs="+", choices=KINDS, default=[REAL])
-    parser.add_argument("--seed", type=int, default=1337)
+        parser.add_argument("--kinds", nargs="+", choices=KINDS, default=None, help=f"a drawn set: default {REAL}")
+    parser.add_argument("--seed", type=int, default=None, help=f"a drawn set: default {DRAWN_SEED}")
     parser.add_argument("--device", default="cpu")
     if stage.speed:
         parser.add_argument("--speed", type=Path, required=True,
@@ -410,9 +440,42 @@ def add_arguments(parser: argparse.ArgumentParser, stage: StageExport) -> None:
     parser.add_argument("--smoke", action="store_true", help="SMOKE: allowed from a tree with changes; recorded")
 
 
+def listed_windows(parser: argparse.ArgumentParser, stage: StageExport, listed: WindowList, split: str,
+                   selection: Sequence[Window], selection_fields: Mapping[str, Any]) -> list[tuple[int, Window]]:
+    """A window list's windows (post-training D176 (3)), each with its place among the campaign's selection windows,
+    in the list's order: refused by name for a list of another stage, split or selection, or a window that is not at
+    its place (no window there, another airport or another identity)."""
+    if listed.stage != stage.stage:
+        parser.error(f"the window list is of stage {listed.stage}, the campaign of stage {stage.stage}")
+    if listed.split != split:
+        parser.error(f"the window list names {listed.split} windows, the set is of {split} windows")
+    if dict(listed.selection) != dict(selection_fields):
+        parser.error(f"the window list indexes the selection {dict(listed.selection)}, the campaign's is "
+                     f"{dict(selection_fields)}")
+    out = []
+    for item in listed.windows:
+        if item.place >= len(selection):
+            parser.error(f"listed window {dict(item.identity)}: place {item.place}, the campaign has "
+                         f"{len(selection)} selection windows")
+        window = selection[item.place]
+        found = stage.identity(window)
+        if window.scene.geometry.code != item.airport or found != dict(item.identity):
+            parser.error(f"listed window at place {item.place} ({item.airport}, {dict(item.identity)}) is not the "
+                         f"campaign's ({window.scene.geometry.code}, {found})")
+        out.append((item.place, window))
+    return out
+
+
 def export_sets(parser: argparse.ArgumentParser, args: argparse.Namespace, stage: StageExport) -> int:
-    """A stage's window sets (module docstring), every airport built before any is written, into ``stage``'s index."""
+    """A stage's window sets (module docstring), every airport built before any is written, into ``stage``'s index: of
+    drawn windows, or of a window list's (``--windows``, D176 (3)), each flown with its selection readout's numbers."""
     stage_files = STAGE_FILES[stage.stage]
+    # a listed set's windows and airports are the list's: the draw's arguments and --airports go without it
+    drawn_args = {"--airports": args.airports, "--per-airport": args.per_airport, "--seed": args.seed,
+                  **({"--kinds": args.kinds} if stage.stage == "C" else {})}
+    if args.windows is not None and any(value is not None for value in drawn_args.values()):
+        parser.error(f"--windows names the set's windows: refused with "
+                     f"{', '.join(name for name, value in drawn_args.items() if value is not None)}")
     git = git_state()
     if git["dirty"] and not args.smoke:
         parser.error("the tree has uncommitted changes; a Training set is exported from a commit")
@@ -428,7 +491,6 @@ def export_sets(parser: argparse.ArgumentParser, args: argparse.Namespace, stage
         if speed["smoke"] and not args.smoke:
             parser.error(f"{args.speed} is a smoke speed readout: only a --smoke set names it")
     rounds = [r if r == START else int(r) for r in args.rounds]
-    kinds = args.kinds if stage.stage == "C" else [REAL]
     # the campaign's paths as this checkout reads them (a campaign run in the main checkout, exported from a worktree)
     inputs = {**record["inputs"], **{key: str(this_checkout(record["inputs"][key]))
                                      for key in ("instructions", "executor", "prior", "windows", "procedure_root")}}
@@ -439,7 +501,24 @@ def export_sets(parser: argparse.ArgumentParser, args: argparse.Namespace, stage
     settings = stage.settings_of(record)
     context = open_context(Path(inputs["prior"]), instructions, executor, edges_reference, torch.device(args.device),
                            Path(inputs["procedure_root"]), formal=False, data=False)
-    airports = args.airports or sorted(context.geometries)
+    listed_by_airport: dict[str, list[tuple[int, Window]]] = {}
+    if args.windows is not None:
+        list_path = args.windows if args.windows.is_absolute() else REPO_ROOT / args.windows
+        listed = read_window_list(list_path)
+        fields = stage.selection_fields(settings)
+        for place, window in listed_windows(parser, stage, listed, args.split, stage.selection(context, settings),
+                                            fields):
+            listed_by_airport.setdefault(window.scene.geometry.code, []).append((place, window))
+        airports = sorted(listed_by_airport)
+        readout = stage.readout_numbers(settings)
+        listed_cohort = {"form": "listed", "split": args.split, "list": repo_relative(list_path),
+                         "sha256": file_sha256(list_path), "chose": listed.chose,
+                         "listCount": len(listed.windows), "selectSeed": fields["select_seed"]}
+    else:
+        airports = args.airports or sorted(context.geometries)
+        per_airport = DRAWN_PER_AIRPORT if args.per_airport is None else args.per_airport
+        seed = DRAWN_SEED if args.seed is None else args.seed
+        kinds = (args.kinds or [REAL]) if stage.stage == "C" else [REAL]
     signals_record = json.loads((instructions / "signals.json").read_text(encoding="utf-8"))
     existing = {airport: stage_files.read_index(args.root / airport / "training", airport, args.set_id)
                 for airport in airports}
@@ -449,16 +528,23 @@ def export_sets(parser: argparse.ArgumentParser, args: argparse.Namespace, stage
               "instructions": repo_relative(instructions), "executor": repo_relative(executor),
               "specSha256": words.spec.sha256, "executorSpecSha256": opened["sha256"], "checks": opened["checks"],
               "git": git, "smoke": args.smoke, "device": args.device, "speed": speed}
-    flying = stage.flying(context, settings, args.seed)
     started = time.perf_counter()
     built = {}
     for airport in airports:
         hae = candidate_hae_minus_msl_m(signals_record["runway_ends_from"], context.geometries[airport])
-        chosen, drawn = stage.windows(context, settings, args.split, airport, args.per_airport, kinds, args.seed)
+        if args.windows is not None:
+            places = [place for place, _ in listed_by_airport[airport]]
+            chosen = [window for _, window in listed_by_airport[airport]]
+            numbers: Numbers = lambda k, member, places=places: readout(places[k], member)
+            cohort = {**listed_cohort, "windows": len(chosen)}
+        else:
+            chosen, drawn = stage.windows(context, settings, args.split, airport, per_airport, kinds, seed)
+            numbers = stage.drawn_numbers(settings, seed)
+            cohort = {"form": "drawn", "split": args.split, "perAirport": per_airport, "kinds": kinds, "seed": seed,
+                      "windows": len(chosen), **drawn, "drawnFrom": stage.drawn_from}
         flights, windows = window_set(context, args.split, chosen, rounds,
-                                      lambda r: stage.model_of(context, settings, campaign, r), flying, params, hae)
-        cohort = {"split": args.split, "perAirport": args.per_airport, "kinds": kinds, "seed": args.seed,
-                  "windows": len(windows), **drawn, "drawnFrom": stage.drawn_from}
+                                      lambda r: stage.model_of(context, settings, campaign, r),
+                                      stage.flying(context, settings, numbers), params, hae)
         sample = sample_of(args.set_id, context, airport, hae, source, model, cohort, params.cycle_s, flights, windows,
                            stage.campaign_formats)
         entry = index_entry(stage.stage, args.set_id, sample)
@@ -478,7 +564,13 @@ STAGE_C = StageExport(
     windows=lambda context, settings, split, airport, per_airport, kinds, seed: chosen_windows(
         context, split, airport, per_airport, kinds, seed),
     model_of=lambda context, settings, campaign, r: round_model(context, settings, campaign, None if r == START else int(r)),
-    flying=lambda context, settings, seed: stage_c_flying(settings.batch_windows, seed),
+    flying=lambda context, settings, numbers: stage_c_flying(settings.batch_windows, numbers),
+    drawn_numbers=lambda settings, seed: lambda place, member: member_numbers(seed, place, member),
+    # the selection readout's numbers (`post_train.read_batch`): its select seed and the window's place
+    readout_numbers=lambda settings: lambda place, member: member_numbers(settings.select_seed, place, member),
+    selection=lambda context, settings: selection_windows(context, settings, "select"),
+    identity=lambda window: {"flight": window.commanded.key, "row0_s": window.row0_s, "kind": window.kind},
+    selection_fields=lambda settings: {"select_seed": settings.select_seed, "per_airport": settings.select_per_airport},
     drawn_from="a seeded draw of the airport's real windows that do not open inside a loss (D113)", speed=True)
 
 

@@ -40,6 +40,7 @@ import {
   trainingWindowSelectionOf,
   type TrainingWindow,
   type TrainingWindowAircraft,
+  type TrainingWindowCohort,
   type TrainingWindowRound,
   type TrainingWindowRoundEnd,
   type TrainingWindowSample,
@@ -147,6 +148,17 @@ function windowTabs(window: TrainingWindow, aircraft: TrainingWindowAircraft, st
         `window's other aircraft — ${ending(aircraft, sentence, window.rounds[place])} · ${sentence.goArounds} go-around${sentence.goArounds === 1 ? "" : "s"}`,
     })),
   ];
+}
+
+/** What a set's windows are, as the details page's first section says it (frontend §5.7): a draw, or a window list's
+ *  windows and the sentence of what chose them. */
+export function cohortText(cohort: TrainingWindowCohort): string {
+  if (cohort.form === "listed") {
+    return `Listed windows: ${cohort.windows} of the ${cohort.listCount} of the window list ${cohort.list} — ${cohort.chose}. ` +
+      `Each flew with its selection readout's numbers (select seed ${cohort.selectSeed}), so a round says the sentence its readout judged.`;
+  }
+  return `Drawn windows: ${cohort.windows} of the ${cohort.split} days (${cohort.perAirport} real an airport, seed ${cohort.seed}, ` +
+    `kinds ${cohort.kinds.join(", ")}) — ${cohort.drawnFrom}.`;
 }
 
 /** A window as the list shows it (outline §6.2, frontend §5.1): its anchor's callsign ("+k" for its k other commanded
@@ -318,7 +330,7 @@ export default function TrainingWindowSession({ airport, stage, sets, details }:
     // the first section always has a body: the set's intent and provenance come from its index entry, not its sample
     entry === null ? { id: EXPERIMENT_SECTION, title: "The set and the experiment", body: <p className="training-details-lede">The index lists no set.</p> } : {
       id: EXPERIMENT_SECTION, title: "The set and the experiment",
-      body: <ExperimentSection setId={entry.id} intent={intent} provenance={entry.model.campaign} /> },
+      body: <ExperimentSection setId={entry.id} intent={intent} provenance={entry.model.campaign} windows={cohortText(entry.cohort)} /> },
     sample === null ? { id: STATISTICS_SECTION, title: "The models' statistics", body: null, absent }
       : { id: STATISTICS_SECTION, title: "The models' statistics",
         body: <StatisticsSection table={windowStatistics(sample, c)} results={results} /> },

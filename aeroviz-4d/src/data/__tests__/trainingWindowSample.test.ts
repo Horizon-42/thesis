@@ -27,6 +27,8 @@ import { TRAINING_LOST_SEPARATION } from "../trainingSample";
 import {
   stageCIndex, stageCSample, stageCSampleFile, stageCSampleFileFromRound, stageCSelection, WINDOW_SET_ID,
 } from "./stageC";
+import { stageCListedIndex, stageCListedSampleFile } from "./stageCListed";
+import { cohortText } from "../../components/training/TrainingWindowSession";
 
 describe("the index", () => {
   it("is read: one set with its model, cohort and source", () => {
@@ -139,6 +141,37 @@ describe("the sample", () => {
     refused((settings) => { settings.start.checkpoint_sha256 = "abc"; }, "not a SHA-256");
     refused((settings) => { settings.start.round = -1; }, "model.settings.start.round");
     refused((settings) => { delete settings.start.campaign; }, "model.settings.start.campaign");
+  });
+
+  it("reads a set's cohort in either form: drawn (the draw's fields), or listed (the window list's, D176)", () => {
+    expect(sample.cohort).toMatchObject({ form: "drawn", perAirport: 1, seed: 1337, kinds: ["real"] });
+    const listed = parseTrainingWindowSample(stageCListedSampleFile(), "C");
+    if (!listed.ok) throw new Error(listed.problem);
+    const written = stageCListedSampleFile().cohort;
+    expect(listed.value.cohort).toEqual({ form: "listed", split: "select", list: written.list, sha256: written.sha256,
+      chose: written.chose, listCount: written.listCount, windows: listed.value.windows.length, selectSeed: written.selectSeed });
+    const index = parseTrainingWindowIndex(stageCListedIndex());
+    if (!index.ok) throw new Error(index.problem);
+    expect(index.value.sets[0].cohort.form).toBe("listed");
+    expect(cohortText(listed.value.cohort)).toContain(written.chose);
+    expect(cohortText(sample.cohort)).toMatch(/^Drawn windows: /);
+    // a cohort of neither form, and a listed one holding more windows than its list, refused by name
+    const neither = stageCListedSampleFile();
+    neither.cohort.form = "chosen";
+    const refused = parseTrainingWindowSample(neither, "C");
+    expect(!refused.ok && refused.problem).toContain("form");
+    const more = stageCListedSampleFile();
+    more.cohort.windows = 2;
+    const tooMany = parseTrainingWindowSample(more, "C");
+    expect(!tooMany.ok && tooMany.problem).toContain("of the list's 1 windows");
+  });
+
+  it("refuses v4, and another schema, by name", () => {
+    const v4 = parseTrainingWindowSample({ ...stageCSampleFile(), schema: "aeroviz-training-window-sample-v4" }, "C");
+    expect(!v4.ok && v4.problem).toContain(TRAINING_WINDOW_SAMPLE_SCHEMA);
+    expect(!v4.ok && v4.problem).toContain("aeroviz-training-window-sample-v4");
+    const index = parseTrainingWindowIndex({ ...stageCIndex(), schema: "aeroviz-training-window-index-v3" });
+    expect(!index.ok && index.problem).toContain(TRAINING_WINDOW_INDEX_SCHEMA);
   });
 
   it("refuses another schema by name", () => {

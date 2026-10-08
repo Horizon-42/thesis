@@ -202,11 +202,11 @@ def test_the_warm_up_opens_every_listed_window_set(world):
     backend = SyntheticBackend(world["root"], world["flown"], world["setup"]["words"])
     lines = []
     backend.window.warm_up(lines.append)
-    assert any("1 sets ready" in line for line in lines) and post_files.INDEX_FILE == "index_post_v3.json"
+    assert any("1 sets ready" in line for line in lines)
 
 
 def test_a_set_of_stage_d_is_found_under_stage_d_s_index_and_warmed_up(world, tmp_path):
-    """Frontend §5.5, §5.7: stage D's sets are listed in ``index_multi_v1.json``, one format with stage C's; a request
+    """Frontend §5.5, §5.7: stage D's sets are listed in ``index_multi_v2.json``, one format with stage C's; a request
     naming stage D flies a set that index lists (here stage C's set listed there too), and the warm-up opens both."""
     import shutil
 

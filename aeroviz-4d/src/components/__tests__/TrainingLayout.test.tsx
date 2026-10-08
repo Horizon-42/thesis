@@ -60,7 +60,7 @@ function TabsSpy() {
 }
 
 const C_FILES = {
-  "data/airports/KXXX/training/index_post_v3.json": stageCIndex(),
+  "data/airports/KXXX/training/index_post_v4.json": stageCIndex(),
   [`data/airports/KXXX/training/${WINDOW_SET_ID}/sample.json`]: stageCSampleFile(),
 };
 const B_FILES = {

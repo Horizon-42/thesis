@@ -5,7 +5,7 @@
  * anchor answers its loss with the copy, is silent from there and flies on (the loss between them goes on while the copy
  * is observed: one loss, not written again); the copy answers its own.
  */
-import indexFile from "./fixtures/stage_d/index_multi_v1.json";
+import indexFile from "./fixtures/stage_d/index_multi_v2.json";
 import sampleFile from "./fixtures/stage_d/fixture-windows-two/sample.json";
 import {
   parseTrainingWindowSample,

@@ -90,8 +90,10 @@ export function ItemList({ label, items, active, onSelect }: {
 
 /** "The set and the experiment" (outline §6.2 item 3): the campaign's title, intent and design, the set's own line — or the
  *  problem by name — and one line of provenance: the readout or campaign the set was made from (D134). */
-export function ExperimentSection({ setId, intent, provenance }: {
+export function ExperimentSection({ setId, intent, provenance, windows }: {
   setId: string; intent: TrainingSetIntentState; provenance: string;
+  /** What the set's windows are (stages C and D: drawn, or a window list's and what chose them), or null. */
+  windows: string | null;
 }) {
   return (
     <>
@@ -107,6 +109,7 @@ export function ExperimentSection({ setId, intent, provenance }: {
         </p>
       )}
       <p className="training-details-provenance">Set <code>{setId}</code>, made from <code>{provenance}</code></p>
+      {windows === null ? null : <p className="training-details-lede">{windows}</p>}
     </>
   );
 }

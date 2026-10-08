@@ -86,17 +86,7 @@ def stage_d_set(tmp_path, monkeypatch):
                     windows=lambda *a: ([window], {"pool": 1, "real": 1, "leftOut": {}}),
                     model_of=lambda context_, settings_, campaign_, r: model)
     root = tmp_path / "airports"
-    # every census reading of the export, kept with what it read, to be checked against the readout's census
-    census = []
-    reading = multi_export.census_losses
-
-    def kept(context_, flown, w, window_, ends):
-        found = reading(context_, flown, w, window_, ends)
-        census.append((context_, flown, window_, list(ends), found))
-        return found
-
     with monkeypatch.context() as patch:
-        patch.setattr(multi_export, "census_losses", kept)
         patch.setattr(export, "require_conforming_closed_loop",
                       lambda *a: (test_start._params(), {"sha256": "fixture", "checks": {}}, s["words"]))
         patch.setattr(export, "checked_edges", lambda reference: None)
@@ -115,14 +105,14 @@ def stage_d_set(tmp_path, monkeypatch):
     training = root / s["geometry"].code / "training"
     texts = {name: (training / name).read_text(encoding="utf-8")
              for name in (files.MULTI_INDEX_FILE, f"{STAGE_D_SET}/{files.SAMPLE_FILE}")}
-    return texts, census
+    return texts
 
 
 def test_stage_d_s_set_holds_the_answered_losses_and_every_other_one_dashed(tmp_path, monkeypatch):
     """The set in stage D's index (module docstring): both aircraft in the order they join; the losses the loop's
     aircraft answer cost W; every other loss of a commanded aircraft is answered by none and costs nothing; no (step,
     pair) twice; the source names no speed readout (none of stage D, D136); the index entry is stage D's."""
-    texts, census = stage_d_set(tmp_path, monkeypatch)
+    texts = stage_d_set(tmp_path, monkeypatch)
     sample = json.loads(texts[f"{STAGE_D_SET}/{files.SAMPLE_FILE}"])
     index = json.loads(texts[files.MULTI_INDEX_FILE])
     (entry,) = index["sets"]
@@ -137,17 +127,6 @@ def test_stage_d_s_set_holds_the_answered_losses_and_every_other_one_dashed(tmp_
     assert not any(loss["costsW"] for loss in unanswered)
     # the losses between the two while the anchor is silent continue the one it answered: not written again
     assert [loss["step"] for loss in end["losses"]] == [loss["step"] for loss in answered] == [8, 13]
-    # the census the export read is the readout's: per kind, the steps with a loss are its counts
-    from ts_transformer.experiments.multi_train import window_losses_of
-    (context, flown, window_, ends, found) = census[0]
-    counts, _ = window_losses_of(window_, ends, flown.speaking.start, context)
-    steps = {kind: len({step for step, k, _, _ in found if k == kind}) for kind in counts}
-    assert steps["commanded_commanded"] > 0
-    assert all(steps[kind] == counts[kind] for kind in ("commanded_commanded", "commanded_answers"))
-    # the census splits a recorded-only loss by whether the records have it (records_kept); the mirror does not
-    assert (steps["recorded_only"] == 0) == (counts["recorded_only"] + counts["records_kept"] == 0)
-    pairs = [(loss["step"], frozenset(loss["aircraft"])) for loss in end["losses"]]
-    assert len(pairs) == len(set(pairs)) and [p[0] for p in pairs] == sorted(p[0] for p in pairs)
     ids = {a["datasetId"] for a in window["commanded"]}
     assert all(set(loss["aircraft"]) & ids for loss in end["losses"])            # each holds a commanded aircraft
     # an aircraft answers for at most one loss, as the reader requires (D144)
@@ -166,20 +145,32 @@ def test_a_loss_is_written_once_at_the_step_it_starts(monkeypatch):
     """`round_end`: a pair's loss over successive steps that no aircraft answered is one loss, written at its first
     step; a run holding a step the loop's aircraft answered is that answer's — not written again, even from a step
     before the answer (the responsible aircraft still observed, D145); the same pair again after a gap is another."""
+    from ts_transformer.multi.census import JudgedStep, StepLoss
+
     loss = SimpleNamespace(kind="radar_or_vertical", relation="same", required_m=5556.0, distance_m=3000.0,
                            vertical_m=50.0, wake_known=True)
-    found = [(step, "commanded_commanded", ["a", "b"], loss) for step in (4, 5, 6, 7, 9, 10)] + \
-            [(step, "recorded_only", ["a", "r"], loss) for step in (3, 4)]
-    monkeypatch.setattr(multi_export, "census_losses", lambda *a: found)
+    by_step = {step: [StepLoss("commanded_commanded", ("a", "b"), loss)] for step in (4, 5, 6, 7, 9, 10)}
+    for step in (3, 4):
+        by_step.setdefault(step, []).insert(0, StepLoss("recorded_only", ("a", "r"), loss))
+    by_step[5].append(StepLoss("recorded_only", ("b", "r"), loss))
+    steps = [JudgedStep(step, None, 2, tuple(items)) for step, items in sorted(by_step.items())]
+    monkeypatch.setattr(multi_export, "flown_positions", lambda *a: None)
+    monkeypatch.setattr(multi_export, "judged_steps", lambda *a: iter(steps))
     monkeypatch.setattr(multi_export, "round_end_payload", lambda ends, keys, window: {"losses": [
         {"step": 5, "aircraft": ["a", "b"], "answering": ["a"]}], "faultySteps": 0})
     flown = SimpleNamespace(records=[SimpleNamespace(key="a"), SimpleNamespace(key="b")], members=[[0, 1]],
-                            _reading=[{4: frozenset({"r"})}])
-    window = SimpleNamespace(step_s=lambda step: 10.0 * step, row0_s=0.0)
-    written = multi_export.round_end(None, flown, 0, window, [None, None])["losses"]
+                            fault_readings=lambda w: {4: frozenset({"r"})}, speaking=SimpleNamespace(start=0))
+    window = SimpleNamespace(step_s=lambda step: 10.0 * step, row0_s=0.0, scene=SimpleNamespace(
+        geometry=SimpleNamespace(code="KXXX")))
+    context = SimpleNamespace(separations={"KXXX": None}, finals={"KXXX": None}, words=SimpleNamespace(
+        spec=SimpleNamespace(step_s=2.0)))
+    ends = [SimpleNamespace(states=None, words=None, crossing=None)] * 2
+    written = multi_export.round_end(context, flown, 0, window, ends)["losses"]
     assert [(x["step"], sorted(x["aircraft"]), x["answering"]) for x in written] == [
-        (3, ["a", "r"], []), (5, ["a", "b"], ["a"]), (9, ["a", "b"], [])]
+        (3, ["a", "r"], []), (5, ["a", "b"], ["a"]), (5, ["b", "r"], []), (9, ["a", "b"], [])]
     assert written[0]["readsFault"] is False and written[2]["costsW"] is False
+    # "r" reads a faulty point at step 4: after the onset of (a, r) at 3, within the 2 Δ before (b, r) at 5
+    assert [x["readsFault"] for x in written if not x["answering"]] == [False, True, False]
 
 
 def test_a_silent_aircraft_the_executor_finished_ends_where_the_judge_ended_it(tmp_path, monkeypatch):
@@ -219,6 +210,70 @@ def test_a_silent_aircraft_the_executor_finished_ends_where_the_judge_ended_it(t
     assert anchor["track"]["lastCycle"] == last_state_cycle(judged.outcome, judged.end_row)
     assert anchor["timedOut"] == (anchor["outcome"] == "timeout")
     assert any(keys[0] in loss["answering"] for loss in end_["losses"])
+
+
+def test_stage_d_s_positions_and_listed_parts_are_the_readout_s(tmp_path, monkeypatch):
+    """The positions `round_end` hands the census (`multi.census.judged_steps`) are those `multi_train.window_losses_of`
+    builds for the readout, on the same flown window (a MIRROR pinned here); stage D's listed parts (post-training
+    D176 (3)) are the readout's numbers (`multi_train.readout_numbers` of the campaign's seed) and a window list's
+    field names (`post.window_lists`)."""
+    import numpy as np
+
+    from ts_transformer.experiments import multi_train
+    from ts_transformer.post.window_lists import IDENTITY_FIELDS, SELECTION_FIELDS
+
+    s, two, window, model, keys = two_window(tmp_path, monkeypatch)
+    seen: dict[str, list] = {}
+    flown_positions = multi_export.flown_positions
+
+    def capture(name):
+        def read(window_, flown, words):
+            seen.setdefault(name, []).append(flown)
+            return flown_positions(window_, flown, words)
+        return read
+
+    monkeypatch.setattr(multi_export, "flown_positions", capture("export"))
+    monkeypatch.setattr(multi_train, "flown_positions", capture("readout"))
+    settings = SimpleNamespace(spans_s=[window.span_s], batch_rows=[2], seed=2027, select_per_airport=1)
+    flying = multi_export.stage_d_flying(two, settings, multi_export.STAGE_D.readout_numbers(settings))
+    flown_ends = []
+    end = flying.end
+    flying = replace(flying, end=lambda flown, w, window_, ends: (flown_ends.append((flown, list(ends))),
+                                                                   end(flown, w, window_, ends))[1])
+    export.fly_round(model, two, "train", [window], flying)
+    ((flown, ends),) = flown_ends
+    multi_train.window_losses_of(window, ends, flown.speaking.start, two)
+    (ours,), (theirs,) = seen["export"], seen["readout"]
+    assert len(ours) == len(theirs) == 2
+    for a, b in zip(ours, theirs):
+        assert np.array_equal(a[0], b[0]) and np.array_equal(a[1], b[1]) and a[2:] == b[2:]
+    # with landed aircraft (a crossing each): each one's landed runway read, in a window of several, on both sides
+    class Captured(Exception):
+        pass
+
+    def stop(name):
+        def read(window_, flown_, words):
+            seen.setdefault(name, []).append(flown_)
+            raise Captured
+        return read
+
+    landed = [replace(e, crossing={"runway_index": k}) for k, e in enumerate(ends)]
+    monkeypatch.setattr(multi_export, "flown_positions", stop("export landed"))
+    monkeypatch.setattr(multi_train, "flown_positions", stop("readout landed"))
+    with pytest.raises(Captured):
+        multi_export.round_end(two, flown, 0, window, landed)
+    with pytest.raises(Captured):
+        multi_train.window_losses_of(window, landed, flown.speaking.start, two)
+    (ours,), (theirs,) = seen["export landed"], seen["readout landed"]
+    assert [a[3] for a in ours] == [b[3] for b in theirs] == [0, 1]
+    ours_numbers = multi_export.STAGE_D.readout_numbers(settings)(3, 1).random(4)
+    assert ours_numbers.tolist() == multi_train.readout_numbers(2027, 3, 1).random(4).tolist()
+    assert tuple(multi_export.STAGE_D.identity(window)) == IDENTITY_FIELDS["D"]
+    assert tuple(multi_export.STAGE_D.selection_fields(SimpleNamespace(seed=2027, select_per_airport=1,
+                                                                       spans_s=[300.0]))) == SELECTION_FIELDS["D"]
+    assert tuple(export.STAGE_C.identity(window)) == IDENTITY_FIELDS["C"]
+    assert tuple(export.STAGE_C.selection_fields(SimpleNamespace(select_seed=7, select_per_airport=1))) == \
+        SELECTION_FIELDS["C"]
 
 
 def test_stage_d_s_export_refuses_a_campaign_of_another_stage(tmp_path, capsys):
