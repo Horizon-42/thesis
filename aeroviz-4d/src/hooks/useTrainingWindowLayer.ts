@@ -30,6 +30,7 @@ import {
   onAircraftClock,
   onWindowClock,
   otherOf,
+  roundLabel,
   trainingWindowOriginOf,
   windowShiftText,
   type TrainingWindowOrigin,
@@ -139,7 +140,7 @@ function drawOtherRounds(viewer: Cesium.Viewer, origin: TrainingWindowOrigin) {
   const group = entityGroup(viewer);
   for (const sentence of origin.aircraft.rounds) {
     if (sentence.round === origin.round) continue;
-    group.add(airLine(ENTITY.round(String(sentence.round)), `Round ${sentence.round}: ${TRAINING_OUTCOME_TAG[sentence.outcome]}`,
+    group.add(airLine(ENTITY.round(String(sentence.round)), `${roundLabel(sentence.round, origin.sample.model.start)}: ${TRAINING_OUTCOME_TAG[sentence.outcome]}`,
       Cesium.Cartesian3.fromDegreesArrayHeights(lonLatHeights(sentence.flown)), trainingOutcomeColour(sentence.outcome), 1.5, 0.5));
   }
   return group;

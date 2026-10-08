@@ -10,7 +10,7 @@ import { parseTrainingSetResults, type TrainingSetResults } from "../trainingSet
 import { resultsAnswer, type ResultsAnswer } from "./trainingResults";
 import { stageASample } from "./stageA";
 import { stageBSample } from "./stageB";
-import { stageCSample } from "./stageC";
+import { stageCSample, stageCSampleFromRound } from "./stageC";
 import StatisticsSection from "../../components/training/StatisticsSection";
 
 function results(name: ResultsAnswer): TrainingSetResults {
@@ -93,6 +93,10 @@ describe("the rows of each stage", () => {
     expect(two.rows.map((row) => [row.label, row.kind])).toEqual([["start (base)", "base"], ["r0", "postTrained"]]);
     expect(two.rows[1].readout).toEqual({ sentences: answer.selection.KXXX.windows, landed: answer.selection.KXXX.outcomes.landed,
       goArounds: null, timedOut: 0, lost: 0, rewardSum: answer.selection.KXXX.rewardMean * answer.selection.KXXX.windows });
+    // a campaign that starts from another campaign's round (D162): the start named by it, a post-trained row
+    sample.model.start = stageCSampleFromRound().model.start;
+    expect(windowStatistics(sample, results("C")).rows.map((row) => [row.label, row.kind]))
+      .toEqual([["start (post_source_fixture r0)", "postTrained"], ["r0", "postTrained"]]);
   });
 });
 

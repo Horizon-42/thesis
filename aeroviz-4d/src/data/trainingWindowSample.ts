@@ -83,12 +83,23 @@ export type TrainingWindowRole = (typeof TRAINING_WINDOW_ROLES)[number];
 /** A round of a campaign: the model at its start, or the model after a round. */
 export type TrainingWindowRound = number | typeof TRAINING_WINDOW_START;
 
+/** The round of another campaign that a campaign starts from (post-training D162): its directory (repository-relative),
+ *  the round and the checkpoint's SHA-256. */
+export interface TrainingWindowStart {
+  campaign: string;
+  round: number;
+  checkpointSha256: string;
+}
+
 export interface TrainingWindowModel {
   campaign: string;
   rounds: TrainingWindowRound[];
   rowIntervalS: number;
   mostGoArounds: number;
   procedureMasks: string;
+  /** What the campaign starts from (the set's `model.settings.start`): null for the base (D29), else another campaign's
+   *  round (D162). */
+  start: TrainingWindowStart | null;
 }
 
 export interface TrainingWindowCohort {
@@ -262,6 +273,16 @@ function parseRound(value: unknown, where: Reader): TrainingWindowRound {
   return where.fail(`round ${JSON.stringify(value)} is neither "${TRAINING_WINDOW_START}" nor a round's number`);
 }
 
+/** MIRROR of `post_train.Settings.start` as the campaign records it: null, or the round of another campaign (D162). Only
+ *  this key of the campaign's settings is read. */
+function parseStart(settings: Reader): TrainingWindowStart | null {
+  const start = settings.nullableChild("start");
+  if (start === null) return null;
+  const checkpointSha256 = start.string("checkpoint_sha256");
+  if (!/^[0-9a-f]{64}$/.test(checkpointSha256)) start.fail(`checkpoint_sha256 ${checkpointSha256} is not a SHA-256`);
+  return { campaign: start.string("campaign"), round: start.count("round"), checkpointSha256 };
+}
+
 function parseModel(reader: Reader): TrainingWindowModel {
   const rounds = reader.list("rounds").map((value) => parseRound(value, reader));
   if (rounds.length === 0) reader.fail("rounds is empty");
@@ -269,6 +290,7 @@ function parseModel(reader: Reader): TrainingWindowModel {
   return {
     campaign: reader.string("campaign"), rounds, rowIntervalS: reader.number("rowIntervalS"),
     mostGoArounds: reader.count("mostGoArounds"), procedureMasks: reader.string("procedureMasks"),
+    start: parseStart(reader.child("settings")),
   };
 }
 
@@ -559,9 +581,15 @@ export function windowShiftText(seconds: number): string {
 
 // ── a round's sentence as the stage-A views read it ──────────────────────────
 
-/** A round as the view's lines and titles name it. */
-export function roundLabel(round: TrainingWindowRound): string {
-  return round === TRAINING_WINDOW_START ? "start (base)" : `round ${round}`;
+/** The model a campaign starts from, by name (frontend §4.3): the base (D29), or another campaign's round by the
+ *  campaign's directory name (D162). The one name the tabs, the statistics and the lines give it. */
+export function startName(start: TrainingWindowStart | null): string {
+  return start === null ? "base" : `${start.campaign.split("/").pop()} r${start.round}`;
+}
+
+/** A round as the view's lines and titles name it; the start by what it is (`startName`). */
+export function roundLabel(round: TrainingWindowRound, start: TrainingWindowStart | null): string {
+  return round === TRAINING_WINDOW_START ? `start (${startName(start)})` : `round ${round}`;
 }
 
 /** A window time (s from its row 0) on ``aircraft``'s flight clock. */

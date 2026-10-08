@@ -257,3 +257,23 @@ def test_the_frontend_fixtures_are_what_the_export_writes(tmp_path, monkeypatch)
     for name, text in texts.items():
         assert (FIXTURES / name).read_text(encoding="utf-8") == text, (
             f"{FIXTURES / name} is not what the export writes now: AEROVIZ_WRITE_FIXTURES=1 writes it again")
+
+
+START_FIXTURE = "start_from_round.json"
+
+
+def test_the_frontend_fixture_of_a_start_from_a_round_is_what_post_train_writes(tmp_path, monkeypatch):
+    """The setting of a start from another campaign's round (`Settings.start`, D162) as `post_train.start_of` writes it
+    — the value the export copies into a set's ``model.settings.start``: the frontend's reader is tested on it (frontend
+    §4.3), so a change of its keys moves this fixture (``AEROVIZ_WRITE_FIXTURES=1`` writes it again). The source is a
+    smoke campaign with round 0 done (a checkpoint of fixed bytes: `start_of` only names and hashes it)."""
+    source = tmp_path / "post_source_fixture"
+    open_campaign(source, {"settings": asdict(_settings(rounds=1)), "smoke": True}, {"head": "fixture", "dirty": False}, {})
+    (source / "round_0").mkdir()
+    (source / "round_0" / "checkpoint.pt").write_bytes(b"the fixture's round 0")
+    monkeypatch.setattr(post_train, "repo_relative", lambda path: f"fixture/{path.name}")
+    text = json.dumps({"start": post_train.start_of(source, 0, formal=False)}, indent=2) + "\n"
+    if os.environ.get("AEROVIZ_WRITE_FIXTURES") == "1":
+        (FIXTURES / START_FIXTURE).write_text(text, encoding="utf-8")
+    assert (FIXTURES / START_FIXTURE).read_text(encoding="utf-8") == text, (
+        f"{FIXTURES / START_FIXTURE} is not what post_train.start_of writes now: AEROVIZ_WRITE_FIXTURES=1 writes it again")

@@ -7,7 +7,8 @@
  * A window holds a list of commanded aircraft (frontend §5.7, the window format of stages C and D); stage C's windows
  * hold one, and this view shows it (stage D's aircraft strip chooses among several, F3). Of the window on screen the
  * SENTENCE BAR'S TABS choose the sentence — Labelled (the labeller's open-loop reading of the recorded flight of the
- * commanded aircraft) and each round's sentence for it, Start (base), Round 1 …
+ * commanded aircraft) and each round's sentence for it, Start (what the campaign starts from: the base, or another
+ * campaign's round, D162), r0, r1 …
  * (`data/trainingTabs.ts`); the bar, the read-back window and the 3D layers draw it as stage A draws a sentence (a round's
  * sentence is published as a closed-loop sentence at the set's Δ, `trainingWindowFlightView`). The left panel has no
  * second chooser.
@@ -31,6 +32,8 @@ import {
   roundLabel,
   onAircraftClock,
   otherOf,
+  startName,
+  TRAINING_WINDOW_START,
   trainingWindowFlightView,
   trainingWindowSelectionOf,
   type TrainingWindow,
@@ -40,6 +43,7 @@ import {
   type TrainingWindowSample,
   type TrainingWindowSentence,
   type TrainingWindowSetEntry,
+  type TrainingWindowStart,
 } from "../../data/trainingWindowSample";
 import { readingAxisEndS, trainingReadingOf } from "../../data/trainingSample";
 import { TRAINING_OUTCOME_TAG } from "../../data/trainingText";
@@ -117,20 +121,22 @@ function ending(aircraft: TrainingWindowAircraft, sentence: TrainingWindowSenten
       : `loss of separation with ${losses.map((loss) => otherOf(loss, aircraft.datasetId)).join(", ")}`);
 }
 
-/** A round's tab label (outline §6.2 item 2): short, r1, r2 … (the user, 2026-10-06); its tooltip says what it is. */
-export function roundTabLabel(round: TrainingWindowRound): string {
-  return round === "start" ? "Start (base)" : `r${round}`;
+/** A round's tab label (outline §6.2 item 2): short, r1, r2 … (the user, 2026-10-06), the start by what it is
+ *  (`startName`, frontend §4.3); its tooltip says what it is. */
+export function roundTabLabel(round: TrainingWindowRound, start: TrainingWindowStart | null): string {
+  return round === TRAINING_WINDOW_START ? `Start (${startName(start)})` : `r${round}`;
 }
 
 /** The tabs of a commanded aircraft of a window. */
-function windowTabs(window: TrainingWindow, aircraft: TrainingWindowAircraft): TrainingTab[] {
+function windowTabs(window: TrainingWindow, aircraft: TrainingWindowAircraft, start: TrainingWindowStart | null): TrainingTab[] {
   return [
     { id: LABELLED, label: "Labelled", outcome: null, kind: null,
       title: "The labeller's open-loop reading of the recorded flight of the commanded aircraft; not flown" +
         (window.kind === "B" ? ". This window starts from a moved start (window B): the reading is of the flight as recorded" : "") },
     ...aircraft.rounds.map((sentence, place) => ({
-      id: roundTab(sentence.round), label: roundTabLabel(sentence.round), outcome: sentence.outcome, kind: roundKind(sentence.round),
-      title: `The sentence ${roundLabel(sentence.round)}'s model said for the commanded aircraft, flown by the executor among the ` +
+      id: roundTab(sentence.round), label: roundTabLabel(sentence.round, start), outcome: sentence.outcome,
+      kind: roundKind(sentence.round, start),
+      title: `The sentence ${roundLabel(sentence.round, start)}'s model said for the commanded aircraft, flown by the executor among the ` +
         `window's other aircraft — ${ending(aircraft, sentence, window.rounds[place])} · ${sentence.goArounds} go-around${sentence.goArounds === 1 ? "" : "s"}`,
     })),
   ];
@@ -140,7 +146,7 @@ function windowTabs(window: TrainingWindow, aircraft: TrainingWindowAircraft): T
 function roundsSummary(sample: TrainingWindowSample): string {
   return sample.model.rounds.map((round) => {
     const said = sample.windows.flatMap((window) => window.commanded.flatMap((aircraft) => aircraft.rounds.filter((item) => item.round === round)));
-    return `${roundLabel(round)}: ${said.filter((item) => item.outcome === "landed").length}/${said.length} landed`;
+    return `${roundLabel(round, sample.model.start)}: ${said.filter((item) => item.outcome === "landed").length}/${said.length} landed`;
   }).join(" · ");
 }
 
@@ -166,7 +172,8 @@ export default function TrainingWindowSession({ airport, sets, details }: {
 
   // ── the tabs: the session gives them, the bar chooses (outline §6.2 item 2) ──
   const scope = sample === null || window === null ? null : `C/${airport}/${sample.setId}/window-${window.index}`;
-  const tabList = useMemo(() => (window === null || aircraft === null ? [] : windowTabs(window, aircraft)), [window, aircraft]);
+  const tabList = useMemo(() => (sample === null || window === null || aircraft === null ? []
+    : windowTabs(window, aircraft, sample.model.start)), [sample, window, aircraft]);
   const shared = useTrainingTabs();
   const last = useRef<string | null>(null);
   // a window opens on the last tab chosen where it has one, else on its last round
@@ -254,13 +261,13 @@ export default function TrainingWindowSession({ airport, sets, details }: {
                 runwayTitle: "the runway the flight landed on in the record (a round's sentence may say another)", stratum: item.kind,
                 landed: anchor.rounds.filter((s) => s.outcome === "landed").length, of: anchor.rounds.length,
                 more: `${item.traffic.length} other`, title: anchor.head.flightKey,
-                outcomes: anchor.rounds.map((s) => `${roundLabel(s.round)}: ${TRAINING_OUTCOME_TAG[s.outcome]}`).join("; "),
+                outcomes: anchor.rounds.map((s) => `${roundLabel(s.round, sample.model.start)}: ${TRAINING_OUTCOME_TAG[s.outcome]}`).join("; "),
               };
             })} />
           {window === null || aircraft === null || sentence === null || end === null ? null : (
             <ul className="training-details-links" aria-label="Readouts">
               <DetailsLink name="This round" onOpen={details.open(STATISTICS_SECTION)}
-                summary={chosen === LABELLED ? "the labelled sentence (not flown)" : `${roundLabel(sentence.round)}: ${ending(aircraft, sentence, end)}`} />
+                summary={chosen === LABELLED ? "the labelled sentence (not flown)" : `${roundLabel(sentence.round, sample.model.start)}: ${ending(aircraft, sentence, end)}`} />
               <DetailsLink name="Rounds" onOpen={details.open(STATISTICS_SECTION)} summary={roundsSummary(sample)} />
               <ReadoutLine name="The window" summary={`${TRAINING_WINDOW_KIND_TEXT[window.kind]} · ` +
                 (window.traffic.length === 0 ? "no other aircraft"

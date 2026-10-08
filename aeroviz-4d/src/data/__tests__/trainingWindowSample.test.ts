@@ -14,6 +14,8 @@ import {
   onAircraftClock,
   onWindowClock,
   otherOf,
+  roundLabel,
+  startName,
   trainingWindowFlightView,
   trainingWindowOriginOf,
   TRAINING_WINDOW_INDEX_SCHEMA,
@@ -22,7 +24,9 @@ import {
 } from "../trainingWindowSample";
 import { TRAINING_LOST_SEPARATION } from "../trainingSample";
 import { positionAt } from "../../hooks/useTrainingWindowLayer";
-import { stageCIndex, stageCSample, stageCSampleFile, stageCSelection, WINDOW_SET_ID } from "./stageC";
+import {
+  stageCIndex, stageCSample, stageCSampleFile, stageCSampleFileFromRound, stageCSelection, WINDOW_SET_ID,
+} from "./stageC";
 
 describe("the index", () => {
   it("is read: one set with its model, cohort and source", () => {
@@ -33,6 +37,7 @@ describe("the index", () => {
     expect(set).toMatchObject({ id: WINDOW_SET_ID, file: `${WINDOW_SET_ID}/sample.json`, windows: 3, flights: 1 });
     expect(set.model.rounds).toEqual(["start"]);
     expect(set.model.rowIntervalS).toBe(4);
+    expect(set.model.start).toBeNull();                                // the fixture's campaign starts from the base
     expect(set.source.smoke).toBe(true);
   });
 
@@ -103,6 +108,37 @@ describe("the sample", () => {
     const row = moved.head.closedLoop["4"].firstRow;
     expect(start.lon[0]).not.toBeCloseTo(moved.head.observed.lon[row], 4);
     expect(start.altitudeHaeM[0]).toBeCloseTo(start.altitudeMslM[0] + moved.head.haeMinusMslM, 6);
+  });
+
+  it("reads the campaign's start: the base, or another campaign's round (D162), named by one function", () => {
+    expect(sample.model.start).toBeNull();
+    expect(startName(sample.model.start)).toBe("base");
+    expect(roundLabel("start", sample.model.start)).toBe("start (base)");
+    const raw = stageCSampleFileFromRound();                           // post_train.start_of's setting (the fixture)
+    const parsed = parseTrainingWindowSample(raw);
+    if (!parsed.ok) throw new Error(parsed.problem);
+    const { start } = parsed.value.model;
+    const written = raw.model.settings.start;
+    expect(start).toEqual({ campaign: written.campaign, round: written.round, checkpointSha256: written.checkpoint_sha256 });
+    expect(startName(start)).toBe(`${written.campaign.split("/").pop()} r${written.round}`);
+    expect(startName(start)).toBe("post_source_fixture r0");
+    expect(roundLabel("start", start)).toBe("start (post_source_fixture r0)");
+    expect(roundLabel(5, start)).toBe("round 5");
+  });
+
+  it("refuses a start of another shape, and settings without one", () => {
+    const refused = (change: (settings: Record<string, any>) => void, says: string) => {
+      const raw = stageCSampleFileFromRound();
+      change(raw.model.settings);
+      const parsed = parseTrainingWindowSample(raw);
+      expect(parsed.ok).toBe(false);
+      if (!parsed.ok) expect(parsed.problem).toContain(says);
+    };
+    refused((settings) => { delete settings.start; }, "model.settings.start");
+    refused((settings) => { settings.start = settings.start.campaign; }, "model.settings.start");
+    refused((settings) => { settings.start.checkpoint_sha256 = "abc"; }, "not a SHA-256");
+    refused((settings) => { settings.start.round = -1; }, "model.settings.start.round");
+    refused((settings) => { delete settings.start.campaign; }, "model.settings.start.campaign");
   });
 
   it("refuses another schema by name", () => {

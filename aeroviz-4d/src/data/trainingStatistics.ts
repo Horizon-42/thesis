@@ -18,7 +18,9 @@
 import type { TrainingSentenceKind } from "../utils/trainingWordColors";
 import type { TrainingSample } from "./trainingSample";
 import type { TrainingPriorSample } from "./trainingPriorSample";
-import { TRAINING_WINDOW_START, type TrainingWindowRound, type TrainingWindowSample } from "./trainingWindowSample";
+import {
+  startName, TRAINING_WINDOW_START, type TrainingWindowRound, type TrainingWindowSample, type TrainingWindowStart,
+} from "./trainingWindowSample";
 import type { Counts, TrainingSetResults } from "./trainingSetResults";
 import { roundKind } from "./trainingSentenceKind";
 
@@ -120,12 +122,12 @@ export function stageBStatistics(sample: TrainingPriorSample, results: TrainingS
   };
 }
 
-/** A round's row label, as the bar's tabs name it. */
-function roundName(round: TrainingWindowRound): string {
-  return round === TRAINING_WINDOW_START ? "start (base)" : `r${round}`;
+/** A round's row label, as the bar's tabs name it; the start by what it is (`startName`). */
+function roundName(round: TrainingWindowRound, start: TrainingWindowStart | null): string {
+  return round === TRAINING_WINDOW_START ? `start (${startName(start)})` : `r${round}`;
 }
 
-/** Stages C and D: a row for each round of the set (the start is the base's). */
+/** Stages C and D: a row for each round of the set (the start is the base's, or another campaign's round, D162). */
 export function windowStatistics(sample: TrainingWindowSample, results: TrainingSetResults | null): TrainingStatsTable {
   const section = results !== null && results.stage === "C" ? results.rounds : null;
   const rounds = section !== null && section.ok ? section.value.rounds : null;
@@ -136,7 +138,7 @@ export function windowStatistics(sample: TrainingWindowSample, results: Training
       const read = round === TRAINING_WINDOW_START || rounds === null ? undefined
         : rounds.find((item) => item.round === round)?.selection[sample.airport];
       return {
-        key: `round-${round}`, label: roundName(round), kind: roundKind(round),
+        key: `round-${round}`, label: roundName(round, sample.model.start), kind: roundKind(round, sample.model.start),
         set: cellsOf(countOutcomes(said.map((sentence) => sentence.outcome)), sum(said.map((sentence) => sentence.goArounds)), true,
           sum(said.map((sentence) => sentence.reward))),
         readout: read === undefined ? null : cellsOf(read.outcomes, null, true, read.rewardMean * read.windows),

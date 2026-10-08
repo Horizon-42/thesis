@@ -13,9 +13,10 @@ only by a planned readout, outline §6 item 4), drawn once with ``--seed`` from 
 kind the window admits none of, or one that opens inside a loss, is left out and counted). Every round flies the same
 windows with the same numbers (`post_train.readout_numbers`), so the rounds stand side by side.
 
-WHICH ROUNDS. ``--rounds``: ``start`` (the model at the start: the base with zero-output traffic modules, D29) and the
-numbers of rounds whose checkpoint the campaign holds (`post_train.round_model`, refused for another base, masks or
-traffic shape).
+WHICH ROUNDS. ``--rounds``: ``start`` (the model at the start, `post_train.campaign_start`: the base with zero-output
+traffic modules, D29, or the round of another campaign it starts from, D162; the set names it by
+``model.settings.start``) and the numbers of rounds whose checkpoint the campaign holds (`post_train.round_model`,
+refused for another base, masks or traffic shape).
 
 THE SENTENCE IS THE EXPORT'S OWN READOUT: the windows are flown here (`WindowLoop`), and what is written comes from that
 flight — the words, the executor's record on the 2 s rows (the judge's outcome and crossing for a flight the executor

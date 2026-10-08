@@ -30,7 +30,9 @@ vi.mock("../../context/AppContext", () => ({
 import TrainingPanel from "../TrainingPanel";
 import { AEROVIZ_BACKEND_URL } from "../../pilot/pilotClient";
 import { stageBIndex, stageBSampleFile, stageBValSampleFile } from "../../data/__tests__/stageB";
-import { stageCIndex, stageCSample, stageCSampleFile, stageCSelection, WINDOW_SET_ID } from "../../data/__tests__/stageC";
+import {
+  stageCIndex, stageCSample, stageCSampleFile, stageCSampleFromRound, stageCSelection, WINDOW_SET_ID,
+} from "../../data/__tests__/stageC";
 import { chooseTrainingTab, useTrainingTabs, type TrainingTabs } from "../../data/trainingTabs";
 import { requestTrainingDetails } from "../training/PanelParts";
 import { resultsAnswer, resultsUrl } from "../../data/__tests__/trainingResults";
@@ -185,8 +187,11 @@ describe("one layout for the three stages", () => {
 });
 
 describe("the tabs' short labels (the user, 2026-10-06)", () => {
-  it("a round is r1, r2 …; the base's start is Start (base)", () => {
-    expect([1, 2, 12].map(roundTabLabel)).toEqual(["r1", "r2", "r12"]);
-    expect(roundTabLabel("start")).toBe("Start (base)");
+  it("a round is r1, r2 …; the start is Start (base), or Start (<campaign> r<n>) from another campaign's round (D162)", () => {
+    expect([1, 2, 12].map((round) => roundTabLabel(round, null))).toEqual(["r1", "r2", "r12"]);
+    expect(roundTabLabel("start", null)).toBe("Start (base)");
+    const from = stageCSampleFromRound().model.start;
+    expect(roundTabLabel("start", from)).toBe("Start (post_source_fixture r0)");
+    expect(roundTabLabel(3, from)).toBe("r3");
   });
 });
