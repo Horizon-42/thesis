@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from dataclasses import replace
 from types import SimpleNamespace
 
 import numpy as np
@@ -316,3 +317,148 @@ def test_v_s_reading_changes_nothing_the_loop_says_or_flies(setup):
     said = np.diff(left[start:start + 20])
     assert np.allclose(said[said < 0.5], -4.0 / 900.0, atol=1e-5)      # 4 s a row
     assert np.allclose(said[said >= 0.5], 896.0 / 900.0, atol=1e-5)     # a go-around's 900 s, less the row
+
+
+def _weights(model) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    for k, v in model.state_dict().items():
+        h.update(k.encode())
+        h.update(v.detach().cpu().contiguous().numpy().tobytes())
+    return h.hexdigest()
+
+
+#: A value campaign of 2 rounds (warm-up then training, two passes, a clip) on the fixture's short round, as the code
+#: before D173 made it (2026-10-08, dev-two-tier-v4-post c288ad77): its models' and V's weights and the old keys of
+#: V's record. D173's defaults must give it bit for bit.
+VALUE_BEFORE_D173 = "e38ec0f923c83eed37d97172616d3c09676fe8d4f946d73d1842f26503cd2efb"
+
+
+def test_with_d173_s_defaults_a_value_campaign_is_the_code_s_before_bit_for_bit(setup, tmp_path, monkeypatch):
+    import hashlib
+
+    from ts_transformer.experiments.post_train import STAGE_C_VALUE, open_campaign, run_campaign
+    from ts_transformer.tests.test_post_train import _context, _inputs, short_round
+
+    s = setup
+    short_round(monkeypatch, s)
+    settings = _value_settings(rounds=2, epochs=2, clip_norm=1.0)
+    out = tmp_path / "campaign"
+    threads = torch.get_num_threads()
+    torch.set_num_threads(1)                          # the digest was taken on one thread (as test_post_generalised's)
+    try:
+        open_campaign(out, _inputs(settings, tmp_path), {"head": "x", "dirty": False}, {})
+        run_campaign(out, settings, _context(s), stage=STAGE_C_VALUE)
+    finally:
+        torch.set_num_threads(threads)
+    h = hashlib.sha256()
+    for r in range(2):
+        for name in ("checkpoint.pt", "value.pt"):
+            state = torch.load(out / f"round_{r}" / name, weights_only=False)
+            for key in ("model", "value"):
+                if key in state:
+                    for k, v in state[key].items():
+                        h.update(k.encode())
+                        h.update(v.detach().cpu().contiguous().numpy().tobytes())
+        value = json.loads((out / f"round_{r}" / "round.json").read_text())["pass"]["value"]
+        old = {k: value[k] for k in ("loss_before", "advantage_mean", "advantage_std", "rows", "loss_after",
+                                     "explained_after", "updates")}
+        h.update(json.dumps(old, sort_keys=True).encode())
+        assert value["centred_by"] is None and value["passes"] == 2
+    assert h.hexdigest() == VALUE_BEFORE_D173
+
+
+def _spoken_round(s, tmp_path, monkeypatch, **changed):
+    """The fixture's value round spoken into a directory, a batch (a file) each: the real window (its whole flight, many
+    counted rows) and the window with an aircraft inserted ahead (one counted row); the context, the settings, the
+    start model and its optimizer."""
+    from ts_transformer.experiments.post_train import STAGE_C_VALUE, speak_round, start_model
+    from ts_transformer.tests.test_post_train import _context
+
+    context = _context(s)
+    settings = _value_settings(batch_windows=1, **changed)
+    model, optimizer = start_model(context, settings)
+    windows = [s["windows"][0], _ahead(s["windows"][0])]
+    directory = tmp_path / "round"
+    directory.mkdir()
+    speak_round(model, context, windows, settings, 0, directory, stage=STAGE_C_VALUE)
+    return context, settings, model, optimizer, directory
+
+
+def test_the_centring_takes_the_round_s_mean_off_the_advantages_and_keeps_the_targets(setup, tmp_path, monkeypatch):
+    """D173 (a): after V at the round's start has read the samples, each counted row's advantage less the round's mean
+    of them — their mean 0, the rows not counted 0 — and the targets those before the centring."""
+    from ts_transformer.experiments.post_train import round_advantages
+
+    context, settings, model, _, directory = _spoken_round(setup, tmp_path, monkeypatch)
+    torch.manual_seed(0)
+    value = Value.of(model)
+    plain, before = round_advantages(directory, CPU, value)
+    centred, after = round_advantages(directory, CPU, value, centering=True)
+    assert before["centred_by"] is None and after["centred_by"] == pytest.approx(before["advantage_mean"])
+    assert before["advantage_mean"] != 0.0 and before["advantage_std"] > 0.0 and len(plain) == 2   # two files
+    assert any(bool((c[m] != 0).any()) for c, _, m in
+               [(centred[k][0], plain[k][0], plain[k][0] != 0) for k in plain])
+    rows = [(centred[k][0], plain[k][0], plain[k][0] != 0) for k in plain]
+    total = sum(float(c[m].sum()) for c, _, m in rows)
+    assert abs(total) < 1e-4                                                       # their mean 0
+    assert all(torch.allclose(c[m], p[m] - before["advantage_mean"]) and not c[~m].any() for c, p, m in rows)
+    assert all(torch.equal(centred[k][1], plain[k][1]) for k in plain)              # the targets kept
+
+
+def test_v_steps_in_its_first_passes_only_and_the_model_in_every_pass(setup, tmp_path, monkeypatch):
+    """D173 (b): with `value_epochs` 1 and `epochs` 4, V's weights change in the first pass only and the model's in all
+    four; a warm-up round makes V's pass only; `value_epochs` above `epochs` is refused."""
+    from ts_transformer.experiments import post_train
+    from ts_transformer.experiments.post_train import ValueRun, value_train_pass
+
+    context, settings, model, optimizer, directory = _spoken_round(setup, tmp_path, monkeypatch, epochs=4,
+                                                                    value_epochs=1, value_warmup=0)
+    companion = ValueRun.of(context, settings, tmp_path, 0, model)
+    seen = []
+    real = post_train.value_pairs
+
+    def watched(*a, **k):
+        seen.append((_weights(model), _weights(companion.value)))
+        yield from real(*a, **k)
+
+    monkeypatch.setattr(post_train, "value_pairs", watched)
+    record = value_train_pass(model, context, optimizer, directory, settings, np.random.default_rng(0), part_width=0,
+                              round_=0, companion=companion)
+    seen.append((_weights(model), _weights(companion.value)))
+    models, values = [m for m, _ in seen], [v for _, v in seen]
+    assert len(seen) == 5 and len(set(models)) == 5                               # the model moves in every pass
+    assert values[0] != values[1] and len(set(values[1:])) == 1                   # V in the first pass only
+    assert record["value"]["passes"] == 1 and len(record["passes"]) == 4
+    assert record["value"]["updates"] == record["updates"] // 4                   # V's updates: the first pass's
+    seen.clear()
+    warm = replace(settings, value_warmup=1)
+    value_train_pass(model, context, optimizer, directory, warm, np.random.default_rng(0), part_width=0, round_=0,
+                     companion=companion)
+    assert len(seen) == 1                                                         # warm-up: V's one pass only
+    with pytest.raises(ValueError, match="value_epochs 5: from 1 to epochs"):
+        _value_settings(epochs=4, value_epochs=5)
+
+
+def test_d173_s_settings_go_with_the_value_method_and_a_record_without_them_reads_the_defaults(tmp_path):
+    from ts_transformer.experiments import post_train
+    from ts_transformer.experiments.post_train import open_campaign
+    from ts_transformer.tests.test_post_train import _inputs, _settings
+
+    for wrong in (dict(advantage_centering=True), dict(value_epochs=1)):
+        with pytest.raises(ValueError, match="advantage_centering and value_epochs are the value method's"):
+            _settings(**wrong)
+    settings = _value_settings()
+    out = tmp_path / "campaign"
+    open_campaign(out, _inputs(settings, tmp_path), {"head": "x", "dirty": False}, {})
+    record = json.loads((out / "campaign.json").read_text())
+    for added in ("advantage_centering", "value_epochs"):
+        del record["inputs"]["settings"][added]                                   # a record from before D173
+    (out / "campaign.json").write_text(json.dumps(record))
+    assert post_train.settings_of(record) == settings
+    assert len(open_campaign(out, _inputs(settings, tmp_path), {"head": "x", "dirty": False}, {})["resumed"]) == 1
+    for changed in (dict(advantage_centering=True), dict(value_epochs=1)):
+        with pytest.raises(SystemExit, match="other inputs or settings"):
+            open_campaign(out, _inputs(_value_settings(**changed), tmp_path), {"head": "x", "dirty": False}, {})
+

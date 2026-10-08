@@ -196,6 +196,11 @@ class Settings:
     #: train V alone; both required with `VALUE` and refused with another method. Added as ``clip_norm`` (None: no V).
     value_lr: float | None = None
     value_warmup: int | None = None
+    #: D173: with `VALUE`, each counted row's advantage less the round's mean of them (the targets kept), and V's steps
+    #: in the round's first ``value_epochs`` passes only (None: every pass); added as ``clip_norm`` (the behaviour
+    #: before them: no centring, V in every pass)
+    advantage_centering: bool = False
+    value_epochs: int | None = None
 
     def __post_init__(self) -> None:
         if set(self.per_kind) != set(KINDS) or min(self.per_kind.values()) < 0 or not any(self.per_kind.values()):
@@ -217,6 +222,10 @@ class Settings:
                 self.value_warmup is not None):
             raise ValueError(f"value_lr and value_warmup are required with method {VALUE!r} and refused with another "
                              f"(method {self.method!r})")
+        if self.method != VALUE and (self.advantage_centering or self.value_epochs is not None):
+            raise ValueError(f"advantage_centering and value_epochs are the value method's, not {self.method!r}'s")
+        if self.value_epochs is not None and not 1 <= self.value_epochs <= self.epochs:
+            raise ValueError(f"value_epochs {self.value_epochs}: from 1 to epochs ({self.epochs})")
         if self.method == VALUE and not (self.value_lr > 0 and self.value_warmup >= 0 and self.continuations == 1):
             raise ValueError("with method value: value_lr positive, value_warmup at least 0, and continuations 1 (one "
                              "sentence a window, D171)")
@@ -1273,20 +1282,27 @@ def fixed_batch(one: ValueSample, fixed: tuple[torch.Tensor, torch.Tensor], devi
     return ValueBatch(replace(samples, advantage=advantage.to(device)), traffic, left, target.to(device))
 
 
-def round_advantages(directory: Path, device: torch.device, start: Value
+def round_advantages(directory: Path, device: torch.device, start: Value, centering: bool = False
                      ) -> tuple[dict[tuple[str, int], tuple[torch.Tensor, torch.Tensor]], dict[str, Any]]:
     """§2 item 10 point 4: V at the round's start (``start``) reads every sample of the round one time; each sample's
-    advantages and targets (by its file and place), fixed for the round's passes, and V's reading before the passes
-    (its loss: the mean of A_t² over the counted rows; the advantages' mean and spread)."""
-    fixed, every = {}, []
+    advantages and targets (by its file and place), fixed for the round's passes — with ``centering`` (D173) each
+    counted row's advantage less the mean of the round's counted rows' advantages, the targets those before the
+    centring —, and V's reading before the passes (its loss: the mean of A_t² over the counted rows, before the
+    centring; the advantages' mean and spread before it; the mean taken off, None without the centring)."""
+    fixed, counted, every = {}, {}, []
     for path in _sample_files(directory):
         for i, one in enumerate(torch.load(path, weights_only=False)):
             batch = valued(one, start, device)
             fixed[(path.name, i)] = (batch.samples.advantage.cpu(), batch.target.cpu())
+            counted[(path.name, i)] = batch.samples.counted.cpu()
             every.append(batch.samples.advantage[batch.samples.counted].cpu())
     a = torch.cat(every)
-    return fixed, {"loss_before": float((a ** 2).mean()), "advantage_mean": float(a.mean()),
-                   "advantage_std": float(a.std(unbiased=False)), "rows": int(len(a))}
+    mean = float(a.mean())
+    if centering:
+        fixed = {key: ((advantage - mean) * counted[key], target) for key, (advantage, target) in fixed.items()}
+    return fixed, {"loss_before": float((a ** 2).mean()), "advantage_mean": mean,
+                   "advantage_std": float(a.std(unbiased=False)), "rows": int(len(a)),
+                   "centred_by": mean if centering else None}
 
 
 def value_pairs(directory: Path, data: Sequence[Any], settings: Settings, rng: np.random.Generator,
@@ -1313,7 +1329,8 @@ def value_train_pass(model: Prior, context: Context, optimizer: torch.optim.Opti
     order, `pass_orders`); each update one step of the model (§2 item 5's terms with the rows' advantages, in pieces,
     the ratio against the round's start, `post.loss.update_step`) and one of V (its loss: the mean over the update's
     counted rows of (V − R_t)², `post.value.value_loss`), each clipped to `Settings.clip_norm`; in a warm-up round
-    (before `Settings.value_warmup`) V's only. Its record: whether it warmed up, the model's means (`pass_means`, none in
+    (before `Settings.value_warmup`) V's only; V steps in the first `Settings.value_epochs` passes only, and a warm-up
+    round makes only those (D173); the advantages centred with `Settings.advantage_centering` (D173). Its record: whether it warmed up, the model's means (`pass_means`, none in
     a warm-up), and V's: its loss before and after the passes, the share of the targets' variance it explains after,
     the advantages' mean and spread. ``part_width``: the skeleton's argument; stage C has no token part."""
     value, value_optimizer = companion.value, companion.optimizer
@@ -1322,14 +1339,17 @@ def value_train_pass(model: Prior, context: Context, optimizer: torch.optim.Opti
     for parameter in start.parameters():
         parameter.grad = None
         parameter.requires_grad_(False)
-    fixed, before = round_advantages(directory, context.device, start)
+    fixed, before = round_advantages(directory, context.device, start, settings.advantage_centering)
     del start
+    value_passes = settings.value_epochs if settings.value_epochs is not None else settings.epochs   # D173
     model_start = PassStart(model)
     parameters = [p for group in optimizer.param_groups for p in group["params"]]
     value_parameters = [p for group in value_optimizer.param_groups for p in group["params"]]
     each: list[list[LossParts]] = []
     value_losses = []
-    for numbers in pass_orders(rng, settings.epochs):
+    for e, numbers in enumerate(pass_orders(rng, settings.epochs)):
+        if warm and e >= value_passes:                   # a warm-up round: V's passes only
+            break
         parts = []
         for batches, rows in value_pairs(directory, context.data, settings, numbers, context.device, fixed):
             if not warm:
@@ -1337,6 +1357,8 @@ def value_train_pass(model: Prior, context: Context, optimizer: torch.optim.Opti
                 done = update_step(model, model_start, context.base, [b.samples for b in batches], rows)
                 norm, clipped = clipped_step(optimizer, parameters, settings.clip_norm)
                 parts.append(replace(done, grad_norm=norm, grad_clipped=clipped))
+            if e >= value_passes:                          # D173: V steps in the first value_epochs passes
+                continue
             value_optimizer.zero_grad(set_to_none=True)
             counted = sum(b.samples.counted.sum() for b in batches).to(torch.float32)
             total = torch.zeros((), device=context.device)
@@ -1352,7 +1374,7 @@ def value_train_pass(model: Prior, context: Context, optimizer: torch.optim.Opti
     return {"warmup": warm, **({} if warm else pass_means(each)),
             "value": {**before, "loss_after": after["loss"], "explained_after": after["explained"],
                       "updates": len(value_losses), "update_loss_mean": float(np.mean(value_losses))
-                      if value_losses else None}}
+                      if value_losses else None, "passes": value_passes}}
 
 
 def value_after(directory: Path, device: torch.device, value: Value,
@@ -1549,7 +1571,8 @@ def inputs_here(inputs: Mapping[str, Any]) -> dict[str, Any]:
 
 #: The settings added after campaigns were recorded, each with its default: the code's behaviour before it (the user's
 #: standing permission, 2026-10-07): a record without one reads as its default, and no record is edited.
-SETTINGS_ADDED = ("clip_norm", "epochs", "segment_only", "branch_every_s", "value_lr", "value_warmup")
+SETTINGS_ADDED = ("clip_norm", "epochs", "segment_only", "branch_every_s", "value_lr", "value_warmup",
+                  "advantage_centering", "value_epochs")
 
 
 def _but_rounds(inputs: Mapping[str, Any]) -> dict[str, Any]:
@@ -1810,6 +1833,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="P55: the interval of the branch points, s (default: D37's 120)")
     parser.add_argument("--value-lr", type=float, help="D171: V's learning rate (with --method value)")
     parser.add_argument("--value-warmup", type=int, help="D171: the rounds that train V alone (with --method value)")
+    parser.add_argument("--advantage-centering", action="store_true",
+                        help="D173: the round's mean advantage taken off each counted row (with --method value)")
+    parser.add_argument("--value-epochs", type=int,
+                        help="D173: V's passes a round, the first ones (default: every pass; with --method value)")
     parser.add_argument("--start-campaign", type=Path,
                         help="start from a round of this campaign (with --start-round); the base when left out")
     parser.add_argument("--start-round", type=int, help="the round of --start-campaign whose weights the campaign starts from")
@@ -1844,7 +1871,7 @@ def main(argv: list[str] | None = None) -> int:
                             args.weight_decay, args.update_groups, args.data_sentences, args.select_per_airport,
                             args.traffic_hidden, args.traffic_heads, start, args.method, args.select_seed,
                             args.clip_norm, args.epochs, args.segment_only, args.branch_every_s, args.value_lr,
-                            args.value_warmup)
+                            args.value_warmup, args.advantage_centering, args.value_epochs)
     except ValueError as refused:                   # a setting refused by name (`Settings`), before anything opens
         parser.error(str(refused))
     git = git_state()
