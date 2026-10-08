@@ -1319,3 +1319,14 @@ points and numbers tested.
 **P55's first campaign (`post_seg60_20261007`)** launched 20:32 local after C21's merge; round 0 ended 21:04: landed
 84.6 % (the start 85.7 %), 451 updates (1,711 informative groups of 3,678, segments of 60 s). Results: the experiment
 log, experiment 5.
+
+**The night of 2026-10-07/08 (the user's rule: P55 → 32 s → the value method; decide alone, recount the next day).**
+- C22 merged (`c1e39964`, the user's word). P55's campaign resumed to 8 rounds (the user's word; the resume read its
+  recorded measure, C18): round 5 87.7 %, the first past the readout's noise; sealed (21 files).
+- By the rule (my threshold: landed ≥ 87 %, KL ≤ 0.08, the highest), the 32 s campaign (`post_seg32_20261007`) started
+  from P55's round 5: 86.8 / 86.3 / 87.0 / 87.9 %, within its start's noise; sealed (11 files). Not resumed (my decision).
+- The value campaign (`post_value1_20261007`, the user's settings, C22's first formal run): the warm-up readouts equal
+  C10 round 8's; the training rounds 83.8 / 84.3 / 83.1 / 83.9 %, below the start; V overfits each round's samples
+  (in-sample error 0.004–0.008 against 0.017–0.17 on the next round's) and underestimates new ones (the advantages'
+  mean +0.20 → +0.05). Sealed (21 files). C22's O15 measure ran on the GPU for the first time (1.65 GB).
+- Results, readings and the decisions: the experiment log, experiments 5–7; requests item 5.

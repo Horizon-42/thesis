@@ -96,7 +96,7 @@ commits, the tests and the readings are in the implementation log.
 | C18 (D167) | Code `364c2f4c` (reviewed), merged `704879d7`: the measure in `campaign.json` (`measures`), read by a later launch on the same devices, each launch's `fit` (log §30) |
 | C20 (D169) | Code `2e2e860f` (reviewed), merged into `dev-two-tier` (the user's word): `Settings.epochs` (default 1), `post.loss.passes`, each pass's numbers and means (log §30) |
 | C21 (D170) | Code `1ce26b63` (reviewed), merged into `dev-two-tier` (`a72829f3`, the user's word); its first campaign runs (log §30) |
-| C22 (D171) | Code `6a0e45fe` (reviewed) on `dev-two-tier-v4-post`, not yet merged; the first value campaign's settings wait for the user (requests item 4; log §30) |
+| C22 (D171) | Code `6a0e45fe` (reviewed), merged into `dev-two-tier` (`c1e39964`, the user's word); its first campaign ran (log §30) |
 | The validation readout of the chosen round | Built and reviewed on synthetic artefacts (`post_validation`, `0c95a821`, log §23; D132 `483b81d7`) |
 | C12 | After C10 |
 
