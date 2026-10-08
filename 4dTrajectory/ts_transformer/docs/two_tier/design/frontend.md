@@ -372,7 +372,9 @@ C11 in the stages' implementation logs) and as §3 lays it out. The cursor slide
   inserted, kind A: pink; moved, kind D: amber); a loss of separation as a red line between the two aircraft at the
   loss's time, with two markers that give the distance and the distance required. The list names a window's runway as
   its recorded runway; the shift of a window A is shown in days or hours; the cursor starts at the window's row 0, so
-  that the other aircraft show from the start (D129).
+  that the other aircraft show from the start (D129). The start's tab, its statistics row and its readout name the
+  model the campaign starts from: the base (D29), or the round of another campaign (post-training D162: every campaign
+  after C10 starts so), read from the set's `model.settings.start`; one function gives the name.
 - **Live.** A click on a word flies its segment in the window (`POST /autopilot/window-segment`), the other aircraft on
   their records.
 
