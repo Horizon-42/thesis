@@ -129,6 +129,10 @@ describe("stage D's rows (frontend §5.6)", () => {
     expect(start.set).toMatchObject({ sentences: said.length, lost: said.filter((s) => s.outcome === "lost_separation").length,
       rewardSum: said.reduce((sum, s) => sum + s.reward, 0) });
     expect(start.readout).toBeNull();                                     // stage C's round: read on stage C's windows
+    // an aircraft that answered a loss counts as lost separation, whatever end the executor flew it on to (D144)
+    const landedSilent = stageDSample();
+    landedSilent.windows[0].commanded[0].rounds[0].outcome = "landed";
+    expect(windowStatistics(landedSilent, results("D")).rows[0].set).toEqual(start.set);
     expect(table.notes[0]).toContain("stage C's windows");
     // windows with a loss of each kind (the readout's unit): the fixture's one window, its two losses between the same two
     expect(table.notes[1]).toMatch(/windows with a loss of separation — this set: 1 between commanded aircraft, 0 with a recorded one$/);

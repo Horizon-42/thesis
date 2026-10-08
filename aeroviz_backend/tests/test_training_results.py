@@ -32,15 +32,15 @@ def write(path: Path, payload) -> Path:
 
 def listed(root: Path, stage_dir: str, files, set_dirs: list[str], change, index_file: str | None = None) -> str:
     """The stage's fixture index and samples copied under ``root`` (its airport), each entry changed by ``change``; the
-    index written as ``index_file`` (stage D's: the two-aircraft fixture, which stage C's export writes, under stage D's
-    index), else under its own name."""
-    index = json.loads((FIXTURES / stage_dir / files.INDEX_FILE).read_text(encoding="utf-8"))
+    index is ``index_file`` (stage D's), else the stage's ``INDEX_FILE``."""
+    index_file = index_file or files.INDEX_FILE
+    index = json.loads((FIXTURES / stage_dir / index_file).read_text(encoding="utf-8"))
     training = root / index["airport"] / "training"
     training.mkdir(parents=True, exist_ok=True)
     for name in set_dirs:
         shutil.copytree(FIXTURES / stage_dir / name, training / name)
     index["sets"] = [change(entry) for entry in index["sets"]]
-    write(training / (index_file or files.INDEX_FILE), index)
+    write(training / index_file, index)
     return index["airport"]
 
 
@@ -137,10 +137,8 @@ def world(tmp_path):
     write(multi / "round_0" / "round.json", {
         "round": 0, "speaking": {"windows": 4, "reward_sum": 7.5, "outcomes": {"landed": 8, "lost_separation": 1}},
         "selection_readout": {"KXXX": {"all": {"all": d_cell, "kind": SEALED}, "five": SEALED, "reward_mean": 0.78}}})
-    airport_d = listed(roots["D"], "stage_c_two", post_files, ["fixture-windows-two"], lambda e: {
-        **e, "model": {**e["model"], "campaign": str(multi)},
-        "source": {**e["source"], "speed": {**e["source"]["speed"], "readout": str(c_speed)}}},
-        index_file=post_files.MULTI_INDEX_FILE)
+    airport_d = listed(roots["D"], "stage_d", post_files, ["fixture-windows-two"], lambda e: {
+        **e, "model": {**e["model"], "campaign": str(multi)}}, index_file=post_files.MULTI_INDEX_FILE)
     return {"results": {stage: TrainingResults(roots[stage], outputs) for stage in "ABCD"},
             "airports": dict(zip("ABCD", (airport_a, airport_b, airport_c, airport_d))), "outputs": outputs, "roots": roots,
             "post": post, "source": source}
@@ -217,6 +215,7 @@ def test_stage_d_answers_its_rounds_by_their_all_cells_and_why_its_start_has_no_
     start = sections["rounds"]["start"]
     assert start["selection"] is None and "stage C's windows" in start["why"]
     assert sections["checks"]["checks"] == {"labeller": {"flights": 3}}
+    assert sections["speed"]["ok"] is False and "names no speed readout" in sections["speed"]["problem"]
     # stage C's index does not list it, nor stage D's stage C's set
     assert world["results"]["C"].answer("C", world["airports"]["D"], "fixture-windows-two")[0] == 404
 

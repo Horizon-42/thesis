@@ -1,11 +1,12 @@
 /**
- * The stage-D fixtures the Python code WRITES (frontend §8 F3: stage C's export on a synthetic window of two commanded
- * aircraft — `4dTrajectory/ts_transformer/tests/test_post_training_export.py` writes `fixtures/stage_c_two/`; never edited
- * by hand), read as stage D's set (its index file is stage D's, the format one for both stages): the anchor and a copy of
- * it joining 32 s behind it on the same path; the anchor answers its loss with the copy, is silent from there and flies on.
+ * The stage-D fixtures the Python code WRITES (stage D's export, `experiments/multi_training_export.py`, on a synthetic
+ * window of two commanded aircraft — `4dTrajectory/ts_transformer/tests/test_multi_training_export.py` writes
+ * `fixtures/stage_d/`; never edited by hand): the anchor and a copy of it joining 32 s behind it on the same path; the
+ * anchor answers its loss with the copy, is silent from there and flies on (the loss between them goes on while the copy
+ * is observed: one loss, not written again); the copy answers its own.
  */
-import indexFile from "./fixtures/stage_c_two/index_post_v3.json";
-import sampleFile from "./fixtures/stage_c_two/fixture-windows-two/sample.json";
+import indexFile from "./fixtures/stage_d/index_multi_v1.json";
+import sampleFile from "./fixtures/stage_d/fixture-windows-two/sample.json";
 import {
   parseTrainingWindowSample,
   trainingWindowFlightView,

@@ -648,12 +648,8 @@
     "started": "2026-10-08T00:00:00Z"
    },
    "speed": {
-    "model": "fixture/outputs/post/campaign round 0",
-    "ok": true,
-    "settings": [],
-    "smoke": false,
-    "split": "select",
-    "warmupRows": 20
+    "ok": false,
+    "problem": "a set of stage D names no speed readout (model_speed times stages B and C)"
    }
   },
   "set": "fixture-windows-two",

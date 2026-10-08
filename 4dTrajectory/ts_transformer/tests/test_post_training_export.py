@@ -70,7 +70,8 @@ def test_a_window_s_sentence_its_end_and_its_traffic(setup):
     context = _context(s)
     ahead, real = _ahead(s["windows"][0]), s["windows"][0]
     model = round_model(context, _settings(), s["directory"], None)
-    ([lost], [judged]), (lost_end, judged_end), observed = export.fly_round(model, context, "train", [ahead, real], 2, 1337)
+    ([lost], [judged]), (lost_end, judged_end), observed = export.fly_round(model, context, "train", [ahead, real],
+                                                                            export.stage_c_flying(2, 1337))
     assert np.array_equal(observed[1], s["stored"].rows.states[: len(observed[1])])     # no move: the stored rows
     assert lost["outcome"] == "lost_separation" and lost["crossing"] is None and lost["reward"] == 0.0
     # the window's loss: its two aircraft, the commanded one answering for it, and it costs W (D30's reward 0)
@@ -94,7 +95,7 @@ def test_a_window_s_sentence_its_end_and_its_traffic(setup):
     payload = export.sentence_payload
     try:
         export.sentence_payload = lambda loop, b, result, *a: (spy.append(result.states), payload(loop, b, result, *a))[1]
-        export.fly_round(model, context, "train", [ahead], 2, 1337)
+        export.fly_round(model, context, "train", [ahead], export.stage_c_flying(2, 1337))
     finally:
         export.sentence_payload = payload
     flown_rows = spy[0][lost["flownFromRow"]:]
@@ -132,11 +133,11 @@ def test_the_rounds_stand_side_by_side_and_a_foreign_checkpoint_is_refused(setup
     run_campaign(campaign, settings, context)
     assert done_rounds(campaign) == 1
     ahead = _ahead(s["windows"][0])
-    monkeypatch.setattr(export, "chosen_windows", lambda *a, **k: ([ahead], {"pool": 1, "real": 1, "leftOut": {}}))
     monkeypatch.setattr(export, "split_flights", lambda *a, **k: ([head_of(s)], s["geometry"]))
-    flights, windows, drawn = export.build_airport(
-        context, campaign, settings, s["geometry"].code, [export.START, 0], split="train", per_airport=1,
-        kinds=[REAL], seed=1337, params=test_start._params(), hae_minus_msl_m=_hae(s))
+    flights, windows = export.window_set(
+        context, "train", [ahead], [export.START, 0],
+        lambda r: export.STAGE_C.model_of(context, settings, campaign, r), export.STAGE_C.flying(context, settings, 1337),
+        test_start._params(), _hae(s))
     (window,) = windows
     assert [r["round"] for r in window["rounds"]] == [export.START, 0] and flights[0]["haeMinusMslM"] == -33.0
     assert [r["round"] for r in window["commanded"][0]["rounds"]] == [export.START, 0]
@@ -284,7 +285,7 @@ TWO_SET = "fixture-windows-two"
 
 
 def stage_c_two_fixture(tmp_path, monkeypatch):
-    """Frontend §8 F3: stage C's export (`main`) on a synthetic window of two commanded aircraft (post-training §9
+    """Stage C's export (`main`) on a synthetic window of two commanded aircraft (post-training §9
     items 1, 3, 8; `test_post_window_multi._multi`'s window: the anchor and a copy of it under its own key joining 8
     steps behind it, on the same path), flown by the start model under stage C's loop and rule of who answers — the
     anchor answers its loss with the copy and is silent from there, flying on; the files as `stage_c_fixture` writes
@@ -352,14 +353,6 @@ def test_a_window_of_two_commanded_aircraft_is_written_with_both_its_silence_and
     answered = [loss for loss in end["losses"] if anchor["datasetId"] in loss["answering"]]
     assert len(answered) == 1 and set(answered[0]["aircraft"]) == {anchor["datasetId"], copy["datasetId"]}
     assert said["reward"] == 0.0 and said["silentFromRow"] is not None and said["silentFromRow"] < said["rows"]
-    if os.environ.get("AEROVIZ_WRITE_FIXTURES") == "1":
-        for name, text in texts.items():
-            (FIXTURES.parent / "stage_c_two" / name).parent.mkdir(parents=True, exist_ok=True)
-            (FIXTURES.parent / "stage_c_two" / name).write_text(text, encoding="utf-8")
-    for name, text in texts.items():
-        assert (FIXTURES.parent / "stage_c_two" / name).read_text(encoding="utf-8") == text, (
-            f"{FIXTURES.parent / 'stage_c_two' / name} is not what the export writes now: AEROVIZ_WRITE_FIXTURES=1 writes "
-            f"it again")
 
 
 START_FIXTURE = "start_from_round.json"

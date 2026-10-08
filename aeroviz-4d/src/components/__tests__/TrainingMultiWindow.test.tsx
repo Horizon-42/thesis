@@ -102,7 +102,9 @@ describe("stage D's window view", () => {
     const readouts = await screen.findByRole("list", { name: "Readouts" });
     const sample = stageDSample();
     const [anchor] = sample.windows[0].commanded;
-    expect(readouts.textContent).toMatch(/W [\d.]+ of 2 · \d landed · \d+ go-arounds · 1 silent · 2 losses of separation between commanded aircraft, 0 with recorded/);
+    const losses = sample.windows[0].rounds[0].losses;
+    expect(readouts.textContent).toMatch(new RegExp(`W [\\d.]+ of 2 · \\d landed · \\d+ go-arounds · 1 silent · ` +
+      `${losses.length} loss${losses.length === 1 ? "" : "es"} of separation between commanded aircraft, 0 with recorded`));
     expect(readouts.textContent).toContain(`${anchor.head.callsign} · lost separation · r 0.00 · silent from row`);
     expect(readouts.textContent).toContain("joins at 0 s");
     expect(readouts.textContent).toContain("2 commanded · at most 0 recorded at once");

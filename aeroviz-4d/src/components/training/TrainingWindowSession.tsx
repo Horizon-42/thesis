@@ -180,7 +180,7 @@ function roundReadout(window: TrainingWindow, place: number): string {
   const between = losses.filter((loss) => loss.aircraft.every((key) => ids.has(key))).length;
   return `W ${windowReward(window, place).toFixed(2)} of ${said.length} · ${said.filter((s) => s.outcome === "landed").length} landed · ` +
     `${said.reduce((sum, s) => sum + s.goArounds, 0)} go-arounds · ${said.filter((s) => s.silentFromRow !== null).length} silent · ` +
-    `${between} losses of separation between commanded aircraft, ${losses.length - between} with recorded`;
+    `${between} loss${between === 1 ? "" : "es"} of separation between commanded aircraft, ${losses.length - between} with recorded`;
 }
 
 /** Stage D's "this aircraft" (frontend §5.1): its callsign, its outcome and reward r in the round, the row it is silent

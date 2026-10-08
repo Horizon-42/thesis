@@ -121,7 +121,7 @@ function drawLosses(viewer: Cesium.Viewer, origin: TrainingWindowOrigin) {
     if (one === null || two === null) return;
     const oneAt = Cesium.Cartesian3.fromDegrees(...one);
     const twoAt = Cesium.Cartesian3.fromDegrees(...two);
-    const answered = loss.answering.length === 0 ? "no commanded aircraft answers for it (the records have it too)"
+    const answered = loss.answering.length === 0 ? "answered by no commanded aircraft (D145)"
       : `${loss.answering.join(", ")} answer${loss.answering.length === 1 ? "s" : ""} for it`;
     const text = `lost separation (${loss.kind}) · ${loss.distanceM.toFixed(0)} m of ${loss.requiredM.toFixed(0)} m required · ${answered}`;
     group.add(airLine(ENTITY.loss(k), text, [oneAt, twoAt], TRAINING_FAILURE_COLOR, 3, 1, loss.answering.length === 0));

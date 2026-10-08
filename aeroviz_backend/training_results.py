@@ -96,7 +96,7 @@ class TrainingResults:
             provenance = model["campaign"]
             read = self.rounds if stage == "C" else self.multi_rounds
             sections = {"rounds": self.section(lambda: read(model["campaign"])),
-                        "speed": self.section(lambda: self.speed(source)),
+                        "speed": self.section(lambda: self.speed(source) if stage == "C" else self.no_speed()),
                         "checks": self.section(lambda: self.checks(model["campaign"]))}
         return 200, {"ok": True, "stage": stage, "airport": airport, "set": set_id, "provenance": provenance,
                      "sections": sections}
@@ -266,6 +266,11 @@ class TrainingResults:
                 "why": None}
 
     # ---- stage D
+    @staticmethod
+    def no_speed() -> dict[str, Any]:
+        """A stage D set names no speed readout (`multi_training_export`: `model_speed` times stages B and C)."""
+        raise Unreadable("a set of stage D names no speed readout (model_speed times stages B and C)")
+
     def multi_rounds(self, campaign: str) -> dict[str, Any]:
         """Stage D's rounds (frontend §5.6): what each spoke (its windows, the commanded aircraft's reward sum and
         outcomes) and its readout by airport — the airport's ``all`` span and ``all`` kind: its windows and commanded

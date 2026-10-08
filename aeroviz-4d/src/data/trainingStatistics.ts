@@ -16,7 +16,7 @@
  */
 
 import type { TrainingSentenceKind } from "../utils/trainingWordColors";
-import type { TrainingSample } from "./trainingSample";
+import { TRAINING_LOST_SEPARATION, type TrainingSample } from "./trainingSample";
 import type { TrainingPriorSample } from "./trainingPriorSample";
 import {
   startName, TRAINING_WINDOW_START, type TrainingWindowRound, type TrainingWindowSample, type TrainingWindowStart,
@@ -134,9 +134,15 @@ export function windowStatistics(sample: TrainingWindowSample, results: Training
   return sample.stage === "D" ? multiStatistics(sample, results) : postStatistics(sample, results);
 }
 
-/** A round's sentences of every commanded aircraft of the set's windows, counted. */
+/** A round's sentences of every commanded aircraft of the set's windows, counted as the readouts count them: an
+ *  aircraft that answered a loss of separation as lost separation — a silent one too, whose flight the executor took on
+ *  to an end of its own (D144: the set gives that end; the loop's outcome is the loss). */
 function setCells(sample: TrainingWindowSample, place: number): TrainingStatsCells {
-  const said = sample.windows.flatMap((window) => window.commanded.map((aircraft) => aircraft.rounds[place]));
+  const said = sample.windows.flatMap((window) => window.commanded.map((aircraft) => {
+    const sentence = aircraft.rounds[place];
+    const answered = window.rounds[place].losses.some((loss) => loss.answering.includes(aircraft.datasetId));
+    return { outcome: answered ? TRAINING_LOST_SEPARATION : sentence.outcome, goArounds: sentence.goArounds, reward: sentence.reward };
+  }));
   return cellsOf(countOutcomes(said.map((sentence) => sentence.outcome)), sum(said.map((sentence) => sentence.goArounds)), true,
     sum(said.map((sentence) => sentence.reward)));
 }
