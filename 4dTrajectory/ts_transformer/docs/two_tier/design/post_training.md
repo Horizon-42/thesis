@@ -101,7 +101,7 @@ commits, the tests and the readings are in the implementation log.
 | C21 (D170) | Code `1ce26b63` (reviewed), merged into `dev-two-tier` (`a72829f3`, the user's word); its first campaign runs (log §30) |
 | C22 (D171) | Code `6a0e45fe` (reviewed), merged into `dev-two-tier` (`c1e39964`, the user's word); its first campaign ran (log §30) |
 | C23 (D173) | Code `9017541e` (reviewed), merged into `dev-two-tier` (`e1a3e123`, the user's word); its campaign ran (below its start) (log §30) |
-| C24 (D175) | Code `5880f26e` (reviewed, two rounds), on `dev-two-tier-v4-post`, not yet merged; dev-two-tier can fast-forward to it (log §30) |
+| C24 (D175) | Code `5880f26e` (reviewed, two rounds), merged into `dev-two-tier` (`bf2a4f04`, the user's word). Read 2026-10-08: `outputs/POOLED/post/diagnose_post_seg60_20261007_r5_20261008` and `diagnose_post_train_20261006_r8_20261008` (read-only); traffic off lands 5.5 points lower on P55 r5 and 4.8 on C10 r8; 79 % of P55's losses 10–20 km out, 10 % in conflict at the start (log §30; the experiment log) |
 | The validation readout of the chosen round | Done 2026-10-08: the user chose `post_seg60_20261007` round 5 (D7); val read once: landed 88.9 %, mean reward 0.880 (log §30; the experiment log) |
 | The validation readout of the chosen round | Built and reviewed on synthetic artefacts (`post_validation`, `0c95a821`, log §23; D132 `483b81d7`) |
 | C12 | After C10 |
