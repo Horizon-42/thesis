@@ -99,6 +99,7 @@ commits, the tests and the readings are in the implementation log.
 | C20 (D169) | Code `2e2e860f` (reviewed), merged into `dev-two-tier` (the user's word): `Settings.epochs` (default 1), `post.loss.passes`, each pass's numbers and means (log §30) |
 | C21 (D170) | Code `1ce26b63` (reviewed), merged into `dev-two-tier` (`a72829f3`, the user's word); its first campaign runs (log §30) |
 | C22 (D171) | Code `6a0e45fe` (reviewed), merged into `dev-two-tier` (`c1e39964`, the user's word); its first campaign ran (log §30) |
+| C23 (D173) | Code `9017541e` (reviewed), merged into `dev-two-tier` (`e1a3e123`, the user's word); its campaign runs (log §30) |
 | The validation readout of the chosen round | Built and reviewed on synthetic artefacts (`post_validation`, `0c95a821`, log §23; D132 `483b81d7`) |
 | C12 | After C10 |
 

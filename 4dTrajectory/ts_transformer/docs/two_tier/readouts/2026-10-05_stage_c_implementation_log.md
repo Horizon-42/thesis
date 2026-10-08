@@ -1330,3 +1330,14 @@ log, experiment 5.
   (in-sample error 0.004–0.008 against 0.017–0.17 on the next round's) and underestimates new ones (the advantages'
   mean +0.20 → +0.05). Sealed (21 files). C22's O15 measure ran on the GPU for the first time (1.65 GB).
 - Results, readings and the decisions: the experiment log, experiments 5–7; requests item 5.
+
+**C23 (D173), `9017541e`, merged into `dev-two-tier` (`e1a3e123`, the user's word, 2026-10-08).** The value method's
+`advantage_centering` (the round's mean advantage off each counted row, the targets kept; `centred_by` recorded) and
+`value_epochs` (V steps in the round's first passes only; a warm-up round makes those only; `passes` recorded); both
+refused under another method; a record without them reads the defaults. Tests: 185 passed; with the defaults a value
+campaign of 2 rounds is the code's before bit for bit (a digest pinned from `c288ad77` on one thread; the reviewer
+reproduced it with the old module); the centring over two files of different advantages; V's weights in the first of
+4 passes only. Review (opus): no S1; S2 the digest's thread count and a centring test that could not fail, fixed; S3
+V's update count tested; noted (not changed): `--value-epochs E` written out equal to `epochs` is a second spelling of
+the default, refused on a resume against a record holding the default. The second value campaign
+(`post_value2_20261008`, `--advantage-centering --value-epochs 1`, seed 2031) launched 08:48 local.
