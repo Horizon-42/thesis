@@ -11,7 +11,7 @@ State: 2026-10-08, night: everything of stage D merged into `dev-two-tier` (the 
 `multi.census.judged_steps`, 9ca282dd, frontend D177 (12)). MC5's profile: with 3 workers ended by the GPU's memory
 (item 49, `outputs/POOLED/multi/profile_20261008.aborted-20261008T200415Z`); with 2 workers **stopped at the user's word**
 after its measures and 16 of 198 batches (`outputs/POOLED/multi/profile_20261008.stopped-20261008T204116Z`): items 50
-and 51 are the user's decisions of 2026-10-08 for the design.
+and 51 are the user's decisions of 2026-10-08 for the design; items 52 and 53 the speed-ups the user asked to request.
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -205,4 +205,32 @@ and 51 are the user's decisions of 2026-10-08 for the design.
       "5–6 h" came from the first 16 batches alone, all of the slowest span: corrected.)
     - From a run worktree at the merged commit (D163), in a systemd unit; the intent in `docs/experiments/intents.json`
       before publication.
+
+## MC6 · making a round faster (the user, 2026-10-08: "write these two as requests")
+
+A round of MC6 at the profile's settings is about 3 h (item 51): its speaking about 5.1 h for one worker (300 s: 23
+batches, 62 min; 600 s: 41, 141 min; 1200 s: 134, 101 min, from the profile's measured batches), about 2.5 h with the 2
+workers the GPU holds, plus the readout and the pass. Speaking is a loop of Δ rows, each a small forward pass of the
+model and the executor's flight of the row: the GPU is mostly idle, and its memory caps the workers at 2 (item 49).
+
+52. **Speaking workers on the CPU for stage D** (as stage C's `post_train --speak-device`, C13 / C18: workers on the
+    CPU beside the pass on the GPU). Stage C runs its campaigns so (P55: 9 workers on the CPU; the host has 28 cores and
+    31 GiB); stage D's `multi_train` (and `multi_profile`) puts every worker on `--device`. Asked:
+    - `multi_train --speak-device` (default `--device`, the behaviour today; refused with one worker, and `cuda` beside
+      a campaign on the CPU, as stage C), the workers sized from the profile as D172 (`profiled_fit`: the measure's
+      device kind must be the workers'), a worker on the CPU capped by the host's memory, none of the GPU;
+    - `multi_profile --speak-device` likewise, so that its measure (item 50: the memory measure only) is taken on the
+      workers' device, and records each measured batch's time on it.
+    - Then, before MC6 (when the frontend's exports are done and the host is free): one measure of a worker on each
+      span's first and largest batch on the CPU and on the GPU (minutes), and MC6's workers chosen from the two
+      speeds: e.g. 8–10 CPU workers if a CPU worker is within a few times a GPU worker's time (Claude's estimate,
+      untested on stage D: the closed loop alone runs about 5× faster on one CPU thread than on the GPU, the memory
+      note of 2026-10-04; the model's forward pass is the unknown). The round's other parts (readout, pass) as today.
+53. **The 1200 s span's batch twice as large** (`--batch-rows 64 48 48` in place of `64 48 24`; D172: one number a
+    span). Its measured GPU peak is 0.65–0.78 GiB at 24 rows, against 1.41–1.51 GiB for 300 s at 64 and 1.91–2.04 GiB
+    for 600 s at 48; it holds 134 of the round's 198 batches. At 48 rows its batches halve (67), its peak about doubles
+    (about 1.3–1.6 GiB, under the 600 s span's), and its time a batch grows less than twice (the rows are spoken
+    together). A setting only, but `batch_rows` is among `PROFILED_SETTINGS`, so it needs the new measure of item 52
+    (or item 50's) before MC6; with workers on the CPU (item 52) the GPU bound no longer applies to speaking, and the
+    rows a batch are read against the host's memory instead.
 
