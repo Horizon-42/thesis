@@ -9,12 +9,10 @@ import json
 import shutil
 from pathlib import Path
 
-import numpy as np
 import pytest
 
 from aeroviz_backend.http_server import AeroVizBackendApp
 from aeroviz_backend.training_results import TrainingResults
-from ts_transformer.experiments.model_speed import TimedLoop, summary
 from ts_transformer.instructions import training_files as stage_a_files
 from ts_transformer.post import training_files as post_files
 from ts_transformer.prior import training_files as prior_files
@@ -87,19 +85,10 @@ def world(tmp_path):
                                                            "by_airport": SEALED},
                                         "masks_on_labelled_words": {"inside": {"KXXX": {"angle": {"said": 5, "blocked": 1,
                                                                                                   "share": 0.2}}}}})
-    speed = write(outputs / "speed" / "base" / "speed.json", {
-        "model": {"stage": "B", "prior": str(prior), "split": "select"}, "warmupRows": 20, "smoke": False,
-        # a setting as the runner writes it: its statistics by the runner's own summary, of fixed times
-        "settings": [{"device": "cpu", "batch": 1, "loops": 1, "loopSizes": [1],
-                      **summary([TimedLoop(None, lambda: None, prior_s=[0.005, 0.007], executor_s=[0.001, 0.001],
-                                           flying=[np.array([True]), np.array([True])])], 4.0),
-                      "host": {"device": "cpu", "torch": "2", "threads": 1, "loadAverage": [SEALED]}}]}).parent
-
     def prior_entry(entry):
         claimed = entry["source"]["validationClaim"] is not None
         return {**entry, "model": {**entry["model"], "prior": str(prior)},
-                "source": {**entry["source"], "readout": str(val_readout if claimed else select_readout),
-                           "speed": {**entry["source"]["speed"], "readout": str(speed)}}}
+                "source": {**entry["source"], "readout": str(val_readout if claimed else select_readout)}}
 
     airport_b = listed(roots["B"], "stage_b", prior_files, ["fixture_set", "fixture_val"], prior_entry)
     write(prior / f"val_read_{prior_files.CLAIM_READER}.json", {"out": str(val_readout)})
@@ -120,12 +109,8 @@ def world(tmp_path):
     write(post / "round_0" / "round.json", {
         "round": 0, "speaking": {"windows": 5, "reward_sum": 4.0, "outcomes": {"landed": 4, "lost_separation": 1}},
         "selection_readout": {"KXXX": {"windows": 1, "reward_mean": 1.0, "outcomes": {"landed": 1}, "faulty_steps": SEALED}}})
-    c_speed = write(outputs / "speed" / "round" / "speed.json", {
-        "model": {"stage": "C", "campaign": str(post), "round": "0", "split": "select"}, "warmupRows": 20, "smoke": False,
-        "settings": []}).parent
     airport_c = listed(roots["C"], "stage_c", post_files, ["fixture-windows"], lambda e: {
-        **e, "model": {**e["model"], "campaign": str(post)},
-        "source": {**e["source"], "speed": {**e["source"]["speed"], "readout": str(c_speed)}}})
+        **e, "model": {**e["model"], "campaign": str(post)}})
     # stage D: a campaign of one round from stage C's round (D164), its readout's cells by span and kind
     multi = outputs / "multi" / "campaign"
     write(multi / "campaign.json", {"started_utc": "2026-10-08T00:00:00Z", "checks": {"labeller": {"flights": 3}},
@@ -164,7 +149,6 @@ def test_stage_b_answers_its_results_and_the_val_days_only_for_the_claimed_set(w
     assert sections["freeGeneration"]["sides"]["inside"]["KXXX"]["vectored"]["goArounds"] == 1
     assert sections["training"]["bestEpoch"] == 2 and sections["choice"]["configuration"]["chosen"] == "C"
     assert sections["choice"]["variant"]["scores"] == {"full": 1.36, "constants": 1.37}
-    assert sections["speed"]["settings"][0]["rowMs"]["max"] == pytest.approx(8.0)
     assert sections["validation"] == {"ok": False, "problem": sections["validation"]["problem"]}
     assert "claimed validation readout" in sections["validation"]["problem"]
     val = answered(world, "B", "fixture_val")
@@ -183,7 +167,7 @@ def test_stage_c_answers_its_rounds_and_checks(world):
     sections = answered(world, "C", "fixture-windows")
     assert [r["round"] for r in sections["rounds"]["rounds"]] == [0]
     assert sections["checks"]["checks"] == {"labeller": {"flights": 3}}
-    assert sections["speed"]["model"].endswith("campaign round 0")
+    assert "speed" not in sections                                  # no speed readout bound to a set (2026-10-08)
     # the start's readout: the source round's own, on the same select windows (frontend §4.3)
     start = sections["rounds"]["start"]
     assert start == {"campaign": str(world["source"]), "round": 1, "why": None,
@@ -215,7 +199,6 @@ def test_stage_d_answers_its_rounds_by_their_all_cells_and_why_its_start_has_no_
     start = sections["rounds"]["start"]
     assert start["selection"] is None and "stage C's windows" in start["why"]
     assert sections["checks"]["checks"] == {"labeller": {"flights": 3}}
-    assert sections["speed"]["ok"] is False and "names no speed readout" in sections["speed"]["problem"]
     # stage C's index does not list it, nor stage D's stage C's set
     assert world["results"]["C"].answer("C", world["airports"]["D"], "fixture-windows-two")[0] == 404
 

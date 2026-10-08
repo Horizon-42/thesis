@@ -20,8 +20,6 @@ from ts_transformer.instructions.grammar import column_words
 from ts_transformer.instructions.words import ALTITUDE, ANGLE, HEADING, UNCHANGED, Words
 from ts_transformer.instructions import training_files as stage_a_files
 from ts_transformer.instructions.artefact import load_signals
-from ts_transformer.experiments import model_speed
-from ts_transformer.tests.test_model_speed import speed_readout
 from ts_transformer.prior import training_files as files
 from ts_transformer.prior.procedure import GLIDEPATH_BELOW_M, Final
 from ts_transformer.tests.support import instruction_spec, parallel_airport
@@ -194,9 +192,8 @@ def stage_b_fixture(tmp_path, monkeypatch, *, texts=False):
     val_dir = tmp_path / "readout_val"
     readout_dir.mkdir()
     (readout_dir / "readout.json").write_text("{}")                     # the readouts written (D119, D127)
-    speed = speed_readout(tmp_path / "speed")
     names = {readout_dir: "fixture/readout", Path(directory): "fixture/instruction_language", executor: "fixture/executor",
-             prior: "fixture/prior", val_dir: "fixture/readout_val", speed: "fixture/speed"}
+             prior: "fixture/prior", val_dir: "fixture/readout_val"}
     with monkeypatch.context() as patch:
         patch.setattr(export, "read_sentences", lambda out: (readout, stored_sentences))
         patch.setattr(export, "require_conforming_closed_loop",
@@ -210,13 +207,12 @@ def stage_b_fixture(tmp_path, monkeypatch, *, texts=False):
         patch.setattr(export, "candidate_hae_minus_msl_m",
                       lambda runway_ends_from, geometry_: {c.ident: -33.0 for c in geometry_.candidates})
         patch.setattr(export, "repo_relative", lambda path: names[path])
-        patch.setattr(model_speed, "repo_relative", lambda path: names[path])           # the speed readout's name
         patch.setattr(export, "git_state", lambda: {"head": "fixture", "dirty": False})
         patch.setattr(stage_a_files, "utc_now", lambda: "fixture")   # the one writer's
         build, built = export.build_airport, []
         patch.setattr(export, "build_airport", lambda *a, **k: built.append(build(*a, **k)) or built[-1])
         assert export.main(["--readout", str(readout_dir), "--set-id", FIXTURE_SET, "--root", str(root),
-                            "--per-airport", "1", "--speed", str(speed), "--smoke"]) == 0
+                            "--per-airport", "1", "--smoke"]) == 0
         # the base's one validation readout, claimed (D85): its set holds val flights (outline D109). Its flights are
         # the train set's, given the split val (the synthetic artefact has no val sentences to fly again).
         heads, geometry_ = built[0]
@@ -227,14 +223,14 @@ def stage_b_fixture(tmp_path, monkeypatch, *, texts=False):
         (val_dir / "readout.json").write_text("{}")                     # the readout written: the read spent (D119)
         patch.setattr(export, "build_airport", lambda *a, **k: (val_heads, geometry_))
         assert export.main(["--readout", str(val_dir), "--set-id", FIXTURE_VAL_SET, "--root", str(root),
-                            "--per-airport", "1", "--speed", str(speed), "--smoke"]) == 0
+                            "--per-airport", "1", "--smoke"]) == 0
     training = root / geometry.code / "training"
     entry, sample = files.FILES.listed_set(training, geometry.code, FIXTURE_SET)
     val_entry, _ = files.FILES.listed_set(training, geometry.code, FIXTURE_VAL_SET)
     index = json.loads((training / files.INDEX_FILE).read_text(encoding="utf-8"))
     assert index["sets"] == [entry, val_entry]
     assert sample["source"]["validationClaim"] is None
-    assert sample["source"]["speed"] == {"readout": "fixture/speed", "model": "fixture/prior", "smoke": True}
+    assert "speed" not in sample["source"]                       # no speed readout bound to a set (the user, 2026-10-08)
     assert val_entry["source"]["validationClaim"] == {"reader": "prior_free_generation", "prior": "fixture/prior",
                                                       "readout": "fixture/readout_val"}
     if texts:
@@ -374,9 +370,8 @@ def test_the_runner_writes_a_set_and_refuses_what_it_cannot_trust(tmp_path, monk
     monkeypatch.setattr(export, "candidate_hae_minus_msl_m",
                         lambda runway_ends_from, geometry_: {c.ident: -33.0 for c in geometry_.candidates})
     root = tmp_path / "airports"
-    speed = speed_readout(tmp_path / "speed")
     argv = ["--readout", str(tmp_path / "readout"), "--set-id", "one", "--root", str(root), "--per-airport", "1",
-            "--speed", str(speed), "--smoke"]
+            "--smoke"]
     with pytest.raises(SystemExit):                       # a readout without its readout.json: before any file is read
         export.main(argv)
     assert read == []
@@ -435,7 +430,7 @@ def test_the_set_names_the_artefact_and_the_executor_relative_to_the_repository(
     readout = fixture_readout("KXXX", instructions=str(REPO_ROOT / "4dTrajectory/outputs/POOLED/instruction_language/v"),
                               executor=str(REPO_ROOT / "4dTrajectory/outputs/POOLED/executor/v"))
     source = export.source_block("r", readout, Words(instruction_spec()), {"sha256": "s", "checks": {}}, {}, smoke=True,
-                                 device="cpu", claim=None, speed={"readout": "s", "model": "p", "smoke": True})
+                                 device="cpu", claim=None)
     assert (source["instructions"], source["executor"]) == ("4dTrajectory/outputs/POOLED/instruction_language/v",
                                                             "4dTrajectory/outputs/POOLED/executor/v")
 

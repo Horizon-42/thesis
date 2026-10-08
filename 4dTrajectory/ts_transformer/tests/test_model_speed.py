@@ -144,8 +144,74 @@ def test_a_round_s_model_is_timed_in_the_window_loop(setup, monkeypatch):
     model, _ = post_train.start_model(context, _settings(rounds=1))
     monkeypatch.setattr(model_speed, "SPLIT", "train")
     monkeypatch.setattr(model_speed, "WARMUP_ROWS", 1)
-    setting = model_speed.window_setting(context, model, [_ahead(s["windows"][0])], 1337, CPU, 1)
+    setting = model_speed.window_setting(context, model, [_ahead(s["windows"][0])], [0], 1337, CPU, 1)
     assert setting["loopSizes"] == [1] and setting["rowsTimed"] >= 1 and setting["priorStepMs"]["p50"] > 0
+
+
+def test_stage_c_flies_the_drawn_windows_at_their_places_with_their_readout_numbers(monkeypatch):
+    """`window_setting`: the windows flown are those at the drawn places among the selection windows, at batch 1 and in
+    a batch (the batch's indices mapped back to the places), each with the selection readout's numbers at its place."""
+    from types import SimpleNamespace
+
+    from ts_transformer.experiments import post_train, post_window_loop
+
+    windows = [SimpleNamespace(name=f"w{k}", signal_index=k) for k in range(8)]
+    flown, numbered = [], []
+
+    class Loop:
+        def __init__(self, model, timed, order, chosen, *a, **k):
+            flown.append([w.name for w in chosen])
+
+        def run(self, numbers):
+            pass
+
+    context = SimpleNamespace(start_loop=lambda split, chosen: lambda indices: (None, indices, {}),
+                              splits={model_speed.SPLIT: {"sentences": None, "flights": None, "faults": None}},
+                              geometries=None, rosters=None, finals=None, words=None, interval_s=4.0, variant="full",
+                              edges_reference=None)
+    monkeypatch.setattr(post_window_loop, "WindowLoop", Loop)
+    monkeypatch.setattr(post_train, "readout_numbers", lambda seed, place: numbered.append((seed, place)))
+    batched = []
+    monkeypatch.setattr(post_train, "batches", lambda chosen, size: (batched.append([w.name for w in chosen]),
+                                                                     [[1, 0]])[1])
+    monkeypatch.setattr(model_speed, "TimedLoop", lambda loop, sync, limit: SimpleNamespace())
+    monkeypatch.setattr(model_speed, "summary", lambda timed, interval_s: {})
+    monkeypatch.setattr(model_speed, "host_info", lambda device: {})
+    for batch, expected in ((1, [["w3"], ["w3"], ["w7"]]), (400, [["w7", "w3"], ["w7", "w3"]])):
+        flown.clear(), numbered.clear()
+        model_speed.window_setting(context, None, windows, [3, 7], 1337, CPU, batch)
+        assert flown == expected                                  # the warm-up's group first, then every group
+        assert [place for _, place in numbered] == [p for group in expected for p in (int(w[1]) for w in group)]
+        assert {seed for seed, _ in numbered} == {1337}
+    assert batched == [["w3", "w7"]]                              # the batch is made of the drawn windows only
+
+
+def test_each_setting_draws_its_own_windows_a_batch_at_least_its_size():
+    """`setting_draws`: batch 1 takes ``--per-airport`` of each airport; a batch at least the batch, an equal share an
+    airport (400 over 5 airports: 80 each), fewer where an airport holds fewer."""
+    from types import SimpleNamespace
+
+    def windows(sizes):
+        return [SimpleNamespace(scene=SimpleNamespace(geometry=SimpleNamespace(code=f"K{k}")))
+                for k, size in enumerate(sizes) for _ in range(size)]
+
+    draws = model_speed.setting_draws(windows([200] * 5), 20, [1, 400], 1337)
+    assert {batch: len(places) for batch, places in draws.items()} == {1: 100, 400: 400}
+    short = model_speed.setting_draws(windows([200, 200, 200, 200, 50]), 20, [1, 400], 1337)
+    assert {batch: len(places) for batch, places in short.items()} == {1: 100, 400: 370}
+
+
+def test_stage_c_times_a_seeded_draw_of_each_airport_s_selection_windows():
+    """Stage C times ``--per-airport`` of each airport's selection windows (the user, 2026-10-08: a sample, never all),
+    drawn with the seed, by their places among the selection windows (each keeps its readout's numbers)."""
+    from types import SimpleNamespace
+
+    windows = [SimpleNamespace(scene=SimpleNamespace(geometry=SimpleNamespace(code=code)))
+               for code in ["KAAA"] * 5 + ["KBBB"] * 2 + ["KAAA"] * 3]
+    places = model_speed.drawn_places(windows, 3, 1337)
+    assert len(places) == 3 + 2 and places == sorted(places[:3]) + sorted(places[3:])
+    assert all(windows[p].scene.geometry.code == "KAAA" for p in places[:3]) and places[3:] == [5, 6]
+    assert places == model_speed.drawn_places(windows, 3, 1337) != model_speed.drawn_places(windows, 3, 7)
 
 
 def test_the_summary_of_fixed_times():
@@ -180,26 +246,3 @@ def test_the_runner_reads_the_select_days_only_and_refuses_a_bad_call(tmp_path, 
     with pytest.raises(SystemExit):
         model_speed.main(["--campaign", str(tmp_path), "--round", "start", "--out", str(tmp_path / "c"), "--smoke"])
     assert "campaign, not" in capsys.readouterr().err
-
-
-def speed_readout(directory, *, smoke: bool = True, stage: str = "B"):
-    """A `model_speed` readout as a fixture of the exports (D136): its record only, the settings left empty."""
-    import json
-
-    from ts_transformer.experiments.model_speed import SPEED_SCHEMA
-
-    directory.mkdir(parents=True)
-    model = {"stage": stage, "prior": "fixture/prior"} if stage == "B" else {"stage": stage, "campaign": "fixture/campaign",
-                                                                             "round": "start"}
-    (directory / "speed.json").write_text(json.dumps({"schema": SPEED_SCHEMA, "model": model, "settings": [],
-                                                      "smoke": smoke}), encoding="utf-8")
-    return directory
-
-
-def test_a_set_names_a_speed_readout_of_its_own_stage(tmp_path):
-    """D136: a set's ``source.speed`` is a `model_speed` readout of its stage, named with the model it timed; another
-    stage's is refused by name."""
-    assert model_speed.speed_source(speed_readout(tmp_path / "b"), "B")["model"] == "fixture/prior"
-    assert model_speed.speed_source(speed_readout(tmp_path / "c", stage="C"), "C")["model"] == "fixture/campaign round start"
-    with pytest.raises(ValueError, match="of stage C, not"):
-        model_speed.speed_source(tmp_path / "c", "B")

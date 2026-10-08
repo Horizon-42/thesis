@@ -157,7 +157,7 @@ export function cohortText(cohort: TrainingWindowCohort): string {
     return `Listed windows: ${cohort.windows} of the ${cohort.listCount} of the window list ${cohort.list} — ${cohort.chose}. ` +
       `Each flew with its selection readout's numbers (select seed ${cohort.selectSeed}), so a round says the sentence its readout judged.`;
   }
-  return `Drawn windows: ${cohort.windows} of the ${cohort.split} days (${cohort.perAirport} real an airport, seed ${cohort.seed}, ` +
+  return `Drawn windows: ${cohort.windows} of the ${cohort.split} days (${cohort.perAirport} real windows of each airport, seed ${cohort.seed}, ` +
     `kinds ${cohort.kinds.join(", ")}) — ${cohort.drawnFrom}.`;
 }
 

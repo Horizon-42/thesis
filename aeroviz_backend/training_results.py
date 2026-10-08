@@ -12,8 +12,8 @@ splits, which are train and select. Stage B's validation and the free generation
 exported from the base's claimed, written validation readout (`source.validationClaim`, D109; prior D119), and never
 the val counts of a run's identity (prior D120: no identity is read). Stage C's validation readout: not read.
 
-Sections — A: ``labelling``, ``closedLoop``; B: ``freeGeneration``, ``training``, ``validation``, ``speed``,
-``choice``; C and D: ``rounds``, ``speed``, ``checks`` (D's rounds by its readout's ``all`` cells, with its losses by pair). An airport that is no airport code is refused (400), a set of another
+Sections — A: ``labelling``, ``closedLoop``; B: ``freeGeneration``, ``training``, ``validation``, ``choice``; C and
+D: ``rounds``, ``checks`` (D's rounds by its readout's ``all`` cells, with its losses by pair). An airport that is no airport code is refused (400), a set of another
 format answered by name (409). Each is ``{"ok": true, ...}`` or ``{"ok": false, "problem": "..."}``.
 """
 
@@ -50,10 +50,6 @@ class Unreadable(ValueError):
 FREE_GENERATION_FIELDS = {"sentences": "sentences", "outcomes": "outcomes", "timedOut": "timed_out",
                           "goArounds": "go_arounds", "atTheBound": "at_the_bound",
                           "wordsPerSentence": "words_per_sentence", "labelledWordsPerSentence": "labelled_words_per_sentence"}
-SPEED_FIELDS = ("device", "batch", "loops", "loopSizes", "rowsTimed", "sentences", "priorStepMs", "executorStepsMs",
-                "rowMs", "sentenceS", "flightRowsPerS", "shareOfInterval")
-#: What a speed setting says of its host (a GPU's name too; the load and memory are the runner's own information).
-SPEED_HOST = ("device", "torch", "threads", "name")
 
 
 class TrainingResults:
@@ -89,14 +85,12 @@ class TrainingResults:
             sections = {"freeGeneration": self.section(lambda: self.free_generation(source, model)),
                         "training": self.section(lambda: self.training(model)),
                         "validation": self.section(lambda: self.validation(source, model)),
-                        "speed": self.section(lambda: self.speed(source)),
                         "choice": self.section(lambda: self.choice(model))}
         else:
             model = entry["model"]
             provenance = model["campaign"]
             read = self.rounds if stage == "C" else self.multi_rounds
             sections = {"rounds": self.section(lambda: read(model["campaign"])),
-                        "speed": self.section(lambda: self.speed(source) if stage == "C" else self.no_speed()),
                         "checks": self.section(lambda: self.checks(model["campaign"]))}
         return 200, {"ok": True, "stage": stage, "airport": airport, "set": set_id, "provenance": provenance,
                      "sections": sections}
@@ -216,18 +210,6 @@ class TrainingResults:
                                   "within": configuration["within"]},
                 "variant": {**step(variant), "scores": {name: variant[name] for name in CHOICE_VARIANTS}}}
 
-    def speed(self, source: Mapping[str, Any]) -> dict[str, Any]:
-        """The model's speed readout the set names (D136): the model it timed (stage B: the prior; C: the campaign's
-        round), each setting's named statistics and what it ran on."""
-        record = self.read(f"{source['speed']['readout']}/speed.json")
-        timed = record["model"]
-        model = timed["prior"] if timed["stage"] == "B" else f"{timed['campaign']} round {timed['round']}"
-        return {"model": model, "split": timed["split"], "warmupRows": record["warmupRows"],
-                "smoke": record["smoke"],
-                "settings": [{**{key: setting[key] for key in SPEED_FIELDS},
-                              "host": {key: setting["host"][key] for key in SPEED_HOST if key in setting["host"]}}
-                             for setting in record["settings"]]}
-
     # ---- stage C
     def rounds(self, campaign: str) -> dict[str, Any]:
         """Each round the campaign holds (``round_<n>/round.json``, n from 0 while one exists): what it spoke and its
@@ -266,11 +248,6 @@ class TrainingResults:
                 "why": None}
 
     # ---- stage D
-    @staticmethod
-    def no_speed() -> dict[str, Any]:
-        """A stage D set names no speed readout (`multi_training_export`: `model_speed` times stages B and C)."""
-        raise Unreadable("a set of stage D names no speed readout (model_speed times stages B and C)")
-
     def multi_rounds(self, campaign: str) -> dict[str, Any]:
         """Stage D's rounds (frontend §5.6): what each spoke (its windows, the commanded aircraft's reward sum and
         outcomes) and its readout by airport — the airport's ``all`` span and ``all`` kind: its windows and commanded

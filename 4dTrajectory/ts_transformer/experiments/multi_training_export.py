@@ -21,7 +21,7 @@ at the states they flew, as the readout's census judges them (`multi.census.judg
 costing nothing, drawn dashed: an answered loss at the step it was answered, a pair's unanswered run of steps once, at
 its first step (`round_end`).
 
-No speed readout is named: `model_speed` times stages B and C (D136); a stage D set's ``source.speed`` is null.
+A set names no speed readout: `model_speed` writes its own file, which nothing binds to a set (the user, 2026-10-08).
 
 WRITES ``<root>/<airport>/training/<set-id>/sample.json`` and its entry in ``<root>/<airport>/training/index_multi_v2.json``;
 refused when the set exists. Every airport is built before any is written. From a clean tree unless ``--smoke``; a smoke
@@ -130,7 +130,7 @@ STAGE_D = StageExport(
     # the seed that orders the readout's windows and draws their numbers (`multi_train.selection_windows`)
     selection_fields=lambda settings: {"select_seed": settings.seed, "per_airport": settings.select_per_airport,
                                        "spans_s": list(settings.spans_s)},
-    drawn_from="a seeded draw of the airport's readout windows (real, of every span: D166 (33))", speed=False)
+    drawn_from="a seeded draw of the airport's readout windows (real, of every span: D166 (33))")
 
 
 def main(argv: list[str] | None = None) -> int:

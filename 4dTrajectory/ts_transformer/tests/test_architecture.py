@@ -943,8 +943,6 @@ TRAINING_EXPORT_NAMES = {
                                     "flown_sentence", "split_flights", "this_checkout", "vocabulary_block"},
     "experiments.training_attitude": {"attitude_payload", "executor_attitude"},
     "experiments.prior_training_export": {"procedure_block"},
-    # the speed readout a set names (outline §6.2 item 10, D136)
-    "experiments.model_speed": {"speed_source"},
 }
 
 

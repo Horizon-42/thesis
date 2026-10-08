@@ -4,9 +4,12 @@ steps of it, apart, on fixed inputs of the select days (never val or test).
 WHAT. Stage B (``--prior``): a prior run (the base) speaking select-day flights to their end through the shared step of
 a closed loop (`prior_speaking_loop.SpeakingLoop`, prior §7 item 7), one sample at temperature 1 — ``--per-airport``
 flights of each airport drawn with ``--seed`` (`prior_free_generation.draw`). Stage C (``--campaign``, ``--round``): a
-post-training round's model speaking the select windows of its campaign's selection readout
-(`post_train.selection_windows`) in the window loop (`post_window_loop.WindowLoop`: the traffic attention and the
-separation masks with the prior's step).
+post-training round's model speaking ``--per-airport`` windows of each airport drawn with ``--seed`` from the select
+windows of its campaign's selection readout (`post_train.selection_windows`; `drawn_places` — a time is a sample, the
+user 2026-10-08: never all of them; a batched setting draws at least its batch, an equal share an airport, so that a
+batch of 400 holds 400 where each airport holds its share — the loop sizes record what each held, `setting_draws`),
+each with that readout's numbers at its place, in the window loop
+(`post_window_loop.WindowLoop`: the traffic attention and the separation masks with the prior's step).
 
 TIMES, EACH APART (`TimedLoop`). The executor's steps of a row are the closed loop's `step` (and its `halt` after the
 row), timed between two synchronisations on the GPU; the prior's step of the row is everything else of the row — from the end of the executor's
@@ -128,18 +131,6 @@ class TimedLoop:
         self.flying.append(flying)
         self._since = end
         return out
-
-
-def speed_source(directory: Path, stage: str) -> dict[str, Any]:
-    """The speed readout a Training set names (``source.speed``, outline §6.2 item 10, D136): ``directory`` a readout of
-    this runner of ``stage`` ("B" or "C"), refused otherwise; its directory (repository-relative), the model it timed (a
-    stage-B fold set names the base's readout and says so by the prior it names) and whether it is a smoke."""
-    record = json.loads((directory / "speed.json").read_text(encoding="utf-8"))
-    if record["schema"] != SPEED_SCHEMA or record["model"]["stage"] != stage:
-        raise ValueError(f"{directory} is a {record['schema']} readout of stage {record['model']['stage']}, not a "
-                         f"{SPEED_SCHEMA} readout of stage {stage}")
-    timed = record["model"]["prior"] if stage == "B" else f"{record['model']['campaign']} round {record['model']['round']}"
-    return {"readout": repo_relative(directory), "model": timed, "smoke": bool(record["smoke"])}
 
 
 def prior_groups(drawn: Sequence[int], batch: int) -> list[list[tuple[int, int]]]:
@@ -270,19 +261,39 @@ def prior_setting(run: PriorRun, device: torch.device, batch: int, seed: int) ->
 
 
 # ---- stage C: a round of a post-training campaign
-def window_setting(context: Any, model: Any, windows: Sequence[Any], seed: int, device: torch.device, batch: int
-                   ) -> dict[str, Any]:
-    """Stage C's setting (module docstring): ``model`` (a round's, `post_train.round_model`) on ``windows`` (the select
-    windows of the campaign's selection readout) in the window loop, in batches that command each flight once
-    (`post_train.batches`), each loop timed; the numbers of each window the selection readout's (`readout_numbers`)."""
+def drawn_places(windows: Sequence[Any], per_airport: int, seed: int) -> list[int]:
+    """At most ``per_airport`` of ``windows`` (the selection readout's) at each airport, drawn at random with ``seed``,
+    by their places among them, in order."""
+    rng = np.random.default_rng(seed)
+    out: list[int] = []
+    for airport in sorted({w.scene.geometry.code for w in windows}):
+        pool = np.array([p for p, w in enumerate(windows) if w.scene.geometry.code == airport])
+        out += sorted(rng.choice(pool, size=min(per_airport, len(pool)), replace=False).tolist())
+    return out
+
+
+def setting_draws(windows: Sequence[Any], per_airport: int, batches: Sequence[int], seed: int) -> dict[int, list[int]]:
+    """Each setting's draw (module docstring), by its batch: ``per_airport`` windows of each airport, and for a batch at
+    least the batch, an equal share an airport (fewer where an airport holds fewer)."""
+    airports = len({w.scene.geometry.code for w in windows})
+    return {batch: drawn_places(windows, max(per_airport, -(-batch // airports)), seed) for batch in batches}
+
+
+def window_setting(context: Any, model: Any, windows: Sequence[Any], places: Sequence[int], seed: int,
+                   device: torch.device, batch: int) -> dict[str, Any]:
+    """Stage C's setting (module docstring): ``model`` (a round's, `post_train.round_model`) on the windows at
+    ``places`` among ``windows`` (the select windows of the campaign's selection readout) in the window loop, in batches
+    that command each flight once (`post_train.batches`), each loop timed; the numbers of each window the selection
+    readout's at its place (`readout_numbers`)."""
     from ts_transformer.experiments.post_train import batches, readout_numbers
     from ts_transformer.experiments.post_window_loop import WindowLoop
 
-    groups = [[p] for p in range(len(windows))] if batch == 1 else batches(windows, batch)
+    groups = ([[p] for p in places] if batch == 1
+              else [[places[k] for k in group] for group in batches([windows[p] for p in places], batch)])
     select = context.splits[SPLIT]
 
-    def fly(places: Sequence[int], limit: int | None) -> TimedLoop:
-        chosen = [windows[p] for p in places]
+    def fly(group: Sequence[int], limit: int | None) -> TimedLoop:
+        chosen = [windows[p] for p in group]
         loop, order, observed = context.start_loop(SPLIT, chosen)([w.signal_index for w in chosen])
         timed = TimedLoop(loop, synchroniser(device), limit)
         flown = WindowLoop(model, timed, order, chosen, select["sentences"], select["flights"], context.geometries,
@@ -290,7 +301,7 @@ def window_setting(context: Any, model: Any, windows: Sequence[Any], seed: int, 
                            variant=context.variant, edges_reference=context.edges_reference, faults=select["faults"],
                            observed=observed, device=device)
         try:
-            flown.run([readout_numbers(seed, p) for p in places])
+            flown.run([readout_numbers(seed, p) for p in group])
         except Warmed:
             pass
         return timed
@@ -325,8 +336,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--round", help="stage C: 'start' or a round's number")
     parser.add_argument("--instructions", type=Path, help="stage B: the artefact")
     parser.add_argument("--executor", type=Path, help="stage B: the directory of the artefact's executor spec")
-    parser.add_argument("--per-airport", type=int, default=20, help="stage B: flights of each airport")
-    parser.add_argument("--seed", type=int, default=1337, help="stage B: the draw of the flights and their numbers")
+    parser.add_argument("--per-airport", type=int, default=20,
+                        help="flights (stage B) or selection windows (stage C) of each airport, drawn")
+    parser.add_argument("--seed", type=int, default=1337,
+                        help="the draw (stage B: and the flights' numbers; stage C: the windows fly the readout's)")
     parser.add_argument("--devices", nargs="+", default=["cpu", "cuda"])
     parser.add_argument("--batches", nargs="+", type=int, default=[1, BATCH])
     parser.add_argument("--out", type=Path, required=True, help="a new directory")
@@ -378,12 +391,15 @@ def main(argv: list[str] | None = None) -> int:
         require_conforming_closed_loop(Path(record["inputs"]["instructions"]),
                                        Path(record["inputs"]["executor"]))     # D69: the checks run here (D73)
         seed = settings_of(record).select_seed                    # the selection readout's numbers (C17)
-        subject = {"stage": "C", "campaign": repo_relative(campaign), "round": args.round, "split": SPLIT}
+        subject = {"stage": "C", "campaign": repo_relative(campaign), "round": args.round, "split": SPLIT,
+                   "perAirport": args.per_airport, "seed": args.seed}
         for name in args.devices:
             context, model, windows = open_round(campaign, record, args.round, torch.device(name))
-            subject["windows"] = len(windows)
+            draws = setting_draws(windows, args.per_airport, args.batches, args.seed)
+            subject.update(selectionWindows=len(windows), windows={str(b): len(p) for b, p in draws.items()})
             for batch in args.batches:
-                settings.append(window_setting(context, model, windows, seed, torch.device(name), batch))
+                settings.append(window_setting(context, model, windows, draws[batch], seed, torch.device(name),
+                                               batch))
                 print(json.dumps({k: settings[-1][k] for k in ("device", "batch", "rowMs")}), flush=True)
     out.mkdir(parents=True)
     write_json_atomic(out / "speed.json", {

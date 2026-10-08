@@ -24,8 +24,9 @@ WRITES a set ``<root>/<airport>/training/<set-id>/sample.json`` and its entry in
 ``<root>/<airport>/training/index_prior_v3.json`` (`prior.training_files`); refused when the set exists. Every airport is
 built before any is written. From a clean tree (the set records the commit) unless ``--smoke``.
 
-    python run_ts.py prior_training_export --readout <a prior_free_generation directory> --set-id <id> --per-airport 10 \\
-        --speed <a model_speed directory>
+    python run_ts.py prior_training_export --readout <a prior_free_generation directory> --set-id <id> --per-airport 10
+
+A set names no speed readout: `model_speed` writes its own file, which nothing binds to a set (the user, 2026-10-08).
 """
 
 from __future__ import annotations
@@ -45,7 +46,6 @@ from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
 from ts_transformer.autopilot.judge import TIMEOUT
 from ts_transformer.autopilot.start import start
 from ts_transformer.experiments import training_flights
-from ts_transformer.experiments.model_speed import speed_source
 from ts_transformer.experiments.prior_free_generation import FREE_GENERATION_SCHEMA, Stored, read_sentences
 from ts_transformer.experiments.training_export import (
     FORMATS, candidate_hae_minus_msl_m, candidates_block, events, flown_sentence, split_flights, this_checkout,
@@ -264,17 +264,17 @@ def model_block(readout: dict[str, Any], prior_dir: str) -> dict[str, Any]:
 
 
 def source_block(readout_dir: str, readout: dict[str, Any], words: Words, opened: dict[str, Any], git: dict[str, Any],
-                 *, smoke: bool, device: str, claim: dict[str, str] | None, speed: dict[str, str]) -> dict[str, Any]:
+                 *, smoke: bool, device: str, claim: dict[str, str] | None) -> dict[str, Any]:
     """What the set was exported from, and the checks the export ran (D73). The artefact and the executor spec are named
     relative to the repository (`repo_relative`): the live executor opens them from its own checkout, never from the
     worktree a readout happened to run in. ``claim``: the claim of the val read the set was exported under (outline
-    D109: its flights are of val), None for every other set. ``speed``: the model's speed readout (`model_speed.speed_source`)."""
+    D109: its flights are of val), None for every other set."""
     return {"readout": readout_dir, "readoutGit": readout["git"], "readoutSmoke": readout["smoke"],
             "validationClaim": claim,
             "instructions": repo_relative(Path(readout["instructions"])),
             "executor": repo_relative(Path(readout["executor"])), "specSha256": words.spec.sha256,
             "executorSpecSha256": opened["sha256"], "checks": opened["checks"], "git": git, "smoke": smoke,
-            "device": device, "speed": speed}
+            "device": device}
 
 
 def cohort_block(readout: dict[str, Any], flights: int, per_airport: int, seed: int, readout_flights: int
@@ -323,8 +323,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--per-airport", type=int, default=10)
     parser.add_argument("--seed", type=int, default=1337, help="the draw of each airport's flights from the readout")
     parser.add_argument("--device", default="cpu", help="the executor's device when the sentences are flown again")
-    parser.add_argument("--speed", type=Path, required=True,
-                        help="the model's speed readout (a model_speed directory of stage B, D136)")
     parser.add_argument("--smoke", action="store_true", help="SMOKE: allowed from a tree with changes; recorded")
     args = parser.parse_args(argv)
     git = git_state()
@@ -368,11 +366,8 @@ def main(argv: list[str] | None = None) -> int:
     existing = {airport: files.FILES.read_index(args.root / airport / "training", airport, args.set_id)
                 for airport in airports}
     model = model_block(readout, repo_relative(prior_dir))
-    speed = speed_source(args.speed if args.speed.is_absolute() else REPO_ROOT / args.speed, "B")
-    if speed["smoke"] and not args.smoke:
-        parser.error(f"{args.speed} is a smoke speed readout: only a --smoke set names it")
     source = source_block(repo_relative(readout_dir), readout, words, opened, git, smoke=args.smoke, device=args.device,
-                          claim=claim, speed=speed)
+                          claim=claim)
     built = {}
     for airport in airports:
         flights, geometry = build_airport(airport, readout, stored, params, words, per_airport=args.per_airport,

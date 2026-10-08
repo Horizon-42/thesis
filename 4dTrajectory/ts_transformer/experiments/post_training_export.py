@@ -43,9 +43,11 @@ built before any is written. From a clean tree (the set records the commit) unle
 only a smoke set.
 
     python run_ts.py post_training_export --campaign <a post_train directory> --rounds start 0 4 --split select \\
-        --per-airport 10 --set-id <id> --speed <a model_speed directory of stage C>
-    python run_ts.py post_training_export --campaign <a post_train directory> --rounds start 8 --split select \
-        --windows <a window_list directory>/list.json --set-id <id> --speed <a model_speed directory of stage C>
+        --per-airport 10 --set-id <id>
+    python run_ts.py post_training_export --campaign <a post_train directory> --rounds start 8 --split select \\
+        --windows <a window_list directory>/list.json --set-id <id>
+
+A set names no speed readout: `model_speed` writes its own file, which nothing binds to a set (the user, 2026-10-08).
 """
 
 from __future__ import annotations
@@ -68,7 +70,6 @@ from ts_transformer.experiments.post_train import (
     CAMPAIGN_SCHEMA, KINDS, POST_CHECKPOINT_SCHEMA, Context, batches, candidate, open_context, readout_numbers,
     round_model, selection_windows, settings_of,
 )
-from ts_transformer.experiments.model_speed import speed_source
 from ts_transformer.experiments.post_window_loop import WindowLoop, WindowResult, checked_edges, moved_commanded
 from ts_transformer.experiments.prior_training_export import procedure_block
 from ts_transformer.experiments.training_export import (
@@ -394,7 +395,7 @@ class StageExport:
     `Numbers`), the numbers of a drawn set (settings, ``--seed``) and of the readout (settings: by a window's place
     among the selection windows, post-training D176 (3)), the campaign's selection windows (context, settings), a
     window's identity and the selection's fields as a window list names them (`post.window_lists`), the cohort's
-    sentence on the draw, and whether a set names a speed readout of the stage (D136; ``--speed``)."""
+    sentence on the draw."""
 
     stage: str
     campaign_schema: str
@@ -409,7 +410,6 @@ class StageExport:
     identity: Callable[[Window], dict[str, Any]]
     selection_fields: Callable[[Any], dict[str, Any]]
     drawn_from: str
-    speed: bool
 
 
 #: A drawn set's windows an airport and seed when the arguments do not say (``--per-airport``, ``--seed``; stage C's
@@ -419,7 +419,7 @@ DRAWN_PER_AIRPORT, DRAWN_SEED = 10, 1337
 
 def add_arguments(parser: argparse.ArgumentParser, stage: StageExport) -> None:
     """The arguments of a stage's export (``--kinds`` stage C's only: stage D's sets are of real windows, D166 (33);
-    ``--speed`` where the stage has a speed readout; ``--windows`` a window list, post-training D176 (3))."""
+    ``--windows`` a window list, post-training D176 (3))."""
     parser.add_argument("--campaign", type=Path, required=True, help="the campaign's directory")
     parser.add_argument("--rounds", nargs="+", required=True, help=f"{START!r} and/or round numbers")
     parser.add_argument("--split", choices=SPLITS, required=True)
@@ -434,9 +434,6 @@ def add_arguments(parser: argparse.ArgumentParser, stage: StageExport) -> None:
         parser.add_argument("--kinds", nargs="+", choices=KINDS, default=None, help=f"a drawn set: default {REAL}")
     parser.add_argument("--seed", type=int, default=None, help=f"a drawn set: default {DRAWN_SEED}")
     parser.add_argument("--device", default="cpu")
-    if stage.speed:
-        parser.add_argument("--speed", type=Path, required=True,
-                            help=f"the model's speed readout (a model_speed directory of stage {stage.stage}, D136)")
     parser.add_argument("--smoke", action="store_true", help="SMOKE: allowed from a tree with changes; recorded")
 
 
@@ -485,11 +482,6 @@ def export_sets(parser: argparse.ArgumentParser, args: argparse.Namespace, stage
         parser.error(f"{campaign} is a {record['schema']} campaign, not {stage.campaign_schema}")
     if record["inputs"]["smoke"] and not args.smoke:
         parser.error(f"{campaign} is a smoke campaign: only a --smoke set is made from it")
-    speed = None
-    if stage.speed:
-        speed = speed_source(args.speed if args.speed.is_absolute() else REPO_ROOT / args.speed, stage.stage)
-        if speed["smoke"] and not args.smoke:
-            parser.error(f"{args.speed} is a smoke speed readout: only a --smoke set names it")
     rounds = [r if r == START else int(r) for r in args.rounds]
     # the campaign's paths as this checkout reads them (a campaign run in the main checkout, exported from a worktree)
     inputs = {**record["inputs"], **{key: str(this_checkout(record["inputs"][key]))
@@ -527,7 +519,7 @@ def export_sets(parser: argparse.ArgumentParser, args: argparse.Namespace, stage
     source = {"campaign": repo_relative(campaign), "campaignGit": record["git"], "campaignSmoke": inputs["smoke"],
               "instructions": repo_relative(instructions), "executor": repo_relative(executor),
               "specSha256": words.spec.sha256, "executorSpecSha256": opened["sha256"], "checks": opened["checks"],
-              "git": git, "smoke": args.smoke, "device": args.device, "speed": speed}
+              "git": git, "smoke": args.smoke, "device": args.device}
     started = time.perf_counter()
     built = {}
     for airport in airports:
@@ -571,7 +563,7 @@ STAGE_C = StageExport(
     selection=lambda context, settings: selection_windows(context, settings, "select"),
     identity=lambda window: {"flight": window.commanded.key, "row0_s": window.row0_s, "kind": window.kind},
     selection_fields=lambda settings: {"select_seed": settings.select_seed, "per_airport": settings.select_per_airport},
-    drawn_from="a seeded draw of the airport's real windows that do not open inside a loss (D113)", speed=True)
+    drawn_from="a seeded draw of the airport's real windows that do not open inside a loss (D113)")
 
 
 def main(argv: list[str] | None = None) -> int:

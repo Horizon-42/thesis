@@ -16,7 +16,6 @@ describe("a set's results", () => {
     expect(a.value.stage === "A" && a.value.labelling.ok && Object.keys(a.value.labelling.value).sort()).toEqual(["select", "train"]);
     expect(b.value.stage === "B" && !b.value.validation.ok && b.value.validation.problem).toContain("claimed validation readout");
     expect(val.value.stage === "B" && val.value.validation.ok && val.value.validation.value.lossPerStep).toBe(1.08);
-    expect(b.value.stage === "B" && b.value.speed.ok && b.value.speed.value.settings[0].rowMs.max).toBeCloseTo(8);
     expect(missing.value.stage === "C" && !missing.value.rounds.ok && missing.value.rounds.problem).toContain("does not exist");
   });
 

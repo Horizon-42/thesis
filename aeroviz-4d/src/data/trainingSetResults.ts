@@ -9,7 +9,7 @@
 
 import { useEffect, useState } from "react";
 import { AEROVIZ_BACKEND_URL } from "../pilot/pilotClient";
-import { asNumber, attempt, recordOf, Reader, Refusal, type Parsed } from "./trainingReader";
+import { asNumber, attempt, recordOf, Reader, type Parsed } from "./trainingReader";
 
 /** MIRROR of the backend's route (`aeroviz_backend/http_server.py`, `training_results.TrainingResults`). */
 export const TRAINING_RESULTS_PATH = "/training/results";
@@ -61,21 +61,6 @@ export interface TrainingChoiceConfiguration extends TrainingChoiceStep {
 export interface TrainingChoiceVariant extends TrainingChoiceStep {
   scores: Counts;
 }
-export interface TrainingSpeedSetting {
-  device: string;
-  batch: number;
-  loops: number;
-  loopSizes: number[];
-  rowsTimed: number;
-  sentences: number;
-  priorStepMs: Counts;
-  executorStepsMs: Counts;
-  rowMs: Counts;
-  sentenceS: Counts;
-  flightRowsPerS: number;
-  shareOfInterval: { intervalS: number; prior: Counts; executor: Counts; row: Counts };
-  host: Record<string, string | number>;
-}
 export interface TrainingRoundResult {
   round: number;
   speaking: { windows: number; rewardSum: number; outcomes: Counts };
@@ -94,7 +79,6 @@ export interface TrainingStageBResults {
   training: TrainingResultSection<{ bestEpoch: number; epochs: Array<{ epoch: number; trainLossPerStep: number; selectLossPerStep: number }> }>;
   validation: TrainingResultSection<{ lossPerStep: number; perColumn: Counts; masksOnLabelledWords: Record<string, Record<string, Counts>> }>;
   choice: TrainingResultSection<{ configuration: TrainingChoiceConfiguration; variant: TrainingChoiceVariant }>;
-  speed: TrainingResultSection<TrainingSpeed>;
 }
 /** The selection readout of the round a campaign starts from (post-training D162, frontend §4.3): ``selection`` null
  *  with ``why`` when that campaign read other select windows. The round is the set's `model.start` (the same record). */
@@ -107,7 +91,6 @@ export interface TrainingStageCResults {
   /** ``start``: null for a campaign from the base (the base has no selection readout). */
   rounds: TrainingResultSection<{ started: string; rounds: TrainingRoundResult[]; start: TrainingStartReadout | null }>;
   checks: TrainingResultSection<{ checks: Record<string, unknown> }>;
-  speed: TrainingResultSection<TrainingSpeed>;
 }
 /** A cell of stage D's readout at an airport (its ``all`` span and kind): its windows and commanded aircraft, their
  *  reward sum, outcomes, go-arounds said and silent ones, and the windows with a loss of each pair
@@ -131,15 +114,6 @@ export interface TrainingStageDResults {
   /** ``start``: stage C's round, read on stage C's windows — never a readout here, only why (frontend §5.6). */
   rounds: TrainingResultSection<{ started: string; rounds: TrainingMultiRoundResult[]; start: TrainingStartReadout }>;
   checks: TrainingResultSection<{ checks: Record<string, unknown> }>;
-  speed: TrainingResultSection<TrainingSpeed>;
-}
-/** The model's speed readout (D136): the model it timed (B: the prior; C: the campaign's round) and each setting. */
-export interface TrainingSpeed {
-  model: string;
-  split: string;
-  warmupRows: number;
-  smoke: boolean;
-  settings: TrainingSpeedSetting[];
 }
 export type TrainingSetResults = (TrainingStageAResults | TrainingStageBResults | TrainingStageCResults | TrainingStageDResults) & {
   /** The path of the readout or campaign the set was made from: the one line of provenance. */
@@ -161,30 +135,6 @@ function choiceStep(reader: Reader): TrainingChoiceStep {
       return { score: arm.number("score"), folds: arm.record("folds", asNumber) };
     }),
     seedScale: reader.number("seedScale"), chosen: reader.string("chosen"),
-  };
-}
-
-function speedSetting(reader: Reader): TrainingSpeedSetting {
-  const share = reader.child("shareOfInterval");
-  return {
-    device: reader.string("device"), batch: reader.count("batch", 1), loops: reader.count("loops", 1),
-    loopSizes: reader.numbers("loopSizes"), rowsTimed: reader.count("rowsTimed"), sentences: reader.count("sentences"),
-    priorStepMs: reader.record("priorStepMs", asNumber), executorStepsMs: reader.record("executorStepsMs", asNumber),
-    rowMs: reader.record("rowMs", asNumber), sentenceS: reader.record("sentenceS", asNumber),
-    flightRowsPerS: reader.number("flightRowsPerS"),
-    shareOfInterval: { intervalS: share.number("intervalS"), prior: share.record("prior", asNumber),
-      executor: share.record("executor", asNumber), row: share.record("row", asNumber) },
-    host: reader.record("host", (value, where) => {
-      if (typeof value !== "string" && typeof value !== "number") throw new Refusal(`${where} is not a string or a number`);
-      return value;
-    }),
-  };
-}
-
-function speed(reader: Reader): TrainingSpeed {
-  return {
-    model: reader.string("model"), split: reader.string("split"), warmupRows: reader.count("warmupRows"), smoke: reader.boolean("smoke"),
-    settings: reader.children("settings").map(speedSetting),
   };
 }
 
@@ -253,7 +203,6 @@ export function parseTrainingSetResults(ok: boolean, raw: unknown, setId: string
             variant: { ...choiceStep(variant), scores: variant.record("scores", asNumber) },
           };
         }),
-        speed: section(sections, "speed", speed),
       };
     }
     if (stage === "D") {
@@ -281,7 +230,6 @@ export function parseTrainingSetResults(ok: boolean, raw: unknown, setId: string
           };
         }),
         checks: section(sections, "checks", (s) => ({ checks: s.record("checks", (value) => value) })),
-        speed: section(sections, "speed", speed),
       };
     }
     return {
@@ -299,7 +247,6 @@ export function parseTrainingSetResults(ok: boolean, raw: unknown, setId: string
         start: startOf(s.nullableChild("start")),
       })),
       checks: section(sections, "checks", (s) => ({ checks: s.record("checks", (value) => value) })),
-      speed: section(sections, "speed", speed),
     };
   });
 }

@@ -116,7 +116,7 @@ def test_stage_d_s_set_holds_the_answered_losses_and_every_other_one_dashed(tmp_
     sample = json.loads(texts[f"{STAGE_D_SET}/{files.SAMPLE_FILE}"])
     index = json.loads(texts[files.MULTI_INDEX_FILE])
     (entry,) = index["sets"]
-    assert entry["title"].startswith("Stage D · windows") and sample["source"]["speed"] is None
+    assert entry["title"].startswith("Stage D · windows") and "speed" not in sample["source"]
     assert sample["formats"]["campaign"] == multi_export.MULTI_CAMPAIGN_SCHEMA
     (window,) = sample["windows"]
     assert [a["joinS"] for a in window["commanded"]] == [0.0, 32.0]

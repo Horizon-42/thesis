@@ -36,7 +36,9 @@ from ts_transformer.instructions.training_files import TrainingFiles
 #: two aircraft, the ones that answer for it and whether it costs W; the set kind is the two stages' one. Index v4
 #: (``index_post_v4.json``; stage D's ``index_multi_v2.json``) / sample v5 (post-training D176, frontend F5,
 #: 2026-10-08): a set's cohort is one of two forms — ``drawn`` (v4's fields) or ``listed`` (a window list's path,
-#: sha256, sentence and count, and the select seed of the readout numbers its windows flew with).
+#: sha256, sentence and count, and the select seed of the readout numbers its windows flew with). From 2026-10-08 a set's
+#: source names no speed readout (the user unbound it; no reader ever read it): sets written before keep an unread
+#: ``speed``, and the names stay.
 INDEX_SCHEMA = "aeroviz-training-window-index-v4"
 INDEX_FILE = "index_post_v4.json"
 SAMPLE_SCHEMA = "aeroviz-training-window-sample-v5"

@@ -266,66 +266,6 @@
     },
     "split": "select"
    },
-   "speed": {
-    "model": "fixture/outputs/prior/campaign/base/run",
-    "ok": true,
-    "settings": [
-     {
-      "batch": 1,
-      "device": "cpu",
-      "executorStepsMs": {
-       "max": 1.0,
-       "p50": 1.0,
-       "p95": 1.0
-      },
-      "flightRowsPerS": 142.85714285714286,
-      "host": {
-       "device": "cpu",
-       "threads": 1,
-       "torch": "2"
-      },
-      "loopSizes": [
-       1
-      ],
-      "loops": 1,
-      "priorStepMs": {
-       "max": 7.0,
-       "p50": 6.0,
-       "p95": 6.9
-      },
-      "rowMs": {
-       "max": 8.0,
-       "p50": 7.0,
-       "p95": 7.9
-      },
-      "rowsTimed": 2,
-      "sentenceS": {
-       "max": 0.014,
-       "p50": 0.014,
-       "p95": 0.014
-      },
-      "sentences": 1,
-      "shareOfInterval": {
-       "executor": {
-        "p50": 0.00025,
-        "p95": 0.00025
-       },
-       "intervalS": 4.0,
-       "prior": {
-        "p50": 0.0015,
-        "p95": 0.0017250000000000002
-       },
-       "row": {
-        "p50": 0.00175,
-        "p95": 0.001975
-       }
-      }
-     }
-    ],
-    "smoke": false,
-    "split": "select",
-    "warmupRows": 20
-   },
    "training": {
     "bestEpoch": 2,
     "epochs": [
@@ -413,66 +353,6 @@
     },
     "split": "val"
    },
-   "speed": {
-    "model": "fixture/outputs/prior/campaign/base/run",
-    "ok": true,
-    "settings": [
-     {
-      "batch": 1,
-      "device": "cpu",
-      "executorStepsMs": {
-       "max": 1.0,
-       "p50": 1.0,
-       "p95": 1.0
-      },
-      "flightRowsPerS": 142.85714285714286,
-      "host": {
-       "device": "cpu",
-       "threads": 1,
-       "torch": "2"
-      },
-      "loopSizes": [
-       1
-      ],
-      "loops": 1,
-      "priorStepMs": {
-       "max": 7.0,
-       "p50": 6.0,
-       "p95": 6.9
-      },
-      "rowMs": {
-       "max": 8.0,
-       "p50": 7.0,
-       "p95": 7.9
-      },
-      "rowsTimed": 2,
-      "sentenceS": {
-       "max": 0.014,
-       "p50": 0.014,
-       "p95": 0.014
-      },
-      "sentences": 1,
-      "shareOfInterval": {
-       "executor": {
-        "p50": 0.00025,
-        "p95": 0.00025
-       },
-       "intervalS": 4.0,
-       "prior": {
-        "p50": 0.0015,
-        "p95": 0.0017250000000000002
-       },
-       "row": {
-        "p50": 0.00175,
-        "p95": 0.001975
-       }
-      }
-     }
-    ],
-    "smoke": false,
-    "split": "select",
-    "warmupRows": 20
-   },
    "training": {
     "bestEpoch": 2,
     "epochs": [
@@ -556,14 +436,6 @@
      "why": null
     },
     "started": "2026-10-06T00:00:00Z"
-   },
-   "speed": {
-    "model": "fixture/outputs/post/campaign round 0",
-    "ok": true,
-    "settings": [],
-    "smoke": false,
-    "split": "select",
-    "warmupRows": 20
    }
   },
   "set": "fixture-windows",
@@ -581,14 +453,6 @@
    "rounds": {
     "ok": false,
     "problem": "fixture/outputs/post/campaign/campaign.json does not exist"
-   },
-   "speed": {
-    "model": "fixture/outputs/post/campaign round 0",
-    "ok": true,
-    "settings": [],
-    "smoke": false,
-    "split": "select",
-    "warmupRows": 20
    }
   },
   "set": "fixture-windows",
@@ -646,10 +510,6 @@
      "why": "the start, round 0 of stage C's fixture/outputs/post/campaign, was read on stage C's windows, not stage D's"
     },
     "started": "2026-10-08T00:00:00Z"
-   },
-   "speed": {
-    "ok": false,
-    "problem": "a set of stage D names no speed readout (model_speed times stages B and C)"
    }
   },
   "set": "fixture-windows-two",
