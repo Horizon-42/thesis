@@ -56,7 +56,7 @@ Fronter keeps this table and its log, `readouts/2026-10-06_fronter_implementatio
 | F2 Windows of several commanded aircraft: the format, stage C's export, the view's readers (D156) | Done: `05963721`, `1452cccb` on `dev-frontend` (reviewed; browser-checked on a v4 smoke set) |
 | F3 Stage D's parts of the window view (D156) | Done: `a7ab9bb6` on `dev-frontend` (reviewed; tests; stage D's browser check is F4's) |
 | F4 Stage D's export and sets | Export and smoke set done: `7b3e7ae5` on `dev-frontend` (reviewed, browser-checked on the test stack); formal sets after MC6, their intent first |
-| F5 Sets of listed windows (D176) and D177's changes | Built: `b8646c12` on `dev-frontend` (reviewed); the v5 re-export of `windows_seg60_r5_20261008` and the two listed sets after the merge |
+| F5 Sets of listed windows (D176) and D177's changes | Done: `b8646c12`, the speed unbinding and `model_speed`'s sample `2972cf9f` (reviewed, merged); `windows_seg60_r5_20261008` in v5 and the listed sets `loss_windows_seg60_20261008`, `loss_windows_c10_20261008` published |
 | The start's name after D162 (§4.3) | Done: `f10e9ee5`, the start's readout `a9d296d5` (reviewed, merged) |
 | Stage C's first formal set (P55 round 5) | Published 2026-10-08: `windows_seg60_r5_20261008`, five airports, 163 windows (browser-checked) |
 

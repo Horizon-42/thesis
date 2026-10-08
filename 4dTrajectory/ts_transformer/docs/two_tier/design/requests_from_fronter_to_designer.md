@@ -4,8 +4,9 @@ Fronter writes this file (outline §5 rule 10, frontend §0.3); it is rewritten 
 fronter made where the design says nothing, or a gap; a reading is a proposal until the user decides, and a decided item
 is removed. Paths are relative to `4dTrajectory/ts_transformer/`; frontend paths to `aeroviz-4d/src/`.
 
-State: 2026-10-08. Items 1–15 were decided (frontend D177) and are removed. F5 and D177's changes are built on
-`dev-frontend`; the items below are F5's readings (built so; the user can change any).
+State: 2026-10-08. Items 1–15 were decided (frontend D177) and are removed. F5, D177's changes, the speed unbinding
+and the `model_speed` sample are merged into `dev-two-tier` (`b8646c12`, `2972cf9f`); the items below are readings
+(built so; the user can change any).
 
 ## F5 (2026-10-08)
 
@@ -30,14 +31,18 @@ State: 2026-10-08. Items 1–15 were decided (frontend D177) and are removed. F5
    `StageExport` beside `post.window_lists.IDENTITY_FIELDS` / `SELECTION_FIELDS` (pinned by a test): proposed to stage
    C, `identity_of(stage, window)` in `post/window_lists.py`.
 
-## The speed readout (2026-10-08, the user's word)
+## The speed readout (2026-10-08, the user's decisions)
 
-7. **`model_speed` should time a sample, not every selection window (the user: "sample 一部分就可以").** For stage C
-   it speaks every window of the campaign's selection readout (`post_train.selection_windows`: 1,000 at 200 an airport),
-   one at a time at batch 1 on the CPU and on the GPU — about 75 min a model (P55 round 5's took 75 min). Stage B's
-   already draws `--per-airport` flights (20). Proposed: stage C (and stage D, once timed) takes `--per-airport` too,
-   a seeded draw of the selection windows of each airport, recorded in `speed.json`; the batch-400 settings speak the
-   same drawn windows. `model_speed` is stage B's runner (R63, D136): not fronter's to change. Meanwhile the Training
-   export of C10's round 8 (`loss_windows_c10_20261008`) waits for its speed readout; the readout of all 1,000 windows
-   was stopped at the user's word.
-
+7. **The speed readout is unbound from the Training sets (the user: "解绑，B 和 C 都改").** No Training set names a
+   speed readout any more: the exports of stages B, C and D lost `--speed` and `source.speed`, the results route
+   (`aeroviz_backend/training_results.py`) lost its `speed` sections, the TS results reader its `TrainingSpeed`
+   (D159 had already taken the section off the details page, so nothing showed it). `model_speed` stays a runner of its
+   own that writes `speed.json`; a page that shows speed reads that file. To the designer: D136 and frontend §3 item 10
+   say a set names its readout — to rewrite. **Reading (fronter): the format names stay** (sample v5 / index_post_v4,
+   index_prior_v3): no reader read `source.speed`, so the published sets of stages B and C keep a field nobody reads
+   and new sets lack it; renaming would mean re-exporting every published B set for a field no one reads.
+8. **`model_speed` times a sample (the user: "sample 一部分就可以").** Stage C now speaks a seeded draw of the
+   selection windows, `--per-airport` an airport (default 20, as stage B's), each at its place with its readout's
+   numbers; a batched setting draws at least its batch (an equal share an airport), so batch 400 holds 400 windows
+   where each airport holds its share; `speed.json` records the draw. `model_speed` is frontend §3 item 10 (D136),
+   fronter's runner — item 7 of the last version said stage B's, which was wrong.
