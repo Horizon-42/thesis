@@ -226,6 +226,16 @@ def test_a_window_reports_the_faulty_points_its_recorded_aircraft_read(setup):
     early = _window_loop(s, _with_module(s["base"]), [ahead], faults={own.key: frozenset({far_row})})
     (far,) = early.run([flight_numbers(7, 0, 0)])
     assert far.faulty_steps == 1 and not far.loss_reads_fault                 # read once, but not near the event
+    # C26: the public reading gives what the results counted — the step read, by the inserted aircraft's key, at the
+    # event for the marked row and 9 rows (more than 2 Δ) before it for the far one; nothing else, and read-only
+    for loop, end, at in ((marked, result, clean.loss_step), (early, far, None)):
+        readings = loop.fault_readings(0)
+        steps = [step for step, keys in readings.items() if keys]
+        assert len(steps) == end.faulty_steps == 1 and readings[steps[0]] == frozenset({key})
+        assert (steps[0] == at) if at is not None else steps[0] < clean.loss_step - 2
+        with pytest.raises(TypeError):
+            readings[0] = frozenset()                                    # type: ignore[index]
+    assert not any(_window_loop(s, _with_module(s["base"]), [ahead]).fault_readings(0).values())     # none read yet
 
 
 
