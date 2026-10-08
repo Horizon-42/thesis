@@ -266,3 +266,134 @@ def test_a_loss_that_the_records_also_have_stays_recorded_only(built):
     as_baseline = Positions(records.at, records.end_s, False)
     count = window_count(Drawn(behind, REAL_KIND), separation, fin, INSTRUCTION_STEP_S, positions=as_baseline)
     assert count.loss_steps["recorded_only"] > 0 and count.loss_steps["records_kept"] == 0
+
+
+def _counts_before(window, positions, separation, fin, step_s, reached):
+    """The census's step loop as it was before the generator (`multi.census.window_losses` at 246eca69, frontend
+    D177 (12)), kept here as the reference the new loop must count bit for bit like: (steps judged, loss steps by pair).
+    ``reached`` counts the branches the inputs reach (a landed commanded aircraft over its threshold, a loss holding
+    none, two recorded-only losses in a step, a recorded-only loss on the records)."""
+    from ts_transformer.multi.census import first_step_rows
+    from ts_transformer.multi.separation import judged_step, losses_on_records
+
+    steps, loss_steps = 0, {pair: 0 for pair in PAIRS}
+    interval = window.scene.interval_s
+    first = int(first_step_rows(window)[0])
+    last = int(round((positions.end_s - window.row0_s) / interval))
+    for step in range(first, last + 1):
+        judged = judged_step(window, positions, step, separation, fin, step_s)
+        if judged is None:
+            continue
+        aircraft, commanded, losses = judged
+        steps += 1
+        found, kept_on_records = set(), None
+        over = frozenset(int(k) for k in np.flatnonzero(aircraft.last_step[:commanded]))
+        reached["over"] += bool(over)
+        pairs = [classify(loss.i, loss.j, loss.responsible, commanded, over) for loss in losses]
+        reached["none"] += pairs.count(None)
+        reached["two_recorded_only"] += pairs.count("recorded_only") > 1
+        reached["recorded_only_on_records"] += positions.records and "recorded_only" in pairs
+        for loss in losses:
+            pair = classify(loss.i, loss.j, loss.responsible, commanded, over)
+            if pair == "recorded_only" and not positions.records:
+                if kept_on_records is None:
+                    kept_on_records = losses_on_records(window, step, separation, fin, step_s)
+                if frozenset((aircraft.keys[loss.i], aircraft.keys[loss.j])) not in kept_on_records:
+                    pair = "records_kept"
+            if pair is not None:
+                found.add(pair)
+        for pair in found:
+            loss_steps[pair] += 1
+    return steps, loss_steps
+
+
+def _cases(windows):
+    """Fixed inputs of the census (the tests above): each window of a 300 s span and two compressed (the second close
+    enough for its commanded aircraft to lose separation from each other), on the records;
+    a commanded aircraft placed 8 s ahead of a recorded follower (records_kept); a follower 8 s behind on the records
+    taken as a baseline (recorded_only)."""
+    from ts_transformer.multi.separation import Positions, on_records
+    from ts_transformer.post.scene import INSERTED, INSERTED_SUFFIX, MovedScene
+
+    anchors = Anchors(windows)
+    out = [(anchors.window_of(w, 300.0), None) for w in windows]
+    out.append((compressed(anchors.window_of(windows[0], 300.0), np.random.default_rng(3), 0.6).window, None))
+    out.append((compressed(anchors.window_of(windows[0], 300.0), np.random.default_rng(2), 0.3).window, None))
+    b = windows[1]
+    follower = b.scene.flight("KXXX:c")
+
+    def ahead_of_c(member, time_s):
+        later = time_s + 8.0
+        if not follower.start_s <= later <= follower.end_s:
+            return None
+        _, here, before, known, runway, category, _, go_around = follower.at_step(later, b.scene.interval_s)
+        return b.commanded.key, here, before, known, runway, category, False, go_around
+
+    out.append((b, Positions(ahead_of_c, follower.end_s - 8.0, False)))
+    own = windows[0].scene.flight(windows[0].commanded.key)
+    key = own.key + INSERTED_SUFFIX
+    behind = replace(windows[0], kind=INSERTED, moved=((key, 8.0),),
+                     scene=MovedScene(windows[0].scene, added=(own.shifted(8.0, DELTA, key=key),)))
+    records = on_records(behind)
+    as_baseline = Positions(records.at, records.end_s, False)
+    out.append((behind, as_baseline))
+    out.append((behind, None))                                          # the same on the records themselves
+    key2 = key + "2"                                                    # a second copy, 16 s behind
+    two = replace(windows[0], kind=INSERTED, moved=((key, 8.0), (key2, 16.0)),
+                  scene=MovedScene(windows[0].scene, added=(own.shifted(8.0, DELTA, key=key),
+                                                            own.shifted(16.0, DELTA, key=key2))))
+    records = on_records(two)
+    out += [(two, None), (two, Positions(records.at, records.end_s, False))]
+
+    def over_threshold(member, time_s):                                 # the commanded aircraft judged as landed
+        item = as_baseline.at(member, time_s)
+        return None if item is None else (*item[:6], True, item[7])
+
+    out.append((behind, Positions(over_threshold, as_baseline.end_s, False)))
+    return out
+
+
+def test_the_census_counts_bit_for_bit_as_before_the_generator(built):
+    """Frontend D177 (12): the readout's census (`window_count`, through `judged_steps`) gives on fixed inputs exactly
+    the counts of the loop it replaced (`_counts_before`): every pair, records_kept and recorded_only among them."""
+    from ts_transformer.multi.separation import on_records
+
+    windows, separation, fin = built
+    seen = {pair: 0 for pair in PAIRS}
+    reached = dict.fromkeys(("over", "none", "two_recorded_only", "recorded_only_on_records"), 0)
+    for window, positions in _cases(windows):
+        placed = on_records(window) if positions is None else positions
+        count = window_count(Drawn(window, REAL_KIND), separation, fin, INSTRUCTION_STEP_S, positions=positions)
+        assert (count.steps, count.loss_steps) == _counts_before(window, placed, separation, fin, INSTRUCTION_STEP_S,
+                                                                 reached)
+        for pair, n in count.loss_steps.items():
+            seen[pair] += n
+    assert all(seen[pair] > 0 for pair in PAIRS)                         # every pair counted somewhere
+    assert all(n > 0 for n in reached.values()), reached                 # and every branch of the loop reached
+
+
+def test_the_step_loop_gives_each_judged_step_and_its_losses(built):
+    """`judged_steps` on two synthetic windows: a flight alone gives every step from its first predicted step to its
+    end, none with a loss; with its own flight inserted 8 s behind on the records (a baseline, the stream's flights
+    around them), each loss holds the commanded aircraft and is recorded_only exactly where the commanded aircraft is
+    not among the responsible (before the records are read), commanded_answers where it is; the steps with each, and
+    every judged step, are the census's counts."""
+    from ts_transformer.multi.census import first_step_rows, judged_steps
+    from ts_transformer.multi.separation import on_records
+
+    windows, separation, fin = built
+    alone = windows[3]
+    steps = list(judged_steps(alone, on_records(alone), separation, fin, INSTRUCTION_STEP_S))
+    first = int(first_step_rows(alone)[0])
+    assert [s.step for s in steps] == list(range(first, first + len(steps))) and len(steps) > 10
+    assert all(s.commanded == 1 and s.losses == () for s in steps)
+    window, positions = _cases(windows)[-5]                            # the follower 8 s behind, as a baseline
+    steps = list(judged_steps(window, positions, separation, fin, INSTRUCTION_STEP_S))
+    losses = [x for s in steps for x in s.losses]
+    assert any(frozenset(x.keys) == frozenset({window.commanded.key, window.moved[0][0]}) for x in losses)
+    assert all(window.commanded.key in x.keys for x in losses)
+    assert all((x.pair == "recorded_only") == (0 not in x.loss.responsible) for x in losses)
+    count = window_count(Drawn(window, REAL_KIND), separation, fin, INSTRUCTION_STEP_S, positions=positions)
+    for name in ("recorded_only", "commanded_answers"):
+        assert sum(any(x.pair == name for x in s.losses) for s in steps) == count.loss_steps[name] > 0
+    assert len(steps) == count.steps

@@ -26,18 +26,19 @@ of a set of windows by airport: no criterion (D7).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Mapping, Sequence
+from typing import Iterator, Mapping, Sequence
 
 import numpy as np
 
 from ts_transformer.inference.runway_schedule import Separation
+from ts_transformer.inference.separation import Loss
 from ts_transformer.instructions.artefact import ClosedLoopSentence
 from ts_transformer.instructions.grammar import apply
 from ts_transformer.instructions.labeller.interval import OBSERVATION_S
 from ts_transformer.instructions.words import Words
 from ts_transformer.multi.separation import PAIRS, Positions, classify, judged_step, losses_on_records, on_records
 from ts_transformer.multi.windows import Drawn, first_step_rows, left_out
-from ts_transformer.post.scene import Window
+from ts_transformer.post.scene import AircraftAt, Window
 from ts_transformer.prior.procedure import Final
 
 @dataclass
@@ -104,10 +105,34 @@ def flown_positions(window: Window, flown: Sequence[tuple[np.ndarray, np.ndarray
     return Positions(at, end_s, False)
 
 
-def window_losses(window: Window, positions: Positions, separation: Separation, finals: Sequence[Final], step_s: float,
-                  count: WindowCount) -> None:
-    """The losses of ``window``'s steps into ``count`` (module docstring), its commanded aircraft at ``positions``, to
-    the end of those positions."""
+@dataclass(frozen=True)
+class StepLoss:
+    """A loss of a judged step that holds a commanded aircraft: its pair as `classify` reads it (``recorded_only``
+    before the records are read: `window_losses` splits off ``records_kept``), its two aircraft's keys and the judge's
+    loss."""
+
+    pair: str
+    keys: tuple[str, str]
+    loss: Loss
+
+
+@dataclass(frozen=True)
+class JudgedStep:
+    """A step of a window at which a commanded aircraft is in the air: the judged set (its commanded aircraft first),
+    the count of its commanded ones and its losses that hold a commanded aircraft, in the judge's order."""
+
+    step: int
+    aircraft: AircraftAt
+    commanded: int
+    losses: tuple[StepLoss, ...]
+
+
+def judged_steps(window: Window, positions: Positions, separation: Separation, finals: Sequence[Final], step_s: float
+                 ) -> Iterator[JudgedStep]:
+    """The census's step loop (module docstring): each Δ step of ``window`` from the anchor's first predicted step to
+    the end of ``positions`` at which a commanded aircraft is in the air, with its losses that hold one — a commanded
+    aircraft that landed (`flown_positions`) judged over its threshold counts as recorded. The readout's census
+    (`window_losses`) and the Training export's losses (frontend D177 (12)) both read it."""
     interval = window.scene.interval_s
     first = int(first_step_rows(window)[0])
     last = int(round((positions.end_s - window.row0_s) / interval))
@@ -116,19 +141,31 @@ def window_losses(window: Window, positions: Positions, separation: Separation, 
         if judged is None:
             continue
         aircraft, commanded, losses = judged
+        over = frozenset(int(k) for k in np.flatnonzero(aircraft.last_step[:commanded]))   # a landed one (flown_positions)
+        found = []
+        for loss in losses:
+            pair = classify(loss.i, loss.j, loss.responsible, commanded, over)
+            if pair is not None:
+                found.append(StepLoss(pair, (aircraft.keys[loss.i], aircraft.keys[loss.j]), loss))
+        yield JudgedStep(step, aircraft, commanded, tuple(found))
+
+
+def window_losses(window: Window, positions: Positions, separation: Separation, finals: Sequence[Final], step_s: float,
+                  count: WindowCount) -> None:
+    """The losses of ``window``'s steps into ``count`` (module docstring; `judged_steps`), its commanded aircraft at
+    ``positions``, to the end of those positions."""
+    for judged in judged_steps(window, positions, separation, finals, step_s):
         count.steps += 1
         found = set()
         kept_on_records = None
-        over = frozenset(int(k) for k in np.flatnonzero(aircraft.last_step[:commanded]))   # a landed one (flown_positions)
-        for loss in losses:
-            pair = classify(loss.i, loss.j, loss.responsible, commanded, over)
+        for item in judged.losses:
+            pair = item.pair
             if pair == "recorded_only" and not positions.records:     # the same pair on the records, at that step
                 if kept_on_records is None:
-                    kept_on_records = losses_on_records(window, step, separation, finals, step_s)
-                if frozenset((aircraft.keys[loss.i], aircraft.keys[loss.j])) not in kept_on_records:
+                    kept_on_records = losses_on_records(window, judged.step, separation, finals, step_s)
+                if frozenset(item.keys) not in kept_on_records:
                     pair = "records_kept"
-            if pair is not None:
-                found.add(pair)
+            found.add(pair)
         for pair in found:
             count.loss_steps[pair] += 1
 
