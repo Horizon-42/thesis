@@ -1389,3 +1389,16 @@ removed after, its data links unlinked). The read with traffic on equalled each 
 79.5 %, off − start +1.4 (−0.8 to +3.6). G1 on P55 with traffic on: 99 losses, 10 % in conflict at the start, 79 % at
 10–20 km, others leader 34 / follower 37 / other runway 28 / no landing 0. Both directories read-only with
 `SHA256SUMS` (checked). The readings against the rules: the experiment log, "诊断读数".
+
+**C25 (D176), window lists, built 2026-10-08:** `post/window_lists.py` (`ts-window-list-v1`), `experiments/window_list.py`
+(R67), tests `tests/test_window_lists.py` (5; with `test_architecture` 44 passed, two processes), commit `c7e41626` on
+`dev-two-tier-v4-post`. Reviewed in two rounds; the first found five S2, all fixed: the readouts' paths recorded as
+this checkout reads them (`this_checkout`, a worktree had recorded full paths), an `--outcomes` that no read gives
+refused (a mistyped name had written an empty list), smoke readouts refused, the ceiling's campaign found by
+`this_checkout`, one `file_sha256` (`io_utils`). S3 left: the ceiling's smoke refusal untested, `campaign.json`'s
+schema not checked, the airport taken from the flight key, the count not checked on read, the test fixtures retype the
+readouts' layout, `seal` imported from `post_diagnose` (torch for a JSON runner). The list written by the runner:
+`outputs/POOLED/post/windows_lost_separation_select_20261008` (the losses of separation in any of P55 r5 on, C10 r8 on
+and the C10 start's ceiling draw 0; 193 windows: KMSY 22, KRDU 52, KSJC 40, KSMF 38, KSTL 41; read-only, `SHA256SUMS`).
+It names the same windows (place, airport, flight, start time, kind) and the same reads per window as the hand-made
+`loss_windows_select_20261008`, which is deleted (the note; root `CLAUDE.md`). The export by list is fronter's (F5).
