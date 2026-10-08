@@ -7,9 +7,11 @@ notes; the items the user decided are deleted (D166: 6, 7, 19, 21, 22, 25, 29–
 census's sample: 18; D172: 46–48), item 23 (it asked for 6 and 7), item 20 (built: item 40) and the names of MC0–MC4
 (written into the interfaces).
 
-State: 2026-10-08: everything of stage D merged into `dev-two-tier` (the census generator `multi.census.judged_steps`,
-9ca282dd, frontend D177 (12)). MC5's profile at 64 / 48 / 24 rows: the run with 3 workers ended by the GPU's memory
-(item 49), set aside as `outputs/POOLED/multi/profile_20261008.aborted-20261008T200415Z`; running again with 2 workers.
+State: 2026-10-08, night: everything of stage D merged into `dev-two-tier` (the census generator
+`multi.census.judged_steps`, 9ca282dd, frontend D177 (12)). MC5's profile: with 3 workers ended by the GPU's memory
+(item 49, `outputs/POOLED/multi/profile_20261008.aborted-20261008T200415Z`); with 2 workers **stopped at the user's word**
+after its measures and 16 of 198 batches (`outputs/POOLED/multi/profile_20261008.stopped-20261008T204116Z`): items 50
+and 51 are the user's decisions of 2026-10-08 for the design.
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -164,3 +166,41 @@ State: 2026-10-08: everything of stage D merged into `dev-two-tier` (the census 
     fit keeps a margin on the measured GPU peak (e.g. 1.3×, stated in the record), or MC6 takes one worker fewer than
     the profile's largest fit; until decided, MC6's proposal to the user uses the workers that the profile's own round
     spoke without failing (2 if the run with 2 ends).
+
+## MC5–MC6 · the user's decisions of 2026-10-08 (night)
+
+50. **The profile's design is to change: a whole round before the campaign is a waste** (the user, 2026-10-08: stop
+    the profile — "这个行为很愚蠢", this behaviour is very stupid — and change its design). What MC5 does now
+    (§11 MC5, D172, `experiments/multi_profile.py`): a full round at the formal size before MC6 — the round's draw, one
+    worker's memory on each span's first and largest batch, the whole round spoken (198 batches, about 5–6 h with two
+    workers), the selection readout read twice, the pass, the spread. Only the memory measure must come before a
+    campaign (how many workers fit); everything else is what MC6's own round 0 records anyway (its speaking, readout
+    and pass times are in its `round.json`), so the profile spends a round of GPU time to learn what the campaign's
+    first round would tell. And the one thing it was trusted for failed: its fit judged 3 workers to fit and the round
+    ran out of GPU memory at batch 25 (item 49). Asked of the design:
+    - MC5 is the memory measure only: one worker on each span's first and largest batch and the pass (`multi_profile`
+      parts 1–2, minutes), with a margin on the measured GPU peak (item 49), recorded as today in `profile.json`; no
+      round spoken, no readouts, no spread. `profiled_fit` reads it as today (its `workers` block; the stopped profile
+      above holds exactly that, and its `short` for 1 and 2 workers is empty).
+    - The round's time and the readout's noise come from MC6's own records (round 0's `round.json`); the select set's
+      size is fixed before the campaign from stage C's experience (stage C: 200 windows an airport, about ±1.2 points
+      on landed; a stage D window holds several commanded aircraft), not from a measured spread.
+    - The same lesson for any later profile (MC9): measure only what must be known before the first round.
+51. **MC6's start and settings** (the user, 2026-10-08: "A, stop the profile; the start is stage C's best model").
+    - Start: `post_seg60_20261007` round 5 (P55's round 5, stage C's chosen model: select 87.7 % landed, its one val read
+      88.9 %), a formal campaign that has done its 8 rounds (D166 item 19); seed: one other than its source's 2028
+      (D162), Claude's proposal 2035.
+    - Workers: 2 on the GPU (`--speak-workers 2`), sized from the stopped profile
+      (`--profile outputs/POOLED/multi/profile_20261008.stopped-20261008T204116Z`: the same inputs and the settings
+      that `PROFILED_SETTINGS` compares; 1 and 2 workers fit; the run with 2 spoke 16 batches without a failure; 3 did
+      not fit, item 49).
+    - Settings as the profile's (Claude's proposal; D142, D143 kept, O19): 1,000 real and 1,000 compressed windows a
+      round, spans 300 / 600 / 1200 s, c_min 0.8, batch rows 64 / 48 / 24, K = 8, prior lr 1e-5, traffic lr 1e-4,
+      weight decay 0.01, 4 groups an update, 64 data sentences, 100 select anchors an airport (each read in every span:
+      1,500 windows a readout).
+    - Rounds: Claude's proposal 8, with stage C's stop rule (a round's select landed not above the start's by more than
+      the noise: stop; else continue by D157); about 5–6 h a round (the profile's 16 batches at about 1.7 min a batch
+      with 2 workers, 198 batches), so about two days for 8 rounds.
+    - From a run worktree at the merged commit (D163), in a systemd unit; the intent in `docs/experiments/intents.json`
+      before publication.
+
