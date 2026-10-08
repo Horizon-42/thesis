@@ -1354,3 +1354,9 @@ worktree removed. The experiment log, experiment 9.
 **Experiment 10 (`post_seg60lr3_20261008`, segments of 60 s with 3e-5 / 3e-4 and clip 1.0, K = 8, from P55's round 5)
 ended 17:00 local**, 4 rounds, exit 0: 86.2 / 86.9 / 86.3 / 85.9 %, below its start; KL 0.060 → 0.077. Sealed (11
 files), the run worktree removed. The experiment log, experiment 10.
+
+**Stage C's result (2026-10-08, the user's word):** stopped at P55's round 5 (`post_seg60_20261007`, round 5); its val
+read (D132, once): `validation_post_seg60_r5_20261008`, landed 88.9 %, lost separation 9.1 %, mean reward 0.880 over
+1,000 windows of the val days (the select readout of the round: 87.7 %). The sealed campaign directory took the claim
+(the directory made writable for it alone, the claim and lock added to `SHA256SUMS`, sealed again). The experiment log,
+"阶段 C 的结果".
