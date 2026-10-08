@@ -67,9 +67,24 @@ def fig08_prior_architecture() -> None:
     heads = [box(ax, 1 + 19.6 * i, 0.8, 17.2, 7.0, n_, FILL["b"], bold=True, sub=s_, fs=6.8) for i, (n_, s_) in enumerate(names)]
     ax.plot([88, 88, 9.6], [29, 10.8, 10.8], color=C["ink2"], lw=0.9, zorder=2)
     for h in heads: arrow(ax, (h[0] + h[2] / 2, 10.8), (h[0] + h[2] / 2, 7.9), lw=0.9, ms=6)
-    for i in range(4): arrow(ax, anchor(heads[i], "r", 0.3), anchor(heads[i + 1], "l", 0.3), lw=0.8, ms=5)
-    ax.text(60, 15.5, "each head also reads the words that the earlier columns\nchose in this row; the heads speak in the order of the columns", ha="center", fontsize=6.4, color=C["ink2"], va="center")
+    for i in range(4): arrow(ax, anchor(heads[i], "r", 0.3), anchor(heads[i + 1], "l", 0.3), lw=1.8, ms=8, color=C["word"])
+    ax.text(55, 15.5, "autoregressive over the columns: each head also reads the words that the\nearlier columns chose in this row (purple arrows, in the order of the columns)", ha="center", fontsize=6.4, color=C["word"], va="center")
     ax.text(86.5, 20.5, "masks and a random\nnumber u act on the\nlogits of each head", fontsize=6.4, ha="right", va="center", color=C["word"])
+    # autoregressive over the rows: the words said in this row are inputs of the next row
+    rail = -3.0
+    for h in heads:
+        ax.plot([h[0] + h[2] / 2, h[0] + h[2] / 2], [h[1], rail], color=C["word"], lw=0.9, zorder=2)
+    ax.plot([heads[0][0] + heads[0][2] / 2, -3.5, -3.5], [rail, rail, 39.2], color=C["word"], lw=0.9, zorder=2)
+    ax.plot([heads[-1][0] + heads[-1][2] / 2, heads[0][0] + heads[0][2] / 2], [rail, rail], color=C["word"], lw=0.9, zorder=2)
+    for y in (39.2, 28.3):
+        arrow(ax, (-3.5, y), (1, y), None, color=C["word"], lw=0.9, ms=6)
+    ax.text(50, rail - 1.2, "words said in this row  →  inputs of the next row", fontsize=6.6, color=C["word"], ha="center", va="top", fontweight="bold")
+    # the rows in time that the causal attention reads
+    ax.text(87, 55.6, "rows in time", fontsize=6.4, color=C["ink2"], ha="center", va="bottom")
+    for k, (lab, fc) in enumerate([("t−2", "white"), ("t−1", "white"), ("t", FILL["b"])]):
+        box(ax, 75.5 + 8 * k, 48.5, 7, 5, lab, fc, fs=6.0)
+        if k < 2: arrow(ax, (82.5 + 8 * k, 51), (83.5 + 8 * k, 51), None, lw=0.8, ms=5)
+    ax.text(87, 46.6, "each row reads the rows\nbefore it and itself", fontsize=5.8, color=C["ink2"], ha="center", va="top")
     # the traffic attention in detail: the other aircraft become tokens, and the row attends to them
     ax.add_patch(FancyBboxPatch((1, 58.5), 98, 19, boxstyle="round,pad=0,rounding_size=1", fc="none", ec=C["ink3"], lw=0.8, ls=(0, (4, 3)), zorder=1))
     ax.text(3, 75.2, "Traffic attention, in each layer", fontsize=7, fontweight="bold", va="center", color=C["ink"])
@@ -80,6 +95,7 @@ def fig08_prior_architecture() -> None:
     ax.text(5, 60.4, "The output is added to the row. It is zero at the start, and zero when there is no other aircraft.", fontsize=6.2, color=C["ink2"], va="center")
     ax.plot([72.5, 72.5, 67.6], [62.5, 36.0, 36.0], color=C["ink2"], lw=0.9, ls=(0, (3, 2)), zorder=2)
     arrow(ax, (68.6, 36.0), (67.6, 36.0), lw=0.9, ms=5)
+    ax.set_xlim(-7, 100); ax.set_ylim(-8.5, H)
     save(fig, "fig08_prior_architecture")
 
 
