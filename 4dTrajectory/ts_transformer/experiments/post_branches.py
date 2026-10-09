@@ -487,15 +487,25 @@ def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loo
                 s.groups[part.chosen] = group(part, joint, own)
         return out
 
+    def scheduled(part: _Part, loop: WindowLoop, window: int) -> int | None:
+        """The steps part ``part`` (its first window ``window`` in ``loop``) is flown before it leaves the joint loop at
+        the latest: a point tried, to its judged tick; the decision point's copy, to the fine point; None for a point
+        chosen (flown to its window's end, not known)."""
+        tick = loop.speaking.t - int(loop.origins[window])
+        if part.base:
+            return part.point - tick
+        return part.search.until - tick if part.chosen is None else None
+
     began = time.perf_counter()
     for s in searches:
         ask(s, None)
     joint: WindowLoop | None = None
     flying: list[_Part] = []
+    room: int | None = None             # the steps the joint loop's cache has room for (None: D183's, as it grows)
     while True:
         while True:                     # the parts ended leave, the searches' next points join, until none does
             kept = settled(joint, flying)
-            if not joining and len(kept) == len(flying):
+            if not joining and len(kept) == len(flying) and room != 0:
                 break
             # the joint loop's own windows (those kept, and the fine points' copies of a decision point's) one part of
             # it, then the points from their held copies; the joint loop replaced is freed as it is copied
@@ -504,11 +514,17 @@ def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loo
             mine = [w for _, own in kept for w in own] + [w for _, own in ours for w in own]
             selected = ([(joint, mine)] if mine else []) + [(source, own) for _, source, own in theirs]
             flying = [part for part, _ in kept] + [part for part, _ in ours] + [part for part, _, _ in theirs]
+            # the cache's room: the steps to the next rebuild, at the first part's end by its schedule (D190 (1)); a
+            # point chosen there that goes on with no part leaving or joining is rebuilt with the others all the same
+            steps = [scheduled(part, joint, own[0]) for part, own in kept + ours] + \
+                [scheduled(part, source, own[0]) for part, source, own in theirs]
+            room = min((n for n in steps if n is not None), default=None)
             joining.clear()
-            joint = WindowLoop.together(selected, device, spent=joint if mine else None) if flying else None
+            joint = WindowLoop.together(selected, device, room, spent=joint if mine else None) if flying else None
         if not flying:
             break
         joint.step(_draws(joint, [n for part in flying for n in part.streams]))
+        room = None if room is None else room - 1
         counted["steps"] += 1
         counted["rows"] += len(joint.order)
     search_s = time.perf_counter() - began

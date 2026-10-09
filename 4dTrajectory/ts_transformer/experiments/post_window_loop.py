@@ -565,21 +565,21 @@ class WindowLoop:
         return out
 
     @staticmethod
-    def together(parts: Sequence[tuple[WindowLoop, Sequence[int]]], device: torch.device,
+    def together(parts: Sequence[tuple[WindowLoop, Sequence[int]]], device: torch.device, room: int | None,
                  spent: WindowLoop | None = None) -> WindowLoop:
         """Windows of several loops, each at its own tick, flown on as one loop (multi-aircraft control D188: a backward
         batch's searches stepped together), on ``device``: ``parts`` each a loop and its windows (places in its
         ``windows``, repeats permitted), the loops of one batch (one model, rules and token part). The closed loop's own
         join (`SpeakingLoop.together`: each part's clock moved later by the ticks it is behind) and each window's own
         state as `copy` keeps it; a window keeps its own ticks (its origin in the loop's clock moved with its part).
-        Flown on with the same numbers, a window says and flies what it would in its own loop. ``spent``: a loop among
-        the parts that nothing reads after (the one this loop replaces), its cache freed as it is copied
-        (`SpeakingLoop.together`)."""
+        Flown on with the same numbers, a window says and flies what it would in its own loop. ``room``: the rows its
+        speaker's cache has room for past the rows written (`SpeakingLoop.together`); ``spent``: a loop among the parts
+        that nothing reads after (the one this loop replaces), its cache freed as it is copied."""
         index = [list(windows) for _, windows in parts]
         rows = [[b for w in i for b in loop.members[w]] for (loop, _), i in zip(parts, index)]
         first = parts[0][0]
         out = object.__new__(WindowLoop)
-        out.speaking = SpeakingLoop.together([(loop.speaking, r) for (loop, _), r in zip(parts, rows)], device,
+        out.speaking = SpeakingLoop.together([(loop.speaking, r) for (loop, _), r in zip(parts, rows)], device, room,
                                              None if spent is None else spent.speaking)
         shifts = [out.speaking.t - loop.speaking.t for loop, _ in parts]
         moved = list(zip([loop for loop, _ in parts], index, rows, shifts))

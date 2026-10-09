@@ -237,18 +237,18 @@ def test_windows_of_loops_at_different_ticks_flown_together_say_and_fly_what_eac
     while loop.speaking.t < late:
         step(loop, numbers)
     b, b_numbers = loop.copy([0]), [n.bit_generator.state for n in numbers]
-    together = WindowLoop.together([(a, [0]), (b, [0, 0])], CPU)
+    together = WindowLoop.together([(a, [0]), (b, [0, 0])], CPU, None)
     assert together.speaking.t == late and together.origins.tolist() == [late - early, 0, 0]
     assert together.speaking.join_ticks.tolist() == [late - early + j for j in JOINS] + list(JOINS) * 2
     streams = twins(a_numbers) + twins(b_numbers) + twins(b_numbers)
     for _ in range(3):
         step(together, streams)
     kept = [0, 2]                                         # window 1 leaves: its aircraft and numbers with it
-    together = WindowLoop.together([(together, kept)], CPU)
+    together = WindowLoop.together([(together, kept)], CPU, None)
     streams = streams[:3] + streams[6:]
     for _ in range(4):
         step(together, streams)
-    alone = WindowLoop.together([(together, [0])], CPU)  # its origin, the ticks before its aircraft joined, left out
+    alone = WindowLoop.together([(together, [0])], CPU, None)  # its origin, the ticks before its aircraft joined, left out
     assert alone.origins.tolist() == [0] and alone.speaking.t == early + 7
     first = alone.finish(streams[:3])
     second = together.copy([1]).finish(streams[3:])

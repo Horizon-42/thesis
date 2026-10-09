@@ -452,13 +452,15 @@ class Speaker:
         return out
 
     @staticmethod
-    def together(parts: Sequence[tuple[Speaker, Sequence[int], int]], device: torch.device,
+    def together(parts: Sequence[tuple[Speaker, Sequence[int], int]], device: torch.device, room: int | None,
                  spent: Speaker | None = None) -> Speaker:
         """Aircraft of several speakers as one speaker (multi-aircraft control D188), its cache on ``device``: ``parts``
         each a speaker, its aircraft (repeats permitted) and the rows its clock moves later by (below 0: its first rows,
         before any of its aircraft's own, are left out), so that every part has encoded the same rows and said the same
-        rows since. Each aircraft keeps what `copy` keeps (the cache's rows written and one step of room, D183), its
-        records of the rows said moved with its rows (a row its speaker did not say: said by none, nothing permitted).
+        rows since. Each aircraft keeps what `copy` keeps, its cache with ``room`` rows past the rows written (multi-aircraft
+        control D190 (1): a joint loop's, the steps to its next rebuild; None where they are not known: one step of
+        D183, as `copy`), its records of the rows said moved with its rows (a row its speaker did not say: said by none,
+        nothing permitted).
         Continued with the same inputs and numbers, an aircraft says what it says in its own speaker. The parts' model,
         words and temperature are one speaker's. ``spent``: a speaker among the parts that nothing reads after (the one
         this speaker replaces), its cache freed a layer at a time as it is copied, so that the device holds the two
@@ -473,7 +475,8 @@ class Speaker:
         out.past = []
         for layer in range(len(first.past)):
             out.past.append(Past.together([(s.past[layer], torch.as_tensor(i, device=s.past[layer].keys.device), shift)
-                                           for (s, _, shift), i in zip(parts, index)], CACHE_STEP_ROWS, device))
+                                           for (s, _, shift), i in zip(parts, index)],
+                                         CACHE_STEP_ROWS if room is None else room, device))
             if spent is not None:
                 spent.past[layer] = None                  # copied: the spent speaker's layer freed
         out._heard = [s._heard[b].copy() for (s, _, _), i in zip(parts, index) for b in i]

@@ -345,3 +345,48 @@ def test_the_searches_of_a_batch_step_together_and_find_what_each_finds_alone(se
             for x, y in zip(g.continuations, h.continuations):
                 assert np.array_equal(x.rows.targets, y.rows.targets) and (x.reward, x.until) == (y.reward, y.until)
                 assert all(np.array_equal(a, b) for a, b in zip(x.permitted.masks, y.permitted.masks))   # same shape
+
+
+def test_a_joint_loops_cache_has_room_for_the_steps_to_its_next_rebuild(setup, monkeypatch):
+    """D190 (1): after a rebuild the joint loop's cache has room for the steps to its next rebuild by its parts' schedule
+    (a point tried: to its judged tick; the decision point's copy: to the fine point; D183's step where every part is a
+    point chosen), and flown to the next rebuild it never grows where the room was so given (a point chosen at its
+    judged tick that goes on alone: the loop rebuilt as it is)."""
+    from ts_transformer.prior.model import CACHE_STEP_ROWS, Past
+    from ts_transformer.tests.test_post_window_multi import _multi
+
+    s = setup
+    multi, loop_of = _multi(s, joins=(0, 30, 60))
+    parts = loop_of.parts
+    rules = Rules(**credit.rules(1337, 0, DELTA))
+    built, real_together, real_step, real_grown = [], WindowLoop.together, WindowLoop.step, Past.grown
+
+    def together(parts, device, room, spent=None):
+        out = real_together(parts, device, room, spent)
+        past = out.speaking.speaker.past[0]
+        built.append({"loop": out, "room": room, "capacity": past.keys.shape[2] - past.rows, "steps": 0, "grown": 0})
+        return out
+
+    def step(self, numbers):
+        if built and self is built[-1]["loop"]:
+            built[-1]["steps"] += 1
+        return real_step(self, numbers)
+
+    def grown(self, capacity):
+        if built:                                        # once the joint loop is flown, the only one that says a row
+            built[-1]["grown"] += 1
+        return real_grown(self, capacity)
+
+    monkeypatch.setattr(WindowLoop, "together", staticmethod(together))
+    monkeypatch.setattr(WindowLoop, "step", step)
+    monkeypatch.setattr(Past, "grown", grown)
+    backward_round(_with_module(s["base"]), parts["start"], [multi], [5], parts["sentences"], parts["flights"],
+                   s["geometries"], parts["rosters"], s["finals"], s["words"], interval_s=DELTA, variant="full",
+                   edges_reference=s["reference"], faults={s["geometry"].code: {}}, device=CPU, split="train",
+                   continuations=2, rules=rules)
+    assert len(built) > 1
+    for b in built:
+        assert b["capacity"] == (CACHE_STEP_ROWS if b["room"] is None else b["room"])
+        if b["room"] is not None:
+            assert b["steps"] <= b["room"] and b["grown"] == 0
+    assert any(b["room"] is not None and b["steps"] == b["room"] for b in built)     # a rebuild by the schedule

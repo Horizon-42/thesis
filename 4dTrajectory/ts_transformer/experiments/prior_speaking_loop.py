@@ -335,7 +335,7 @@ class SpeakingLoop:
         return out
 
     @staticmethod
-    def together(parts: Sequence[tuple[SpeakingLoop, Sequence[int]]], device: torch.device,
+    def together(parts: Sequence[tuple[SpeakingLoop, Sequence[int]]], device: torch.device, room: int | None,
                  spent: SpeakingLoop | None = None) -> SpeakingLoop:
         """Flights of several loops, each at its own tick, said and flown on as one loop (multi-aircraft control D188: a
         backward batch's searches stepped together), on ``device``: ``parts`` each a loop from its first predicted step
@@ -344,8 +344,9 @@ class SpeakingLoop:
         tick), and the ticks before any flight joined are left out. Each flight keeps what `copy` keeps of it
         (`Loop.together`, `Speaker.together`, `LoopRows.together`) and its own rows: flown on with the same numbers,
         masks and input of the added modules, it says what it says in its own loop and flies it within the executor's
-        bound. ``spent``: a loop among the parts that nothing reads after (the one this loop replaces): its speaker's
-        cache freed as it is copied (`Speaker.together`)."""
+        bound. ``room``: the rows its speaker's cache has room for past the rows written (`Speaker.together`); ``spent``:
+        a loop among the parts that nothing reads after (the one this loop replaces): its speaker's cache freed as it
+        is copied."""
         index = [np.asarray(list(flights), dtype=np.int64) for _, flights in parts]
         for loop, _ in parts:
             if loop.t < loop.start or len(loop.speaker.said_rows) != loop.t - loop.start:
@@ -356,7 +357,7 @@ class SpeakingLoop:
         first = parts[0][0]
         out = object.__new__(SpeakingLoop)
         out.loop = Loop.together([(loop.loop, i, shift) for loop, i, shift in moved], device)
-        out.speaker = Speaker.together([(loop.speaker, i, shift) for loop, i, shift in moved], device,
+        out.speaker = Speaker.together([(loop.speaker, i, shift) for loop, i, shift in moved], device, room,
                                        None if spent is None else spent.speaker)
         out.rows_of = LoopRows.together([(loop.rows_of, i, shift) for loop, i, shift in moved], device)
         out.order = [loop.order[b] for loop, i, _ in moved for b in i]
