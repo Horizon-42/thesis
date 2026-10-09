@@ -131,6 +131,27 @@ class Past(NamedTuple):
         return Past(torch.cat((self.keys, pad), dim=2), torch.cat((self.values, pad), dim=2),
                     torch.cat((self.present, self.present.new_zeros((self.present.shape[0], extra))), dim=1), self.rows)
 
+    def taken(self, index: torch.Tensor, room: int, device: torch.device | None = None) -> Past:
+        """The lines ``index`` (``[K]``, repeats permitted) of this past in new storage of their rows written and
+        ``room`` rows more, allocated once (D183 (2)): the rows selected into its front by `torch.index_select`, no
+        intermediate copy; on another ``device`` (this one's when not given) the selection is made where the rows are
+        and moved into it."""
+        target = self.keys.device if device is None else torch.device(device)
+        rows = self.rows
+        keys = self.keys.new_zeros((len(index), self.keys.shape[1], rows + room, self.keys.shape[3]), device=target)
+        values = torch.zeros_like(keys)
+        present = self.present.new_zeros((len(index), rows + room), device=target)
+        for into, source in ((keys, self.keys), (values, self.values)):
+            if target == source.device:
+                torch.index_select(source[:, :, :rows], 0, index, out=into[:, :, :rows])
+            else:
+                into[:, :, :rows] = source[index, :, :rows]
+        if target == self.present.device:
+            torch.index_select(self.present[:, :rows], 0, index, out=present[:, :rows])
+        else:
+            present[:, :rows] = self.present[index, :rows]
+        return Past(keys, values, present, rows)
+
     @classmethod
     def nothing(cls, batch: int, heads: int, head: int, capacity: int, like: torch.Tensor) -> Past:
         """No rows yet, room for ``capacity`` (``like``: a tensor of the device and dtype)."""

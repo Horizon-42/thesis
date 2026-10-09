@@ -509,8 +509,8 @@ def test_a_copy_continued_with_the_same_inputs_and_numbers_says_what_the_origina
 
 
 def test_a_copy_keeps_its_rows_and_one_step_of_room_in_its_own_storage(words, monkeypatch):
-    """D183 (1), (2): a copy's cache is its own storage, made once (no second clone), holding the rows written and one
-    step of room (`CACHE_STEP_ROWS`), whatever the room of the speaker copied."""
+    """D183 (1), (2): a copy's cache is its own storage, allocated once (no clone, no growth: the rows selected into
+    it), holding the rows written and one step of room (`CACHE_STEP_ROWS`), whatever the room of the speaker copied."""
     from ts_transformer.prior.model import CACHE_STEP_ROWS
 
     model, rows = setup(words, seed=4, count=4, rows=50)
@@ -522,12 +522,16 @@ def test_a_copy_keeps_its_rows_and_one_step_of_room_in_its_own_storage(words, mo
         speaker.speak(rows.between(r, r + 1), spread(4, r), drawn[r - first])
     written = speaker.past[0].rows
     assert written == first + 10 and speaker.past[0].keys.shape[2] == 400
-    clones = []
+    clones, grown = [], []
     real = torch.Tensor.clone
     monkeypatch.setattr(torch.Tensor, "clone", lambda self, *a, **k: clones.append(1) or real(self, *a, **k))
+    from ts_transformer.prior.model import Past
+
+    real_grown = Past.grown
+    monkeypatch.setattr(Past, "grown", lambda self, capacity: grown.append(1) or real_grown(self, capacity))
     picked = speaker.copy([2, 2, 0])
     monkeypatch.undo()
-    assert clones == []
+    assert clones == [] and grown == []                # its storage allocated once, the rows selected into it
     for p, q in zip(speaker.past, picked.past):
         assert q.rows == written and q.keys.shape[2] == q.values.shape[2] == q.present.shape[1] == written + CACHE_STEP_ROWS
         assert torch.equal(q.keys[:, :, :written], p.keys[[2, 2, 0], :, :written])

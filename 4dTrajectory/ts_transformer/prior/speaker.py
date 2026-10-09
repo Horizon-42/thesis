@@ -392,11 +392,9 @@ class Speaker:
         out.model, out.words, out.temperature = self.model, self.words, self.temperature
         out.procedure = self.procedure.select(indices)
         out._n_candidates = self._n_candidates[indices].copy()
-        # the rows written and one step of room (D183; indexing by a tensor makes the copy's own storage)
+        # the rows written and one step of room, allocated once (D183)
         index = torch.as_tensor(indices, device=self.past[0].keys.device)
-        out.past = [Past(*(x.to(device) if device is not None else x
-                           for x in (p.keys[index, :, : p.rows], p.values[index, :, : p.rows], p.present[index, : p.rows])),
-                         p.rows).grown(p.rows + CACHE_STEP_ROWS) for p in self.past]
+        out.past = [p.taken(index, CACHE_STEP_ROWS, device) for p in self.past]
         out._heard = [self._heard[i].copy() for i in indices]
         out.forbidden = {c: [row[indices] for row in rows] for c, rows in self.forbidden.items()}
         out.go_around_probability = [row[indices] for row in self.go_around_probability]
