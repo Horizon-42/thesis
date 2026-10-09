@@ -71,7 +71,9 @@ export interface ReadbackInputs {
 export function readbackModel({ selection, reading, layers, cursorS, column, autopilot, width }: ReadbackInputs) {
   const { flight, vocabulary, candidates } = selection;
   const stepS = vocabulary.stepS;
-  const { observed, judged: judgedTrack, envelopes, closed } = reading;
+  const { observed, judged: judgedTrack, closed } = reading;
+  // the labelled sentence judges the observed track: its envelopes go with that track's switch
+  const envelopes = closed === null && !layers.observed ? null : reading.envelopes;
   const flown = closed === null ? null : closed.flown;
   const designated = candidates[flight.runwayIndex];
   const cursorRow = readingRowAt(reading, cursorS);
@@ -94,8 +96,11 @@ export function readbackModel({ selection, reading, layers, cursorS, column, aut
   /** The span of flight time the selected word is in force. */
   const focusSpanS: [number, number] | null = focus === null ? null : [rowTimeS(focus.row), rowTimeS(focus.endRow)];
   /** The points of ``tS`` inside the selected word's span, on to the next one so that it meets the next word's stretch. */
+  // the judged track hidden (the labelled sentence's, with the observed track): no word is marked on it
+  const judgedShown = closed !== null || layers.observed;
+  /** The rows of the JUDGED track the selected word is in force. */
   const focusPoints = (tS: number[]): number[] => {
-    if (focusSpanS === null) return [];
+    if (focusSpanS === null || !judgedShown) return [];
     const out: number[] = [];
     tS.forEach((t, index) => {
       if (t >= focusSpanS[0] - 1e-9 && t <= focusSpanS[1] + 1e-9) out.push(index);

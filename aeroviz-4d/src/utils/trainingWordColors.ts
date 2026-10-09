@@ -52,10 +52,10 @@ export const TRAINING_TUBE_COLOR = TRAINING_COLUMN_COLOR.altitude;
 export const TRAINING_SPEED_COLOR = TRAINING_COLUMN_COLOR.speed;
 
 /** How opaque each envelope is in the 3D scene at rest, and a fill when it is the selected word's — one table, so the
- *  legend's swatches are the scene's. The heading bands are lines on the ground, at every ground line's opacity
- *  (`GROUND_LINE_ALPHA`, `scene/trainingEntities.ts`). */
+ *  legend's swatches are the scene's. A heading band's judged rows are lines on the ground, at every ground line's opacity
+ *  (`GROUND_LINE_ALPHA`, `scene/trainingEntities.ts`); its fan a fill on the ground. */
 export const TRAINING_ENVELOPE_ALPHA = {
-  tube: 0.28, selected: 0.45,
+  tube: 0.28, fan: 0.2, selected: 0.45,
 } as const;
 
 /** A window's recorded traffic, and a commanded aircraft from the row it is silent on (stage D, D144: it flies on its

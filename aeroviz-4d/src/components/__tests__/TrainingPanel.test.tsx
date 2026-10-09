@@ -9,7 +9,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 const { appState, setTrainingSelection, setTrainingIntervalS, setTrainingAutopilot, setTrainingLayer, fetchMock } = vi.hoisted(() => ({
   appState: {
     activeAirportCode: "KXXX" as string,
-    trainingLayers: { headingBands: true, vertical: true, candidates: true },
+    trainingLayers: { observed: true, headingBands: true, vertical: true, candidates: true },
     trainingIntervalS: 2 as number | null,
     // no word picked: the live executor asks for nothing
     trainingSelection: null as unknown, trainingPick: null,
@@ -140,13 +140,15 @@ describe("TrainingPanel", () => {
       await waitFor(() => expect(document.querySelector("[data-mark]")).toBeNull());     // the labelled sentence: none
     });
 
-    it("offers the three switches the view has, no more", async () => {
+    it("offers the four switches the view has, no more", async () => {
       render(<TrainingPanel hidden={false} />);
       await screen.findByText("KXXX:test");
       expect(screen.getAllByRole("checkbox").map((box) => box.parentElement!.textContent)).toEqual([
-        "Heading bands", "Altitude tubes", "Other candidate runways"]);
+        "Observed track", "Heading bands", "Altitude tubes", "Other candidate runways"]);
       fireEvent.click(screen.getByLabelText("Heading bands"));
       expect(setTrainingLayer).toHaveBeenCalledWith("headingBands", false);
+      fireEvent.click(screen.getByLabelText("Observed track"));
+      expect(setTrainingLayer).toHaveBeenCalledWith("observed", false);
     });
 
     it("opens the details page on the models' statistics: two sections, a row for each Δ's closed loop", async () => {

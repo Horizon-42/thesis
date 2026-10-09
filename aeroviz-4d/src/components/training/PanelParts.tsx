@@ -12,6 +12,7 @@ import { useApp, type TrainingLayers } from "../../context/AppContext";
 import {
   TRAINING_CANDIDATE_COLOR,
   TRAINING_HEADING_BAND_COLOR,
+  TRAINING_TRACE_COLOR,
   TRAINING_TUBE_COLOR,
 } from "../../utils/trainingWordColors";
 
@@ -84,6 +85,8 @@ export function DrawBox({ legend = "Draw", children }: { legend?: string; childr
 
 /** The Draw switches, in drawing order: a short name in its own colour, what it shows in its tooltip. */
 const LAYER_SWITCHES: Array<{ layer: keyof TrainingLayers; colour: string; text: string; title: string }> = [
+  { layer: "observed", colour: TRAINING_TRACE_COLOR, text: "Observed track",
+    title: "the observed (ground-truth) flight: its track and ground trace, its aircraft at the cursor, its lines on the read-back charts, and the labelled sentence's envelopes, which judge it" },
   { layer: "headingBands", colour: TRAINING_HEADING_BAND_COLOR, text: "Heading bands",
     title: "each heading word's band over the rows it is judged on, and those rows outside it in red" },
   { layer: "vertical", colour: TRAINING_TUBE_COLOR, text: "Altitude tubes",

@@ -27,6 +27,7 @@
 
 import { fetchJson } from "../utils/fetchJson";
 import { attempt, parseManifest, Reader, type Parsed } from "./trainingReader";
+import { parseProcedure, type TrainingProcedure } from "./trainingProcedure";
 import {
   parseCandidates,
   parseEvents,
@@ -126,35 +127,6 @@ export interface TrainingPriorIndex {
   sets: TrainingPriorSetEntry[];
   /** Entries that are not set entries at all, each with the field that failed. */
   rejected: Array<{ id: string; problem: string }>;
-}
-
-/** A point of the procedure's limits: the airport frame, the globe, and its height MSL and as Cesium draws it. */
-export interface TrainingProcedurePoint {
-  eM: number;
-  nM: number;
-  lat: number;
-  lon: number;
-  heightMslM: number;
-  heightHaeM: number;
-  /** Metres before the threshold along the course. */
-  beforeThresholdM: number;
-}
-
-/** One candidate runway's final as the procedure masks read it. */
-export interface TrainingProcedure {
-  index: number;
-  ident: string;
-  fafBeforeThresholdM: number;
-  /** The glidepath lower edge lies this far below the glidepath. */
-  glidepathBelowM: number;
-  /** The closed outline of the region the masks rule (inside the FAF and the LPV cone), on the ground. */
-  region: { eM: number[]; nM: number[]; lat: number[]; lon: number[] };
-  /** The glidepath lower edge along the course: a height at each point. */
-  glidepathLowerEdge: { lat: number[]; lon: number[]; heightMslM: number[]; heightHaeM: number[]; beforeThresholdM: number[] };
-  /** Where the glidepath reaches the decision height. */
-  decision: TrainingProcedurePoint;
-  /** The entry point at the FAF, at the entry height. */
-  entry: TrainingProcedurePoint;
 }
 
 /** One sentence the prior said, flown again by the executor. Rows are the sentence's Δ rows from the first predicted step. */
@@ -281,48 +253,6 @@ export function parseTrainingPriorIndex(raw: unknown): Parsed<TrainingPriorIndex
 }
 
 // ── one set ──────────────────────────────────────────────────────────────────
-
-function procedurePoint(reader: Reader, haeMinusMslM: number): TrainingProcedurePoint {
-  const heightMslM = reader.number("heightMslM");
-  return {
-    // the exporter writes a point's place as lists of one (`placed`)
-    eM: reader.numbers("eM", 1)[0], nM: reader.numbers("nM", 1)[0], lat: reader.numbers("latDeg", 1)[0],
-    lon: reader.numbers("lonDeg", 1)[0], heightMslM, heightHaeM: heightMslM + haeMinusMslM,
-    beforeThresholdM: reader.number("beforeThresholdM"),
-  };
-}
-
-function parseProcedure(reader: Reader, candidates: TrainingCandidate[]): TrainingProcedure[] {
-  const procedure = reader.children("procedure").map((item, position) => {
-    const index = item.integer("index", 0, candidates.length - 1);
-    if (index !== position) item.fail(`index is ${index}, expected ${position}: the limits are in the candidates' order`);
-    const ident = item.string("ident");
-    if (candidates[index].ident !== ident) item.fail(`ident ${ident} is not candidate ${index}'s (${candidates[index].ident})`);
-    const hae = candidates[index].haeMinusMslM;
-    const region = item.child("region");
-    const ring = region.numbers("eM");
-    if (ring.length < 4) region.fail("the outline has fewer than four points");
-    const ringN = region.numbers("nM", ring.length);
-    if (ring[0] !== ring[ring.length - 1] || ringN[0] !== ringN[ringN.length - 1]) {
-      region.fail("the outline is not closed: its last point is not its first");
-    }
-    const edge = item.child("glidepathLowerEdge");
-    const points = edge.numbers("latDeg").length;
-    if (points < 2) edge.fail("the glidepath lower edge has fewer than two points");
-    const heightMslM = edge.numbers("heightMslM", points);
-    return {
-      index, ident, fafBeforeThresholdM: item.number("fafBeforeThresholdM"), glidepathBelowM: item.number("glidepathBelowM"),
-      region: { eM: ring, nM: ringN, lat: region.numbers("latDeg", ring.length), lon: region.numbers("lonDeg", ring.length) },
-      glidepathLowerEdge: {
-        lat: edge.numbers("latDeg", points), lon: edge.numbers("lonDeg", points), heightMslM,
-        heightHaeM: heightMslM.map((value) => value + hae), beforeThresholdM: edge.numbers("beforeThresholdM", points),
-      },
-      decision: procedurePoint(item.child("decision"), hae), entry: procedurePoint(item.child("entry"), hae),
-    };
-  });
-  if (procedure.length !== candidates.length) reader.fail(`procedure lists ${procedure.length} runways, the set has ${candidates.length} candidates`);
-  return procedure;
-}
 
 function parseFlags(reader: Reader, key: string, length: number): boolean[] {
   return reader.numbers(key, length).map((value) => {
@@ -491,15 +421,6 @@ function closedLoopOf(model: TrainingPriorModel, flight: TrainingFlight, sentenc
   };
   const notReached = sentence.events.filter((event) => wordUnreached(result, event.row)).length;
   return { ...result, replay: { ...result.replay, flewTheSentence: notReached === 0, notReached } };
-}
-
-/** The runway in force at Δ row ``row`` of a sentence: the last runway word (not a go-around) said at or before it, else the
- *  first one said; the masks act on this runway, whatever the observed flight landed on. */
-export function runwayInForce(events: TrainingEvent[], row: number): number {
-  const runways = events.filter((event) => event.column === 0 && event.says.column === "runway" && !event.says.goAround);
-  const said = runways.filter((event) => event.row <= row);
-  const event = said.length > 0 ? said[said.length - 1] : runways[0];
-  return (event.says as { runwayIndex: number }).runwayIndex;
 }
 
 /** The flight as the views draw it with ``which`` of its sentences read at the prior's Δ. Another sentence is another flight

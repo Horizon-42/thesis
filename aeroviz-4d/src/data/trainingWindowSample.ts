@@ -35,6 +35,7 @@
 
 import { fetchJson } from "../utils/fetchJson";
 import { attempt, parseManifest, Reader, type Parsed } from "./trainingReader";
+import { parseProcedure, type TrainingProcedure } from "./trainingProcedure";
 import {
   parseCandidates,
   parseEvents,
@@ -287,6 +288,8 @@ export interface TrainingWindowSample {
   vocabulary: TrainingVocabulary;
   airportFrame: { code: string; lat: number; lon: number; elevationM: number };
   candidates: TrainingCandidate[];
+  /** The procedure's limits per candidate runway (`prior_training_export.procedure_block`), drawn in 3D. */
+  procedure: TrainingProcedure[];
   model: TrainingWindowModel;
   cohort: TrainingWindowCohort;
   source: TrainingWindowSource;
@@ -574,7 +577,8 @@ export function parseTrainingWindowSample(raw: unknown, stage: TrainingWindowSta
     return {
       stage, setId: sample.string("setId"), airport: sample.string("airport"), executor: { cycleS }, formats: parseFormats(sample),
       vocabulary, airportFrame: { code: frame.string("code"), lat: frame.number("lat"), lon: frame.number("lon"), elevationM: frame.number("elevationM") },
-      candidates, model, cohort, source: parseSource(sample.child("source")), flights, windows,
+      candidates, procedure: parseProcedure(sample, candidates), model, cohort, source: parseSource(sample.child("source")),
+      flights, windows,
     };
   });
 }

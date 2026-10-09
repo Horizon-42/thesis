@@ -18,7 +18,7 @@ import { stageCSample, stageCSelection } from "../../data/__tests__/stageC";
 import { requestOf, stageAAnswers, stageASampleFile, stageASelection } from "../../data/__tests__/stageA";
 import { parseTrainingSample, TRAINING_SPLITS, trainingSelectionOf } from "../../data/trainingSample";
 
-const ALL: TrainingLayers = { headingBands: true, vertical: true, candidates: true };
+const ALL: TrainingLayers = { observed: true, headingBands: true, vertical: true, candidates: true };
 const selection = stageASelection();
 
 function liveSegment(which = 0): TrainingAutopilotSegment {
@@ -79,6 +79,29 @@ describe("TrainingReadbackWindow", () => {
     expect(chart("Heading chart").querySelectorAll("rect.training-readback-heading-band")).toHaveLength(0);
     expect(chart("Altitude chart").querySelectorAll("polygon.training-readback-tube")).toHaveLength(0);
     expect(chart("Speed chart").querySelectorAll("rect.training-readback-speed-band")).toHaveLength(0);
+  });
+
+  it("the observed track's switch hides its line on every chart; with the labelled sentence, the envelopes that judge it too", () => {
+    const charts = ["Plan view", "Heading chart", "Altitude chart", "Speed chart"];
+    open(2, { ...ALL, observed: false });
+    for (const name of charts) {
+      expect(chart(name).querySelector("polyline.training-readback-trace")).toBeNull();
+      expect(chart(name).querySelector("polyline.training-readback-executor")).toBeTruthy();       // the flown path stays
+    }
+    // a closed-loop reading judges the flown path: its envelopes stay
+    expect(chart("Heading chart").querySelectorAll("rect.training-readback-heading-band").length).toBeGreaterThan(0);
+    cleanup();
+    open(null, { ...ALL, observed: false });
+    expect(chart("Heading chart").querySelectorAll("rect.training-readback-heading-band")).toHaveLength(0);
+    expect(chart("Altitude chart").querySelectorAll("polygon.training-readback-tube")).toHaveLength(0);
+    expect(chart("Speed chart").querySelectorAll("rect.training-readback-speed-band")).toHaveLength(0);
+    cleanup();
+    open(null, { ...ALL, observed: false }, 100, "heading");              // nor the selected word's rows on it
+    expect(document.querySelector(".training-readback-focus")).toBeNull();
+    cleanup();
+    open(null, ALL, 100, "heading");
+    expect(document.querySelector(".training-readback-focus")).toBeTruthy();
+    expect(chart("Heading chart").querySelectorAll("rect.training-readback-heading-band").length).toBeGreaterThan(0);
   });
 
   it("marks the correction words on the axis of their columns' charts and the plan", () => {

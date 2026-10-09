@@ -408,6 +408,10 @@ export default function TrainingWindowSession({ airport, stage, sets, details }:
               <input type="checkbox" checked={layers.otherRounds} onChange={(event) => setTrainingWindowLayer("otherRounds", event.target.checked)} />
               Other rounds
             </label>
+            <label title="each candidate runway's procedure limits: the region its masks rule (inside the FAF and the LPV cone), the glidepath lower edge, the DA and FAF points; the runway in force at the cursor in its colour">
+              <input type="checkbox" checked={layers.procedure} onChange={(event) => setTrainingWindowLayer("procedure", event.target.checked)} />
+              Procedure limits
+            </label>
           </DrawBox>
         </>
       )}

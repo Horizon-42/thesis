@@ -4,14 +4,18 @@
  * The pieces the Training 3D scene is built from (`hooks/useTrainingTrackLayer.ts`, `hooks/useTrainingLiveLayer.ts`): the
  * entity ids, the exporter's and the backend's coordinates as Cesium's flat arrays, and the few entity shapes every
  * layer draws — a line in the air (solid; dashed where terrain hides it), a line on the ground (always dashed, thinner
- * and fainter, so that it never reads as a track in the air: frontend §3 item 6, D159), a marker. Nothing here computes
- * geometry: every coordinate is the exporter's (lon / lat and heights computed in Python) or the backend's.
+ * and fainter, so that it never reads as a track in the air: frontend §3 item 6, D159), a marker. Every coordinate is the
+ * exporter's (lon / lat and heights computed in Python) or the backend's, but one picture: a heading word's FAN
+ * (`trainingBandFan`), drawn from the exported target and tolerance — the band in plan; the verdict stays the
+ * exporter's, row by row.
  *
  * Every layer adds its entities through one `entityGroup` and removes them together when its inputs change.
  */
 
 import * as Cesium from "cesium";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
+import { haversineDistanceM, offsetPoint, toRadians } from "../utils/procedureGeoMath";
+import type { TrainingLayers } from "../context/AppContext";
 import { AIRCRAFT_MODEL_URI, aircraftOrientation } from "../utils/aircraftOrientation";
 import type { TrainingAircraftPose } from "../data/trainingAttitude";
 import {
@@ -31,6 +35,8 @@ export const TRAINING_ENTITY = {
   /** A heading word's judged rows on the ground, and its rows outside the band (`run` counts them). */
   heading: (index: number) => `training-heading-${index}`,
   headingOutside: (index: number, run: number) => `training-heading-${index}-outside-${run}`,
+  /** A heading word's fan on the ground: its target ± its tolerance from its first judged row (`trainingBandFan`). */
+  fan: (id: string) => `${id}-fan`,
   tube: (index: number) => `training-tube-${index}`,
   /** An envelope's edge: a tube's upper / lower line. */
   edge: (id: string, side?: "upper" | "lower") => (side ? `${id}-edge-${side}` : `${id}-edge`),
@@ -122,6 +128,49 @@ export function trainingBandGround(track: TrainingTrack, band: TrainingHeadingBa
   return groundRows(track.lon, track.lat, band.firstRow, Math.min(band.stopRow, track.lon.length - 1));
 }
 
+/** The Draw switches an envelope of ``reading`` needs on: its own, and — for the labelled sentence, whose envelopes judge
+ *  the observed track — the observed track's. A closed-loop reading's envelopes judge its flown path. */
+export function trainingEnvelopeSwitches(reading: TrainingReading, envelope: "headingBands" | "vertical"): Array<keyof TrainingLayers> {
+  return reading.closed === null ? [envelope, "observed"] : [envelope];
+}
+
+/** The arc of a fan, one point a degree (at least two). */
+const FAN_STEP_DEG = 1;
+
+/** A heading word's band in plan, as a closed outline on the ground [lon, lat, …]: a fan from the judged track at the word's
+ *  first judged row, centred on the word's target track, opening its tolerance to each side, as long as the farthest row
+ *  it judges is from there — so a track held on the target stays inside it. A picture of the band: the band judges the
+ *  track's DIRECTION row by row (its rows outside are drawn red), not its position, so a track that left the band and came
+ *  back on to the target heading can run parallel outside the fan. Nothing for a word with no row of its own. */
+export function trainingBandFan(track: TrainingTrack, band: TrainingHeadingBand): number[] {
+  const last = Math.min(band.stopRow, track.lon.length - 1);
+  if (last <= band.firstRow) return [];
+  const apex = { lonDeg: track.lon[band.firstRow], latDeg: track.lat[band.firstRow], altM: 0 };
+  let radiusM = 0;
+  for (let row = band.firstRow + 1; row <= last; row += 1) {
+    radiusM = Math.max(radiusM, haversineDistanceM(apex, { lonDeg: track.lon[row], latDeg: track.lat[row], altM: 0 }));
+  }
+  if (!(radiusM > 0)) return [];
+  const steps = Math.max(Math.ceil((2 * band.toleranceDeg) / FAN_STEP_DEG), 1);
+  const arc = Array.from({ length: steps + 1 }, (_, step) => {
+    const bearing = band.targetDeg - band.toleranceDeg + (2 * band.toleranceDeg * step) / steps;
+    const point = offsetPoint(apex, toRadians(bearing), radiusM);
+    return [point.lonDeg, point.latDeg];
+  });
+  return [apex.lonDeg, apex.latDeg, ...arc.flat(), apex.lonDeg, apex.latDeg];
+}
+
+/** A fill on the ground, in ``css`` at ``alpha``. */
+export function groundFill(id: string, name: string | undefined, degrees: number[], css: string, alpha: number): EntityOptions {
+  return {
+    id, name,
+    polygon: {
+      hierarchy: new Cesium.PolygonHierarchy(Cesium.Cartesian3.fromDegreesArray(degrees)),
+      material: colour(css, alpha), classificationType: Cesium.ClassificationType.BOTH,
+    },
+  };
+}
+
 /** The rows a band judged outside, each as a line on the ground (`outsideSpans`: one row outside on to the next, so it is
  *  a segment). */
 export function trainingBandOutsideGround(track: TrainingTrack, band: TrainingHeadingBand): number[][] {
@@ -145,7 +194,7 @@ export function trainingFocusEntity(reading: TrainingReading, stepS: number, col
 export function trainingEnvelopeEntities(reading: TrainingReading): string[] {
   if (reading.envelopes === null) return [];
   return [
-    ...reading.envelopes.heading.map((_, index) => TRAINING_ENTITY.heading(index)),
+    ...reading.envelopes.heading.flatMap((_, index) => [TRAINING_ENTITY.heading(index), TRAINING_ENTITY.fan(TRAINING_ENTITY.heading(index))]),
     ...reading.envelopes.altitude.map((_, index) => TRAINING_ENTITY.tube(index)),
   ];
 }

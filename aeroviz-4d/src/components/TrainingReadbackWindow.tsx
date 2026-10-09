@@ -72,8 +72,8 @@ export interface TrainingReadbackWindowProps {
 function footerSwatches(m: ReadbackModel): Array<{ key: string; swatch: Swatch; text: string; title: string }> {
   const { vocabulary } = m;
   return [
-    { key: "trace", swatch: { kind: "line", colour: TRAINING_TRACE_COLOR }, text: "observed track",
-      title: "the observed flight, on the 2 s rows of the data" },
+    ...(m.layers.observed ? [{ key: "trace", swatch: { kind: "line", colour: TRAINING_TRACE_COLOR } as Swatch, text: "observed track",
+      title: "the observed flight, on the 2 s rows of the data" }] : []),
     ...(m.flown ? [{ key: "flown", swatch: { kind: "line", colour: m.flownColour } as Swatch, text: "flown path",
       title: `${TRAINING_SENTENCE_KIND_TEXT[flownSentenceKind(m.flight)]}, from the first predicted step; the envelopes judge it` }] : []),
     { key: "heading", swatch: { kind: "area", colour: TRAINING_HEADING_BAND_COLOR, opacity: 0.3 }, text: "heading band",

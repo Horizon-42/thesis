@@ -86,8 +86,10 @@ export default function ReadbackAltitude({ m, onCursorChange, onColumnChange }: 
           </g>
         );
       })}
-      <Line xs={observed.tS.map(m.xTime)} ys={observed.altitudeMslM.map(yAltitude)} stroke={TRAINING_TRACE_COLOR} width={1.4}
-        className="training-readback-trace" title="the observed track" />
+      {m.layers.observed ? (
+        <Line xs={observed.tS.map(m.xTime)} ys={observed.altitudeMslM.map(yAltitude)} stroke={TRAINING_TRACE_COLOR} width={1.4}
+          className="training-readback-trace" title="the observed track" />
+      ) : null}
       {flown ? (
         <Line xs={flown.tS.map(m.xTime)} ys={flown.altitudeMslM.map(yAltitude)} stroke={m.flownColour} width={1.6}
           className="training-readback-executor" title="the flown path's altitude" />

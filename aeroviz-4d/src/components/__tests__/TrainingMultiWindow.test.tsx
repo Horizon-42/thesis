@@ -11,7 +11,7 @@ const { appState, setTrainingSelection, fetchMock } = vi.hoisted(() => ({
   appState: {
     activeAirportCode: "KXXX" as string,
     mode: "training" as string,
-    trainingLayers: { headingBands: true, vertical: true, candidates: true },
+    trainingLayers: { observed: true, headingBands: true, vertical: true, candidates: true },
     trainingIntervalS: 4 as number | null,
     trainingSelection: null as unknown, trainingPick: null,
     cursorS: 0,

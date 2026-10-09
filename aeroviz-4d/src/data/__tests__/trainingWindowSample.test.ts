@@ -128,6 +128,21 @@ describe("the sample", () => {
     expect(roundLabel(5, start)).toBe("round 5");
   });
 
+  it("reads the procedure's limits of every candidate runway, at their ellipsoid heights (as a prior set's)", () => {
+    const raw = stageCSampleFile();
+    expect(sample.procedure.map((limit) => limit.ident)).toEqual(sample.candidates.map((candidate) => candidate.ident));
+    sample.procedure.forEach((limit, index) => {
+      const hae = sample.candidates[index].haeMinusMslM;
+      expect(limit.decision.heightHaeM).toBeCloseTo(raw.procedure[index].decision.heightMslM + hae, 9);
+      expect(limit.glidepathLowerEdge.lon).toEqual(raw.procedure[index].glidepathLowerEdge.lonDeg);
+    });
+    const missing = stageCSampleFile();
+    delete missing.procedure;
+    const parsed = parseTrainingWindowSample(missing, "C");
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.problem).toContain("procedure");
+  });
+
   it("refuses a start of another shape, and settings without one", () => {
     const refused = (change: (settings: Record<string, any>) => void, says: string) => {
       const raw = stageCSampleFileFromRound();

@@ -34,21 +34,25 @@ interface Drawn {
 }
 
 export default function useTrainingAircraftLayer(): void {
-  const { viewer, mode, trainingSelection, trainingIntervalS } = useApp();
+  const { viewer, mode, trainingSelection, trainingIntervalS, trainingLayers } = useApp();
+  const observedShown = trainingLayers.observed;
   const { trainingCursorS } = useTrainingCursor();
   const selection = mode === "training" ? trainingSelection : null;
-  // the aircraft drawn for the reading on screen: the observed one, and the flown one of a closed-loop reading
+  // the aircraft drawn for the reading on screen: the observed one (unless its switch is off), and the flown one of a
+  // closed-loop reading
   const drawn = useMemo((): Drawn[] => {
     if (selection === null) return [];
     const { flight } = selection;
     const reading = trainingReadingOf(flight, selection.vocabulary.stepS, trainingIntervalS);
     return [
-      { id: TRAINING_ENTITY.aircraftObserved, track: reading.observed, css: TRAINING_TRACE_COLOR, who: `${flight.callsign} (observed)` },
+      ...(observedShown
+        ? [{ id: TRAINING_ENTITY.aircraftObserved, track: reading.observed, css: TRAINING_TRACE_COLOR, who: `${flight.callsign} (observed)` }]
+        : []),
       ...(reading.closed === null ? []
         : [{ id: TRAINING_ENTITY.aircraftFlown, track: reading.closed.flown, css: flownSentenceColour(flight),
           who: `${flight.callsign} (flown, Δ ${reading.closed.rowIntervalS} s)` }]),
     ];
-  }, [selection, trainingIntervalS]);
+  }, [selection, trainingIntervalS, observedShown]);
   const entities = useRef<Map<string, Cesium.Entity>>(new Map());
 
   useEffect(() => {
