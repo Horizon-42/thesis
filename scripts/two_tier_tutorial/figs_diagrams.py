@@ -182,6 +182,222 @@ def fig19_traffic_attention() -> None:
     save(fig, "fig19_traffic_attention")
 
 
+# ------------------------------------------------------------------ Fig 20: one round of stage D, and the loop inside it
+def fig20_multi_round() -> None:
+    fig, ax, H = canvas(DOUBLE, 4.0)
+    kinds = {"data": FILL["n"], "speak": FILL["a"], "learn": FILL["c"]}
+    ax.text(1, 54.6, "(a) One round", fontsize=7.2, fontweight="bold", va="center")
+    steps = [("1  Windows", "an anchor and the\narrivals after it", "data"),
+             ("2  First pass", "run the loop,\njudge each aircraft", "speak"),
+             ("3  Reward", "W = sum of the\naircraft's rewards", "learn"),
+             ("4  Second pass", "vary one aircraft v,\n8 continuations", "speak"),
+             ("5  Advantage", "W less the group mean,\non v's later rows", "learn"),
+             ("6  Update", "surrogate, pull,\ndata term", "learn")]
+    w, gap, y0, h = 13.6, 3.0, 36.0, 12.0
+    boxes = [box(ax, 0.5 + i * (w + gap), y0, w, h, t, kinds[k], sub=sub, fs=6.2) for i, (t, sub, k) in enumerate(steps)]
+    for lo, hi in zip(boxes[:-1], boxes[1:]): arrow(ax, anchor(lo, "r"), anchor(hi, "l"), lw=1.0, ms=6)
+    cx = boxes[2][0] + w / 2
+    arrow(ax, (cx, y0), (cx, 31.0), None, lw=0.9, ms=5, ls=(0, (3, 2)))
+    ax.text(cx, 29.6, "W = number of aircraft: no sample", ha="center", va="top", fontsize=5.8, color=C["ink2"])
+    gx = (boxes[2][0] + w + boxes[3][0]) / 2
+    ax.text(gx, y0 + h + 1.4, "W < number of aircraft", ha="center", fontsize=5.9, color=C["ink2"])
+    cx6, cx1 = boxes[5][0] + w / 2, boxes[0][0] + w / 2
+    ax.plot([cx6, cx6, cx1], [y0, 33.6, 33.6], color=C["ink2"], lw=0.9, zorder=2)
+    arrow(ax, (cx1, 33.6), (cx1, y0), None, lw=0.9, ms=6)
+    ax.text(cx6 - 1.0, 34.2, "new weights, next round", ha="right", va="bottom", fontsize=5.9, color=C["ink2"])
+    for x, (name, key) in zip((60.0, 69.0, 86.0), (("data", "data"), ("speaking", "speak"), ("learning", "learn"))):
+        ax.add_patch(Rectangle((x, 55.3), 2.0, 1.6, fc=kinds[key], ec=C["ink2"], lw=0.7))
+        ax.text(x + 2.8, 56.1, name, fontsize=5.9, color=C["ink2"], va="center")
+    # (b) the loop that steps 2 and 4 run: one row at a time, all aircraft together
+    ax.text(1, 21.5, "(b) Inside steps 2 and 4: one row of the loop", fontsize=7.2, fontweight="bold", va="center")
+    loop = [("Join", "each aircraft at its\nown first row", "data"),
+            ("Tokens", "one for each\nother aircraft", "data"),
+            ("Prior", "speaks for every commanded\naircraft at once", "speak"),
+            ("Executor", "flies each aircraft\none row", "speak"),
+            ("Separation judge", "a responsible aircraft\nbecomes silent", "speak")]
+    w2, gap2, y1, h2 = 17.0, 3.5, 3.5, 12.0
+    lb = [box(ax, 0.5 + i * (w2 + gap2), y1, w2, h2, t, kinds[k], sub=sub, fs=6.2) for i, (t, sub, k) in enumerate(loop)]
+    for lo, hi in zip(lb[:-1], lb[1:]): arrow(ax, anchor(lo, "r"), anchor(hi, "l"), lw=1.0, ms=6)
+    ex = lb[4][0] + w2 / 2
+    ax.plot([ex, ex, lb[0][0] + w2 / 2], [y1, 1.0, 1.0], color=C["ink2"], lw=0.9, zorder=2)
+    arrow(ax, (lb[0][0] + w2 / 2, 1.0), (lb[0][0] + w2 / 2, y1), None, lw=0.9, ms=6)
+    ax.text((ex + lb[0][0] + w2 / 2) / 2, 1.5, "next row, until every commanded aircraft is done or silent", ha="center", va="bottom", fontsize=5.9, color=C["ink2"])
+    ax.set_ylim(-0.4, H)
+    save(fig, "fig20_multi_round")
+
+
+# ------------------------------------------------------------------ Fig 21: a random number picks a word
+def fig21_random_number() -> None:
+    fig, ax, H = canvas(DOUBLE, 2.5)
+    words = ["unchanged", "70", "65", "60"]
+    sets = [("the situation is the same", [0.55, 0.25, 0.15, 0.05]),
+            ("v's words changed it", [0.40, 0.20, 0.30, 0.10])]
+    u = 0.62
+    x0, x1 = 24.0, 98.0
+    ax.text(1, 36.0, "The words of the speed column (in m/s) are laid on a line from 0 to 1. Each word gets a piece as long as its probability.", fontsize=6.2, color=C["ink2"], va="center")
+    for i, (title, p) in enumerate(sets):
+        y = 25.0 - i * 13.0
+        ax.text(x0 - 1.5, y, title, fontsize=6.4, ha="right", va="center", fontweight="bold")
+        edge = 0.0
+        for word, q in zip(words, p):
+            lo, hi = x0 + (x1 - x0) * edge, x0 + (x1 - x0) * (edge + q)
+            chosen = edge <= u < edge + q
+            ax.add_patch(Rectangle((lo, y - 2.6), hi - lo, 5.2, fc=FILL["b"] if chosen else "white", ec=C["ink2"], lw=0.9, zorder=2))
+            ax.text((lo + hi) / 2, y, word, fontsize=5.8, ha="center", va="center", fontweight="bold" if chosen else "normal", zorder=3)
+            edge += q
+    ux = x0 + (x1 - x0) * u
+    ax.plot([ux, ux], [8.4, 30.6], color=C["word"], lw=1.5, zorder=5)
+    ax.text(ux + 1.0, 31.8, "the random number u = 0.62", fontsize=6.4, color=C["word"], fontweight="bold", va="center")
+    for v in (0.0, 1.0):
+        ax.text(x0 + (x1 - x0) * v, 7.2, f"{v:g}", fontsize=5.8, color=C["ink2"], ha="center", va="center")
+    ax.text(1, 2.6, "The word whose piece holds u is said. The same u gives the same word while the pieces are the same; when the pieces change, the same u can fall in another word.", fontsize=5.8, color=C["ink2"], va="center")
+    ax.set_xlim(0, 100); ax.set_ylim(0.8, 38.0)
+    save(fig, "fig21_random_number")
+
+
+# ------------------------------------------------------------------ Fig 22: how the sentences of one window branch and affect each other
+def fig22_window_branches() -> None:
+    fig, ax, H = canvas(DOUBLE, 4.6)
+    T, D = 40.0, 30.0                              # a panel: time 0..T, distance to the threshold D..0
+    pw, ph, y_base = 28.5, 28.0, 19.0
+    x0s = [5.0, 37.5, 70.0]
+    def P(k, t, d): return x0s[k] + pw * t / T, y_base + ph * d / D
+    def line(k, pts, **kw): xy = [P(k, t, d) for t, d in pts]; ax.plot([q[0] for q in xy], [q[1] for q in xy], **kw)
+    tb = 10.0
+    pre = {"A2": [(0, 28), (10, 17)], "v": [(3, 30), (10, 20)], "A3": [(6, 30), (10, 24)]}
+    post1 = {"A2": [(10, 17), (22, 0)], "v": [(10, 20), (24, 0)], "A3": [(10, 24), (28, 0)]}
+    post2 = {"A2": [(10, 17), (22, 0)], "v": [(10, 20), (30, 0)], "A3": [(10, 24), (38, 0)]}
+    post3 = {"A2": [(10, 17), (22, 0)], "v": [(10, 20), (20, 0)], "A3": [(10, 24), (22, 0)]}
+    panels = [("first sentence", "all numbers drawn first", post1, None, [("v", 16.0, 11.4)],
+               "loss: v too close behind aircraft 2"),
+              ("continuation 1: v slows down", "v: new numbers   2, 3: the same numbers", post2, post1, [],
+               "no loss: all three land"),
+              ("continuation 2: v speeds up", "v: new numbers   2, 3: the same numbers", post3, post1, [("v", 15.2, 9.6), ("A3", 20.0, 4.0)],
+               "losses: v overtakes aircraft 2;\naircraft 3 too close behind it")]
+    colours = {"A2": C["flown"], "A3": C["flown"], "v": C["corr"]}
+    for k, (title, numbers, post, ghost, losses, events) in enumerate(panels):
+        ax.text(x0s[k] + pw / 2, 54.6, title, fontsize=6.8, fontweight="bold", ha="center", va="center")
+        ax.text(x0s[k] + pw / 2, 52.0, numbers, fontsize=5.7, color=C["ink2"], ha="center", va="center")
+        line(k, [(0, 0), (T, 0)], color=C["ink"], lw=1.0, zorder=1)
+        line(k, [(0, 0), (0, D)], color=C["ink3"], lw=0.7, zorder=1)
+        line(k, [(tb, 0), (tb, D)], color=C["ink2"], lw=0.8, ls=(0, (3, 2)), zorder=1)
+        ax.text(*P(k, T, 0.0), "", fontsize=5)
+        ax.text(x0s[k] + pw, y_base - 1.0, "time \u2192", fontsize=5.6, color=C["ink2"], ha="right", va="top")
+        if k == 0:
+            ax.text(*P(k, tb + 0.6, D - 0.2), "branch point", fontsize=5.6, color=C["ink2"], va="top")
+            ax.text(x0s[k], y_base - 1.0, "threshold", fontsize=5.6, color=C["ink2"], ha="left", va="top")
+            ax.text(x0s[k] - 1.2, y_base + ph / 2, "distance to the threshold", fontsize=5.6, color=C["ink2"], rotation=90, ha="right", va="center")
+        if ghost:
+            for name, pts in ghost.items(): line(k, pts, color=C["faint"], lw=1.0, zorder=2)
+        for name in ("A2", "v", "A3"):
+            line(k, pre[name], color=C["ink3"], lw=1.1, zorder=3)
+            pts = post[name]
+            loss = [l for l in losses if l[0] == name]
+            colour = colours[name]; lw = 2.4 if name == "v" else 1.3
+            if loss:
+                t_l, d_l = loss[0][1], loss[0][2]
+                line(k, [pts[0], (t_l, d_l)], color=colour, lw=lw, zorder=4, solid_capstyle="butt")
+                line(k, [(t_l, d_l), pts[-1]], color=colour, lw=1.1, ls=(0, (1, 2)), zorder=4)
+                ax.plot(*P(k, t_l, d_l), "x", color=C["block"], ms=5.5, mew=1.9, zorder=6)
+            else:
+                line(k, pts, color=colour, lw=lw, zorder=4, solid_capstyle="butt")
+                ax.plot(*P(k, *pts[-1]), "o", color=C["ok"], ms=3.8, zorder=6)
+        ax.text(x0s[k] + pw / 2, 14.4, events, fontsize=5.7, color=C["block"] if "loss" in events and "no loss" not in events else C["ok"], ha="center", va="center", linespacing=1.15)
+    # the gap between v and the aircraft ahead, at one time: too small in the first sentence, enough in continuation 1
+    for k, (d_front, d_back, colour) in ((0, (8.5, 11.4, C["block"])), (1, (8.5, 14.0, C["ok"]))):
+        a_, b_ = P(k, 16.0, d_front), P(k, 16.0, d_back)
+        ax.annotate("", xy=b_, xytext=a_, arrowprops=dict(arrowstyle="<->", color=colour, lw=1.0, shrinkA=0, shrinkB=0))
+    # who is who
+    ax.text(*P(0, 5.0, 30.6), "v", fontsize=6.8, color=C["corr"], fontweight="bold", ha="center", va="bottom")
+    ax.text(*P(0, 8.0, 30.4), "aircraft 3", fontsize=5.8, color=C["flown"], ha="left", va="bottom")
+    ax.text(*P(0, 0.4, 28.6), "aircraft 2", fontsize=5.8, color=C["flown"], ha="left", va="bottom")
+    # aircraft 3 answers v
+    for k, (t, d_v, d_3) in ((1, (13.0, 17.4, 20.4)), (2, (13.0, 14.0, 20.6))):
+        arrow(ax, P(k, t, d_v), P(k, t + 0.3, d_3 - 1.4), None, lw=0.8, ms=5, color=C["ink2"], ls=(0, (2, 2)))
+    ax.text(*P(1, 20.5, 25.0), "aircraft 3 slows down:\nit answers v", fontsize=5.7, color=C["flown"], ha="left", va="center")
+    ax.text(*P(2, 24.0, 22.0), "aircraft 3 speeds up:\nit answers v", fontsize=5.7, color=C["flown"], ha="left", va="center")
+    ax.text(*P(1, 26.5, 17.0), "grey: the\nfirst sentence", fontsize=5.6, color=C["ink3"], ha="left", va="center")
+    for k, (W, adv) in enumerate(((2, 0), (3, 1), (1, -1))):
+        x = x0s[k] + pw / 2
+        ax.text(x, 10.6, f"W = {W}", fontsize=7.0, fontweight="bold", ha="center", va="center")
+        ax.text(x, 7.4, "advantage " + (f"{adv:+d}".replace("-", "\u2212") if adv else "0"), fontsize=6.6, fontweight="bold", color=C["corr"], ha="center", va="center")
+    ky = 2.6
+    ax.plot([1, 5], [ky, ky], color=C["corr"], lw=2.4); ax.text(6.0, ky, "v, after the branch point", fontsize=5.6, color=C["ink2"], va="center")
+    ax.plot([26, 30], [ky, ky], color=C["flown"], lw=1.3); ax.text(31.0, ky, "the other commanded aircraft", fontsize=5.6, color=C["ink2"], va="center")
+    ax.plot([55, 59], [ky, ky], color=C["corr"], lw=1.1, ls=(0, (1, 2))); ax.text(60.0, ky, "silent after a loss", fontsize=5.6, color=C["ink2"], va="center")
+    ax.plot([76], [ky], "x", color=C["block"], ms=5, mew=1.8); ax.text(77.5, ky, "loss", fontsize=5.6, color=C["ink2"], va="center")
+    ax.plot([85], [ky], "o", color=C["ok"], ms=3.8); ax.text(86.5, ky, "landed", fontsize=5.6, color=C["ink2"], va="center")
+    ky2 = -0.4
+    ax.annotate("", xy=(5.0, ky2 + 1.0), xytext=(5.0, ky2 - 1.0), arrowprops=dict(arrowstyle="<->", color=C["block"], lw=1.0)); ax.text(6.5, ky2, "gap to the aircraft ahead: too small", fontsize=5.6, color=C["ink2"], va="center")
+    ax.annotate("", xy=(37.0, ky2 + 1.0), xytext=(37.0, ky2 - 1.0), arrowprops=dict(arrowstyle="<->", color=C["ok"], lw=1.0)); ax.text(38.5, ky2, "gap: enough", fontsize=5.6, color=C["ink2"], va="center")
+    ax.plot([55, 59], [ky2, ky2], color=C["ink2"], lw=0.8, ls=(0, (2, 2))); ax.text(60.0, ky2, "aircraft 3 answers v", fontsize=5.6, color=C["ink2"], va="center")
+    ax.set_xlim(0, 100); ax.set_ylim(-2.4, 57.0)
+    save(fig, "fig22_window_branches")
+
+
+# ------------------------------------------------------------------ Fig 23: the tree of one window's sentences
+def fig23_window_tree() -> None:
+    fig, ax, H = canvas(DOUBLE, 5.3)
+    def elbow(x1, y1, x2, y2, **kw):
+        xm = (x1 + x2) / 2
+        ax.plot([x1, xm, xm, x2], [y1, y1, y2, y2], color=kw.get("color", C["ink2"]), lw=kw.get("lw", 1.0), ls=kw.get("ls", "-"), zorder=1)
+    def node(x, y, w, h, title, sub=None, fc="white", dashed=False, fs=6.4):
+        return box(ax, x, y - h / 2, w, h, title, fc, sub=sub, fs=fs, dashed=dashed, ec=C["ink3"] if dashed else None)
+    def dot(x, y, kind, ring=False):
+        if ring: ax.add_patch(plt.Circle((x, y), 1.55, fc="none", ec=C["flown"], lw=1.4, zorder=5))
+        if kind == "ok": ax.plot([x], [y], "o", color=C["ok"], ms=3.8, zorder=6)
+        else: ax.plot([x], [y], "x", color=C["block"], ms=4.6, mew=1.7, zorder=6)
+    # column heads
+    for x, t in ((1.0, "1  a window"), (20.0, "2  who is varied"), (43.0, "3  branch point"), (64.0, "4  the sentences of the group")):
+        ax.text(x, 74.0, t, fontsize=6.8, fontweight="bold", va="center")
+    # column 1: the window and its first sentence
+    ax.add_patch(FancyBboxPatch((1, 29), 15.5, 17.5, boxstyle="round,pad=0,rounding_size=0.8", fc=FILL["n"], ec=C["ink2"], lw=0.9, zorder=3))
+    ax.text(8.75, 43.6, "first sentence", fontsize=6.4, ha="center", va="center", fontweight="bold", zorder=4)
+    for i, (name, kind) in enumerate((("v1", "x"), ("v2", "x"), ("v3", "ok"))):
+        ax.text(4.2 + i * 4.6, 39.6, name, fontsize=5.8, ha="center", va="center", color=C["ink2"], zorder=4)
+        dot(4.2 + i * 4.6, 36.6, kind)
+    ax.text(8.75, 32.4, "W = 1", fontsize=6.6, ha="center", va="center", fontweight="bold", zorder=4)
+    ax.text(1, 26.0, "three commanded\naircraft; v3 landed\n(r = 1): not varied", fontsize=5.6, color=C["ink2"], va="top")
+    # column 2: one varied aircraft at a time
+    n1 = node(20, 46, 17.5, 7.0, "vary v1", "r = 0: it lost")
+    n2 = node(20, 10, 17.5, 7.0, "vary v2", "r = 0: it failed")
+    root_r = (16.5, 37.75)
+    elbow(root_r[0], root_r[1], 20, 46); elbow(root_r[0], root_r[1], 20, 10)
+    # column 3: the branch points of v1
+    b = [node(43, y, 15.5, 7.0, t, s) for y, (t, s) in zip((68, 46, 26), (("b1", "first predicted step"), ("b2", "120 s later"), ("b3", "240 s later")))]
+    for y in (68, 46, 26): elbow(37.5, 46, 43, y)
+    stub2 = node(43, 10, 15.5, 7.0, "3 branch points", "of v2, the same way", dashed=True)
+    elbow(37.5, 10, 43, 10, ls=(0, (3, 2)), color=C["ink3"])
+    # column 4: b2 expanded: the group = the first sentence + the continuations
+    ax.text(79.0, 62.4, "v1", fontsize=5.8, color=C["corr"], fontweight="bold", ha="center", va="center")
+    ax.text(83.3, 62.4, "v2", fontsize=5.8, color=C["ink2"], ha="center", va="center")
+    ax.text(87.6, 62.4, "v3", fontsize=5.8, color=C["ink2"], ha="center", va="center")
+    ax.text(92.0, 62.4, "W", fontsize=5.8, color=C["ink2"], ha="center", va="center")
+    ax.text(96.6, 62.4, "advantage", fontsize=5.4, color=C["corr"], ha="center", va="center")
+    leaves = [("first sentence", ("x", "x", "ok"), (False, False, False), 1, "−0.25"),
+              ("continuation 1", ("ok", "x", "ok"), (False, False, False), 2, "+0.75"),
+              ("continuation 2", ("x", "ok", "ok"), (False, True, False), 2, "+0.75"),
+              ("continuation 3", ("x", "x", "x"), (False, False, True), 0, "−1.25")]
+    for i, (label, res, rings, W, adv) in enumerate(leaves):
+        y = 57.0 - i * 8.0
+        node(64, y, 33.5, 6.6, "", fc=FILL["n"] if i == 0 else "white")
+        ax.text(65.4, y, label, fontsize=5.9, va="center", color=C["ink"], zorder=4)
+        for j, kind in enumerate(res): dot(79.0 + j * 4.3, y, kind, ring=rings[j])
+        ax.text(92.0, y, str(W), fontsize=6.4, ha="center", va="center", fontweight="bold", zorder=4)
+        ax.text(96.6, y, adv, fontsize=6.0, ha="center", va="center", color=C["corr"], fontweight="bold", zorder=4)
+        elbow(58.5, 46, 64, y)
+    ax.text(64.4, 62.4, "mean of W: 1.25", fontsize=5.8, color=C["ink2"], va="center")
+    # the other branch points of v1 are groups of their own
+    for y, t in ((68, "8 continuations"), (26, "8 continuations")):
+        node(64, y, 33.5, 6.6, t, dashed=True, fs=5.9)
+        elbow(58.5, y, 64, y, ls=(0, (3, 2)), color=C["ink3"])
+    # notes under the tree
+    ax.text(1, 3.0, "Down a branch: the state of the whole window is copied at the branch point, and only the varied aircraft draws new random numbers.\nThe other aircraft keep theirs, but their situation changed, so they can answer (ring): v2 in continuation 2 lands, v3 in continuation 3 fails.", fontsize=5.8, color=C["ink2"], va="center", linespacing=1.4)
+    ax.add_patch(plt.Circle((52.5, 17.4), 0.0, fc="none"))
+    ax.set_xlim(0, 100); ax.set_ylim(0.5, 75.7)
+    save(fig, "fig23_window_tree")
+
+
 # ------------------------------------------------------------------ Fig 10: one column of the speaker
 def fig10_decoding() -> None:
     fig = plt.figure(figsize=(DOUBLE, 2.7))
@@ -420,5 +636,5 @@ def fig15_judge_outcomes() -> None:
 
 
 if __name__ == "__main__":
-    for name in sys.argv[1:] or ["fig01_architecture", "fig08_prior_architecture", "fig10_decoding", "fig11_cv_design", "fig12_post_training_loop", "fig13_branch_training", "fig14_traffic_features", "fig15_judge_outcomes", "fig16_window_kinds", "fig17_landed_training", "fig18_prior_layers", "fig19_traffic_attention"]:
+    for name in sys.argv[1:] or ["fig01_architecture", "fig08_prior_architecture", "fig10_decoding", "fig11_cv_design", "fig12_post_training_loop", "fig13_branch_training", "fig14_traffic_features", "fig15_judge_outcomes", "fig16_window_kinds", "fig17_landed_training", "fig18_prior_layers", "fig19_traffic_attention", "fig20_multi_round", "fig21_random_number", "fig22_window_branches", "fig23_window_tree"]:
         globals()[name]()
