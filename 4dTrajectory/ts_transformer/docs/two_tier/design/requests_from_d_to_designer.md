@@ -4,12 +4,11 @@ Stage D's implementer writes this file (outline §5 rule 10, multi-aircraft cont
 time. Each item is a reading the implementer made where the design says nothing, or a gap; a reading is a proposal
 until the user decides. Paths are relative to `4dTrajectory/ts_transformer/`. The numbers are kept from the earlier
 notes; the items the user decided are deleted (D166: 6, 7, 19, 21, 22, 25, 29–35; O16: 36, written into D146; the
-census's sample: 18; D172: 46–48), item 23 (it asked for 6 and 7), item 20 (built: item 40) and the names of MC0–MC4
+census's sample: 18; D172: 46–48; D179, D180: 49–53; D181, O20: 54–62; D181–D186: 63–70; the interfaces and D182: 71–77), item 23 (it asked for 6 and 7), item 20 (built: item 40) and the names of MC0–MC4
 (written into the interfaces).
 
-State: 2026-10-09: items 49–53 decided (D179, D180) and deleted; `loop_positions` (a332466a) and D179 / D180
-(48c21e50) merged. Items 54–55 are readings of that code for the designer. Items 56–62 (the user's request, 2026-10-09):
-the engineering ways to a faster round, none of them a change of D141–D146's rules.
+State: 2026-10-09 (night): items 71–77 decided (the names into the interfaces; 77 (b) into D182 (3)) and deleted;
+nothing of MC11 or MC12 is open here. The items below are MC0–MC5's readings still open.
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -153,92 +152,3 @@ the engineering ways to a faster round, none of them a change of D141–D146's r
     independent numbers: an upper bound of the noise of comparing two rounds, which share their numbers. Over all spans
     the unit is an anchor (its windows of the spans are nested and share their aircraft); within a span, windows of
     other anchors may still share flights in a dense select set (stated).
-
-## MC5 · the memory measure (D179, D180; 48c21e50)
-
-54. **"Each span's first and largest batch."** D179 says one worker on each span's first batch and on its batch of the
-    most rows. Built with stage C's `post_train.measured_batches` (unchanged): the first batch of each span and the one
-    batch of the most rows over all spans. In stage D a span's batches are filled to its `batch_rows` in order, so a
-    span's first batch is its batch of the most rows but for a shorter one where a window's rows do not divide the
-    setting (the profile of 2026-10-08: 64 / 64, 48 / 48, 24 / 24); the reading measures 3 or 4 batches. Proposal:
-    keep it (the measure stays minutes); a batch of the most rows of each span would be at most one more a span.
-55. **`select_per_airport` is still among `PROFILED_SETTINGS`.** The measure no longer reads the select set (D179), so a
-    campaign with another select size than its profile's is refused and must be measured again, for nothing the
-    measure reads (the reviewer's judgement, not a decided rule). Proposal: drop it from `PROFILED_SETTINGS` (one
-    name, a small change), so that the select size is set freely before the campaign (D179).
-
-## MC6 · the speed of a round (engineering only; the user's request, 2026-10-09)
-
-**What was measured.** MC6's round 0, the attempt of 08:41–11:08 (the times of its `groups_<k>.pt`; 224 batches in
-`profile_mc6_gpu32_20261009`'s draw, 2 GPU workers): the 23 batches of 300 s took 35 min, the 63 of 600 s 72 min, the
-138 of 1200 s about 1.75 min each (about 4 h) — about 5–6 h of speaking a round (log §15: about 5 h). In worker-seconds
-per commanded aircraft: 2.9 / 4.3 / 8.9 s at 2.1 / 3.0 / 4.9 aircraft a window (300 / 600 / 1200 s), against stage C's
-2.1 s a window of one aircraft (C10, one worker; §25 of stage C's log): a window's cost grows about with the square of
-its aircraft, since every continuation flies the whole window to its end (`experiments/post_branches.py:168`,
-`WindowLoop.copy`, D141's W). Stage C's P55 spoke with 9 CPU workers (about 25 min a round); stage D fits 2 GPU workers
-(a worker's peak 2.4–2.6 GiB whatever its rows, log §15) or 3 CPU workers (4.3 GiB host each). The rules' own levers
-(K, the varied aircraft, the branch points, the share of 1200 s windows; a 60 s interval would about double the
-speaking) are the designer's and not proposed here.
-
-56. **A speed profile of stage D, first** (it measures the items below). One 1200 s batch of MC6's round-0 draw under
-    cProfile: the first pass, the second pass and the continuations apart; the executor timed apart between two
-    synchronisations, as `model_speed` times it (D136); the GPU's memory by part (the speaker's cache of the copies, the
-    traffic attention, the executor's CUDA graphs). A runner of its own beside `multi_profile`, which stays a memory
-    measure (D179). Also found: `post_profile.PARTS["executor_step"]` reads 0.0 s in both C8 profiles
-    (`outputs/POOLED/post/c8_20261006/profile_{32,256}`) although the executor flies every cycle — the part's match
-    misses it; the named parts sum to 43 of 113 s. Proposal: the runner, and the part's match fixed.
-    Its own cost, once: the start of a stage D process (the checks and the context, about 3 min: MC6's unit 08:38 →
-    its first batch 08:41) and one batch — on the GPU about 3.5 min for a worker (1200 s at 24 rows), on the CPU about
-    4–5 min (521 s at 48 rows in `profile_mc6_20261009`). cProfile would nearly double the batch (stage C: 2.4 s a
-    window, 4 s under cProfile, log §25) and on the GPU it puts a kernel's time where the host waits: so timers at the
-    parts (the passes, the continuations, the executor between two synchronisations) and the GPU's peak reset at each
-    part, cProfile only on the CPU and only if the timers leave a part unexplained — about 6–8 min in all. While MC6
-    runs the GPU is its two workers' (3.45 GiB each of 7.1 GiB): beside it only on the CPU (one core, about 4.3 GiB of
-    the host's 12 GiB free), whose shares differ from the GPU's; on the GPU after MC6, or with MC6 stopped at a round's
-    end and resumed after (the user's call).
-57. **The continuations in pieces of bounded rows.** `branch_round` flies every copy of a branch tick in one
-    `copies.finish` (`post_branches.py:168–176`): K × the due varied aircraft × each window's aircraft, e.g. 4 windows ×
-    3 varied × 8 × 6 aircraft ≈ 576 rows from a batch of 24 — Claude's reading of why a worker's peak is set by the
-    longest windows, not by `batch_rows`. Proposal: a setting, at most P rows a piece (default: all at once, the old
-    behaviour), each piece a `WindowLoop.copy` of whole windows. A row reads only its own window (Claude's reading of
-    the traffic attention's input), so the pieces say what the whole says: on the CPU to the bit expected, on the GPU up
-    to the kernels' choice by batch shape — a behaviour check on fixed inputs before use. Gain: a bounded peak, so more
-    GPU workers or rows (item 56 measures it).
-58. **The samples of the varied aircraft only.** `copies.samples(split)` (`post_branches.py:177`) builds the sentence of
-    every row of every copy, and `Speaker.permitted()` stacks every row's masks over every row said; only
-    `made[members[v]]` is read, one row of a copy's n. Proposal: `WindowLoop.samples(split, rows)` for the rows asked.
-    The groups bit for bit; n − 1 of n of that time and host memory saved.
-59. **A row's scene once a tick.** In a window of several commanded aircraft, `WindowLoop._of_row` (`scene_aircraft` and
-    `separation_traffic`, `post_window_loop.py:277`) runs twice for each said row in a tick: in `_speed_masks` (:350)
-    and in `_traffic` (:314). Proposal: kept for the tick. The same numbers.
-60. **A worker's host memory.** A CPU worker peaks at 4.3 GiB (`profile_mc6_20261009`), a GPU worker's host at about
-    1.8 GiB; the context is shared by the fork, but Python's reference counts and its collector write into shared
-    pages, which are then copied. Proposal: `gc.freeze()` in the campaign's process before `Speakers` forks. The same
-    results; it pays only once a new memory measure (D179) reads the lower peak.
-61. **Workers on two devices (the user's decision).** D180 gives every worker one device. The GPU's memory and the
-    host's are separate budgets: 2 GPU workers and 2–3 CPU workers fit together; a CPU worker speaks a 1200 s aircraft
-    in about 10.9 s (521 s / 48 rows, `profile_mc6_20261009`) against about 8.75 s on the GPU (round 0), so the
-    speaking would be about 1.8–2× faster. A batch spoken on the CPU and on the GPU may differ by float rounding (a word
-    near a draw's boundary). Either the device is the batch's by a fixed rule (its place in the round; two pools, a
-    poorer balance), so a round repeats, or the device a batch spoke on is recorded and the difference accepted.
-62. **The copies' shared prefix (larger work, only if item 56 shows the cache is the peak).** The K copies of one branch
-    point hold the same speaker cache up to the point, each a clone (`Speaker.copy`, `prior/speaker.py:390`). A prefix
-    shared and a tail of each copy's own would cut the copies' cache by about (K − 1)/K; it changes the attention's
-    arithmetic (two blocks), so it would be a fast mode beside the readable one, checked equal (D138).
-
-Considered and not proposed:
-- The executor's CUDA graphs (`aerodynamic_model/torch_scaled_transport_chart_dynamics.py:151`, `reduce-overhead`,
-  `dynamic=True`; MC6's log warns of "9 distinct sizes"): a graph per batch size, but the step's tensors are `[B, 7]` —
-  tens to a few hundred MB at most — and a replay saves microseconds of an executor row of 12–16 ms (`model_speed`,
-  D136: batch 1 to 400, CPU and GPU alike). Only if item 56 finds its pool large: off in the speaking workers only
-  (`post_train._initialise_speaker`), never in `aerodynamic_model`'s default (training uses it), then
-  `executor_conformance`. Compiling it out altogether would slow the executor (about a hundred small kernels a step).
-- The longest batches first: a round's tail is one batch (2–4 min of about 5 h).
-- Every branch point's copies flown as one batch (they share the tick): more copies alive at once raise the peak that
-  limits the workers now.
-- The second pass from snapshots of the first: the second pass is about one first pass of the windows spoken again,
-  small beside the continuations, and the snapshots cost memory.
-
-Order proposed: 56 (the measure), 58 and 59 (the same numbers, small), 57 (with its check), 60, 61 for the user, 62 if
-56 points to it. None touches the running MC6 (run worktree at `e4bbafac`); a resume on changed code needs a behaviour
-check on fixed inputs first (root `CLAUDE.md`).

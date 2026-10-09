@@ -353,14 +353,18 @@ class Speaker:
         self.said_rows.append(said_now.copy())
         return said
 
-    def permitted(self) -> Permitted:
+    def permitted(self, indices: Sequence[int] | None = None) -> Permitted:
         """The words every mask permitted at each row said so far (D96 item 3), for the caller to keep: each aircraft's
         own said rows, in order (module docstring: a row of several roles; an aircraft said in fewer rows than another
-        has its later rows padded as `Permitted.join` pads them)."""
+        has its later rows padded as `Permitted.join` pads them); of the aircraft ``indices`` only (repeats permitted,
+        in that order; every aircraft when not given), padded as with every aircraft: ``permitted().select(indices)``
+        (multi-aircraft control D181 (58))."""
         if not self.permitted_rows:
             raise ValueError("the speaker has said no row yet")
         said = np.stack(self.said_rows, axis=1)                          # [B, rows]
         rows = int(said.sum(axis=1).max())
+        index = np.arange(len(said)) if indices is None else np.asarray(list(indices), dtype=np.int64)
+        said = said[index]
 
         def own_rows(value: np.ndarray, fill: Any) -> np.ndarray:        # [B, rows, ...] → each aircraft's said rows first
             out = np.full((value.shape[0], rows, *value.shape[2:]), fill, dtype=value.dtype)
@@ -372,10 +376,10 @@ class Speaker:
         masks = []
         for c in range(len(COLUMNS)):
             width = max(row[c].shape[1] for row in self.permitted_rows)
-            masks.append(own_rows(np.stack([np.pad(row[c], ((0, 0), (0, width - row[c].shape[1])))
+            masks.append(own_rows(np.stack([np.pad(row[c][index], ((0, 0), (0, width - row[c].shape[1])))
                                             for row in self.permitted_rows], axis=1), False))
-        return Permitted(tuple(masks), own_rows(np.stack(self.permitted_times, axis=1), np.nan),
-                         own_rows(np.stack(self.permitted_own, axis=1), 0.0), self.temperature)
+        return Permitted(tuple(masks), own_rows(np.stack([row[index] for row in self.permitted_times], axis=1), np.nan),
+                         own_rows(np.stack([row[index] for row in self.permitted_own], axis=1), 0.0), self.temperature)
 
     def copy(self, indices: Sequence[int]) -> Speaker:
         """A speaker of the aircraft ``indices`` of this one (repeats permitted), in that order (D96 item 5): their cache,

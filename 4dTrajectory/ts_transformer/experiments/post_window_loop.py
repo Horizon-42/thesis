@@ -48,7 +48,7 @@ tick 0) is flown as before, bit for bit: silent is its window's end.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Callable, Mapping, Sequence
@@ -139,7 +139,7 @@ class WindowResult:
 class _Tick:
     """A window's aircraft at one tick (kept from the judge after a row flown for the next row's mask and tokens): its
     commanded rows that have joined and are flown, their aircraft, the recorded aircraft, and the judged set and
-    scene."""
+    scene; ``of_row`` each row's own set and scene once computed at this tick (`WindowLoop._of_row`, D181 (59))."""
 
     t: int
     rows: list[int]
@@ -147,6 +147,7 @@ class _Tick:
     recorded: AircraftAt
     aircraft: AircraftAt
     scene: Any
+    of_row: dict[int, tuple[AircraftAt, AircraftAt, list[int | None], Any, Any]] = field(default_factory=dict)
 
 
 class WindowLoop:
@@ -276,16 +277,19 @@ class WindowLoop:
 
     def _of_row(self, tick: _Tick, b: int) -> tuple[AircraftAt, AircraftAt, list[int | None], Any, Any]:
         """Row ``b``'s aircraft, its other aircraft (the recorded ones, then its window's other commanded ones), their
-        rows (None for a recorded one), and the set and scene its speed-word mask reads (``b`` first)."""
+        rows (None for a recorded one), and the set and scene its speed-word mask reads (``b`` first); computed once a
+        tick, for the mask and the tokens (D181 (59))."""
         k = tick.rows.index(b)
         if len(tick.rows) == 1:                              # stage C: the window's judged set is the row's own
             return tick.owns[0], tick.recorded, [None] * len(tick.recorded), tick.aircraft, tick.scene
-        others = [c for c in tick.rows if c != b]
-        other = scene_aircraft(tick.recorded, _concat([tick.owns[tick.rows.index(c)] for c in others]))
-        aircraft = scene_aircraft(tick.owns[k], other)
-        g = self.geometries[b]
-        scene = separation_traffic(aircraft, g, self.separations[g.code], self.finals[b], self.step_s)
-        return tick.owns[k], other, [None] * len(tick.recorded) + others, aircraft, scene
+        if b not in tick.of_row:
+            others = [c for c in tick.rows if c != b]
+            other = scene_aircraft(tick.recorded, _concat([tick.owns[tick.rows.index(c)] for c in others]))
+            aircraft = scene_aircraft(tick.owns[k], other)
+            g = self.geometries[b]
+            scene = separation_traffic(aircraft, g, self.separations[g.code], self.finals[b], self.step_s)
+            tick.of_row[b] = tick.owns[k], other, [None] * len(tick.recorded) + others, aircraft, scene
+        return tick.of_row[b]
 
     def _ticks(self, t: int) -> list[_Tick | None]:
         """Each window's aircraft at tick ``t``, from the judge's (kept after the row flown) where it holds them; None
@@ -525,12 +529,15 @@ class WindowLoop:
             return self.loss_step[b] - int(self.speaking.join_ticks[b])
         return self.speaking.start + len(self.speaking.said(b))
 
-    def samples(self, split: str) -> list[tuple[Any, Any, list[np.ndarray]]]:
+    def samples(self, split: str, rows: Sequence[int] | None = None) -> list[tuple[Any, Any, list[np.ndarray]]]:
         """Each row's sentence for the loss (post-training C7): its rows with the words said as targets
-        (`SpeakingLoop.sentences`), the speaker's records of them and its tokens at each of those rows."""
-        permitted = self.speaking.permitted()
-        return [(rows, permitted.select([b]), self._tokens[b][: len(rows.time_s)])
-                for b, rows in enumerate(self.speaking.sentences(split))]
+        (`SpeakingLoop.sentences`), the speaker's records of them and its tokens at each of those rows; of the rows
+        ``rows`` only (in that order; every row when not given), the others never built (multi-aircraft control D181
+        (58): a branch's copies are read for their varied aircraft only)."""
+        rows = list(range(len(self.order))) if rows is None else list(rows)
+        permitted = self.speaking.permitted(rows)
+        return [(sentence, permitted.select([k]), self._tokens[b][: len(sentence.time_s)])
+                for k, (b, sentence) in enumerate(zip(rows, self.speaking.sentences(split, rows)))]
 
     def values(self, split: str) -> list[tuple[list[np.ndarray], np.ndarray]]:
         """Each row's value readings (D171, ``value_reader``) at the rows of its sentence for the loss (`samples`):

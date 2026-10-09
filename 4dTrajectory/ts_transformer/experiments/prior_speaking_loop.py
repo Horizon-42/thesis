@@ -280,17 +280,20 @@ class SpeakingLoop:
         self.alive &= ~flights
         self.loop.halt(~self.alive)
 
-    def permitted(self) -> Permitted:
+    def permitted(self, flights: Sequence[int] | None = None) -> Permitted:
         """The speaker's records of the words every mask permitted at each row it said (§7 item 3; an ended flight's
-        later rows too, which no row of its sentence asks)."""
-        return self.speaker.permitted()
+        later rows too, which no row of its sentence asks), of the flights ``flights`` (places in ``order``; every
+        flight when not given; `Speaker.permitted`)."""
+        return self.speaker.permitted(flights)
 
-    def sentences(self, split: str) -> list[SentenceRows]:
+    def sentences(self, split: str, flights: Sequence[int] | None = None) -> list[SentenceRows]:
         """Each flight's rows as the loop said them (D106 item 3): the inputs of its observed rows and of each row it
         said to the row it ended in, the words said as the targets — for `train.masked_log_probability` with
-        `permitted`, through `batch.collate`; ``split`` the flights' split (a label of the rows)."""
+        `permitted`, through `batch.collate`; ``split`` the flights' split (a label of the rows); of the flights
+        ``flights`` only (places in ``order``, in that order; every flight when not given)."""
         out = []
-        for b, flight in enumerate(self.flights):
+        for b in range(len(self.flights)) if flights is None else flights:
+            flight = self.flights[b]
             said = len(self._said[b])
             join = int(self.join_ticks[b])                    # its own rows: from its join tick
             rows = self._inputs[join: join + self.start + said]

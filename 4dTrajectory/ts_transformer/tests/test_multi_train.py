@@ -606,14 +606,16 @@ def test_the_workers_are_sized_from_the_profile_and_the_memory_free_now(tmp_path
     """The user (2026-10-07): a campaign's speaking workers read the profile's measure, never measure before a run;
     refused by name for another schema, a profile without its workers' measure, other inputs or settings that set the
     memory, another device, and where they do not fit; each worker's GPU budget its share of the GPU free now less what
-    this process holds beside its pass. The settings that do not set the memory (rounds, seed, start) may differ."""
+    this process holds beside its pass. The settings that do not set the memory (rounds, seed, start, the select set:
+    D181 (55)) may differ."""
     gib = 1 << 30
     settings = _multi_settings(spans_s=[300.0, 600.0], batch_rows=[64, 48])
     inputs = {key: str(tmp_path / key) for key in multi_train.PROFILED_INPUTS}
     cuda = torch.device("cuda")
     monkeypatch.setattr(multi_train, "available_memory", lambda device: {"host": 8 * gib, "gpu": 5 * gib})
     profile = _profile(tmp_path, settings, inputs)
-    fit = multi_train.profiled_fit(profile, replace(settings, rounds=9, seed=7), inputs, 3, cuda, cuda)
+    fit = multi_train.profiled_fit(profile, replace(settings, rounds=9, seed=7, select_per_airport=5), inputs, 3, cuda,
+                                   cuda)
     assert fit["gpu_budget"] == (5 * gib - gib // 2) // 3 and fit["speak_workers"] == 3
     with pytest.raises(SystemExit, match=r"do not fit \(O15, from the profile\): host"):
         multi_train.profiled_fit(profile, settings, inputs, 4, cuda, cuda)      # 4 × 2.5 = 10 > 8 GiB

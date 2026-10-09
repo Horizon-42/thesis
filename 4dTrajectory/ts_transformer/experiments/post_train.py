@@ -78,6 +78,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import gc
 import json
 import multiprocessing
 import os
@@ -628,6 +629,10 @@ class Speakers:
         _SPEAKER.clear()
         _SPEAKER.update(context=context, settings=settings, device=device, stage=stage, gpu_budget=gpu_budget)
         self.stage = stage
+        # the campaign's objects moved out of the collector's reach before the fork (D181 (60)): a worker's collection
+        # then writes no page of the context it shares (copy on write); back in its reach once the workers are closed
+        gc.collect()
+        gc.freeze()
         self.pool = ProcessPoolExecutor(workers, mp_context=multiprocessing.get_context("fork"),
                                         initializer=_initialise_speaker)
         list(self.pool.map(_started, range(workers)))         # every worker forked now, before the GPU is used
@@ -686,6 +691,7 @@ class Speakers:
 
     def close(self) -> None:
         self.pool.shutdown(wait=True, cancel_futures=True)
+        gc.unfreeze()
 
 
 def _initialise_speaker() -> None:

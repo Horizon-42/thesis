@@ -105,10 +105,9 @@ MULTI_PROFILE_SCHEMA = "ts-multi-profile-v2"
 #: 30 % more than its span's measured peak), recorded in the profile.
 MEASURE_MARGIN = 1.3
 #: The settings that set a round's memory, which a campaign shares with its profile (`profiled_fit`); the others (its
-#: rounds, seed, learning rates, and a start of the same traffic shape) change the words spoken, not the shapes — a
-#: worker past its share stops by name.
-PROFILED_SETTINGS = ("per_kind", "spans_s", "c_min", "batch_rows", "continuations", "update_groups", "data_sentences",
-                     "select_per_airport")
+#: rounds, seed, learning rates, a start of the same traffic shape, and the select set, which the measure does not read,
+#: D179, D181 (55)) change the words spoken, not the shapes — a worker past its share stops by name.
+PROFILED_SETTINGS = ("per_kind", "spans_s", "c_min", "batch_rows", "continuations", "update_groups", "data_sentences")
 #: The inputs a campaign shares with its profile.
 PROFILED_INPUTS = ("prior", "instructions", "executor", "windows", "procedure_root")
 

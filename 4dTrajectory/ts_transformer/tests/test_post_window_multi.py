@@ -497,3 +497,39 @@ def test_a_commanded_leader_that_landed_is_judged_once_over_its_threshold(setup,
     loop.step(np.stack([n.random(len(COLUMNS)) if r == SAID else np.zeros(len(COLUMNS)) for n, r in zip(numbers, roles)]))
     assert asked == [[0]]
     assert answered and all(keys[still] == loop.records[0].key and commanded == still + 1 for keys, commanded in answered)
+
+
+def test_a_rows_scene_is_computed_once_a_tick_and_the_samples_of_chosen_rows_are_theirs(setup, monkeypatch):
+    """D181 (59): at a tick of three aircraft flown, each row's own set and scene is computed once, for its speed-word
+    mask (the third aircraft's: the first two are silent by then) and its tokens alike (one scene a row, and the window's
+    judged one, in a row said); (58) the samples of chosen
+    rows (repeats permitted) are those rows' samples of every row, bit for bit, padded to the rows of the row said
+    most of all."""
+    from ts_transformer.tests.test_post_generalised import _Digest
+
+    s = setup
+    _, loop_of = _multi(s)
+    loop = loop_of(_with_module(s["base"]))
+    numbers = _numbers(len(JOINS))
+
+    def step():
+        roles = loop.speaking.roles()
+        loop.step(np.stack([n.random(len(COLUMNS)) if r == SAID else np.zeros(len(COLUMNS))
+                            for n, r in zip(numbers, roles)]))
+
+    while loop.speaking.t < JOINS[2] + loop.speaking.start:            # the last aircraft at its first predicted step
+        step()
+    assert (loop.speaking.roles() == SAID).all() and loop.speaking.alive.all() and not loop.silent[2]
+    real, scenes = post_window_loop.separation_traffic, []
+    monkeypatch.setattr(post_window_loop, "separation_traffic", lambda *a: (scenes.append(a), real(*a))[1])
+    step()
+    assert len(scenes) == len(JOINS) + 1
+    monkeypatch.setattr(post_window_loop, "separation_traffic", real)
+    loop.finish(numbers)
+    every, chosen = loop.samples("train"), [2, 1, 2]     # without row 0, said the most: padded to its rows
+    for sample, b in zip(loop.samples("train", chosen), chosen):
+        a, c = _Digest(), _Digest()
+        a.sentence(*sample)
+        c.sentence(*every[b])
+        assert a.hash.digest() == c.hash.digest()
+    assert len(every[0][0].time_s) > max(len(every[b][0].time_s) for b in (1, 2))      # the padding is tested

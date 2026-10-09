@@ -1,44 +1,37 @@
 # 阶段 D：当前命令
 
 只放最新一条命令，新命令整份覆盖，不是日志（过程记在 `readouts/2026-10-06_stage_d_implementation_log.md`）。
-2026-10-09，Claude 写，用户转发。
+2026-10-09 晚，Claude 写，用户转发。上一条（A–D、MC12）你已做完，这条整份替换它；它的"二、之后"原样留在下面。
 
 ```
-你 requests 的 54–62 条评估完了，写进 multi_control D181（MC11）和 O20：
-- 接受：54（按你建的）、55、56、58、59、60；
-- 57 等 56 量完再定：只有续句确实决定峰值时才做；
-- 61、62 暂不做（O20）。
-  - 61：两种设备混用时，要么一轮不可复现，要么负载不均；57 若能让 GPU 多放 worker，效果相近还更简单。
-  - 62：改动大，只有缓存决定峰值时才值得。
-- post_profile 的 executor_step 读成 0 s：C8 已经结束、不会再跑，写进 docs/code-health-followups.md 一条，不改代码。
-MC6 正在 run-mc6 里跑：不动那个运行工作树，只写代码、只跑改动文件的测试、少开进程（rule 13），不占 GPU。
-路径相对 4dTrajectory/ts_transformer/。
+你 requests 的 71–77 条处理完了（用户 2026-10-09）：
+- 71–76 的名字写进了接口：post_training §9 item 8、11（D185 的名字、window_behaviour R68），
+  prior §7 items 1、2、3、7（CACHE_STEP_ROWS、Past.taken、LandingIndex 的排序、复制链的 device），
+  vocabulary §6 item 5（Loop.copy、Executor.take、Spoken.take 的 device）。
+- 77 的 (a)(c)–(j) 按你建的接受，写进 multi_control D182。
+- 77 (b) 改了（D182 (3) 已改写）：所有事件的"避开"都要求 v 到事件后 60 s 不承担任何丢间隔。
+  - 丢间隔的：同一对飞机保持间隔，且 v 不承担任何丢间隔（和原来一样）；
+  - 复飞的：v 没说复飞，且不承担任何丢间隔；
+  - 其他失败的：v 没有同样的结局，且不承担任何丢间隔。
+  用更差的结局（v 承担的丢间隔）换掉原来的事件，不算避开。B 点的"没说复飞"照旧另加。
 
-一、代码（在 dev-multi-control 上，先把 dev-two-tier 合进来）
-1. 55：select_per_airport 从 PROFILED_SETTINGS 去掉。这是小改动，不用审核 agent。
-2. 58、59、60，数字都不能变：
-   - 58：WindowLoop.samples(split, rows)，只为读的那些行建样本（copies 只要被改动那架的行）；
-   - 59：一个 tick 里每行的场景只算一次；
-   - 60：Speakers fork 之前在 campaign 进程里 gc.freeze()。
-   58、59 改的是 C 的 post_window_loop，60 改的是 post_train，C 的测试都要原样通过。
-3. 58–60 的核对：在固定输入上（CPU、一个线程），C 的窗口和 D 的窗口各一组，一轮的分支组、样本和读数和改之前逐位相同。
-4. 56：experiments/multi_speed.py。
-   - 一批，各部分各自计时：第一遍、第二遍、续句、说话步、执行器（两次同步之间，照 model_speed）；
-     每部分开始时重置 GPU 峰值；
-   - cProfile 只在 CPU 上用，而且只在计时器解释不了某一部分时用（你补充的第 56 条）；
-   - 现在只在 CPU 上用冒烟批测通，正式测量等 GPU 空出来。
-5. 审核按项目 CLAUDE.md 的 "Code review"：58–60 和 56 各走一次 agent，范围是 diff；55 是小改动。
-   → 显式路径提交 → 日志写一行 → 报告 dev-multi-control 能否快进 dev-two-tier，由用户合并。
+一、代码（dev-multi-control）
+1. multi/backward 的 avoids 按上面改。
+   测试补上：复飞事件和其他失败事件，各一条"事件没发生、但 v 承担了丢间隔"的续句，判为没避开；
+   原来判为避开的情形照旧。grid 不经过它，不用逐位核对。30 行内算小改动，不用审核 agent。
+2. 日志写一行；requests_from_d_to_designer.md 整份重写：71–77 已处理，删掉。
+3. 合并前跑一次完整 ts 测试套件（现在没有 campaign 在跑）；报告 dev-multi-control 能否快进 dev-two-tier，由用户合并。
 
-二、合并以后（每一步都等用户的话）
-1. MC6 换代码：58–60 核对通过并合并后，向用户提议——
-   - 在当前这一轮结束时停下；
-   - 从合并后的提交建新的运行工作树，续跑 MC6（设置不变，D157）。
-   停不停由用户定。
-2. 56 的测量：等 MC6 结束或某一轮的边界、GPU 空着时，按用户的话量一批 1200 s。
-   结果报给用户；如果峰值来自续句，再提议做 57（新设置 continuation_rows，默认等于旧行为，只用于下一个 campaign），
-   核对办法见 D181。
+二、之后（等用户的话）
+GPU 现在空着（MC6 已停），代码合并后、主机上没有别的任务时：
+- 先用 multi_speed 量一批：第 69 条和 D183 之前、之后各一次，看保留峰值；再用 multi_profile 重新量内存（D179），定 worker 数。
+  缓存按段扩容会产生碎片，所以看保留的，不只看已分配的；碎片明显就提议给说话 worker 开 expandable_segments。
+- 再各量一批 grid 和 backward，比较三项：
+  - 出样本的组数；
+  - 飞到窗口结束的续句数；
+  - 时间。
+  backward 的时间里看一次只算一个窗口的一个点（77 (e)）是不是瓶颈；是的话，提出把各窗口同一搜索步的续句合成一批。
+报给用户。哪个 campaign 用 backward，由用户定。
 
-你只能写各文档 §0.3 的状态行、multi_control §0.3、你的日志和 code-health-followups 那一条。
-requests_from_d_to_designer.md 整份重写：54–62 条已处理，删掉；新的读法另起。
+你只能写各文档 §0.3 的状态行、multi_control §0.3、你的日志、requests 文件和 code-health-followups。
 ```

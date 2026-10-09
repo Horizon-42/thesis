@@ -491,6 +491,9 @@ def test_a_copy_continued_with_the_same_inputs_and_numbers_says_what_the_origina
     twin = speaker.copy(range(4))
     picked = speaker.copy([2, 2, 0])
     assert np.array_equal(picked.permitted().masks[ALTITUDE], speaker.permitted().masks[ALTITUDE][[2, 2, 0]])
+    some, every = speaker.permitted([2, 2, 0]), speaker.permitted().select([2, 2, 0])     # D181 (58)
+    assert all(np.array_equal(a, b, equal_nan=a.dtype.kind == "f") for a, b in zip(
+        (*some.masks, some.time_s, some.own), (*every.masks, every.time_s, every.own)))
     assert picked.in_force == [speaker.in_force[i] for i in (2, 2, 0)]
     assert np.array_equal(picked.go_arounds, speaker.go_arounds[[2, 2, 0]])
     assert np.array_equal(picked.procedure.joined, speaker.procedure.joined[[2, 2, 0]])
