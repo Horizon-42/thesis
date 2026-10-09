@@ -74,6 +74,40 @@ def test_an_index_built_from_given_landings_refuses_a_sealed_test_day_by_itself(
         LandingIndex(("05L",), (Landing(utc_s("2031-01-01T12:00:00Z"), "05L", "A"),), 0, days)
 
 
+def test_a_landing_added_gives_the_index_built_whole_and_checks_only_itself(monkeypatch):
+    """Multi-aircraft control D186 (1): `with_landing` puts the new landing in its place and checks only it — the same
+    index as one built whole from every landing (landings, sealed, counts, digest), ties in time ordered by flight; the
+    index refuses landings out of time-then-flight order."""
+    from ts_transformer.prior import landings as module
+
+    days = fixture_days()
+    runways = ("05L", "23R")
+    noon = utc_s(f"{days.days['train'][0]}T12:00:00Z")
+    rng = np.random.default_rng(3)
+    added = [Landing(noon + float(rng.integers(0, 40)) * 30.0, runways[int(rng.integers(0, 2))], f"F{k:02d}")
+             for k in rng.permutation(24)]
+    index = LandingIndex(runways, (), 0, days)
+    calls = []
+    real = module.operational_day
+    monkeypatch.setattr(module, "operational_day", lambda moment: calls.append(1) or real(moment))
+    for k, landing in enumerate(added):
+        index = index.with_landing(landing)
+        assert len(calls) == k + 1                                   # the new landing's day only
+    monkeypatch.undo()
+    test_day = utc_s(f"{days.days['test'][0]}T12:00:00Z")
+    index = index.with_landing(Landing(test_day, "05L", "SEALED"))
+    whole = LandingIndex(runways, tuple(sorted(added, key=lambda item: (item.time_s, item.flight_key))), 1, days)
+    assert index.landings == whole.landings and index.sealed == whole.sealed and index.digest() == whole.digest()
+    assert len({landing.time_s for landing in added}) < len(added), "ties in time"
+    probe = noon + np.arange(-1800.0, 1500.0, 7.0)
+    for landing in added:
+        assert np.array_equal(index.counts_before(probe, without=landing.flight_key),
+                              whole.counts_before(probe, without=landing.flight_key))
+    tied = (Landing(noon, "05L", "B"), Landing(noon, "05L", "A"))
+    with pytest.raises(ValueError, match="time order, then flight order"):
+        LandingIndex(runways, tied, 0, days)
+
+
 # ---- the inputs of a sentence's rows (B1)
 
 INTERVALS = (2.0, 4.0, 8.0)
