@@ -65,7 +65,7 @@ from ts_transformer.instructions.grammar import column_words
 from ts_transformer.instructions.labeller.interval import OBSERVATION_S
 from ts_transformer.instructions.words import COLUMNS, RUNWAY, RUNWAY_GO_AROUND, SPEED, UNCHANGED, Words
 from ts_transformer.post.conformance import Checked, require_conforming_edges
-from ts_transformer.post.edges import TOKEN_FEATURES, Pairs, tokens, tokens_of
+from ts_transformer.post.edges import TOKEN_FEATURES, Pairs, tokens, window_tokens
 from ts_transformer.post.fault_census import STEPS_BEFORE_EVENT, reads_fault
 from ts_transformer.post.landings import commanded_landings, roster_key
 from ts_transformer.post.reward import LANDED, present_runways, reward
@@ -152,6 +152,8 @@ class _Tick:
     scene: Any
     moving: Any = None                  # `prior.inputs.motion`'s
     speeds: np.ndarray | None = None
+    #: each row's tokens (in ``rows``' order), every pair of the window computed at once when first read (D189 (3))
+    tokens: list[np.ndarray] | None = None
     of_row: dict[int, _View] = field(default_factory=dict)
 
 
@@ -354,10 +356,13 @@ class WindowLoop:
                 recorded = self.windows[w].others_at(t - int(self.origins[w]))
                 own, other, placed = self._own(b), recorded, [None] * len(recorded)
                 row = tokens(own, other, g, self.separations[g.code], self.step_s)
-            else:                       # the window's motions and approach clocks, as the row's view orders them
+            else:                       # the window's tokens, every pair of it at once (D189 (3))
                 view = self._of_row(tick, b)
                 own, other, placed = view.own, view.other, view.placed
-                row = tokens_of(own, other, g, self.pairs[g.code], view.moving, view.scene.along_m)
+                if tick.tokens is None:
+                    tick.tokens = window_tokens(tick.aircraft, len(tick.rows), g, self.pairs[g.code], tick.moving,
+                                                tick.scene.along_m)
+                row = tick.tokens[tick.rows.index(b)]
             if self.value_reader is not None:
                 self._pending[b] = self.value_reader(self, b, t - int(self.origins[w]), own, other)
             if self.token_part is not None:

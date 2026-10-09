@@ -590,10 +590,11 @@ def test_a_rows_scene_is_computed_once_a_tick_and_the_samples_of_chosen_rows_are
 
 
 def test_each_rows_view_is_its_window_reordered_and_reads_as_the_scene_functions_read_it(setup):
-    """D189 (1): at ticks of three commanded aircraft flown with a recorded one, each row's view of its window — its
-    set (itself, the recorded aircraft, the other commanded ones), its scene, its speeds along the course and its tokens
-    — is the window's computed once and reordered, and equal bit for bit to the scene functions and the tokens called
-    for that row alone (the reference: the functions themselves, no code kept beside them)."""
+    """D189 (1), (3): at ticks of three commanded aircraft flown with a recorded one, each row's view of its window —
+    its set (itself, the recorded aircraft, the other commanded ones), its scene and its speeds along the course — is
+    the window's computed once and reordered, and the tokens of every pair of the window computed at once are each
+    row's: equal bit for bit to the scene functions and the tokens called for that row alone (the reference: the
+    functions themselves, no code kept beside them)."""
     from ts_transformer.post.edges import tokens
     from ts_transformer.post.scene import AircraftAt
     from ts_transformer.post.speed_mask import along_course_speeds
@@ -621,6 +622,8 @@ def test_each_rows_view_is_its_window_reordered_and_reads_as_the_scene_functions
         scene = traffic(aircraft, g, separation, finals, loop.step_s)
         tick = post_window_loop._Tick(tick.t, tick.rows, tick.owns, recorded, aircraft, scene, moving,
                                       along_course_speeds(moving.ground_speed_mps, scene))
+        together = post_window_loop.window_tokens(tick.aircraft, len(tick.rows), g, loop.pairs[g.code], tick.moving,
+                                                  tick.scene.along_m)
         for k, b in enumerate(tick.rows):
             view = loop._of_row(tick, b)
             others = [o for c, o in zip(tick.rows, tick.owns) if c != b]
@@ -636,9 +639,7 @@ def test_each_rows_view_is_its_window_reordered_and_reads_as_the_scene_functions
             assert view.scene.runway == alone.runway and view.scene.category == alone.category
             speeds = along_course_speeds(motion(own.at, own.before, own.known, loop.step_s).ground_speed_mps, alone)
             assert np.array_equal(view.speeds, speeds, equal_nan=True)
-            assert np.array_equal(post_window_loop.tokens_of(view.own, view.other, g, loop.pairs[g.code], view.moving,
-                                                             view.scene.along_m),
-                                  tokens(tick.owns[k], other, g, separation, loop.step_s))
+            assert np.array_equal(together[k], tokens(tick.owns[k], other, g, separation, loop.step_s))
             checked += 1
     assert checked >= 6
 
