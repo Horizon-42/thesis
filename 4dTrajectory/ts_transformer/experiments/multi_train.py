@@ -258,7 +258,8 @@ def speak_batch(model: Prior, context: Context, windows: Sequence[Window], place
     docstring), its branch points D143's or found backward (`MultiSettings.branching`, D182: `post_branches.
     backward_round`), its informative groups written to ``groups_<k>.pt``, and its record (`post_train.speak_round`'s
     sums, of every commanded aircraft; backward, besides: each group's span and depth, the searches and those that found
-    a decision point, the continuations flown to the event + 60 s only and those flown to their window's end)."""
+    a decision point, the continuations flown to the event + 60 s only and those flown to their window's end, and the
+    search's seconds, steps and rows)."""
     train = context.splits["train"]
     batch = [windows[p] for p in places]
     common = dict(interval_s=context.interval_s, variant=context.variant, edges_reference=context.edges_reference,
@@ -274,7 +275,8 @@ def speak_batch(model: Prior, context: Context, windows: Sequence[Window], place
     anchors = {w.signal_index for w in batch}              # a window's count is in each of its aircraft's ends
     searched = {} if settings.branching == GRID else {
         "group_depths_s": [[batch[0].span_s, depth] for depth in found.depths_s], "searches": found.searches,
-        "searches_found": found.found, "continuations_to_event": found.to_event, "continuations_to_end": found.to_end}
+        "searches_found": found.found, "continuations_to_event": found.to_event, "continuations_to_end": found.to_end,
+        "search_s": found.search_s, "search_steps": found.search_steps, "search_rows": found.search_rows}
     return {"groups": len(found.groups), "informative_groups": len(informative),
             "spoken_again": len(found.spoken_again), "differed": list(found.differed),
             "reward_sum": sum(r.reward for r in found.first),

@@ -175,15 +175,20 @@ def test_a_round_found_backward_judges_its_continuations_by_what_they_did(setup)
         assert depth % 16.0 == 0 and 16.0 <= depth <= 8 * 32.0
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-def test_a_copy_held_on_another_device_and_brought_back_flies_and_says_as_its_original(setup):
-    """D182: the second pass's copies held in the host's memory and flown on the GPU later — a window loop copied to
-    another device holds every tensor there; copied back, it says and flies what the loop copied does, bit for bit."""
-    s = setup
+def _round_trip_on_the_gpu(directory: str) -> None:
+    """The body of the GPU test below, in a process of its own: the synthetic window's loop flown three rows, copied to
+    the GPU (every tensor checked there), copied back, and flown to its end beside the loop copied."""
+    import copy as copying
+    from pathlib import Path
+
+    from _pytest.monkeypatch import MonkeyPatch
+
+    from ts_transformer.experiments.post_branches import _batch_loops
+    from ts_transformer.tests.test_post_window_loop import window_setup
+
+    s = window_setup(Path(directory), MonkeyPatch())
     model = _with_module(s["base"])
     (window,) = s["windows"]
-    from ts_transformer.experiments.post_branches import _batch_loops
-
     window_loop, sources = _batch_loops(model, lambda flights: s["moved_loop"](start_move_of(window)), [window], [0],
                                         {0: s["stored"]}, s["flights"], s["geometries"],
                                         {s["geometry"].code: s["roster"]}, s["finals"], s["words"], interval_s=DELTA,
@@ -201,11 +206,27 @@ def test_a_copy_held_on_another_device_and_brought_back_flies_and_says_as_its_or
                                                                away.speaking.loop.spoken.value]
     assert all(t.device.type == "cuda" for t in tensors)
     back = away.copy([0], device=CPU)
-    import copy as copying
-
     twin = [copying.deepcopy(n) for n in numbers]
     a, b = loop.finish(numbers), back.finish(twin)
     assert np.array_equal(a[0].words, b[0].words) and np.array_equal(a[0].states, b[0].states)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_a_copy_held_on_another_device_and_brought_back_flies_and_says_as_its_original(tmp_path):
+    """D182: the second pass's copies held in the host's memory and flown on the GPU later — a window loop copied to
+    another device holds every tensor there; copied back, it says and flies what the loop copied does, bit for bit.
+    Run in a new Python process: a test process that has used the GPU cannot fork speaking workers later
+    (`post_train.Speakers` refuses it), and other tests of the same process do."""
+    import os
+    import subprocess
+    import sys
+
+    code = ("from ts_transformer.tests.test_multi_backward import _round_trip_on_the_gpu; "
+            f"_round_trip_on_the_gpu({str(tmp_path)!r})")
+    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                          env={**os.environ, "PYTHONPATH": os.pathsep.join(p for p in sys.path if p)})
+    assert done.returncode == 0, done.stderr[-3000:]
+    assert not torch.cuda.is_initialized()
 
 
 def test_the_branching_setting_defaults_to_the_grid_and_a_resume_compares_it(tmp_path):
@@ -268,7 +289,8 @@ def test_stage_ds_batch_record_holds_the_searches_with_backward_only(setup, tmp_
     assert set(records[backward.GRID]) == plain
     searched = records[backward.BACKWARD]
     assert set(searched) == plain | {"group_depths_s", "searches", "searches_found", "continuations_to_event",
-                                     "continuations_to_end"}
+                                     "continuations_to_end", "search_s", "search_steps", "search_rows"}
+    assert searched["search_steps"] > 0 and searched["search_rows"] >= 2 * searched["search_steps"]   # K = 2 a step
     assert searched["searches"] == 1 and len(searched["group_depths_s"]) == searched["groups"]
     assert all(span == 1.0 for span, _ in searched["group_depths_s"])
     assert searched["continuations_to_end"] == 2 * searched["groups"]

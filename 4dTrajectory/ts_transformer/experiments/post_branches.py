@@ -28,6 +28,7 @@ its reward, spoken again below 1, its branch points from its first predicted ste
 from __future__ import annotations
 
 import copy as copying
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -266,13 +267,18 @@ class BackwardRound(BranchRound):
     """A batch of a round whose branch points are found backward (`backward_round`; multi-aircraft control D182): the
     branch round's parts, and each group's depth (the seconds from its point to its event, in the groups' order), the
     searches made (one a varied aircraft with a candidate point) and those that found a decision point, the
-    continuations flown only to the event + 60 s and those flown to their window's end."""
+    continuations flown only to the event + 60 s and those flown to their window's end; and, as information on what
+    the search costs (its batches are one point of one window, MC12): its seconds, its loop steps and the rows they
+    flew (each step's rows summed)."""
 
     depths_s: list[float]
     searches: int
     found: int
     to_event: int
     to_end: int
+    search_s: float
+    search_steps: int
+    search_rows: int
 
 
 def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop, list[int], dict[int, np.ndarray]]],
@@ -303,7 +309,7 @@ def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loo
     ends = [[results[b] for b in rows] for rows in first.members]
     again = [w for w in everything if rules.again(ends[w])]
     if not again:
-        return BackwardRound(results, [], [], [], [], 0, 0, 0, 0)
+        return BackwardRound(results, [], [], [], [], 0, 0, 0, 0, 0.0, 0, 0)
     #: each window spoken again (its place in ``again``): its varied aircraft, their events and candidate points
     plans: dict[int, list[tuple[int, backward.Event, list[int]]]] = {}
     for k, w in enumerate(again):
@@ -346,7 +352,15 @@ def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loo
     first_samples = dict(zip(read, first.samples(split, read)))
     groups: list[Group] = []
     depths: list[float] = []
-    counted = {"searches": 0, "found": 0, "to_event": 0, "to_end": 0}
+    counted = {"searches": 0, "found": 0, "to_event": 0, "to_end": 0, "steps": 0, "rows": 0}
+    search_s = 0.0
+
+    def flown(loop: WindowLoop, until: int, streams: Sequence[np.random.Generator]) -> None:
+        """``loop`` flown to the tick ``until`` (or its end, if earlier) on ``streams``, its steps and rows counted."""
+        while loop.speaking.t < until and loop.speaking.alive.any():
+            loop.step(_draws(loop, streams))
+            counted["steps"] += 1
+            counted["rows"] += len(loop.order)
     fine_ticks = backward.ticks_of(backward.FINE_S, interval_s)
     for k, w in enumerate(again):
         for v, happened, points in plans[k] if places[w] not in differed else []:
@@ -363,20 +377,21 @@ def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loo
                 else:                                # the fine point: the decision point's copy flown on 16 s
                     state, streams = held[(k, p - fine_ticks)]
                     state, streams = state.copy([0], device=device), [copying.deepcopy(n) for n in streams]
-                    while state.speaking.t < p and state.speaking.alive.any():
-                        state.step(_draws(state, streams))
+                    flown(state, p, streams)
                 copies = state.copy([0] * continuations, device=device)
                 drawn = [rules.continuation(places[w], m, v, p, j) if m == v else copying.deepcopy(streams[m])
                          for j in range(continuations) for m in range(len(streams))]
-                while copies.speaking.t < until and copies.speaking.alive.any():
-                    copies.step(_draws(copies, drawn))
+                flown(copies, until, drawn)
                 counted["to_event"] += continuations
                 tried.update(point=p, copies=copies, drawn=drawn)
                 return _trials(copies, v, happened, p)
 
             def chosen(p: int) -> None:
                 copies, drawn = tried["copies"], tried["drawn"]
+                before = copies.speaking.t
                 ends_k = copies.finish(drawn)
+                counted["steps"] += copies.speaking.t - before
+                counted["rows"] += (copies.speaking.t - before) * len(copies.order)
                 rows_v = [copies.members[j][v] for j in range(continuations)]
                 made = dict(zip(rows_v, copies.samples(split, rows_v)))
                 kept = tuple(Sentence(*made[b], rules.reward([ends_k[c] for c in copies.members[j]]),
@@ -391,14 +406,17 @@ def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loo
                 counted["to_event"] -= continuations
                 counted["to_end"] += continuations
 
+            began = time.perf_counter()
             found = backward.search(points, fine_ticks, trial, chosen)
+            search_s += time.perf_counter() - began
             tried.clear()
             counted["searches"] += 1
             counted["found"] += found.decision is not None
         for key in [key for key in held if key[0] == k]:     # its copies released once its searches are done
             del held[key]
     return BackwardRound(results, groups, [places[w] for w in again], differed, depths, counted["searches"],
-                         counted["found"], counted["to_event"], counted["to_end"])
+                         counted["found"], counted["to_event"], counted["to_end"], search_s, counted["steps"],
+                         counted["rows"])
 
 
 def _trials(copies: WindowLoop, v: int, happened: backward.Event, point: int) -> list[backward.Trial]:

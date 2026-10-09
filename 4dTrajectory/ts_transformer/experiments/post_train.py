@@ -853,7 +853,8 @@ def _read(reading: int, state: str, split: str, places: list[int], records: list
 
 def _measure(round_: int, state: str, directory: str) -> dict[str, Any]:
     """A worker's measure (`Speakers.measure`): the measured batches of round ``round_`` spoken one after another
-    (`measured_batches`), each with its time and, on a GPU, the most its allocator held in it, its own host memory sampled
+    (`measured_batches`), each with its time, its own record (`Stage.speak_batch`'s) and, on a GPU, the most its
+    allocator reserved and allocated in it, its own host memory sampled
     meanwhile (`_PeakSampler`: the most of any), then its memory after them (`_memory_after_batch`: the GPU's peak the
     most of any) and what a worker holds besides
     in a round (``held``): the selection readout's model (as large as the round's: `_read`) and the round's kept series
@@ -879,13 +880,14 @@ def _measure(round_: int, state: str, directory: str) -> dict[str, Any]:
             if cuda:
                 torch.cuda.reset_peak_memory_stats(context.device)
             started = time.perf_counter()
-            stage.speak_batch(model, context, windows, found[k], settings, round_, Path(directory), k)
+            spoken = stage.speak_batch(model, context, windows, found[k], settings, round_, Path(directory), k)
             if cuda:
                 torch.cuda.synchronize(context.device)
             each.append({"batch": k, "span_s": windows[found[k][0]].span_s, "windows": len(found[k]),
                          "rows": sum(len(windows[p].signal_indices) for p in found[k]),
-                         "s": time.perf_counter() - started,
-                         "gpu_reserved_peak": torch.cuda.max_memory_reserved(context.device) if cuda else None})
+                         "s": time.perf_counter() - started, "record": spoken,
+                         "gpu_reserved_peak": torch.cuda.max_memory_reserved(context.device) if cuda else None,
+                         "gpu_allocated_peak": torch.cuda.max_memory_allocated(context.device) if cuda else None})
             if cuda:
                 torch.cuda.empty_cache()                 # each batch's own peak (as a worker's batch, `_speak`)
     kept = [len(pickle.dumps(series)) for series in start.series.values()]
