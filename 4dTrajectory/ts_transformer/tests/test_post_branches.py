@@ -143,6 +143,40 @@ def test_a_window_whose_second_pass_differs_is_counted_and_gives_no_sample(setup
 
 
 
+def test_a_branch_points_copies_are_released_once_its_groups_are_taken(setup, monkeypatch):
+    """D183 (4): a branch point's copies (their cache) are released at the end of its block, before the next point's
+    copies are made; the groups keep none of their tensors."""
+    import weakref
+
+    from ts_transformer.experiments.post_window_loop import WindowLoop
+
+    s = setup
+    model = _with_module(s["base"])
+    copies, caches = [], []
+    real_copy, real_finish = WindowLoop.copy, WindowLoop.finish
+
+    def released():
+        return all(r() is None for r in copies + caches)
+
+    def copy(self, windows):
+        assert released(), "an earlier branch point's copies are alive at the next point"
+        out = real_copy(self, windows)
+        copies.append(weakref.ref(out))
+        return out
+
+    def finish(self, numbers):
+        out = real_finish(self, numbers)
+        if any(r() is self for r in copies):                       # the cache as flown (it may have grown)
+            caches.extend(weakref.ref(t) for p in self.speaking.speaker.past for t in (p.keys, p.values, p.present))
+        return out
+
+    monkeypatch.setattr(WindowLoop, "copy", copy)
+    monkeypatch.setattr(WindowLoop, "finish", finish)
+    round_ = _round(s, model, s["windows"])
+    assert round_.differed == [] and len(round_.groups) >= 2 and len(copies) == len(round_.groups)
+    assert caches and released()
+
+
 def test_a_windows_numbers_are_keyed_by_its_place_in_the_round(setup, monkeypatch):
     """D94: a round's windows are flown in several batches; each draws by its place in the round, not in its batch."""
     s = setup

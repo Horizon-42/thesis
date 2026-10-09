@@ -192,6 +192,7 @@ def branch_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop,
                 groups.append((k, Group(places[w], t - join, Sentence(rows, permitted, tokens, rules.reward(ends[w]),
                                                                        _until(first, b_first, len(windows[w].joined))),
                                         tuple(kept), varied=v)))
+            del copies, drawn, ends_k, made     # released before the next point's copies (D183 (4)): one set alive
             done = np.zeros(len(second.order), dtype=bool)
             for k in range(len(again)):
                 if last[k] >= 0 and last[k] <= t:
