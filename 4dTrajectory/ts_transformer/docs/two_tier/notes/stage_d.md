@@ -4,7 +4,7 @@
 2026-10-09，Claude 写，用户转发。
 
 ```
-你 requests 的 63–69 条处理完了：
+你 requests 的 63–70 条处理完了：
 - 63–65（MC11 的读法）按你建的接受，记在 D181 里；prior §7 item 3、post_training §9 item 8 补了名字。
 - 66（用户提的往回找决定点）写成 multi_control D182，里程碑 MC12（§11），§2.3 加了一段。用户的选择（2026-10-09）：
   - 做成 campaign 设置 MultiSettings.branching：grid（D143，默认，旧行为）| backward；
@@ -48,6 +48,17 @@ D183 就按这条做。fronter 导出里那两处镜像（frontend D178 (6)）�
    审核走 agent（范围是 diff）。
    它对 MC12 尤其有用：试探点的续句只飞到事件后 60 s，不该带着到窗口结束的空间。
 
+D186（你的第 70 条，评估后接受）：续句里窗口循环自己的 Python 工作。按 D184 由你在 A、B 的代码里改，每项用前在固定输入上核对。
+   (1) 加一次落地：LandingIndex.with_landing 只检查新的那条再插入，不再重查整份名单。
+       索引完全相同，逐位相同；接着 D183 做。
+   (2) 文法遮罩按批算（instructions/grammar.column_mask）：快速模式放在可读版本旁边（D138）。
+       可读版本保留作参照，标注器仍用它；布尔逻辑，要求逐位相同；再跑标注器的 conformance。
+   (3) 每行输入按批算（prior/inputs.state_inputs、instructions/airport.relative_to_runway）：同样是快速模式，要求逐位相同。
+       如果向量化的 sin、cos 等最后一位不同，把差异报给用户，由用户决定能否放宽到"只有接近边界的抽样不同"；
+       在那之前不用。
+   每项：prior_behaviour（D108）、C 和 D 窗口的逐位核对、各自的测试；multi_speed 量前后。
+   (1) 若只改一处且在 30 行内，算小改动，不用审核 agent；(2)(3) 走 agent（范围是 diff）。
+
 D185（你的第 68 条，用户 2026-10-09 定）：一轮按批续跑，里程碑 post_training C27，你在共用的 post_train 里建，C 和 D 都适用。
    - 每批先写组文件，最后写记录文件（record_<k>.json），都先用临时名、写完再改名；有记录才算这一批完成。
    - 续跑时保留没有 checkpoint 的那一轮：完成的批读回，其余的重说；只有组文件没有记录的，重说。
@@ -57,7 +68,7 @@ D185（你的第 68 条，用户 2026-10-09 定）：一轮按批续跑，里程
      - --restart-round：整轮挪开重说；
      - 先做几分钟的行为核对（每个跨度几个窗口，新旧代码各跑一遍），再保留完成的批。已完成的批多于约 10 批时才值得。
    - 测试按 post_training §8 C27。
-   顺序：第 69 条 → D183 → D185 → MC12。
+   顺序：第 69 条 → D183 → D186 (1) → D185 → D186 (2)(3) → MC12。
 
 MC12：
 1. MultiSettings.branching（默认 grid）；续句的搜索放在 multi/ 里，复用共用的 WindowLoop.copy、finish、samples。
@@ -86,5 +97,5 @@ GPU 现在空着（MC6 已停），代码合并后、主机上没有别的任务
 
 另外，上一条 note 里让你改写 multi_control §0.3（还写着 MC1 运行中、MC5 未合并、MC6 未开始），没做的话一起做。
 你只能写各文档 §0.3 的状态行、multi_control §0.3、你的日志和 code-health-followups。
-requests_from_d_to_designer.md 整份重写：63–69 条已处理，删掉；新的读法另起。
+requests_from_d_to_designer.md 整份重写：63–70 条已处理，删掉；新的读法另起。
 ```
