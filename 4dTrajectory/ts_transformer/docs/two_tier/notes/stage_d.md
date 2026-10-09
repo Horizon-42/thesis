@@ -4,7 +4,7 @@
 2026-10-09，Claude 写，用户转发。
 
 ```
-你 requests 的 63–66 条处理完了：
+你 requests 的 63–67 条处理完了：
 - 63–65（MC11 的读法）按你建的接受，记在 D181 里；prior §7 item 3、post_training §9 item 8 补了名字。
 - 66（用户提的往回找决定点）写成 multi_control D182，里程碑 MC12（§11），§2.3 加了一段。用户的选择（2026-10-09）：
   - 做成 campaign 设置 MultiSettings.branching：grid（D143，默认，旧行为）| backward；
@@ -26,7 +26,17 @@
 路径相对 4dTrajectory/ts_transformer/。MC6 在 run-mc6 里跑：不动那个运行工作树，只写代码、只跑改动文件的测试、
 少开进程（rule 13），不占 GPU。
 
-一、代码：MC12（在 dev-multi-control 上，先把 dev-two-tier 合进来）
+一、代码（在 dev-multi-control 上，先把 dev-two-tier 合进来）
+0. 先做 D183（你的第 67 条，评估后接受）：说话器缓存只留已写的行加一段。
+   - Speaker.copy 去掉多余的 .clone()；
+   - 副本只带已写的行加 64 行余量；
+   - 扩容改成每次加 64 行，不再翻倍。
+   核对：CPU 一个线程、固定输入，C 和 D 的窗口逐位相同（同 D181 58–60）；再跑先验的行为检查 prior_behaviour（D108）。
+   这是阶段 B 的代码，接口不变，由你建。测试：三处各一个（克隆一次、副本的空间、按段扩容），以及逐位核对。
+   审核走 agent（范围是 diff）。
+   它对 MC12 尤其有用：试探点的续句只飞到事件后 60 s，不该带着到窗口结束的空间。
+
+MC12：
 1. MultiSettings.branching（默认 grid）；续句的搜索放在 multi/ 里，复用共用的 WindowLoop.copy、finish、samples。
    C 的行为逐位不变（D149）。
 2. 第二遍（D94）在每个候选点复制窗口状态，放在主机内存里，试到哪个点才搬到设备上；设备上同时只有一个点的 K 条续句。
@@ -42,7 +52,10 @@
    → 显式路径提交 → 日志写一行 → 报告 dev-multi-control 能否快进 dev-two-tier，由用户合并。
 
 二、之后（等用户的话）
-GPU 空出来时（MC6 结束或某一轮的边界），用 multi_speed 各量一批 grid 和 backward，比较三项：
+GPU 空出来时（MC6 结束或某一轮的边界）：
+- 先用 multi_speed 量一批：D183 之前和之后各一次，看保留峰值。缓存按段扩容会产生碎片，所以看保留的，不只看已分配的；
+  碎片明显就提议给说话 worker 开 expandable_segments。
+- 再各量一批 grid 和 backward，比较三项：
 - 出样本的组数；
 - 飞到窗口结束的续句数；
 - 时间。
@@ -50,5 +63,5 @@ GPU 空出来时（MC6 结束或某一轮的边界），用 multi_speed 各量�
 
 另外，上一条 note 里让你改写 multi_control §0.3（还写着 MC1 运行中、MC5 未合并、MC6 未开始），没做的话一起做。
 你只能写各文档 §0.3 的状态行、multi_control §0.3、你的日志和 code-health-followups。
-requests_from_d_to_designer.md 整份重写：63–66 条已处理，删掉；新的读法另起。
+requests_from_d_to_designer.md 整份重写：63–67 条已处理，删掉；新的读法另起。
 ```
