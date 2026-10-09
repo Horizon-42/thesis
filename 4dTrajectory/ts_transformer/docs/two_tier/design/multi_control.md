@@ -75,8 +75,8 @@ the evidence is in §9.
 Stage D's implementer keeps this table and its log, `readouts/2026-10-06_stage_d_implementation_log.md` (outline §5
 rule 10); its readings and requests go to `requests_from_d_to_designer.md`. State, 2026-10-09 (night): MC0–MC5 and
 MC11's D181 merged into `dev-two-tier`; MC6 stopped by the user in its round 0; D183, D186, D185 (post-training C27),
-MC12 (D182), the orders A–D of 2026-10-09 (D187), D188 and D189 built on `dev-multi-control`, not merged; the profile
-after D188 and D189 measured (2 workers fit; requests item 80).
+MC12 (D182), the orders A–D of 2026-10-09 (D187), D188, D189 and D190 built on `dev-multi-control`, not merged; the
+profile after D190 measured, 2026-10-10 (3 workers fit with either way of reading the front; requests items 86, 89).
 
 | Milestone | State |
 |---|---|
@@ -93,6 +93,7 @@ after D188 and D189 measured (2 workers fit; requests item 80).
 | MC12 (D182) | On `dev-multi-control`: de0711aa; the grid the same on stage C's and D's fixed windows; the GPU measures of grid against backward wait for the user's word (log §17) |
 | MC12 (D188) | On `dev-multi-control`: (1) the searches stepped together, efef5c4d (against the code before on MC6's batches 0, 23, 86: every group and continuation bit for bit on the CPU); (2) the speaking workers' allocator, c024a333 (the group files the same with and without it) (log §19) |
 | MC11 (D189) | On `dev-multi-control`: (0)–(2) ceccd417, (3) 9c2161fa; window_behaviour on stage C's and D's windows and prior_behaviour the same bit for bit; the profile at §18's settings, `outputs/POOLED/multi/profile_d189_20261009`: batches 0 / 23 / 86 in 55 / 65 / 61 s (§18: 112 / 117 / 81 s), a worker's GPU peak 2.21 GiB: 2 workers fit (log §19) |
+| MC11 (D190) | On `dev-multi-control`: (1) the joint loop's room to its next rebuild, ada6a79d (bit for bit: window_behaviour on stage C's and D's windows, prior_behaviour, MC6's backward batches); (2) the copies of a point hold their front once, 7893d787 (the stage C frontend fixtures 82dd7695), `front_attention` `copied` (the default, bit for bit) or `merged` (D181 (57)'s bound: the words of 1 of 1,600 continuations differ); the profile at §18's settings, `outputs/POOLED/multi/profile_d190_{copied,merged}_20261010`: a worker's GPU peak 1.53 / 1.33 GiB, 3 workers fit (log §20) |
 | MC7–MC10 | Not started |
 
 ### 0.4 Plan

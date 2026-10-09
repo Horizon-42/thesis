@@ -665,3 +665,27 @@ allocated): batches 0 / 23 / 86 allocated 0.63 / 1.44 / 1.24 GiB, of which the j
 (history 37 / 26 / 42 %, written but not present 37 / 60 / 44 %, a step's room 26 / 14 / 14 %) and its executor and
 words 0.02 / 0.12 / 0.10; a rebuild's peak 0.79 / 1.77 / 1.53; the copies of one point identical up to where they part
 (their history and the padding before it): one front instead of K frees 0.24 / 0.76 / 0.75 GiB — requests item 80.
+
+## 20 D190 (notes/stage_d.md orders 1–4, 2026-10-09 night to 10-10)
+
+On `dev-multi-control`: D190 (1) ada6a79d (the joint loop's room after a rebuild the steps to its first part's end by
+its schedule; D183's step where every part is a point chosen; a point chosen at its judged tick that goes on alone
+rebuilt as it is: requests item 85) — bit for bit on fixed inputs (window_behaviour on stage C's and D's windows,
+prior_behaviour, MC6's backward batches 0 / 23 / 86 against 519d6e7d: 232 continuations), a small change; D190 (2)
+7893d787 (the copies of a line hold their rows to where they part once, `prior.model.Front`, its length chosen at each
+copy as few rows as hold the cache smallest, one length a cache; how a line reads it a campaign setting at the user's
+word of 2026-10-09, `front_attention` `copied` (the default) or `merged`: requests item 87) — copied: window_behaviour
+on C and D the same behaviour, prior_behaviour the same bytes, the backward batches bit for bit; merged (D181 (57)'s
+bound): of 1,600 continuations (C 608, D grid 760, D backward 232) the words of 1 differ (backward batch 23, row 102 of
+131, the speed class 34 against 33, the states before it bit for bit), every other's states bit for bit, 3 records
+differ only in rows past their sentence's end and 1 in its traffic tokens (requests item 88); the agent's review: no
+S1, its S2 (no test that the setting reaches the speaker) fixed, the second round clean; 82dd7695 the stage C frontend
+fixtures written again (`front_attention` added, the frontend's 68 tests on them pass). Before building, the joint
+loop's cache at its largest under each layout (MC6's backward batches on the GPU, rows of one line and every layer):
+held whole 54,656 / 143,992 / 125,552, one front length 24,626 / 58,480 / 34,032, two blocks of own rows 20,930 /
+44,158 / 23,616, the least possible 17,528 / 37,389 / 21,984 (requests item 86). The profile at §18's settings
+(7893d787; `outputs/POOLED/multi/profile_d190_copied_20261010`, `…_merged_20261010`): batches 0 / 23 / 86 copied 56.8 /
+68.0 / 63.0 s, reserved / allocated peaks 0.62 / 0.53, 1.39 / 1.10, 0.96 / 0.73 GiB; merged 55.5 / 63.5 / 59.9 s,
+0.56 / 0.53, 1.19 / 0.94, 0.78 / 0.73 GiB (D189: 55.3 / 64.9 / 61.0 s; 0.99 / 0.78, 2.07 / 1.77, 1.80 / 1.53); a
+worker's GPU peak copied 1.53, merged 1.33 GiB (D189 2.21): 3 workers fit either way, 4 not (8.0 and 7.0 GiB against
+6.5 and 6.6) — requests items 86, 89; the full ts suite at 82dd7695: 2,103 passed, 1 skipped (at 7893d787 the two frontend-fixture tests failed: the export now writes `front_attention`; 82dd7695 wrote them again).

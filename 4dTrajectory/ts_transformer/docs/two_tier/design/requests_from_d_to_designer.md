@@ -5,12 +5,12 @@ time. Each item is a reading the implementer made where the design says nothing,
 until the user decides. Paths are relative to `4dTrajectory/ts_transformer/`. The numbers are kept from the earlier
 notes; the items the user decided are deleted (D166: 6, 7, 19, 21, 22, 25, 29–35; O16: 36, written into D146; the
 census's sample: 18; D172: 46–48; D179, D180: 49–53; D181, O20: 54–62; D181–D186: 63–70; the interfaces and D182:
-71–77; D188: 78–79), item 23 (it asked for 6 and 7), item 20 (built: item 40) and the names of MC0–MC4 (written into
-the interfaces).
+71–77; D188: 78–79; D190: 80–84), item 23 (it asked for 6 and 7), item 20 (built: item 40) and the names of MC0–MC4
+(written into the interfaces).
 
-State: 2026-10-09 (night): items 78–79 decided (D188) and deleted; D188 and D189 built on `dev-multi-control`
-(stage D's log §19). Items 80–84 come from them (80 measured: the workers the joint loop leaves room for; 81–84
-readings); the others are MC0–MC5's readings still open.
+State: 2026-10-10: items 80–84 decided (D190) and deleted; D190 built on `dev-multi-control` (stage D's log §20).
+Items 85–90 come from it (85, 87, 88 readings; 86, 89 measured; 90 the next campaign, proposed); the others are
+MC0–MC5's readings still open.
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -155,52 +155,52 @@ readings); the others are MC0–MC5's readings still open.
     the unit is an anchor (its windows of the spans are nested and share their aircraft); within a span, windows of
     other anchors may still share flights in a dense select set (stated).
 
-## D188, D189 (stage D's log §19; 2026-10-09, night)
+## D190 (stage D's log §20; 2026-10-10)
 
-80. **The joint loop's memory sets the workers** (D188 (1), measured by the profile at §18's settings,
-    `outputs/POOLED/multi/profile_d189_20261009`, and by part, stage D's log §19). A batch is faster (batch 0 111.8 →
-    55.3 s, 23 116.8 → 64.9 s, 86 80.8 → 61.0 s), but a worker's GPU peak rose from 1.6 to 2.21 GiB (batch 23: 2.07
-    GiB reserved, 1.77 allocated): with D179's margin 1.3, 2 workers fit where 3 did (3 need 8.7 GiB against 6.8). At
-    a round's batches of MC6 (23 / 63 / 138 by span) the speaking is about 13,800 worker-seconds against §18's 21,100:
-    on 2 workers about 1.9 h, the time 3 workers took before.
-
-    By part (one process on the GPU, at each batch's step of the most allocated; GiB): the joint loop's cache is most
-    of it — batch 0: 0.40 of 0.63 allocated, 23: 1.10 of 1.44, 86: 0.96 of 1.24; the executor and words 0.02 / 0.12 /
-    0.10; a rebuild's peak 0.79 / 1.77 / 1.53. Of the cache, the rows of history 37 / 26 / 42 %, the rows written but
-    not present 37 / 60 / 44 % (a line is aligned to the joint loop's clock: a point from an early tick is padded to
-    the latest part's length, and an aircraft not yet joined writes rows not present) and the room of a step (D183's
-    64 rows, after each rebuild) 26 / 14 / 14 %. The K copies of one point are the same, bit for bit, up to where they
-    part — their history and the padding before it: one copy of that front instead of K would free 0.24 / 0.76 / 0.75
-    (61–79 % of the cache), of which history alone 0.12 / 0.19 / 0.36.
-
-    Proposals, by what each frees (the user chooses; none changes a number but (c)'s kernel on the GPU):
-    (a) the room after a rebuild of the joint loop: the steps to its next rebuild, not 64 rows (rebuilds come every
-        few steps): about 0.10–0.16 GiB, the room no row reads (the cache grows by D183's step if it outlives it);
-    (b) a campaign setting that bounds the rows the joint loop holds, a point waiting for room (D181 (57)'s
-        `continuation_rows`, never built; default "all", today's behaviour): the memory in proportion, at the price of
-        steps;
-    (c) the shared prefix (O20 (62); the condition it was deferred on — that the cache sets the peak — now holds): the
-        K copies of a point read one front, each its own rows after the point; frees most of the cache (above); a change
-        of the speaker's cache and its attention (stage B), two pieces of attention merged — on the GPU a rounding,
-        checked by D181 (57)'s bound. Estimate with (a) and (c): a worker's peak about 1.2–1.5 GiB, 3–4 workers.
-    Today, without them, the next campaign runs 2 workers.
-81. **D189 (0)'s "window's end"** (reading). A window has no end of its own: its aircraft fly until the executor ends
-    them, and a batch's windows are said together (a window's halted rows are said while another's fly). Read: a
-    commanded aircraft's landings are those from 30 min and one Δ before its window's row 0 to the latest a row of its
-    loop is said (`WindowLoop` `reach`: each aircraft's first predicted step and the executor's time limit with every
-    go-around's, from its window's row 0, the latest of the loop, one Δ more; a row's time is its flight's, the
-    window's to rounding), and its own (`LandingIndex.counted`, `post.landings.commanded_landings`). Every count is the
-    same (window_behaviour on stage C's and D's windows, a test that every count read lies in the cut).
-82. **D189 (1)'s assertion of one airport** (reading). Not added as code: `post.scene.Window` refuses a commanded
-    aircraft of another airport, and each row's geometry and finals are its window's by construction
-    (`WindowLoop.__init__`), so an assertion in the loop could never bind (root `CLAUDE.md`); `_of_row`'s docstring
-    names the rule it rests on.
-83. **D189 (2)'s masks of an aircraft not said** (reading). The later columns' procedure and caller masks are computed
-    once a row under the runway as said (an aircraft not said keeps its own), where the old code read the raw word
-    drawn for an aircraft not said; every class is permitted to such an aircraft, so the records are the same, and
-    the row's `blocked` record reads the same masks as before. The check that an aircraft has a permitted word (D62) is
-    read at the row's end, before the executor flies it: a row that fails it is refused before any change, but a
-    later column's refusal can be the message raised. The row's records come back in four transfers at its end.
-84. **The search's counts in a batch's record** (reading). `search_steps` and `search_rows` count the joint loop's steps
-    and their rows (D188 (1)): they are not comparable with §18's (one point of one window a loop); `search_rows` is
-    the same work (on MC6's batches 0, 23, 86 equal to §18's).
+85. **D190 (1)'s room where no part has a schedule** (reading). The next rebuild of the joint loop is known by its
+    parts' schedule only: a point tried leaves at its judged tick, the decision point's copy at the fine point; a point
+    chosen goes on to its window's end, which is not known. Read: the room after a rebuild is the steps to the first
+    end by the schedule; where every part is a point chosen, D183's step (64 rows), as a copy's. A point chosen at its
+    judged tick that goes on with no part leaving or joining leaves the loop at the end of its room: the loop is then
+    rebuilt as it is (a rebuild frees the old cache a layer at a time; a growth would hold the cache twice). No number
+    changes (bit for bit on fixed inputs, log §20).
+86. **The front's length: one for a cache** (reading and proposal; measured). `Past.together` chooses one length S for
+    every front of a cache, as few rows as hold it smallest: a front for each kin the same that far, one for each
+    other line, and every line's own rows from S on in one block (one attention a layer). Measured before it was
+    built (MC6's backward batches 0 / 23 / 86 on the GPU at 519d6e7d; the joint loop's cache at its largest, in rows of
+    one line and every layer, 8 KiB each): held whole 54,656 / 143,992 / 125,552 (with D183's room); one length (built)
+    24,626 / 58,480 / 34,032; two blocks of own rows, the lines parted by where their fronts end, 20,930 / 44,158 /
+    23,616; the least possible (each line from where it parts) 17,528 / 37,389 / 21,984. With one length `merged` fits
+    3 workers and 4 fall short by 0.4 GiB (7.0 GiB against 6.6; a worker's measured peak 1.33 GiB, 4 need it at most
+    1.25). Proposal, the user chooses: (a) two blocks of own rows (two attentions a layer; about 0.11 GiB less at batch
+    23, not measured on a worker: perhaps 4 workers with `merged`); (b) as built, 3 workers.
+87. **Both ways kept; the names they add** (reading). notes/stage_d.md asked the old form deleted (D187); the user's word
+    of 2026-10-09 kept both new ways as a setting: the old form (each copy holding the shared rows) is deleted, and how
+    a line reads its front is a campaign setting `front_attention` of stage C (`post_train.Settings`, in
+    `SETTINGS_ADDED`) and of stage D (`MultiSettings`, in `PROFILED_SETTINGS`), `--front-attention`, `copied` the
+    default (the standing permission: a record without it reads as the code before, bit for bit). The architecture
+    test's prior interface gained `prior.model` `COPIED`, `MERGED`, `FRONT_ATTENTIONS`. Prior §7 item 1's Code column
+    still names `Past.taken(index, room, device)` (deleted; now `Past.together(parts, room, device, attention)` and
+    `Front`), item 3 not `Speaker(…, attention=)`; `docs/reference/runners.md` does not name `--front-attention` for
+    `post_train` (R65) or `multi_train`. Proposal: the designer writes them.
+88. **What the check of `merged` counted** (reading). D181 (57)'s bound on fixed inputs (the CPU, one thread; against
+    the code before): of 1,600 continuations (stage C's first batch 608, stage D's grid batches 760, its backward
+    batches 232) the words of one differ — backward batch 23, row 102 of 131, the speed word class 34 against 33
+    (neighbours), the states before it bit for bit, the reward the same: counted as a draw near a boundary; every other
+    continuation's states bit for bit. Beside them, 3 records of permitted words differ only in rows past their
+    sentence's end (an aircraft said on after it is done, `Speaker.say`: no sentence keeps those words, and
+    `masked_log_probability` reads the sentence's rows) and one continuation's traffic tokens differ from its row 18
+    (up to 0.077; its words and states the same: another aircraft of its window drew otherwise, read as a draw near a
+    boundary; the check records the varied aircraft's words only). Proposal: confirm that rows past a sentence's end
+    are outside the bound.
+89. **The two ways' time** (measured, the profile at §18's settings on 7893d787). Copied: batches 0 / 23 / 86 in 56.8 /
+    68.0 / 63.0 s (D189: 55.3 / 64.9 / 61.0; the copy of each line's rows a layer at a time each step); merged: 55.5 /
+    63.5 / 59.9 s. A round's speaking at MC6's batches (23 / 63 / 138 by span): copied about 14,300 worker-seconds,
+    merged 13,500 (D189: 13,800); on 3 workers about 1.3 and 1.25 h. On the CPU the copy costs more (the checks, five
+    processes at once, information only: backward batches copied 90 / 159 / 117 s, before 83 / 118 / 111, merged 76 /
+    94 / 82).
+90. **The next campaign** (proposal; the user decides). MC6's start (stage C's `post_seg60_20261007` round 5, seed 2035)
+    and settings, branch points found backward, 8 rounds, 3 GPU speaking workers; `front_attention` `merged` (13 %
+    less memory and the faster, within D181 (57)'s bound) or `copied` (bit for bit the code before). Its speaking about
+    1.25–1.3 h a round, 10–11 h for 8 rounds, the passes besides; a new profile is not needed (this one is at its
+    settings, each way).
