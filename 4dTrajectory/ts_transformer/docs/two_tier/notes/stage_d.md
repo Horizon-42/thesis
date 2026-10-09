@@ -1,9 +1,41 @@
 # 阶段 D：当前命令
 
 只放最新一条命令，新命令整份覆盖，不是日志（过程记在 `readouts/2026-10-06_stage_d_implementation_log.md`）。
-2026-10-09，Claude 写，用户转发。
+2026-10-09，Claude 写，用户转发；同日晚在原文上追加了最前面一段（原来的命令还没做完，没有覆盖）。
 
 ```
+追加（2026-10-09 晚，Claude 审核了已提交的 0fa9df2e…ad950c8a）：
+第 69 条、D183、D186 (1)、D185/C27、D186 (2)(3) 符合设计，没有数据泄漏。用户定了下面四项，都要改：
+
+A. 快速模式在每个进程里先核对（outline D187，新）。
+   - stage C、D 的 runner 共用的打开处（post_train.open_context，和闭环检查放在一起），在说话之前、说话 worker fork 之前，
+     把 BATCH 和 PER_AIRCRAFT 两种模式比一次：用 prior_behaviour 的固定输入（说话器的几行 + 三架飞机的 speaking loop），
+     CPU 一个线程，先验用固定种子按本进程的 words 和 variant 造（不读模型文件）；
+     词、概率、遮罩、状态逐位相同，否则按名拒绝，不退回可读模式。
+   - 复用 prior_behaviour 的 speaking 和 require_same_modes，不照抄；需要挪位置就挪（D184），改的名字写进报告。
+   - 不经 open_context 却用 BATCH 说话、并保留结果的 runner 也要有；只记时间的 model_speed 不用。
+     报告里列出覆盖了哪些 runner、核对用了多少秒。
+   - 测试：两种模式相同时打开通过；把一种模式换成给出不同结果的版本时，打开按名拒绝。
+   - 审核走 agent（范围是 diff）。
+B. D183 (2) 改写：副本的缓存只分配一次。
+   - Speaker.copy 直接分配"已写行 + 64 行"大小的存储，把选中的行按索引写进它的前面
+     （例如 index_select 的 out= 写进那段视图）；不再先索引出一份已写行大小的副本、再用 grown 拼成新存储。
+   - 如果 torch 在 CPU 或 GPU 上做不到不经中间副本写进去，就报告，不要改成 Python 循环逐行复制。
+   - 核对：window_behaviour 对 D186 (2)(3) 的记录，C 和 D 的窗口逐位相同；prior_behaviour 相同；D183 的测试照过。
+   - 一处、30 行内算小改动，不用审核 agent。
+C. C27 补一个测试（post_training §8 C27 已补一句）：经过说话 worker（Speakers，两个 worker）续跑一个带已完成批的轮次，
+   组文件的字节和轮的记录跟整轮一次说完的相同。只改测试，小改动。
+D. column_mask_fast 依赖的文法性质（vocabulary §6 item 2 已写明）：
+   - grammar 的模块说明同时写 column_mask 和 column_mask_fast，并写明快速版依赖的性质：航向词和速度词只经规则 1 进入规则；
+   - 穷举比较两个函数的测试，说明里写明它守的就是这条性质：以后改规则 1–6 把它改坏了，这个测试会失败，快速版要一起改。
+   - 小改动。
+
+顺序：先把手上的 MC12 做完提交，然后 B → A → C、D。
+之后：日志补上这几次提交和上面四项；multi_control §0.3 和 requests_from_d_to_designer.md 按下面原来的要求整份重写；
+合并前跑一次完整 ts 测试套件（现在没有 campaign 在跑）；报告 dev-multi-control 能否快进 dev-two-tier，由用户合并。
+
+（下面是原来那条命令：第 69 条、D183、D186、D185 已做完；MC12 和"二、之后"仍然有效。）
+
 你 requests 的 63–70 条处理完了：
 - 63–65（MC11 的读法）按你建的接受，记在 D181 里；prior §7 item 3、post_training §9 item 8 补了名字。
 - 66（用户提的往回找决定点）写成 multi_control D182，里程碑 MC12（§11），§2.3 加了一段。用户的选择（2026-10-09）：
