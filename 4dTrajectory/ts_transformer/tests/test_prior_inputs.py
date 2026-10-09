@@ -595,17 +595,16 @@ def test_a_loop_s_row_is_the_sentence_s_row_bit_for_bit(interval_s):
             heard.hear(rows.grid[t - rows.start], float(rows.states[r, 2] - geometry.elevation_m), t * interval_s)
 
 
-def test_a_loop_s_rows_of_each_airport_at_once_are_the_rows_one_aircraft_at_a_time():
-    """Multi-aircraft control D186 (3): `LoopRows` in `BATCH` mode (each airport's aircraft through `state_inputs` at
-    once) gives the inputs and positions of `PER_AIRCRAFT` (one aircraft at a time, the reference), bit for bit — seven
-    aircraft of two airports interleaved, join ticks, rows with and without motion, each its own landings; its
-    `select` keeps the mode; an unknown mode is refused by name."""
+def test_a_loop_s_rows_of_each_airport_at_once_are_each_aircraft_s_rows_alone():
+    """Multi-aircraft control D186 (3): `LoopRows` computes the state inputs of each airport's aircraft at once; each
+    aircraft's inputs and position are those of a loop of that aircraft alone (`select`), bit for bit — seven aircraft
+    of two airports interleaved, join ticks, rows with and without motion, each its own landings (counted: the
+    landings input differs between aircraft)."""
     import torch
 
     from ts_transformer.prior.batch import variant_features
     from ts_transformer.prior.inputs import Heard
     from ts_transformer.prior.loop import LoopRows
-    from ts_transformer.prior.procedure import BATCH, PER_AIRCRAFT
     from ts_transformer.tests.support import raised_airport
 
     words = Words(instruction_spec())
@@ -620,9 +619,10 @@ def test_a_loop_s_rows_of_each_airport_at_once_are_the_rows_one_aircraft_at_a_ti
         (Landing(noon - 1500.0 + 60.0 * k + 37.0 * b, ("09", "09L")[k % 2], f"O{b}_{k}") for k in range(3)),
         key=lambda item: (item.time_s, item.flight_key))) + (Landing(noon + 900.0 + b, "09", keys[b]),), 0, days)
         for b in range(count)]
-    made = {mode: LoopRows(geometries, landings, keys, np.full(count, noon - 1200.0), rng.integers(0, 5, count), 3,
-                           variant="full", interval_s=4.0, step_s=words.spec.step_s, device=torch.device("cpu"),
-                           join_ticks=np.array([0, 0, 2, 1, 0, 3, 0]), mode=mode) for mode in (PER_AIRCRAFT, BATCH)}
+    loop = LoopRows(geometries, landings, keys, np.full(count, noon - 1200.0), rng.integers(0, 5, count), 3,
+                    variant="full", interval_s=4.0, step_s=words.spec.step_s, device=torch.device("cpu"),
+                    join_ticks=np.array([0, 0, 2, 1, 0, 3, 0]))
+    alone = [loop.select([b]) for b in range(count)]
     heard = [Heard(g, words) for g in geometries]
     column = variant_features("full").index("landings_30min")
     read = []
@@ -631,17 +631,15 @@ def test_a_loop_s_rows_of_each_airport_at_once_are_the_rows_one_aircraft_at_a_ti
                               rng.uniform(150, 3_000, count), rng.normal(0, 60, (count, 3))])
         before = at + np.column_stack([rng.normal(0, 150, (count, 3)), np.zeros((count, 3))])
         known = rng.random(count) < 0.8
-        (a, at_a), (b, at_b) = (made[mode](t, at, before, known, heard) for mode in (PER_AIRCRAFT, BATCH))
-        for name, x, y in zip(a._fields, a, b):
-            assert torch.equal(x, y), (t, name)
-        read.append(a.candidates[..., column])
-        assert all(np.array_equal(x, y) for x, y in zip(at_a, at_b))
+        rows, position = loop(t, at, before, known, heard)
+        for b, one in enumerate(alone):
+            mine, place = one(t, at[b: b + 1], before[b: b + 1], known[b: b + 1], heard[b: b + 1])
+            for name, x, y in zip(rows._fields, rows, mine):
+                assert torch.equal(x[b: b + 1], y), (t, b, name)
+            assert all(np.array_equal(x[b: b + 1], y) for x, y in zip(position, place))
+        read.append(rows.candidates[..., column])
     landings_read = torch.stack(read)                            # the landing input really compared: aircraft apart
     assert (landings_read != 0).any() and len({tuple(x.flatten().tolist()) for x in landings_read.unbind(1)}) > 1
-    assert made[BATCH].select([3, 0]).mode == BATCH
-    with pytest.raises(ValueError, match="none of"):
-        LoopRows(geometries, landings, keys, np.zeros(count), np.zeros(count, dtype=int), 3, variant="full",
-                 interval_s=4.0, step_s=words.spec.step_s, device=torch.device("cpu"), mode="fast")
 
 
 def test_each_aircraft_of_a_loop_counts_its_own_landings():

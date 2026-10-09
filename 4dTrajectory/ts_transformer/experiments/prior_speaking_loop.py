@@ -47,7 +47,7 @@ from ts_transformer.prior.inputs import own_flight_key
 from ts_transformer.prior.landings import Landing, LandingIndex, utc_s
 from ts_transformer.prior.loop import LoopRows
 from ts_transformer.prior.model import Prior
-from ts_transformer.prior.procedure import PER_AIRCRAFT, Final
+from ts_transformer.prior.procedure import Final
 from ts_transformer.prior.speaker import ABSENT, OBSERVED, SAID, Permitted, Speaker, go_around_bound
 
 #: The predicted rows the speaker's cache has room for at first (it grows as the flights need, `model.Past.grown`; the
@@ -89,14 +89,12 @@ class SpeakingLoop:
     """The closed loop of the flights ``order`` of ``loop`` (module docstring). ``sentences``, ``observed`` (each
     flight's observed rows before its first predicted step as the start gave them back, `STATE_COLUMNS`) and
     ``flights`` (their records in the split's signals: airport, entry time, key) by their place in the signals; ``landings`` each flight's,
-    in ``order`` (D105); ``finals`` each airport's (the procedure masks); ``masks`` the mode of a row's masks and state
-    inputs (`Speaker`, B14; `LoopRows`, multi-aircraft control D186 (3))."""
+    in ``order`` (D105); ``finals`` each airport's (the procedure masks)."""
 
     def __init__(self, model: Prior, loop: Loop, order: Sequence[int], sentences: Mapping[int, ClosedLoopSentence],
                  observed: Mapping[int, np.ndarray], flights: Mapping[int, Mapping[str, Any]], geometries: Mapping[str, AirportGeometry],
                  landings: Sequence[LandingIndex], finals: Mapping[str, Sequence[Final]], words: Words, *,
-                 interval_s: float, variant: str, device: torch.device, temperature: float = 1.0,
-                 masks: str = PER_AIRCRAFT) -> None:
+                 interval_s: float, variant: str, device: torch.device, temperature: float = 1.0) -> None:
         self.loop, self.order, self.words = loop, list(order), words
         count = len(self.order)
         rows = [sentences[i].rows for i in self.order]                   # the rows alone are read (D82)
@@ -109,13 +107,13 @@ class SpeakingLoop:
         #: each flight's join tick (module docstring): the start's
         self.join_ticks = loop.join_ticks.copy()
         self.speaker = Speaker(model, words, self.finals, capacity=int(self.join_ticks.max()) + self.start + FIRST_ROWS,
-                               temperature=temperature, masks=masks)
+                               temperature=temperature)
         # the inputs of a row: the prior's one function of a loop's row (D96 item 4), each flight's own landings (D105)
         self.rows_of = LoopRows(self.geometries, landings, [own_flight_key(f) for f in self.flights],
                                 np.array([utc_s(f["entry_time_utc"]) for f in self.flights]),
                                 np.array([r.first_row for r in rows]), self.start, variant=variant,
                                 interval_s=interval_s, step_s=words.spec.step_s, device=device,
-                                join_ticks=self.join_ticks, mode=masks)
+                                join_ticks=self.join_ticks)
         shape = (self.start * self.every, len(STATE_COLUMNS))
         wrong = [i for i in self.order if np.shape(observed[i]) != shape]
         if wrong:

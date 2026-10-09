@@ -49,12 +49,12 @@ from typing import Any, Callable, Mapping, NamedTuple, Sequence
 import numpy as np
 import torch
 
-from ts_transformer.instructions.grammar import InForce, column_mask, column_mask_fast, column_words
+from ts_transformer.instructions.grammar import InForce, column_mask, column_words
 from ts_transformer.instructions.words import COLUMNS, HEADING, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words
 from ts_transformer.prior.batch import RUNWAY_FIXED_CLASSES, RUNWAY_GO_AROUND_CLASS, RowTensors
 from ts_transformer.prior.inputs import Heard
 from ts_transformer.prior.model import CACHE_STEP_ROWS, Past, Prior, require_eval
-from ts_transformer.prior.procedure import BATCH, PER_AIRCRAFT, Final, ProcedureMasks
+from ts_transformer.prior.procedure import Final, ProcedureMasks
 
 
 class Position(NamedTuple):
@@ -170,12 +170,10 @@ class Speaker:
     vocabulary D80 for the start)."""
 
     def __init__(self, model: Prior, words: Words, finals: Sequence[Sequence[Final]], *, capacity: int,
-                 temperature: float = 1.0, masks: str = PER_AIRCRAFT) -> None:
+                 temperature: float = 1.0) -> None:
         """``finals``: each aircraft's airport's finals, one for each candidate in the pointer's order (the procedure
         masks it speaks under, §4, kept fresh for this batch: their state is this batch's); ``capacity``: the rows the
-        cache has room for at first (it grows as a sentence needs, `model.Past.grown`); ``masks``: the mode of the
-        procedure masks and the grammar's (`procedure.MASK_MODES`, B14 and multi-aircraft control D186 (2): the same
-        masks; `BATCH` the faster)."""
+        cache has room for at first (it grows as a sentence needs, `model.Past.grown`)."""
         if not temperature > 0.0:
             raise ValueError(f"temperature {temperature}: it must be positive")
         require_eval(model, "the speaker")
@@ -184,7 +182,7 @@ class Speaker:
             if [f.index for f in finals_b] != list(range(len(geometry.candidates))):
                 raise ValueError(f"{geometry.code}: the finals are not one for each candidate, in the pointer's order")
         self.model, self.words = model, words
-        self.procedure = ProcedureMasks(finals, words, masks)
+        self.procedure = ProcedureMasks(finals, words)
         self._n_candidates = np.array([len(f) for f in finals], dtype=np.int64)
         self.temperature = temperature
         self.past = model.no_past(len(finals), capacity)
@@ -442,7 +440,7 @@ class Speaker:
             runway, go_around = self._runway_after(said[:, RUNWAY])
             later = {c: self._others(c, runway, go_around, at, caller, procedure)
                      for c in range(column + 1, len(COLUMNS))}
-            return (self._grammar(self.in_force, said, column, at.height_m, self._n_candidates, self.words, later)
+            return (column_mask(self.in_force, said, column, at.height_m, self._n_candidates, self.words, later)
                     & self._others(column, runway, go_around, at, caller, procedure))
         # a runway word is permitted where some permitted heading word of the row can follow it: the grammar asked at
         # the heading column after it, with the later columns' masks under the runway and G it leaves (exact, and one
@@ -454,18 +452,12 @@ class Speaker:
             runway, go_around = self._runway_after(np.full(count, word))
             later = {c: self._others(c, runway, go_around, at, caller, procedure)
                      for c in range(HEADING + 1, len(COLUMNS))}
-            heading = self._grammar(self.in_force, np.full((count, 1), word), HEADING, at.height_m,
-                                    self._n_candidates, self.words, later)
+            heading = column_mask(self.in_force, np.full((count, 1), word), HEADING, at.height_m, self._n_candidates,
+                                  self.words, later)
             out[:, w] = (heading & self._others(HEADING, runway, go_around, at, caller, procedure)).any(axis=1)
         if RUNWAY in caller:
             out &= caller[RUNWAY]
         return out
-
-    @property
-    def _grammar(self) -> Callable[..., np.ndarray]:
-        """The grammar's mask of the masks' mode (D62; multi-aircraft control D186 (2)): `column_mask`, the readable
-        reference, or under `BATCH` `column_mask_fast`, the same answer."""
-        return column_mask_fast if self.procedure.mode == BATCH else column_mask
 
     def _runway_after(self, word: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         return runway_after(word, self.in_force, self._n_candidates)

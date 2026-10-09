@@ -30,7 +30,6 @@ from ts_transformer.instructions.labeller.interval import interval_rows
 from ts_transformer.prior.batch import RowTensors, row_tensors
 from ts_transformer.prior.inputs import Heard, state_inputs
 from ts_transformer.prior.landings import Landing, LandingIndex
-from ts_transformer.prior.procedure import BATCH, MASK_MODES, PER_AIRCRAFT
 from ts_transformer.prior.speaker import Position
 
 #: The columns of a state row that the inputs read: the position and the MSL height.
@@ -43,17 +42,14 @@ class LoopRows:
     (`inputs.own_flight_key`: its own landing, which its landings hold, left out), the UTC time of its 2 s row 0
     (``entry_utc_s``) and the 2 s row of the signals its Δ row 0 is (``first_rows``); ``start`` the first predicted
     step's Δ row of each aircraft's own rows, one for the batch; ``join_ticks`` each aircraft's join tick (module
-    docstring), every aircraft's 0 when not given; ``mode`` how a row's state inputs are computed (multi-aircraft
-    control D186 (3)): `PER_AIRCRAFT` one aircraft at a time (the readable reference), `BATCH` the aircraft of each
-    airport at once (`state_inputs` on several rows: the same numbers, bit for bit)."""
+    docstring), every aircraft's 0 when not given. A row's state inputs are computed for the aircraft of each airport at
+    once (`state_inputs` on several rows, one each: multi-aircraft control D186 (3)); each row's numbers are those of
+    the row alone (elementwise numpy, the same bits for one row as for many: the tests compare them)."""
 
     def __init__(self, geometries: Sequence[AirportGeometry], landings: Sequence[LandingIndex], keys: Sequence[str],
                  entry_utc_s: np.ndarray, first_rows: np.ndarray, start: int, *, variant: str,
                  interval_s: float, step_s: float, device: torch.device,
-                 join_ticks: np.ndarray | None = None, mode: str = PER_AIRCRAFT) -> None:
-        if mode not in MASK_MODES:
-            raise ValueError(f"the inputs' mode {mode!r} is none of {MASK_MODES}")
-        self.mode = mode
+                 join_ticks: np.ndarray | None = None) -> None:
         self.geometries, self.landings, self.keys = list(geometries), list(landings), list(keys)
         count = len(self.geometries)
         self.entry_utc_s = np.asarray(entry_utc_s, dtype=np.float64)
@@ -73,7 +69,7 @@ class LoopRows:
         # each aircraft's candidates as columns of its landings (refused when its landings are not on its candidates)
         self._runways = [[index.runways.index(c.ident) for c in g.candidates]
                          for g, index in zip(self.geometries, self.landings)]
-        # the aircraft of each airport (`BATCH`), in their order
+        # the aircraft of each airport, in their order: their state inputs computed at once
         airports: dict[int, list[int]] = {}
         for b, geometry in enumerate(self.geometries):
             airports.setdefault(id(geometry), []).append(b)
@@ -92,18 +88,12 @@ class LoopRows:
         counts = [self.landings[b].counts_before(utc[b: b + 1], without=self.keys[b])[:, self._runways[b]]
                   for b in range(count)]
         own, candidates = [None] * count, [None] * count
-        if self.mode == BATCH:                              # each airport's aircraft at once (D186 (3))
-            for group in self._airports:
-                o, c = state_inputs(at[group][:, POSITION], before[group][:, POSITION], known[group],
-                                    np.concatenate([counts[b] for b in group]), self.geometries[group[0]],
-                                    self.variant, self.step_s)
-                for k, b in enumerate(group):
-                    own[b], candidates[b] = o[k], c[k]
-        else:
-            for b, geometry in enumerate(self.geometries):
-                o, c = state_inputs(at[b: b + 1, POSITION], before[b: b + 1, POSITION], known[b: b + 1], counts[b],
-                                    geometry, self.variant, self.step_s)
-                own[b], candidates[b] = o[0], c[0]
+        for group in self._airports:
+            o, c = state_inputs(at[group][:, POSITION], before[group][:, POSITION], known[group],
+                                np.concatenate([counts[b] for b in group]), self.geometries[group[0]], self.variant,
+                                self.step_s)
+            for k, b in enumerate(group):
+                own[b], candidates[b] = o[k], c[k]
         words = [h.inputs(float(r * self.interval_s)) for h, r in zip(heard, own_row)]
         tensors = row_tensors(own_row * self.interval_s, np.stack(own), candidates,
                               np.array([w[0] for w in words]), np.array([w[1] for w in words]),
@@ -126,4 +116,4 @@ class LoopRows:
                         [self.keys[i] for i in indices],
                         self.entry_utc_s[indices], self.first_rows[indices], self.start, variant=self.variant,
                         interval_s=self.interval_s, step_s=self.step_s, device=self.device if device is None else device,
-                        join_ticks=self.join_ticks[indices], mode=self.mode)
+                        join_ticks=self.join_ticks[indices])
