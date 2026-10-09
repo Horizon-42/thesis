@@ -4,7 +4,7 @@
 2026-10-09，Claude 写，用户转发。
 
 ```
-你 requests 的 63–68 条处理完了：
+你 requests 的 63–69 条处理完了：
 - 63–65（MC11 的读法）按你建的接受，记在 D181 里；prior §7 item 3、post_training §9 item 8 补了名字。
 - 66（用户提的往回找决定点）写成 multi_control D182，里程碑 MC12（§11），§2.3 加了一段。用户的选择（2026-10-09）：
   - 做成 campaign 设置 MultiSettings.branching：grid（D143，默认，旧行为）| backward；
@@ -34,7 +34,12 @@
 D183 就按这条做。fronter 导出里那两处镜像（frontend D178 (6)）如果你的 helper 已经合并，也可以顺手删掉。
 
 一、代码（在 dev-multi-control 上，先把 dev-two-tier 合进来）
-0. 先做 D183（你的第 67 条，评估后接受）：说话器缓存只留已写的行加一段。
+0. 最先做第 69 条（写进 D183 (4)，评估后接受）：branch_round 里一个分支点的副本和 drawn、ends_k、made，
+   在组取走后就释放（if due: 块末尾 del），不让下一个点的新副本和旧副本同时活着。
+   - 只是对象生命周期，数字不变，不用逐位核对；
+   - 要加一个测试：块结束后旧副本的缓存张量已被回收（CPU 上用 weakref），以防组里还挂着它的张量；
+   - 小改动（项目 CLAUDE.md），不用审核 agent，按 D184 直接改共用代码，C 的测试也要过。
+   然后做 D183（你的第 67 条，评估后接受）：说话器缓存只留已写的行加一段。
    - Speaker.copy 去掉多余的 .clone()；
    - 副本只带已写的行加 64 行余量；
    - 扩容改成每次加 64 行，不再翻倍。
@@ -52,7 +57,7 @@ D185（你的第 68 条，用户 2026-10-09 定）：一轮按批续跑，里程
      - --restart-round：整轮挪开重说；
      - 先做几分钟的行为核对（每个跨度几个窗口，新旧代码各跑一遍），再保留完成的批。已完成的批多于约 10 批时才值得。
    - 测试按 post_training §8 C27。
-   顺序：D183 → D185 → MC12。
+   顺序：第 69 条 → D183 → D185 → MC12。
 
 MC12：
 1. MultiSettings.branching（默认 grid）；续句的搜索放在 multi/ 里，复用共用的 WindowLoop.copy、finish、samples。
@@ -71,7 +76,7 @@ MC12：
 
 二、之后（等用户的话）
 GPU 现在空着（MC6 已停），代码合并后、主机上没有别的任务时：
-- 先用 multi_speed 量一批：D183 之前和之后各一次，看保留峰值。缓存按段扩容会产生碎片，所以看保留的，不只看已分配的；
+- 先用 multi_speed 量一批：第 69 条和 D183 之前、之后各一次，看保留峰值；再用 multi_profile 重新量内存（D179），定 worker 数。缓存按段扩容会产生碎片，所以看保留的，不只看已分配的；
   碎片明显就提议给说话 worker 开 expandable_segments。
 - 再各量一批 grid 和 backward，比较三项：
   - 出样本的组数；
@@ -81,5 +86,5 @@ GPU 现在空着（MC6 已停），代码合并后、主机上没有别的任务
 
 另外，上一条 note 里让你改写 multi_control §0.3（还写着 MC1 运行中、MC5 未合并、MC6 未开始），没做的话一起做。
 你只能写各文档 §0.3 的状态行、multi_control §0.3、你的日志和 code-health-followups。
-requests_from_d_to_designer.md 整份重写：63–68 条已处理，删掉；新的读法另起。
+requests_from_d_to_designer.md 整份重写：63–69 条已处理，删掉；新的读法另起。
 ```
