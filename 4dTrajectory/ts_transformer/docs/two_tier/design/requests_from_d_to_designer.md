@@ -9,8 +9,8 @@ census's sample: 18; D172: 46–48; D179, D180: 49–53; D181, O20: 54–62), it
 
 State: 2026-10-09: items 54–62 decided (D181, O20) and deleted. MC11's code (D181 items 55, 58–60, 56) is built on
 `dev-multi-control`; items 63–65 are readings of it for the designer. Item 66 is the user's proposal of 2026-10-09 (a
-new rule of branch training) item 67 the speaker's cache allocated as needed and item 68 a round resumed by its batches; written here at
-the user's word. MC6 was stopped by the user inside its round 0 (2026-10-09 14:31, 134 of 224 batches; "太慢而且不一定有用").
+new rule of branch training) item 67 the speaker's cache allocated as needed, item 68 a round resumed by its batches and item 69 a branch
+point's copies freed once used; written here at the user's word. MC6 was stopped by the user inside its round 0 (2026-10-09 14:31, 134 of 224 batches; "太慢而且不一定有用").
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -270,3 +270,37 @@ the user's word. MC6 was stopped by the user inside its round 0 (2026-10-09 14:3
       bit for bit; a half-written file is never read; another draw is refused.
     It protects against loss (a stop costs the batches in flight, not the round); it does not make a round shorter
     (items 66 and 67 do). It changes D157 (stage C's and stage D's campaigns alike); the designer and the user decide.
+
+## A branch point's copies freed once used (item 56's measure; the user's word, 2026-10-09)
+
+**Item 56's measure** (`outputs/POOLED/multi/speed_mc6_r0_b86_20261009/speed.json`; `multi_speed`, a8df27f7, from
+`0d60d86c`): MC6's round-0 draw, batch 86 (1200 s, 4 windows, 24 aircraft; 2 spoken again, 16 groups, 9 informative),
+the start's model, alone on the GPU: 166.5 s. By part (time; the speaker / the executor / the window loop's own;
+the GPU's allocated peak):
+
+| Part | Time | Speaker | Executor | Window loop | Allocated peak |
+|---|---|---|---|---|---|
+| first pass | 19.7 s | 5.3 | 10.4 | 4.0 | 0.14 GiB |
+| second pass | 10.8 s | 3.9 | 4.5 | 2.4 | 1.40 GiB |
+| continuations | 130.7 s (78 %) | 44.4 | 18.0 | 68.3 | 1.98 GiB |
+| samples | 0.3 s | — | — | 0.3 | 1.39 GiB |
+| other | 5.1 s | | | | |
+
+(The reserved peaks, 2.2–2.3 GiB from the second pass on, are the allocator's cache, which a reset does not empty.)
+The continuations take most of the batch, and inside them the window loop's own work (scenes, edge features, the judge,
+the loop's copy: the CPU's) more than the model and the executor together; a profile of that part on the CPU
+(`--cprofile continuations`) is reported apart.
+
+69. **The copies of a branch point outlive their use.** In `branch_round` (`experiments/post_branches.py`), the names of a
+    branch point's work — `copies` (the loop of K × the varied aircraft × each window's aircraft), `drawn`, `ends_k`,
+    `made` — are bound inside `if due:` and never released: the copies keep their speaker caches and executor state on
+    the GPU while the second pass steps on (its allocated peak 1.40 GiB with no continuation flown: the measure above;
+    the samples part likewise), and at the next branch point `copies = second.copy(...)` builds the new copies before
+    the name lets the old ones go — two sets of copies alive at once, the 1.98 GiB peak about twice one set (about
+    1 GiB, as item 67's estimate from the cache's size). Proposal: release them once the point's groups are taken
+    (`del copies, drawn, ends_k, made` at the end of the `if due:` block; the groups keep only CPU arrays: a sentence's
+    rows, records and tokens). No number changes (nothing computed differs; the same check on fixed inputs as D181
+    items 58–60, and item 56's measure before and after). Expected: the worker's peak from about 2.0 to about 1.0 GiB,
+    with item 67 lower still — 4 to 5 GPU workers instead of 2 (an estimate; a new memory measure, D179, reads it).
+    A worker remains one CPU core: the round's time then rests on item 66 (fewer continuations) and on the window
+    loop's own work (the profile).
