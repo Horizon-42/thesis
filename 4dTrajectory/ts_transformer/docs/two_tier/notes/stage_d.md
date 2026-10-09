@@ -7,15 +7,14 @@
 追加（2026-10-09 晚，Claude 审核了已提交的 0fa9df2e…ad950c8a）：
 第 69 条、D183、D186 (1)、D185/C27、D186 (2)(3) 符合设计，没有数据泄漏。用户定了下面四项，都要改：
 
-A. 快速模式在每个进程里先核对（outline D187，新）。
-   - stage C、D 的 runner 共用的打开处（post_train.open_context，和闭环检查放在一起），在说话之前、说话 worker fork 之前，
-     把 BATCH 和 PER_AIRCRAFT 两种模式比一次：用 prior_behaviour 的固定输入（说话器的几行 + 三架飞机的 speaking loop），
-     CPU 一个线程，先验用固定种子按本进程的 words 和 variant 造（不读模型文件）；
-     词、概率、遮罩、状态逐位相同，否则按名拒绝，不退回可读模式。
-   - 复用 prior_behaviour 的 speaking 和 require_same_modes，不照抄；需要挪位置就挪（D184），改的名字写进报告。
-   - 不经 open_context 却用 BATCH 说话、并保留结果的 runner 也要有；只记时间的 model_speed 不用。
-     报告里列出覆盖了哪些 runner、核对用了多少秒。
-   - 测试：两种模式相同时打开通过；把一种模式换成给出不同结果的版本时，打开按名拒绝。
+A. 快速版本取代旧版本，旧模式删除（outline D187 改写；之前写的"每个进程里比两种模式"作废，不要做）。
+   - 删掉遮罩和每行输入的两种模式，只留按批的那一种：
+     prior/procedure 的逐架计算和每个进程一次的 require_same_masks（连同它的 check_rows、CHECKED、_unchecked）；
+     Speaker 里可读 column_mask 的那条路径；LoopRows 的逐架路径。masks / mode 参数和 MASK_MODES 一起删（D184，不留兼容层）。
+   - column_mask_fast 改名 column_mask（只剩一个，不再叫 fast）；原来可读的 column_mask 挪进测试，当穷举比较的参照（它按 apply 定义，D62）。
+   - prior_behaviour 不再比两种模式；它的输出要和改之前逐位相同，campaign 开头记下的记录照样对得上。
+   - 改的名字写进报告。若发现哪个已记录的产物或设置里写着模式名，先停下报告。
+   - 提交前核对一次：window_behaviour 对 B 之后的记录，C 和 D 的窗口逐位相同；prior_behaviour 相同；标注器 conformance；各自的测试。
    - 审核走 agent（范围是 diff）。
 B. D183 (2) 改写：副本的缓存只分配一次。
    - Speaker.copy 直接分配"已写行 + 64 行"大小的存储，把选中的行按索引写进它的前面
@@ -25,10 +24,10 @@ B. D183 (2) 改写：副本的缓存只分配一次。
    - 一处、30 行内算小改动，不用审核 agent。
 C. C27 补一个测试（post_training §8 C27 已补一句）：经过说话 worker（Speakers，两个 worker）续跑一个带已完成批的轮次，
    组文件的字节和轮的记录跟整轮一次说完的相同。只改测试，小改动。
-D. column_mask_fast 依赖的文法性质（vocabulary §6 item 2 已写明）：
-   - grammar 的模块说明同时写 column_mask 和 column_mask_fast，并写明快速版依赖的性质：航向词和速度词只经规则 1 进入规则；
-   - 穷举比较两个函数的测试，说明里写明它守的就是这条性质：以后改规则 1–6 把它改坏了，这个测试会失败，快速版要一起改。
-   - 小改动。
+D. column_mask 依赖的文法性质（vocabulary §6 item 2 已写明）：
+   - grammar 的模块说明写明 column_mask 按批算，依赖的性质是：航向词和速度词只经规则 1 进入规则；
+   - 穷举测试拿按 apply 定义的参照比较，说明里写明它守的就是这条性质：以后改规则 1–6 把它改坏了，测试会失败，column_mask 要一起改。
+   - 小改动，可以和 A 一起提交。
 
 顺序：先把手上的 MC12 做完提交，然后 B → A → C、D。
 之后：日志补上这几次提交和上面四项；multi_control §0.3 和 requests_from_d_to_designer.md 按下面原来的要求整份重写；
