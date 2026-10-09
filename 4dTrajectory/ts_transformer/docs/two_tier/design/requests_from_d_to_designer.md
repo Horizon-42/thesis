@@ -187,6 +187,15 @@ speaking) are the designer's and not proposed here.
     measure (D179). Also found: `post_profile.PARTS["executor_step"]` reads 0.0 s in both C8 profiles
     (`outputs/POOLED/post/c8_20261006/profile_{32,256}`) although the executor flies every cycle — the part's match
     misses it; the named parts sum to 43 of 113 s. Proposal: the runner, and the part's match fixed.
+    Its own cost, once: the start of a stage D process (the checks and the context, about 3 min: MC6's unit 08:38 →
+    its first batch 08:41) and one batch — on the GPU about 3.5 min for a worker (1200 s at 24 rows), on the CPU about
+    4–5 min (521 s at 48 rows in `profile_mc6_20261009`). cProfile would nearly double the batch (stage C: 2.4 s a
+    window, 4 s under cProfile, log §25) and on the GPU it puts a kernel's time where the host waits: so timers at the
+    parts (the passes, the continuations, the executor between two synchronisations) and the GPU's peak reset at each
+    part, cProfile only on the CPU and only if the timers leave a part unexplained — about 6–8 min in all. While MC6
+    runs the GPU is its two workers' (3.45 GiB each of 7.1 GiB): beside it only on the CPU (one core, about 4.3 GiB of
+    the host's 12 GiB free), whose shares differ from the GPU's; on the GPU after MC6, or with MC6 stopped at a round's
+    end and resumed after (the user's call).
 57. **The continuations in pieces of bounded rows.** `branch_round` flies every copy of a branch tick in one
     `copies.finish` (`post_branches.py:168–176`): K × the due varied aircraft × each window's aircraft, e.g. 4 windows ×
     3 varied × 8 × 6 aircraft ≈ 576 rows from a batch of 24 — Claude's reading of why a worker's peak is set by the
