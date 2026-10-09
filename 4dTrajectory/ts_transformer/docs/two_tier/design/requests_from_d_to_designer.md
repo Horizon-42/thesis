@@ -4,11 +4,13 @@ Stage D's implementer writes this file (outline §5 rule 10, multi-aircraft cont
 time. Each item is a reading the implementer made where the design says nothing, or a gap; a reading is a proposal
 until the user decides. Paths are relative to `4dTrajectory/ts_transformer/`. The numbers are kept from the earlier
 notes; the items the user decided are deleted (D166: 6, 7, 19, 21, 22, 25, 29–35; O16: 36, written into D146; the
-census's sample: 18; D172: 46–48; D179, D180: 49–53; D181, O20: 54–62; D181–D186: 63–70; the interfaces and D182: 71–77), item 23 (it asked for 6 and 7), item 20 (built: item 40) and the names of MC0–MC4
-(written into the interfaces).
+census's sample: 18; D172: 46–48; D179, D180: 49–53; D181, O20: 54–62; D181–D186: 63–70; the interfaces and D182:
+71–77; D188: 78–79), item 23 (it asked for 6 and 7), item 20 (built: item 40) and the names of MC0–MC4 (written into
+the interfaces).
 
-State: 2026-10-09 (night): items 71–77 decided (the names into the interfaces; 77 (b) into D182 (3)) and deleted.
-Items 78–79 come from the backward measure (stage D's log §18); the others are MC0–MC5's readings still open.
+State: 2026-10-09 (night): items 78–79 decided (D188) and deleted; D188 and D189 built on `dev-multi-control`
+(stage D's log §19). Items 80–84 come from them (80 measured: the workers the joint loop leaves room for; 81–84
+readings); the others are MC0–MC5's readings still open.
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -153,19 +155,37 @@ Items 78–79 come from the backward measure (stage D's log §18); the others ar
     the unit is an anchor (its windows of the spans are nested and share their aircraft); within a span, windows of
     other anchors may still share flights in a dense select set (stated).
 
-## The backward measure (stage D's log §18; 2026-10-09)
+## D188, D189 (stage D's log §19; 2026-10-09, night)
 
-78. **Batch the search's continuations across windows** (MC12's reading 77 (e), now measured). In a backward batch the
-    search is 64–79 % of the time, and a search step costs about 21 ms above its rows (31 ms a step at 20 rows, 52 ms at
-    63): the steps' count, not their rows, sets the time. Proposal: the searches of one batch go step by step together —
-    every search's current point (each window at its own point) copied into one loop of their K continuations each,
-    flown together to each one's judged tick; a search that chooses a point flies it to its window's end in the next
-    such batch. The numbers of each continuation stay its own (D166 (26)), so the words are the same; its states agree
-    to the executor's bound only (another batch of the model, as grid's copies). Estimate: batch 0's 11 searches in
-    lockstep would take about a quarter to a half of today's 82 s (they do not all try the same number of points).
-    The device then holds several windows' points at once (still below one round's grid copies on batch 86).
-79. **`expandable_segments` for the speaking workers**. On batch 86 the reserved peak is 1.46 GiB against 0.66 GiB
-    allocated (before D183: 2.29 against 1.98): the cache grown in 64-row steps leaves the allocator's blocks fragmented,
-    and a worker's GPU share is set by the reserved peak (3 workers fit, 4 do not, by 1.6 GiB). Proposal: the speaking
-    workers set `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` (before their first CUDA call), then a new profile;
-    if the reserved peak falls toward the allocated one, 4 workers fit. A setting of the process: no number changes.
+80. **The joint loop's memory sets the workers** (D188 (1), measured by the profile at §18's settings,
+    `outputs/POOLED/multi/profile_d189_20261009`). A batch is faster (batch 0 111.8 → 55.3 s, 23 116.8 → 64.9 s,
+    86 80.8 → 61.0 s), but a worker's GPU peak rose from 1.6 to 2.21 GiB (batch 23: 2.07 GiB reserved, 1.77
+    allocated): with D179's margin 1.3, 2 workers fit where 3 did (3 need 8.7 GiB against 6.8). At a round's batches of
+    MC6 (23 / 63 / 138 by span) the speaking is about 13,800 worker-seconds against §18's 21,100: on 2 workers about
+    1.9 h, the time 3 workers took before. The peak is the joint loop's: every search's current point (K copies of its
+    window, each with its history in the cache) and every chosen point until its window's end; at a rebuild the old
+    and new loops' executors (the cache is freed a layer at a time). Proposal: a campaign setting that bounds the rows
+    the joint loop holds — a point waits for room (D181 (57)'s `continuation_rows`, never built: its default "all",
+    today's behaviour), checked as D188 (1) (the batching only changes: on the CPU bit for bit) — sized so that 3
+    workers fit (about 1.7 GiB a worker); estimate: a round's speaking about 1.3–1.6 h. Otherwise the next campaign
+    runs 2 workers.
+81. **D189 (0)'s "window's end"** (reading). A window has no end of its own: its aircraft fly until the executor ends
+    them, and a batch's windows are said together (a window's halted rows are said while another's fly). Read: a
+    commanded aircraft's landings are those from 30 min and one Δ before its window's row 0 to the latest a row of its
+    loop is said (`WindowLoop` `reach`: each aircraft's first predicted step and the executor's time limit with every
+    go-around's, from its window's row 0, the latest of the loop, one Δ more; a row's time is its flight's, the
+    window's to rounding), and its own (`LandingIndex.counted`, `post.landings.commanded_landings`). Every count is the
+    same (window_behaviour on stage C's and D's windows, a test that every count read lies in the cut).
+82. **D189 (1)'s assertion of one airport** (reading). Not added as code: `post.scene.Window` refuses a commanded
+    aircraft of another airport, and each row's geometry and finals are its window's by construction
+    (`WindowLoop.__init__`), so an assertion in the loop could never bind (root `CLAUDE.md`); `_of_row`'s docstring
+    names the rule it rests on.
+83. **D189 (2)'s masks of an aircraft not said** (reading). The later columns' procedure and caller masks are computed
+    once a row under the runway as said (an aircraft not said keeps its own), where the old code read the raw word
+    drawn for an aircraft not said; every class is permitted to such an aircraft, so the records are the same, and
+    the row's `blocked` record reads the same masks as before. The check that an aircraft has a permitted word (D62) is
+    read at the row's end, before the executor flies it: a row that fails it is refused before any change, but a
+    later column's refusal can be the message raised. The row's records come back in four transfers at its end.
+84. **The search's counts in a batch's record** (reading). `search_steps` and `search_rows` count the joint loop's steps
+    and their rows (D188 (1)): they are not comparable with §18's (one point of one window a loop); `search_rows` is
+    the same work (on MC6's batches 0, 23, 86 equal to §18's).
