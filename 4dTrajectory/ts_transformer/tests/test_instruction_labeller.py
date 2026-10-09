@@ -496,7 +496,9 @@ MASKS = (grammar.column_mask, grammar.column_mask_fast)        # the readable re
 def test_the_column_mask_is_every_completion_through_apply_on_every_row_of_a_small_vocabulary(column_mask):
     """D62: on a small vocabulary, every state in force (and none: the first step), every word of the earlier columns,
     three heights, every column: the mask is the definition — some completion of the later columns passes `apply` —
-    with every later word permitted and with random permitted words; the readable mask and its fast mode alike."""
+    with every later word permitted and with random permitted words; the readable mask and its fast mode alike. For
+    the fast mode this guards its property (grammar's module docstring: a heading or speed word enters the rules only
+    through rule 1): a change of rules 1–6 that breaks it fails here, and `column_mask_fast` must change with it."""
     import itertools
 
     words, candidates = Words(_small_spec()), 2

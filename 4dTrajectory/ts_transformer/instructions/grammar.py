@@ -1,6 +1,11 @@
 """Which words may be said at a step — the vocabulary's grammar (vocabulary §3.2 table, §3.7 rules 1–6, §6 item 2):
 one definition (`_rules`), which `apply` checks a row with (the labeller, the closed-loop reading) and `column_mask` gives
-a speaker's mask with ("checked in labelling, a mask in decoding", D62).
+a speaker's mask with ("checked in labelling, a mask in decoding", D62); `column_mask_fast` gives the same mask faster
+(multi-aircraft control D186 (2), outline D138: `column_mask` the readable reference), the speaker's under the masks'
+mode `BATCH`. The fast mask rests on one property of the rules: **a heading or a speed word enters them only through
+rule 1** (at the first step every column says a word), so a later heading or speed column leaves the product of
+completions as one factor per aircraft. A change of rules 1–6 that reads a heading or speed word elsewhere breaks it:
+the exhaustive tests of the two masks against `apply` then fail, and `column_mask_fast` changes with the rules.
 
 A step is one row of five words (`UNCHANGED` where a column says nothing). The words in force (`InForce`) carry the
 runway in force R and the go-around state G beside the last word of each other column. The rules:
