@@ -770,10 +770,19 @@ class Speakers:
         gc.unfreeze()
 
 
+#: The CUDA allocator of a speaking worker (multi-aircraft control D188 (2)): segments that expand in place, so that
+#: what it reserves stays near what it holds (stage D's log §18: reserved 2.2 times allocated on a 1200 s batch). A
+#: setting of the process, read before its first CUDA call: no number changes; the campaign's process (the pass) keeps
+#: its own.
+SPEAKER_ALLOCATOR = "expandable_segments:True"
+
+
 def _initialise_speaker() -> None:
-    """A worker's torch on one thread, its compiler too (module docstring of `Speakers`)."""
+    """A worker's torch on one thread, its compiler too (module docstring of `Speakers`), and its CUDA allocator
+    (`SPEAKER_ALLOCATOR`), set before it first uses the GPU."""
     import torch._inductor.config as inductor
 
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = SPEAKER_ALLOCATOR
     torch.set_num_threads(1)
     inductor.compile_threads = 1
 

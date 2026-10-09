@@ -214,6 +214,22 @@ def _digest(model) -> float:
     return float(sum(p.detach().double().sum() for p in model.parameters()))
 
 
+def test_a_speaking_worker_sets_its_cuda_allocator_before_it_uses_the_gpu(monkeypatch):
+    """D188 (2): a worker's initialiser sets the CUDA allocator of its process (`SPEAKER_ALLOCATOR`, read at its first
+    CUDA call), whatever the campaign's shell set; its torch on one thread."""
+    import torch._inductor.config as inductor
+
+    monkeypatch.delenv("PYTORCH_CUDA_ALLOC_CONF", raising=False)
+    monkeypatch.setattr(inductor, "compile_threads", inductor.compile_threads)
+    threads = torch.get_num_threads()
+    try:
+        post_train._initialise_speaker()
+        assert os.environ["PYTORCH_CUDA_ALLOC_CONF"] == post_train.SPEAKER_ALLOCATOR == "expandable_segments:True"
+        assert torch.get_num_threads() == 1 and inductor.compile_threads == 1
+    finally:
+        torch.set_num_threads(threads)
+
+
 def test_each_speaker_speaks_with_the_round_s_model_and_a_dead_one_fails_the_round(setup, tmp_path, monkeypatch):
     """Through the pool: in two rounds with two different models, every batch is spoken with that round's model (the
     worker reloads it each round) and the campaign's windows; a worker that dies fails the round with
