@@ -7,8 +7,8 @@ notes; the items the user decided are deleted (D166: 6, 7, 19, 21, 22, 25, 29–
 census's sample: 18; D172: 46–48; D179, D180: 49–53; D181, O20: 54–62; D181–D186: 63–70; the interfaces and D182: 71–77), item 23 (it asked for 6 and 7), item 20 (built: item 40) and the names of MC0–MC4
 (written into the interfaces).
 
-State: 2026-10-09 (night): items 71–77 decided (the names into the interfaces; 77 (b) into D182 (3)) and deleted;
-nothing of MC11 or MC12 is open here. The items below are MC0–MC5's readings still open.
+State: 2026-10-09 (night): items 71–77 decided (the names into the interfaces; 77 (b) into D182 (3)) and deleted.
+Items 78–79 come from the backward measure (stage D's log §18); the others are MC0–MC5's readings still open.
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -152,3 +152,20 @@ nothing of MC11 or MC12 is open here. The items below are MC0–MC5's readings s
     independent numbers: an upper bound of the noise of comparing two rounds, which share their numbers. Over all spans
     the unit is an anchor (its windows of the spans are nested and share their aircraft); within a span, windows of
     other anchors may still share flights in a dense select set (stated).
+
+## The backward measure (stage D's log §18; 2026-10-09)
+
+78. **Batch the search's continuations across windows** (MC12's reading 77 (e), now measured). In a backward batch the
+    search is 64–79 % of the time, and a search step costs about 21 ms above its rows (31 ms a step at 20 rows, 52 ms at
+    63): the steps' count, not their rows, sets the time. Proposal: the searches of one batch go step by step together —
+    every search's current point (each window at its own point) copied into one loop of their K continuations each,
+    flown together to each one's judged tick; a search that chooses a point flies it to its window's end in the next
+    such batch. The numbers of each continuation stay its own (D166 (26)), so the words are the same; its states agree
+    to the executor's bound only (another batch of the model, as grid's copies). Estimate: batch 0's 11 searches in
+    lockstep would take about a quarter to a half of today's 82 s (they do not all try the same number of points).
+    The device then holds several windows' points at once (still below one round's grid copies on batch 86).
+79. **`expandable_segments` for the speaking workers**. On batch 86 the reserved peak is 1.46 GiB against 0.66 GiB
+    allocated (before D183: 2.29 against 1.98): the cache grown in 64-row steps leaves the allocator's blocks fragmented,
+    and a worker's GPU share is set by the reserved peak (3 workers fit, 4 do not, by 1.6 GiB). Proposal: the speaking
+    workers set `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` (before their first CUDA call), then a new profile;
+    if the reserved peak falls toward the allocated one, 4 workers fit. A setting of the process: no number changes.

@@ -620,3 +620,28 @@ another end; small change). Then, for the user's measure plan (one `multi_profil
 compared with item 56's GPU record of the same batch 86; no grid run, the user: the campaign uses backward): a
 measured batch's entry holds its own record and the allocated peak, and a backward batch records its search's
 seconds, steps and rows (whether one window's point at a time is the bottleneck). Requests 71–77 deleted.
+
+## 18 The backward measure (notes/stage_d.md 二, the user's plan of 2026-10-09)
+
+The user's plan (in the conversation, 2026-10-09): no grid run (the campaign uses backward); one `multi_profile` with
+`--branching backward` at MC6's settings (spans 300 / 600 / 1200 s, batch rows 64 / 32 / 24, K 8, start
+`post_seg60_20261007` round 5, seed 2035), 4 workers asked, the GPU, from a run worktree at e885589d (removed after,
+its data links unlinked first); its batch 86 against item 56's GPU record of the same batch
+(`speed_mc6_r0_b86_20261009`: grid, 0d60d86c, `multi_speed` in one process with its timers). Record:
+`outputs/POOLED/multi/profile_backward_20261009/profile.json`. The runner refused 4 workers by name and stopped, its
+record written (by design).
+
+| Batch (span, windows, rows) | Time | GPU reserved / allocated peak | Groups (informative) | Continuations to end / to event + 60 s | Search: time, steps, rows a step |
+|---|---|---|---|---|---|
+| 0 (300 s, 32, 64) | 111.8 s | 0.39 / 0.32 GiB | 12 (8) | 96 / 368 | 82.5 s (74 %), 2,684, 20.5 |
+| 23 (600 s, 11, 32) | 116.8 s | 0.63 / 0.41 GiB | 12 (7) | 96 / 256 | 91.8 s (79 %), 2,731, 28.1 |
+| 86 (1200 s, 4, 24) | 80.8 s | 1.46 / 0.66 GiB | 5 (3) | 40 / 112 | 52.0 s (64 %), 998, 62.9 |
+| 86 before (grid, 0d60d86c) | 166.5 s | 2.29 / 1.98 GiB | 16 (9) | 128 / 0 | — |
+
+The worker: host peak 2.3 GiB, GPU peak 1.6 GiB (× 1.3 = 2.08); the pass 2.08 GiB. Fit: 1–3 workers on the GPU, 4 not
+(4 × 2.1 GiB = 8.4 GiB against 6.8 GiB free). Batch 86 against before mixes item 69, D183 and order B (memory), D186
+(time), grid against backward (the work: fewer continuations flown to the end) and the two runners (a worker without
+timers against one process with them); it gives the whole change only. Read: (1) the search is most of a backward
+batch (64–79 %) and a search step costs about 21 ms more than its rows (31 ms at 20 rows, 52 ms at 63): one window's
+point at a time is the bottleneck — requests item 78; (2) on batch 86 the reserved peak is 2.2 times the allocated one
+(before: 1.16): the cache grown in steps fragments the allocator — requests item 79.
