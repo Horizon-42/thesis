@@ -9,7 +9,8 @@ census's sample: 18; D172: 46–48; D179, D180: 49–53; D181, O20: 54–62), it
 
 State: 2026-10-09: items 54–62 decided (D181, O20) and deleted. MC11's code (D181 items 55, 58–60, 56) is built on
 `dev-multi-control`; items 63–65 are readings of it for the designer. Item 66 is the user's proposal of 2026-10-09 (a
-new rule of branch training) and item 67 the speaker's cache allocated as needed; both written here at the user's word.
+new rule of branch training) item 67 the speaker's cache allocated as needed and item 68 a round resumed by its batches; written here at
+the user's word. MC6 was stopped by the user inside its round 0 (2026-10-09 14:31, 134 of 224 batches; "太慢而且不一定有用").
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -247,3 +248,25 @@ new rule of branch training) and item 67 the speaker's cache allocated as needed
     so possibly a third GPU worker. The code is stage B's speaker and model (prior §7), shared by stages C and D; the
     designer names the owner. It needs no tree of shared prefixes (O20's item 62) and does not exclude one: the tree
     would also share the copies' prefix, this only stops holding room that no row uses.
+
+## A round resumed by its batches (the user's word, 2026-10-09)
+
+68. **Resume inside a round, from its batches spoken.** Today (post-training D157, `post_train.open_campaign`): a round
+    without its checkpoint is moved aside whole (`round_<r>.aborted-<UTC>`) and spoken again from its first batch.
+    MC6's round 0 lost 113 batches (about 2.5 h) and then a few more to two bugs on 2026-10-09. What a batch leaves on
+    disk is its groups (`groups_<k>.pt`, written by the worker); its record (counts of groups and informative groups,
+    the windows spoken again and those that differed, the reward's sum, the faulty steps, the outcomes) stays in the
+    campaign's memory until the round's end (`speak_round`), so a stopped round cannot be put together from its files.
+    Proposal:
+    - a batch's record written beside its groups (`record_<k>.json`), and both written to a temporary name and renamed
+      (a stop never leaves half a file);
+    - on a resume, a round without its checkpoint is kept: its batches with both files are read back, the others spoken;
+      the round's record sums them in batch order as today. Refused by name if the round's draw differs (its windows'
+      records, as the workers already check, `post_train._speak`), or the settings;
+    - why it holds: a batch reads only its own windows' random numbers (`Speakers`: the same groups and records whatever
+      process speaks it), and the round's draw comes from the seed. Batches spoken by other code may be joined once
+      the codes are shown to behave the same on fixed inputs (root `CLAUDE.md`, as D181 items 58–60), else refused;
+    - tests: a round stopped after some batches and resumed gives the groups and the record of a round spoken whole,
+      bit for bit; a half-written file is never read; another draw is refused.
+    It protects against loss (a stop costs the batches in flight, not the round); it does not make a round shorter
+    (items 66 and 67 do). It changes D157 (stage C's and stage D's campaigns alike); the designer and the user decide.
