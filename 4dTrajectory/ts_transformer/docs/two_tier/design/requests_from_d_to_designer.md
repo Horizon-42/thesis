@@ -4,12 +4,11 @@ Stage D's implementer writes this file (outline §5 rule 10, multi-aircraft cont
 time. Each item is a reading the implementer made where the design says nothing, or a gap; a reading is a proposal
 until the user decides. Paths are relative to `4dTrajectory/ts_transformer/`. The numbers are kept from the earlier
 notes; the items the user decided are deleted (D166: 6, 7, 19, 21, 22, 25, 29–35; O16: 36, written into D146; the
-census's sample: 18; D172: 46–48; D179, D180: 49–53; D181, O20: 54–62; D181–D186: 63–70), item 23 (it asked for 6 and 7), item 20 (built: item 40) and the names of MC0–MC4
+census's sample: 18; D172: 46–48; D179, D180: 49–53; D181, O20: 54–62; D181–D186: 63–70; the interfaces and D182: 71–77), item 23 (it asked for 6 and 7), item 20 (built: item 40) and the names of MC0–MC4
 (written into the interfaces).
 
-State: 2026-10-09 (evening): items 63–70 decided (D181–D186) and deleted. On `dev-multi-control`: item 69, D183, D186,
-D185 (C27), MC12 (D182) and the designer's orders A–D (D187) built; the readings of that work are items 71–77 (stage D's
-log §17).
+State: 2026-10-09 (night): items 71–77 decided (the names into the interfaces; 77 (b) into D182 (3)) and deleted;
+nothing of MC11 or MC12 is open here. The items below are MC0–MC5's readings still open.
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -153,54 +152,3 @@ log §17).
     independent numbers: an upper bound of the noise of comparing two rounds, which share their numbers. Over all spans
     the unit is an anchor (its windows of the spans are nested and share their aircraft); within a span, windows of
     other anchors may still share flights in a dense select set (stated).
-
-## MC11, MC12 · the speed of a round and the points found backward (D182, D183, D185, D186, D187; 2026-10-09)
-
-71. **The behaviour check is a runner** (`experiments/window_behaviour.py`, R68; D181's one-off script made formal, as
-    a readout used more than once is a runner). From a stage C campaign (its branch method; landed and value refused
-    by name) or a stage D one, on the CPU with one thread: the first batch of each span of a round's draw spoken by the
-    stage's own batch speaker and a few readout windows of each span, digested; `--against` another record names what
-    differs (a backward round's depths and counts too). It is also D185's check before a resume on changed code.
-    Proposal: name it in post-training §9 item 11 beside D185.
-72. **The cache's room** (D183 (2), (3), order B): a copy's cache is allocated once with its rows written and 64 rows
-    (`prior.model.CACHE_STEP_ROWS`, `Past.taken`: the rows selected into its front by `torch.index_select(out=)`); a
-    line that outgrows its room grows by as many 64-row steps as its rows need at once. On another device (D182's host
-    copies) the selection is made where the rows are and then moved: an intermediate there that cannot be avoided.
-    Proposal: write the constant and `Past.taken` into prior §7 item 1.
-73. **An index of landings in time, then flight order** (D186 (1)): `LandingIndex` refuses landings out of (time,
-    flight key) order (every builder already sorted so; the insert of D186 (1) equals the old sort only then). A stage
-    B contract, refused by name. Proposal: write it into prior §7 item 2.
-74. **The names after order A** (D187 rewritten): one form of each — `grammar.column_mask` is the batched mask (the
-    readable one deleted, its test's reference `apply` itself); `ProcedureMasks(finals, words)`, `Speaker(…)`,
-    `SpeakingLoop(…)` and `LoopRows(…)` take no mode; `PER_AIRCRAFT`, `BATCH`, `MASK_MODES`, `require_same_masks`
-    and `check_rows` are gone; `procedure._FinalArrays` (was `_Gathered`). Vectorised numpy gave the same bits as single
-    rows on this host (sin, cos, arctan2, hypot, arcsinh, log1p over 200,000 values) and the rows' inputs of many
-    aircraft equal each one's alone (the test), so no bound was needed. A test now pins the masks' arrays to `Final`'s
-    definition (`Final.inside`, `Final.edge_m`, `entry_low_m`), which the per-aircraft mode used to. Proposal: the names
-    into vocabulary §6 item 2 and prior §7 items 2, 7 (the review found prior §7 still listing ``masks``,
-    `PER_AIRCRAFT`, `BATCH`, `MASK_MODES` and the per-process check).
-75. **A batch's record** (D185): `record_<k>.json` holds the batch's own record, its windows' records, the launch (time,
-    commit, whether the tree was dirty: information) and the kind of device; files are written as `<stem>.tmp` and
-    renamed (`groups_<k>.tmp`: torch names a file's inner folder after its stem, so the bytes are those of a file
-    written in place). `--restart-round` is recorded in each resume's entry of `campaign.json`. New names:
-    `post_train.save_batch_file`, `batch_record_path`, `spoken_batch`, `done_batches`, `launch_of`;
-    `Stage.speak(…, launch=)`, `Speakers.speak(…, batches, launch)`, `open_campaign(…, restart_round=False)`.
-    Proposal: write them into post-training §9 item 11.
-76. **The copy chain takes a device** (D182's copies on the host): `WindowLoop.copy`, `SpeakingLoop.copy`,
-    `Speaker.copy`, `LoopRows.select`, `autopilot.start.Loop.copy`, `Executor.take` and `Spoken.take` take an optional
-    `device` (None: the copied one's, as before). Proposal: name it in vocabulary §6 item 5, prior §7 items 1, 2, 7 and
-    post-training §9 item 8.
-77. **Readings of D182 built in MC12** (`multi/backward.py`, `experiments/post_branches.backward_round`):
-    (a) the event of a landing after a go-around is its first go-around when that is earlier than D143's event (a loss
-    before the go-around stays the event); (b) for an event that is no loss and no go-around, a continuation in which v
-    answers for a loss instead ends with another outcome and so "avoids" the event — the letter of D182; the user may
-    want such a continuation not to count; (c) the first point is 32 s before the event (the event's own tick is never
-    tried); (d) the fine point's state is the decision point's held copy flown 16 s on every aircraft's first-sentence
-    numbers; (e) the batching: one point of one window at a time, its K continuations one batch (the device holds one
-    point's continuations); (f) a window whose second pass differed (D94) is not searched; (g) the record of a
-    backward batch adds each group's span and depth (`group_depths_s`), the searches and those that found a decision
-    point, and the continuations flown to the event + 60 s only and to the end; a grid batch's record is unchanged;
-    (h) the readout's go-arounds per aircraft are its `go_arounds` / `aircraft` of each span (no new key, so a grid
-    round's `round.json` stays the one before); (i) `branching` is a profiled setting (a profile of the grid does not
-    size a backward campaign; a profile without it reads as the grid); (j) at Δ = 8 s, 60 s is no whole number of
-    ticks: refused, but only at the first search, not when the campaign opens. Proposal: confirm each, or decide (b).

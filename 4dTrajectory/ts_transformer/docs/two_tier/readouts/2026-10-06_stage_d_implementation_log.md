@@ -613,3 +613,10 @@ then flight order; `PER_AIRCRAFT`, `BATCH`, `MASK_MODES`, `require_same_masks`, 
 `batch_record_path`, `spoken_batch`, `done_batches`, `launch_of`, `Stage.speak(…, launch=)`,
 `Speakers.speak(…, batches, launch)`, `open_campaign(…, restart_round=False)`, `post_branches.backward_round`,
 `BackwardRound`; stage D — `MultiSettings.branching`, `multi.backward`.
+
+**After §17 (2026-10-09, night; notes/stage_d.md of 14114c9d).** 16988bbc: D182 (3) as the user decided item 77 (b) — a
+continuation avoids its event only if v answers for no loss, for every kind of event (tests for a go-around and for
+another end; small change). Then, for the user's measure plan (one `multi_profile` with `--branching backward`,
+compared with item 56's GPU record of the same batch 86; no grid run, the user: the campaign uses backward): a
+measured batch's entry holds its own record and the allocated peak, and a backward batch records its search's
+seconds, steps and rows (whether one window's point at a time is the bottleneck). Requests 71–77 deleted.
