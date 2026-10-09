@@ -85,15 +85,38 @@ def direction_inputs(track_deg: np.ndarray, course_deg: float, known: np.ndarray
 
 def state_inputs(at: np.ndarray, before: np.ndarray, known: np.ndarray, landings: np.ndarray, geometry: AirportGeometry,
                  variant: str, step_s: float) -> tuple[np.ndarray, np.ndarray]:
-    """The inputs of rows that come from the aircraft's states (§2; D13, D23–D25, D58, D60): ``(own [rows,
-    len(OWN_FEATURES)], candidates [rows, K, F])``. ``at`` and ``before``: each row's state and the state of the 2 s row
-    before it (e, n in the airport frame, MSL height; ``[rows, 3]``), ``known`` whether that row exists (`motion`);
-    ``landings``: the landings on each candidate in the 30 min before each row (``[rows, K]``, the candidates' order).
+    """The inputs of rows that come from the aircraft's states (§2; D13, D23–D25, D58, D60).
+
     The one function of §7 item 2 for the states: the training sentences call it on every row at once, a loop on its
-    newest row."""
+    newest row.
+
+    Args:
+        at: each row's state, ``[rows, 3]`` = (e, n in the airport frame, MSL height), metres.
+        before: the state of the row ``step_s`` earlier, same layout and frame as ``at``.
+        known: ``[rows]`` bool, whether that earlier row exists (``motion`` reads speed, track and vertical rate off
+            the pair, so a row without one has no motion).
+        landings: ``[rows, K]``, the landings on each candidate in the 30 min before each row, in the order of
+            ``geometry.candidates``.
+        geometry: the airport — its candidate runway ends (K of them) and its elevation.
+        variant: which candidate-feature set to build (D39); ``batch.VARIANTS``, any other name raises. It fixes the
+            columns of ``candidates`` and so F; ``own`` does not depend on it.
+            ``"full"``: the 7 ``CANDIDATE_FEATURES`` (position and height in the candidate's runway frame, heading
+            minus course as sine/cosine, height above the glidepath, landings in the last 30 min).
+            ``"constants"``: ``"full"`` plus the 2 ``RUNWAY_CONSTANT_FEATURES`` (``length``, ``threshold_elevation``),
+            9 in all — a control arm of D39, testing whether fixed runway properties help at a held-out airport.
+            Not chosen: in B5 it scored worse than ``"full"`` (1.3731 vs 1.3601), so the live prior is ``"full"``.
+        step_s: seconds between ``before`` and ``at`` (the 2 s row spacing); the divisor of the speeds.
+
+    Returns:
+        ``(own, candidates)``:
+        own: ``[rows, len(OWN_FEATURES)]``, the features of the aircraft itself (height above the airport elevation,
+            ground speed, vertical rate, no-motion flag), scaled.
+        candidates: ``[rows, K, F]``, the features of the aircraft relative to each candidate runway, in
+            ``variant_features(variant)`` order, scaled.
+    """
     move = motion(at, before, known, step_s)
     e, n, h = at.T
-    count = len(at)
+    count = len(at) # how many rows we have as input
     own = np.zeros((count, len(OWN_FEATURES)))
     own[:, OWN_FEATURES.index("height_above_elevation")] = (h - geometry.elevation_m) / HEIGHT_SCALE_M     # D58
     own[:, OWN_FEATURES.index("ground_speed")] = move.ground_speed_mps / SPEED_SCALE_MPS
@@ -119,15 +142,20 @@ def state_inputs(at: np.ndarray, before: np.ndarray, known: np.ndarray, landings
 
 
 class Heard:
-    """The words in force of one aircraft as a sentence goes on (§2 "Words in force"; D17, D46): the runway in force,
-    G, the heading word's track, the altitude, angle and speed words, and when each column said its word. `hear` takes
-    a row said on, through the grammar (`instructions.grammar.apply`, which refuses a row it does not pass); `inputs`
-    gives the words-in-force inputs of a later row. Before the first predicted step has been said, nothing is in force.
-    The one function of §7 item 2 for the words: the training sentences walk it row by row, as a loop does."""
+    """The words in force of one aircraft as a sentence goes on (§2 "Words in force"; D17, D46).
+
+    The words-side counterpart of `state_inputs`: training sentences and loops both walk it row by row
+    (`hear` a said row, then read `inputs` of the next). Before the first predicted step, nothing is in force.
+
+    Args:
+        geometry: the airport; its candidate runways' courses are what a heading word is read against.
+        words: the vocabulary's encoder / decoder (`instructions.words.Words`): class number <-> physical value.
+            A fixed dictionary with no state — NOT the words in force (those are ``self.state``); a poor name.
+    """
 
     def __init__(self, geometry: AirportGeometry, words: Words) -> None:
         self.geometry, self.words = geometry, words
-        self.state: InForce | None = None
+        self.state: InForce | None = None 
         #: the heading word's track (compass): a heading word keeps the track it said under the runway in force where it
         #: was heard (D46)
         self.track_deg = 0.0
@@ -164,11 +192,25 @@ class Heard:
 
 def sentence_rows(sentence: ClosedLoopRows, flight: Mapping[str, Any], geometry: AirportGeometry,
                   landings: LandingIndex, words: Words, *, interval_s: float, split: str, variant: str) -> SentenceRows:
-    """The inputs and targets of one closed-loop sentence on its Δ rows (§2, §7 item 2): ``sentence`` its rows alone —
-    what a model may read, never the withheld fields (vocabulary D82) — ``flight`` its record in the split's signals
-    (`instructions.artefact.signals_flights`; its entry time and its key, by which its own landing is left out of
-    ``landings``, its airport's). Rows before the first predicted step are observed, rows from it are flown (the
-    artefact's states, D32)."""
+    """The inputs and targets of one closed-loop sentence on its Δ rows (§2, §7 item 2).
+
+    Rows before the first predicted step are observed; rows from it are flown (the artefact's states, D32). The state
+    inputs come from `state_inputs` for all rows at once, the words-in-force inputs from `Heard` walked row by row.
+
+    Args:
+        sentence: the sentence's rows alone — what a model may read, never the withheld fields (vocabulary D82).
+        flight: its record in the split's signals (`instructions.artefact.signals_flights`); gives the entry time (the
+            UTC clock of the rows) and the key by which its own landing is left out of ``landings``.
+        geometry: the flight's airport (candidate runways, elevation).
+        landings: the airport's landing index, for the 30 min landing counts.
+        words: the vocabulary's encoder / decoder (see `Heard`), also the 2 s row step.
+        interval_s: seconds between Δ rows; the sentence's rows must be every such row of the 2 s data.
+        split: the split's name, carried into the result.
+        variant: the candidate-feature set (see `state_inputs`).
+
+    Returns:
+        `SentenceRows`: per Δ row, ``own``, ``candidates``, the words-in-force inputs and the ``targets`` words.
+    """
     every = interval_rows(interval_s, words.spec.step_s)
     if not np.array_equal(sentence.on_interval, on_interval_rows(len(sentence.states), every)):
         raise ValueError(f"{flight['dataset_id']}: the sentence's Δ rows are not every {every}-th 2 s row")
