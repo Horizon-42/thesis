@@ -9,7 +9,7 @@ then `design/outline.md` §0 and §3.2, then each stage document's §0. Paths ar
 - **You own the design documents** in `design/`: `outline.md` (principles, shared decisions, the decision index
   §3.2), `vocabulary.md` (stage A), `prior.md` (stage B), `post_training.md` (stage C), `multi_control.md` (stage D),
   `frontend.md` (the Training view, fronter). You write decisions (D numbers), open items (O numbers), milestones and
-  public interfaces. **Next free numbers: D187, O22** (outline §3.2 keeps the index; update it with every new number).
+  public interfaces. **Next free numbers: D188, O22** (outline §3.2 keeps the index; update it with every new number).
 - **You give orders, you do not build.** Implementers build code; you never commit code. Orders go into
   `notes/stage_c.md`, `notes/stage_d.md`, `notes/fronter.md` (in Chinese, plain words, imperative, only the changes;
   never a role preamble). The user forwards them.

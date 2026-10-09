@@ -109,6 +109,7 @@ commits, the tests and the readings are in the implementation log.
 | §9 item 13 (frontend D178 (6)) | Code `8baf6468` (small change, no agent review): `post.window_lists.identity_of(stage, window)`; on `dev-two-tier-v4-post`, not yet merged (log §30) |
 | The validation readout of the chosen round | Done 2026-10-08: the user chose `post_seg60_20261007` round 5 (D7); val read once: landed 88.9 %, mean reward 0.880 (log §30; the experiment log) |
 | The validation readout of the chosen round | Built and reviewed on synthetic artefacts (`post_validation`, `0c95a821`, log §23; D132 `483b81d7`) |
+| C27 (D185) | Built by stage D's implementer on `dev-multi-control`: 33e24bbe (a round resumed by its batches, `--restart-round`), the resume through the speaking workers tested (646ffb3a); not merged (stage D's log §17) |
 | C12 | After C10 |
 
 ### 0.4 Plan
@@ -586,7 +587,8 @@ the readouts count (D114) on a window with a faulty point; the export's test pas
 **C27. A round resumed by its batches** (D185), built by stage D's implementer in the campaign's skeleton
 (`experiments/post_train.py`: `speak_round`, `open_campaign`) for stages C and D. Tests: a round stopped after some
 batches and resumed gives the groups and the record of a round spoken whole, bit for bit (stage C's windows and stage
-D's); a batch without its record is spoken again; a file under its temporary name is never read; another draw, other
+D's; in one process and through the speaking workers, `Speakers`, with done batches); a batch without its record is
+spoken again; a file under its temporary name is never read; another draw, other
 settings or another device kind for the rest of a round are refused; `--restart-round` moves the round aside.
 
 **C12. Close of stage C.** The full ts suite passes. The implementation log and `docs/reference/runners.md` are

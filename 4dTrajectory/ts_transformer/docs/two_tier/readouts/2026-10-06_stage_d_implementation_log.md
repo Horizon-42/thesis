@@ -30,7 +30,8 @@ they start with `4dTrajectory/` or `.claude/`.
 | MC1's census on real data (notes 三) | dev-multi-control | A sample of 20 anchors measured; the full census stopped at the user's word ("sample, … finish it as soon as possible"); a stated sample of 500 anchors an airport and split running in 6 processes (§9) |
 | The full ts suite on dev-multi-control (fccbab8d) | dev-multi-control | 1,963 passed, 1 skipped (8 workers, 13.2 min, 2026-10-07) |
 | dev-multi-control into dev-two-tier | dev-two-tier | Merged at the user's word ("合进去", 2026-10-07): b967d2b1, no conflict, no code differs from the tested branch |
-| MC11 · D181 items 55, 58–60, 56 (notes/stage_d.md 一, 2026-10-09) | dev-multi-control | Built, reviewed, committed (92341758, 37526695, a8df27f7); 58–60 bit for bit on real windows (§16); not merged |
+| MC11 · D181 items 55, 58–60, 56 (notes/stage_d.md 一, 2026-10-09) | dev-multi-control | Built, reviewed, committed (92341758, 37526695, a8df27f7); 58–60 bit for bit on real windows (§16); merged into dev-two-tier |
+| Item 69, D183, D186, D185 (C27), MC12 (D182), orders A–D (D187) (notes/stage_d.md, 2026-10-09) | dev-multi-control | Built, reviewed, committed (0fa9df2e … ae4249fd); every change the same on stage C's and D's fixed windows and in prior_behaviour (§17); not merged |
 
 ### 0.1 Handover: where the next implementer of stage D starts (2026-10-07)
 
@@ -563,3 +564,52 @@ window loop's own 68.3), the first pass 19.7, the second 10.8, the samples 0.3; 
 continuations and 1.40 GiB in the second pass with none flown (a branch point's copies outlive their use: requests item
 69). On the CPU with cProfile inside the continuations (`speed_mc6_r0_b86_cpu_profile_20261009`): requests item 70.
 Requests 66–70 written at the user's word (dev-two-tier `eb62727d`, `7122ee55`, `bc393217`, `a51deb4a` and this commit).
+
+## 17 Item 69, D183, D186, D185, MC12 and the designer's orders A–D (notes/stage_d.md; 2026-10-09)
+
+On `dev-multi-control` after dev-two-tier (`c87e407a`, docs only) was fast-forwarded in; the GPU idle (MC6 stopped);
+only the changed modules' tests, few processes. Each change that could move a number was checked on fixed inputs with
+`window_behaviour` (R68, built here from D181's one-off script), on the CPU with one thread: stage C's
+`post_seg60_20261007` round 5 on its round-0 draw (batch 0: 64 windows, 76 groups; 4 readout windows) and stage D's
+`multi_train_20261009` start on its round-0 draw (the first batch of each span — 300 s batch 0: 32 windows, 39 groups;
+600 s batch 23: 11 windows, 40 groups; 1200 s batch 86: 4 windows, 16 groups; 12 readout windows), each record against
+the one before (the records in `/tmp/claude-1000/d183/`: `base_*` at `c87e407a`, then `new_*`, `d186a_*`, `d186b_*`,
+`mc12_*`, `orderb_*`, `ordera_*`); and `prior_behaviour` (D108), byte for byte against its output at `c87e407a`. Every
+check below found the same behaviour; the labeller's, the executor's and the closed loop's checks passed at each start.
+
+| Commit | Item | Check | Review |
+|---|---|---|---|
+| 0fa9df2e | 69 (D183 (4)): `branch_round` deletes a point's copies, numbers, ends and samples at the end of its block | a weakref test (each earlier point's copy and cache collected before the next point copies and after the round; fails without the `del`); 72 tests | small change, no agent |
+| cfe5da0f | `experiments/window_behaviour.py` (R68, `ts-window-behaviour-v1`); `Digest` moved from the tests | its tests | S2 fixed (landed/value campaigns crashed late; now refused by name), second round none |
+| 317979f9 | D183 (1)–(3): no second clone, a copy keeps its rows + `CACHE_STEP_ROWS` (64), growth by 64-row steps | C, D, prior_behaviour the same; a test for each | S2 fixed (the growth test needed one step only), second round none |
+| ab6b2e8e | D186 (1): `LandingIndex.with_landing` checks and inserts the new landing only; an index must be in time, then flight order | C, D, prior_behaviour the same; one day check a landing added; the index after 24 landings = the one built whole | no S1/S2; a day check that could never fire removed |
+| 33e24bbe | D185 / C27: a round resumed by its batches (`record_<k>.json` after each batch's files, `<stem>.tmp` renamed; `--restart-round` in both runners) | C27's tests (stage C and D), 172 post and multi tests | S2 fixed (the temporary name changed torch's inner folder, so every batch file's bytes), second round none |
+| ad950c8a | D186 (2), (3): the grammar's mask and the rows' state inputs over the batch, then beside the readable forms | C, D, prior_behaviour the same | S2 fixed (the LoopRows test read no landing count), second round none |
+| de0711aa | MC12 / D182: `MultiSettings.branching` grid \| backward, `post_branches.backward_round`, `multi/backward.py`; the copy chain takes a device; `test_architecture` allows `multi_speed`'s two timers (a failure since a8df27f7) | grid: C, D, prior_behaviour the same; 441 tests | S2 fixed (the profile rules of the setting untested), an S3 fixed (the previous point released before the fine point is flown), second round none |
+| 646ffb3a | Order C: a round resumed through two speaking workers is the round spoken whole (test only) | the test | small change, no agent |
+| 08cb2cec | Order D (first form): the property the fast mask rests on, in the docstrings | — | small change, no agent; rewritten with A |
+| 64e62b4e | Order B: a copy's cache allocated once (`Past.taken`: `torch.index_select(out=)` into the front of the new storage; on another device the selection made where the rows are, then moved) | C, D, prior_behaviour the same; no clone and no growth in a copy (test); on the GPU the extra peak of a selection 0 MB, against about twice the selection before | small change, no agent |
+| ae4249fd | Order A (D187 rewritten): the fast forms replace the old code — the modes deleted (`PER_AIRCRAFT`, `BATCH`, `MASK_MODES`, the `masks`/`mode` parameters, the per-aircraft procedure masks and their once-a-process check, the speaker's readable grammar path, `LoopRows` one aircraft at a time); `column_mask_fast` renamed `column_mask`, the old one deleted; order D folded in | C, D the same; prior_behaviour byte for byte (no mode compared); 321 tests | S2 fixed (nothing pinned the masks' arrays to `Final`'s definition: now a test against `Final.inside`, `Final.edge_m`, `entry_low_m`), an S3 fixed (a refusal test), second round none |
+
+**Time.** The check's fixed batches (CPU, one thread): stage C 135 s → 86 s and stage D 701 s → 485 s with D186 (2),
+(3). `multi_speed` on MC6's round-0 batch 86 (1200 s, 4 windows, 24 aircraft), CPU, one thread
+(`outputs/POOLED/multi/speed_cpu_b86_{d183,d186a,d186b}_20261009`): the batch 189.3 s after D183 → 167.9 s after D186
+(1) → 130.2 s after D186 (2), (3); inside the continuations the window loop's own time 68.3 → 50.5 → 31.2 s and the
+speaker's 75.8 → 75.8 → 59.7 s (the grammar's mask); 16 groups each time. The GPU measures of 二 (item 69 and D183's
+peak, the profile, grid against backward) wait for the user's word.
+
+**Order A, first form (D187 before the user rewrote it):** stopped at the user's word before any code was written
+("D187决定有错误 需要再讨论 先不要写这个"); the rewritten D187 was then built as order A.
+
+**Renamed or new names** (for the stages' interfaces): stage A — `grammar.column_mask` is now the batched mask (the
+readable one deleted), `Executor.take(flights, device=None)`, `Spoken.take(flights, device=None)`,
+`autopilot.start.Loop.copy(flights, device=None)`; stage B — `ProcedureMasks(finals, words)` (no mode),
+`procedure._FinalArrays` (was `_Gathered`), `ProcedureMasks.arrays` (was `gathered`), `Speaker(…)` without ``masks``,
+`Speaker.copy(indices, device=None)`, `prior.model.CACHE_STEP_ROWS`, `Past.taken(index, room, device=None)`,
+`LoopRows(…)` without ``mode``, `LoopRows.select(indices, device=None)`, `LandingIndex` refuses landings out of time,
+then flight order; `PER_AIRCRAFT`, `BATCH`, `MASK_MODES`, `require_same_masks`, `check_rows`, `CHECKED`,
+`prior_behaviour.require_same_modes` deleted; stage C — `SpeakingLoop(…)` without ``masks``,
+`SpeakingLoop.copy(flights, device=None)`, `WindowLoop.copy(windows, device=None)`, `post_train.save_batch_file`,
+`batch_record_path`, `spoken_batch`, `done_batches`, `launch_of`, `Stage.speak(…, launch=)`,
+`Speakers.speak(…, batches, launch)`, `open_campaign(…, restart_round=False)`, `post_branches.backward_round`,
+`BackwardRound`; stage D — `MultiSettings.branching`, `multi.backward`.
