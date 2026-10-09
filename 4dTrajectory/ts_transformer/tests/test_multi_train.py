@@ -700,7 +700,10 @@ def test_a_workers_gpu_is_capped_at_its_budget_less_its_context(monkeypatch):
     monkeypatch.setattr(post_train, "_gpu_used", lambda: gib)
     monkeypatch.setattr(torch.cuda, "memory_reserved", lambda device: gib // 2)
     monkeypatch.setattr(torch.cuda, "get_device_properties", lambda device: SimpleNamespace(total_memory=8 * gib))
-    monkeypatch.setattr(torch.cuda, "set_per_process_memory_fraction", lambda f, device: capped.append(f))
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 0)
+    monkeypatch.setattr(torch.cuda, "set_per_process_memory_fraction",
+                        lambda f, device: capped.append(f) if isinstance(device, int) else pytest.fail(
+                            f"torch takes a device index here, not {device!r}"))
     post_train._cap_gpu(torch.device("cuda"), 2 * gib + gib // 2)               # context 0.5 GiB: 2 GiB of 8
     assert capped == [0.25]
     with pytest.raises(SystemExit, match="not above its CUDA context"):

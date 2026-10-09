@@ -720,7 +720,8 @@ def _cap_gpu(device: torch.device, budget: int) -> None:
     if budget <= context_bytes:
         raise SystemExit(f"a speaking worker's GPU budget {budget / 2**30:.2f} GiB is not above its CUDA context "
                          f"{context_bytes / 2**30:.2f} GiB")
-    torch.cuda.set_per_process_memory_fraction((budget - context_bytes) / total, device)
+    index = device.index if device.index is not None else torch.cuda.current_device()   # torch needs the index
+    torch.cuda.set_per_process_memory_fraction((budget - context_bytes) / total, index)
 
 
 def _speak(round_: int, state: str, directory: str, k: int, places: list[int], records: list[dict[str, Any]]
