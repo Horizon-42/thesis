@@ -23,8 +23,9 @@ MC6 正在 run-mc6 里跑：不动那个运行工作树，只写代码、只跑�
    58、59 改的是 C 的 post_window_loop，60 改的是 post_train，C 的测试都要原样通过。
 3. 58–60 的核对：在固定输入上（CPU、一个线程），C 的窗口和 D 的窗口各一组，一轮的分支组、样本和读数和改之前逐位相同。
 4. 56：experiments/multi_speed.py。
-   - 一批放在 profiler 下，分开计时：第一遍、第二遍、续句、说话步、执行器（两次同步之间，照 model_speed），
-     再加 GPU 内存按部分分；
+   - 一批，各部分各自计时：第一遍、第二遍、续句、说话步、执行器（两次同步之间，照 model_speed）；
+     每部分开始时重置 GPU 峰值；
+   - cProfile 只在 CPU 上用，而且只在计时器解释不了某一部分时用（你补充的第 56 条）；
    - 现在只在 CPU 上用冒烟批测通，正式测量等 GPU 空出来。
 5. 审核按项目 CLAUDE.md 的 "Code review"：58–60 和 56 各走一次 agent，范围是 diff；55 是小改动。
    → 显式路径提交 → 日志写一行 → 报告 dev-multi-control 能否快进 dev-two-tier，由用户合并。
