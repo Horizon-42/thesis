@@ -944,6 +944,8 @@ TRAINING_EXPORT_NAMES = {
     "experiments.training_attitude": {"attitude_payload", "executor_attitude"},
     "experiments.prior_training_export": {"procedure_block"},
 }
+#: The timers of stage B's `model_speed` (D136), which stage D's `multi_speed` (D181 (56)) times its parts with.
+MODEL_SPEED_NAMES = {"experiments.model_speed": {"host_info", "synchroniser"}}
 
 
 def _experiments_imports_refused(source: str, own: tuple[str, ...] = ("post_",)) -> list[str]:
@@ -961,9 +963,9 @@ def _experiments_imports_refused(source: str, own: tuple[str, ...] = ("post_",))
                 continue
             if module == "experiments":
                 refused += [f"from experiments import {a.name}" for a in node.names if not a.name.startswith(own)]
-            elif module in TRAINING_EXPORT_NAMES:
-                refused += [f"from {module} import {a.name}" for a in node.names
-                            if a.name not in TRAINING_EXPORT_NAMES[module]]
+            elif module in TRAINING_EXPORT_NAMES or module in MODEL_SPEED_NAMES:
+                names = {**TRAINING_EXPORT_NAMES, **MODEL_SPEED_NAMES}[module]
+                refused += [f"from {module} import {a.name}" for a in node.names if a.name not in names]
             elif module == SPEAKING_LOOP:
                 refused += [f"from {module} import {a.name}" for a in node.names if a.name not in SPEAKING_LOOP_NAMES]
             elif not module.split(".")[1].startswith(own):

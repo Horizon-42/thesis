@@ -672,7 +672,8 @@ def test_the_workers_are_sized_from_the_profile_and_the_memory_free_now(tmp_path
         multi_train.profiled_fit(profile, settings, inputs, 4, cuda, cuda)
     monkeypatch.setattr(multi_train, "available_memory", lambda device: {"host": 8 * gib, "gpu": 5 * gib})
     for other, named in ((replace(settings, batch_rows=[32, 48]), "batch_rows"), (replace(settings, spans_s=[300.0, 1200.0]),
-                                                                            "spans_s")):
+                                                                            "spans_s"),
+                         (replace(settings, branching="backward"), "branching")):           # D182: profiled
         with pytest.raises(SystemExit, match=f"other {named} than this campaign's"):
             multi_train.profiled_fit(profile, other, inputs, 2, cuda, cuda)
     with pytest.raises(SystemExit, match="other prior than"):
@@ -687,6 +688,13 @@ def test_the_workers_are_sized_from_the_profile_and_the_memory_free_now(tmp_path
                                  2, cuda, cuda)                       # a profile of the whole round (before D179)
     with pytest.raises(SystemExit, match="no measure of the speaking workers"):
         multi_train.profiled_fit(_profile(tmp_path, settings, inputs, workers=False), settings, inputs, 2, cuda, cuda)
+    profile = _profile(tmp_path, settings, inputs)                    # its workers measured again (written over above)
+    before = json.loads((profile / "profile.json").read_text())       # a profile from before D182 reads as the grid
+    del before["inputs"]["settings"]["branching"]
+    (profile / "profile.json").write_text(json.dumps(before))
+    assert multi_train.profiled_fit(profile, settings, inputs, 2, cuda, cuda)["speak_workers"] == 2
+    with pytest.raises(SystemExit, match="other branching than this campaign's"):
+        multi_train.profiled_fit(profile, replace(settings, branching="backward"), inputs, 2, cuda, cuda)
     monkeypatch.setattr(multi_train, "available_memory", lambda device: {"host": 8 * gib, "gpu": None})
     on_cpu = _profile(tmp_path, settings, inputs, gpu=False)
     assert multi_train.profiled_fit(on_cpu, settings, inputs, 2, cpu, cpu)["gpu_budget"] is None

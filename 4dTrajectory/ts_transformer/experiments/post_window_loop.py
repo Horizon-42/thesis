@@ -474,17 +474,19 @@ class WindowLoop:
         return judged, separation_traffic(judged, g, self.separations[g.code], self.finals[b], self.step_s), \
             len(tick.rows) + len(landed)
 
-    def copy(self, windows: Sequence[int]) -> WindowLoop:
+    def copy(self, windows: Sequence[int], device: torch.device | None = None) -> WindowLoop:
         """A loop of copies of the windows ``windows`` (places in ``windows``, repeats permitted; post-training D94): the
         closed loop's own copy of every row of each (`SpeakingLoop.copy`: the executor's loop, the speaker, the inputs
         and their records) and the window's own state — its scene, landings, separation judge, silent rows, speed-mask
         counts, recorded tokens and value readings (D171). Flown on with the same numbers, a copy says what its original says (D94); the loop
-        copied is unchanged."""
+        copied is unchanged. ``device``: the copy's (this loop's when not given; multi-aircraft control D182: the second
+        pass's copies held in the host's memory until their point is tried)."""
         index = list(windows)
         rows = [b for w in index for b in self.members[w]]
         out = object.__new__(WindowLoop)
-        out.speaking = self.speaking.copy(rows)
-        out.order, out.words, out.device = [self.order[b] for b in rows], self.words, self.device
+        out.speaking = self.speaking.copy(rows, device)
+        out.order, out.words = [self.order[b] for b in rows], self.words
+        out.device = self.device if device is None else torch.device(device)
         out.answering, out.token_part, out.part_width = self.answering, self.token_part, self.part_width
         out.windows = [self.windows[w] for w in index]
         out.members, k = [], 0

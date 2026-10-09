@@ -247,18 +247,18 @@ class Loop:
         last), hears no words, and does not become done (one done already stays done)."""
         self.executor.halt(torch.as_tensor(flights, device=self.executor.state.device))
 
-    def copy(self, flights: Sequence[int]) -> Loop:
+    def copy(self, flights: Sequence[int], device: torch.device | None = None) -> Loop:
         """A loop of copies of the flights ``flights`` (repeats permitted; vocabulary §6 item 5, D97 (2)): everything the
         loop holds of them — the executor's state and its record for the judge (`Executor.take`), the words said
         (`Spoken.take`), the grammar's words in force, the go-arounds heard, and the time limits, which stay the loop's
         (D90), and the join ticks (D150). Flown on with the same words, a copy flies what its original flies and gets the
-        same outcome; the loop copied is unchanged."""
+        same outcome; the loop copied is unchanged. ``device``: the copy's (this loop's when not given)."""
         index = np.asarray(flights)
         if index.ndim != 1 or not len(index) or index.dtype.kind not in "iu":     # no bool mask, as `halt` takes
             raise ValueError(f"a copy takes one or more of the loop's flights by index, got {flights!r}")
         out = copy.copy(self)
-        out.executor = self.executor.take(torch.as_tensor(index, device=self.executor.state.device))
-        out.spoken = self.spoken.take(index)
+        out.executor = self.executor.take(torch.as_tensor(index, device=self.executor.state.device), device)
+        out.spoken = self.spoken.take(index, device)
         out.geometries = [self.geometries[i] for i in index]
         out.go_arounds = self.go_arounds[index].copy()
         out.join_ticks = self.join_ticks[index].copy()

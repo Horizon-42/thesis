@@ -25,7 +25,12 @@ parts (`stage_d`):
 - **The speaking** (`speak_batch`, `post_branches.branch_round`): stage D's rules (`multi.credit.rules`: W the sum,
   spoken again below the count, the varied aircraft and their branch points, each aircraft's own numbers, D141–D143)
   and its loop (`loop_options`: the rule of who answers, D145; the token part, D152). Its record is stage C's
-  (`post_train.speak_round`'s sums), its rewards and outcomes those of each commanded aircraft.
+  (`post_train.speak_round`'s sums), its rewards and outcomes those of each commanded aircraft. ``--branching backward``
+  (`MultiSettings.branching`, D182, MC12; `grid` the default, D143's points): the branch points found back from each
+  varied aircraft's event (`post_branches.backward_round`, `multi.backward`), the record holding besides each group's
+  span and depth (``group_depths_s``), the searches and those that found a decision point, and the continuations flown
+  only to the event + 60 s and those flown to their window's end. The readout's ``go_arounds`` and ``aircraft`` of each
+  span give the go-arounds per aircraft that D182 asks to watch.
 - **The selection readout** (§5 item 2, `selection_windows`, `read_batch`, `selection_readout`): at most
   ``select_per_airport`` real windows of each span of each airport of the select days, their anchors in an order drawn
   once with the seed (D146's rule), the first pass only, each aircraft with its own numbers (the same every round). By
@@ -72,7 +77,7 @@ import torch
 from flight_scenarios.procedure_final import DEFAULT_PROCEDURE_ROOT
 
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
-from ts_transformer.experiments.post_branches import Rules, branch_round
+from ts_transformer.experiments.post_branches import Rules, backward_round, branch_round
 from ts_transformer.experiments.post_train import (
     Context, Speakers, Stage, available_memory, batches, done_rounds, open_campaign, open_context, round_start,
     run_campaign, save_batch_file, settings_of, source_campaign, speak_device_refused, speak_round, start_checkpoint,
@@ -80,6 +85,7 @@ from ts_transformer.experiments.post_train import (
 )
 from ts_transformer.experiments.post_window_loop import LANDED, LOST_SEPARATION, WindowLoop, checked_edges
 from ts_transformer.multi import credit
+from ts_transformer.multi.backward import BACKWARD, BRANCHINGS, GRID
 from ts_transformer.multi.census import WindowCount, loop_positions, window_losses
 from ts_transformer.multi.separation import PAIRS, Answering
 from ts_transformer.multi.timing import (
@@ -107,7 +113,8 @@ MEASURE_MARGIN = 1.3
 #: The settings that set a round's memory, which a campaign shares with its profile (`profiled_fit`); the others (its
 #: rounds, seed, learning rates, a start of the same traffic shape, and the select set, which the measure does not read,
 #: D179, D181 (55)) change the words spoken, not the shapes — a worker past its share stops by name.
-PROFILED_SETTINGS = ("per_kind", "spans_s", "c_min", "batch_rows", "continuations", "update_groups", "data_sentences")
+PROFILED_SETTINGS = ("per_kind", "spans_s", "c_min", "batch_rows", "continuations", "update_groups", "data_sentences",
+                     "branching")
 #: The inputs a campaign shares with its profile.
 PROFILED_INPUTS = ("prior", "instructions", "executor", "windows", "procedure_root")
 
@@ -134,6 +141,9 @@ class MultiSettings:
     #: the start (D164): round ``round`` of stage C's campaign ``campaign`` (repository-relative) and its checkpoint's
     #: ``checkpoint_sha256`` (`post_train.start_of`)
     start: dict[str, Any]
+    #: where a round's branch points are (D182, MC12): `GRID`, D143's (the default: the behaviour before D182; a record
+    #: without the setting reads as it), or `BACKWARD`, found back from each varied aircraft's event (`multi.backward`)
+    branching: str = GRID
 
     def __post_init__(self) -> None:
         if set(self.per_kind) != set(KINDS) or min(self.per_kind.values()) < 0 or not any(self.per_kind.values()):
@@ -150,6 +160,8 @@ class MultiSettings:
                              "are positive")
         if set(self.start) != {"campaign", "round", "checkpoint_sha256"}:
             raise ValueError(f"a start is its campaign, round and checkpoint_sha256, not {sorted(self.start)}")
+        if self.branching not in BRANCHINGS:
+            raise ValueError(f"branching {self.branching!r} is none of {BRANCHINGS}")
 
 
 def span_key(span_s: float) -> str:
@@ -243,26 +255,32 @@ def draw_windows(context: Context, settings: MultiSettings, rng: np.random.Gener
 def speak_batch(model: Prior, context: Context, windows: Sequence[Window], places: Sequence[int],
                 settings: MultiSettings, round_: int, directory: Path, k: int) -> dict[str, Any]:
     """Batch ``k`` of a round (the windows at ``places``): its two passes under stage D's rules and loop (module
-    docstring), its informative groups written to ``groups_<k>.pt``, and its record (`post_train.speak_round`'s sums,
-    of every commanded aircraft)."""
+    docstring), its branch points D143's or found backward (`MultiSettings.branching`, D182: `post_branches.
+    backward_round`), its informative groups written to ``groups_<k>.pt``, and its record (`post_train.speak_round`'s
+    sums, of every commanded aircraft; backward, besides: each group's span and depth, the searches and those that found
+    a decision point, the continuations flown to the event + 60 s only and those flown to their window's end)."""
     train = context.splits["train"]
     batch = [windows[p] for p in places]
-    found = branch_round(model, context.start_loop("train", batch), batch, places, train["sentences"], train["flights"],
-                         context.geometries, context.rosters, context.finals, context.words,
-                         interval_s=context.interval_s, variant=context.variant,
-                         edges_reference=context.edges_reference, faults=train["faults"], device=context.device,
-                         seed=settings.seed, round_=round_, split="train", continuations=settings.continuations,
-                         rules=Rules(**credit.rules(settings.seed, round_, context.interval_s)),
-                         loop_options=loop_options(context))
+    common = dict(interval_s=context.interval_s, variant=context.variant, edges_reference=context.edges_reference,
+                  faults=train["faults"], device=context.device, split="train", continuations=settings.continuations,
+                  rules=Rules(**credit.rules(settings.seed, round_, context.interval_s)),
+                  loop_options=loop_options(context))
+    data = (model, context.start_loop("train", batch), batch, places, train["sentences"], train["flights"],
+            context.geometries, context.rosters, context.finals, context.words)
+    found = (backward_round(*data, **common) if settings.branching == BACKWARD else
+             branch_round(*data, seed=settings.seed, round_=round_, **common))
     informative = [g for g in found.groups if g.informative]
     save_batch_file(informative, directory / f"groups_{k}.pt")
     anchors = {w.signal_index for w in batch}              # a window's count is in each of its aircraft's ends
+    searched = {} if settings.branching == GRID else {
+        "group_depths_s": [[batch[0].span_s, depth] for depth in found.depths_s], "searches": found.searches,
+        "searches_found": found.found, "continuations_to_event": found.to_event, "continuations_to_end": found.to_end}
     return {"groups": len(found.groups), "informative_groups": len(informative),
             "spoken_again": len(found.spoken_again), "differed": list(found.differed),
             "reward_sum": sum(r.reward for r in found.first),
             "faulty_steps": sum(r.faulty_steps for r in found.first if r.index in anchors),    # once a window
             "losses_reading_fault": sum(r.loss_reads_fault for r in found.first),
-            "outcomes": dict(Counter(r.outcome for r in found.first))}
+            "outcomes": dict(Counter(r.outcome for r in found.first)), **searched}
 
 
 # ---- the selection readout
@@ -457,7 +475,8 @@ def profiled_fit(profile: Path, settings: MultiSettings, inputs: dict[str, Any],
         raise SystemExit(f"{profile}: no measure of the speaking workers (a profile with --speak-workers 2 or more)")
     held = record["inputs"]
     other = [key for key in PROFILED_INPUTS if this_checkout(held[key]) != this_checkout(inputs[key])]
-    other += [key for key in PROFILED_SETTINGS if held["settings"][key] != asdict(settings)[key]]
+    profiled = asdict(MultiSettings(**held["settings"]))   # a setting added after the profile: its default (D182)
+    other += [key for key in PROFILED_SETTINGS if profiled[key] != asdict(settings)[key]]
     measure = record["workers"]
     if (measure["pass"] is None) != (device.type != "cuda"):
         other.append("device")
@@ -566,6 +585,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--update-groups", type=int, required=True, help="the branch groups of an update")
     parser.add_argument("--data-sentences", type=int, required=True, help="the data term's sentences of an update")
     parser.add_argument("--select-per-airport", type=int, required=True)
+    parser.add_argument("--branching", choices=BRANCHINGS, default=GRID,
+                        help="D182: the branch points, D143's grid (default) or found back from each event")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--speak-workers", type=int, default=1)
     parser.add_argument("--speak-device",
@@ -576,7 +597,8 @@ def settings_from(args: argparse.Namespace, start: dict[str, Any]) -> MultiSetti
     """The settings of `add_arguments`' ``args`` with the start ``start`` (`post_train.start_of`)."""
     return MultiSettings(args.rounds, {kind: getattr(args, f"windows_{kind}") for kind in KINDS}, args.spans_s,
                          args.c_min, args.batch_rows, args.continuations, args.seed, args.prior_lr, args.traffic_lr,
-                         args.weight_decay, args.update_groups, args.data_sentences, args.select_per_airport, start)
+                         args.weight_decay, args.update_groups, args.data_sentences, args.select_per_airport, start,
+                         args.branching)
 
 
 def main(argv: list[str] | None = None) -> int:

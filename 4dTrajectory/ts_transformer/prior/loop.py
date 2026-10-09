@@ -118,12 +118,12 @@ class LoopRows:
         for b in aircraft:
             self.landings[b] = self.landings[b].with_landing(landing)
 
-    def select(self, indices: Sequence[int]) -> LoopRows:
+    def select(self, indices: Sequence[int], device: torch.device | None = None) -> LoopRows:
         """The rows of the aircraft ``indices`` (repeats permitted), in that order, with their landings as they are now
-        and their join ticks: a copy's (`Speaker.copy`)."""
+        and their join ticks: a copy's (`Speaker.copy`); its rows' tensors on ``device`` (this one's when not given)."""
         indices = list(indices)
         return LoopRows([self.geometries[i] for i in indices], [self.landings[i] for i in indices],
                         [self.keys[i] for i in indices],
                         self.entry_utc_s[indices], self.first_rows[indices], self.start, variant=self.variant,
-                        interval_s=self.interval_s, step_s=self.step_s, device=self.device,
+                        interval_s=self.interval_s, step_s=self.step_s, device=self.device if device is None else device,
                         join_ticks=self.join_ticks[indices], mode=self.mode)

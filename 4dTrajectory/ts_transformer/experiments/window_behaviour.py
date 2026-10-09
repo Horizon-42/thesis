@@ -37,14 +37,14 @@ import time
 from contextlib import contextmanager
 from dataclasses import astuple
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 import numpy as np
 import torch
 
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
 from ts_transformer.experiments import multi_train, post_train
-from ts_transformer.experiments.post_branches import BranchRound
+from ts_transformer.experiments.post_branches import BackwardRound, BranchRound
 from ts_transformer.experiments.post_window_loop import WindowResult, checked_edges
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.repo_layout import REPO_ROOT, git_state
@@ -122,29 +122,36 @@ def round_digests(found: BranchRound) -> dict[str, Any]:
             digest.sentence(sentence.rows, sentence.permitted, sentence.tokens)
             digest.add(sentence.reward, sentence.until)
         groups.append(digest.hash.hexdigest())
-    return {"first": [end_digest(r) for r in found.first], "groups": groups,
-            "spoken_again": list(found.spoken_again), "differed": list(found.differed)}
+    out = {"first": [end_digest(r) for r in found.first], "groups": groups,
+           "spoken_again": list(found.spoken_again), "differed": list(found.differed)}
+    if isinstance(found, BackwardRound):          # its points found backward (D182): their depths and counts
+        out["searched"] = [found.depths_s, found.searches, found.found, found.to_event, found.to_end]
+    return out
 
 
 @contextmanager
 def captured_rounds() -> Iterator[list[BranchRound]]:
-    """The `branch_round` results of the stages' batch speakers while open (`post_train.speak_batch`,
-    `multi_train.speak_batch` call it by their module's name), in the order spoken; taken off after."""
+    """The `branch_round` and `backward_round` results of the stages' batch speakers while open (`post_train.speak_batch`,
+    `multi_train.speak_batch` call them by their module's names), in the order spoken; taken off after."""
     found: list[BranchRound] = []
-    real = post_train.branch_round
+    real, real_backward = post_train.branch_round, multi_train.backward_round
     if multi_train.branch_round is not real:
         raise RuntimeError("the stages' batch speakers call different branch rounds")
 
-    def capturing(*args: Any, **kwargs: Any) -> BranchRound:
-        out = real(*args, **kwargs)
-        found.append(out)
-        return out
+    def capturing(round_: Callable[..., BranchRound]) -> Callable[..., BranchRound]:
+        def call(*args: Any, **kwargs: Any) -> BranchRound:
+            out = round_(*args, **kwargs)
+            found.append(out)
+            return out
+        return call
 
-    post_train.branch_round = multi_train.branch_round = capturing
+    post_train.branch_round = multi_train.branch_round = capturing(real)
+    multi_train.backward_round = capturing(real_backward)
     try:
         yield found
     finally:
         post_train.branch_round = multi_train.branch_round = real
+        multi_train.backward_round = real_backward
 
 
 def opened_campaign(record: dict[str, Any]) -> tuple[Any, post_train.Stage]:
@@ -223,8 +230,8 @@ def differences(ours: dict[str, Any], theirs: dict[str, Any]) -> list[str]:
         if mine is None or other is None:
             out.append(f"batch {k}: in one record only")
             continue
-        for key in ("places", "spoken_again", "differed"):
-            if mine[key] != other[key]:
+        for key in sorted((set(mine) | set(other)) - {"first", "groups"}):   # the searched counts of D182's rounds too
+            if key not in mine or key not in other or mine[key] != other[key]:
                 out.append(f"batch {k}: {key}")
         for key in ("first", "groups"):
             if len(mine[key]) != len(other[key]):

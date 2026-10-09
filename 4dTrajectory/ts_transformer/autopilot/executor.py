@@ -142,18 +142,20 @@ class Executor:
         """Hold the flights ``flights`` (``[B]`` bool) from the next cycle on (module docstring)."""
         self.halted = self.halted | flights.to(self.halted.device)
 
-    def take(self, flights: torch.Tensor) -> Executor:
+    def take(self, flights: torch.Tensor, device: torch.device | None = None) -> Executor:
         """A copy of the flights ``flights`` (``[K]`` long, repeats permitted; vocabulary §6 item 5, D97 (2)): everything
         the executor holds of them — their inputs, runways and charts, time limits and reserve, first cycles, state,
         bank, the laws' state, done and halted, end cycles and the record so far — and nothing of the other flights. The
         cycles flown and their layout are the batch's. Flown on, each copy flies as its original would (a flight's
-        states do not depend on the other flights of its batch, D97 (3))."""
+        states do not depend on the other flights of its batch, D97 (3)). ``device``: the copy's (this executor's when
+        not given; multi-aircraft control D182: a copy held in the host's memory, flown on the GPU later)."""
         flights = torch.as_tensor(flights, dtype=torch.long, device=self.state.device)
         if flights.ndim != 1 or not len(flights) or bool(((flights < 0) | (flights >= len(self.state))).any()):
             raise ValueError(f"a copy takes one or more of the batch's {len(self.state)} flights, got {flights.tolist()}")
+        device = self.state.device if device is None else torch.device(device)
 
         def pick(rows: torch.Tensor) -> torch.Tensor:
-            return rows[flights].clone()
+            return rows[flights].clone().to(device)
 
         def picked(record: Any) -> Any:                  # a dataclass of per-flight tensors
             return type(record)(**{f.name: pick(getattr(record, f.name)) for f in fields(record)})

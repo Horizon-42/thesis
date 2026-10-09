@@ -1785,7 +1785,8 @@ methods are refused by name) or D (`--campaign`, by its schema; its inputs' chec
 stage's own batch speaker (groups written to a scratch directory, not kept) — and the first `--readout-per-span`
 (default 4) selection windows of each span read by the stage's reader in its batches. Writes `behaviour.json`
 (`ts-window-behaviour-v1`) into a new directory: digests (sha256) of each first-pass end, each branch group, the windows
-spoken again and differed, and each readout window's read; the commit as information. `--against` another record:
+spoken again and differed (of a campaign whose points are found backward, D182: the groups' depths and the search's
+counts too), and each readout window's read; the commit as information. `--against` another record:
 the parts that differ named, exit status 1 when any does; refused for records of other inputs. Run the same command
 on a checkout of the code before (a detached worktree) and after. Stage C's seg60 round 5 and stage D's MC6 start took
 about 5 + 10 min. Tests: `tests/test_window_behaviour.py`.

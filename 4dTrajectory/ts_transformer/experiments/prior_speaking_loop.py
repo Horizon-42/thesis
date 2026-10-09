@@ -312,15 +312,17 @@ class SpeakingLoop:
                 since=np.stack([r.since[b, 0] for r in rows]), targets=targets))
         return out
 
-    def copy(self, flights: Sequence[int]) -> SpeakingLoop:
+    def copy(self, flights: Sequence[int], device: torch.device | None = None) -> SpeakingLoop:
         """A loop of copies of the flights ``flights`` (places in ``order``, repeats permitted; post-training D94): the
         start's own copy of its flights (`Loop.copy`, vocabulary D97), the speaker's (`Speaker.copy`), the inputs'
         (`LoopRows.select`) and every record. Flown on with the same numbers, masks and input of the added modules, a
         copy says what its original says and flies it within the executor's bound (vocabulary D97 (3)); the loop copied
-        is unchanged."""
+        is unchanged. ``device``: the copy's (this loop's when not given; multi-aircraft control D182: a copy held in the
+        host's memory, flown on the GPU later)."""
         index = list(flights)
         out = object.__new__(SpeakingLoop)
-        out.loop, out.speaker, out.rows_of = self.loop.copy(index), self.speaker.copy(index), self.rows_of.select(index)
+        out.loop, out.speaker = self.loop.copy(index, device), self.speaker.copy(index, device)
+        out.rows_of = self.rows_of.select(index, device)
         out.order, out.words, out.every, out.start, out.t = [self.order[i] for i in index], self.words, self.every, \
             self.start, self.t
         out.join_ticks = self.join_ticks[index].copy()

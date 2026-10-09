@@ -156,12 +156,16 @@ class Spoken:
         """Steps said, from the batch's first."""
         return len(self.grid)
 
-    def take(self, flights: np.ndarray) -> Spoken:
+    def take(self, flights: np.ndarray, device: torch.device | None = None) -> Spoken:
         """A copy of the flights ``flights`` (``[K]``, repeats permitted): the words they were said, in force and
-        when each was issued (`Executor.take`'s, for the words)."""
+        when each was issued (`Executor.take`'s, for the words), on ``device`` (this one's when not given)."""
         out = copy.copy(self)
         index = torch.as_tensor(flights, dtype=torch.long, device=self.device)
-        out.value, out.issued, out.runway = (rows[index].clone() for rows in (self.value, self.issued, self.runway))
+        if device is not None and torch.device(device) != torch.device(self.device):
+            out.device = torch.device(device)
+            out.tables = WordTables(self.tables.words, device=out.device)
+        out.value, out.issued, out.runway = (rows[index].clone().to(out.device)
+                                             for rows in (self.value, self.issued, self.runway))
         out.start = self.start[flights].copy()
         out.staggered = bool((out.start != 0).any())
         out.grid = [row[flights].copy() for row in self.grid]

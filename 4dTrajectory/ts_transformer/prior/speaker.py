@@ -382,10 +382,11 @@ class Speaker:
         return Permitted(tuple(masks), own_rows(np.stack([row[index] for row in self.permitted_times], axis=1), np.nan),
                          own_rows(np.stack([row[index] for row in self.permitted_own], axis=1), 0.0), self.temperature)
 
-    def copy(self, indices: Sequence[int]) -> Speaker:
+    def copy(self, indices: Sequence[int], device: torch.device | None = None) -> Speaker:
         """A speaker of the aircraft ``indices`` of this one (repeats permitted), in that order (D96 item 5): their cache,
         the state of their procedure masks, their words heard, their go-arounds, their roles and their records. Continued with the
-        same inputs and numbers, a copy of every aircraft says what this speaker says, bit for bit."""
+        same inputs and numbers, a copy of every aircraft says what this speaker says, bit for bit. ``device``: the
+        cache's (this one's when not given; multi-aircraft control D182: a copy held in the host's memory)."""
         indices = list(indices)
         out = object.__new__(Speaker)
         out.model, out.words, out.temperature = self.model, self.words, self.temperature
@@ -393,7 +394,8 @@ class Speaker:
         out._n_candidates = self._n_candidates[indices].copy()
         # the rows written and one step of room (D183; indexing by a tensor makes the copy's own storage)
         index = torch.as_tensor(indices, device=self.past[0].keys.device)
-        out.past = [Past(p.keys[index, :, : p.rows], p.values[index, :, : p.rows], p.present[index, : p.rows],
+        out.past = [Past(*(x.to(device) if device is not None else x
+                           for x in (p.keys[index, :, : p.rows], p.values[index, :, : p.rows], p.present[index, : p.rows])),
                          p.rows).grown(p.rows + CACHE_STEP_ROWS) for p in self.past]
         out._heard = [self._heard[i].copy() for i in indices]
         out.forbidden = {c: [row[indices] for row in rows] for c, rows in self.forbidden.items()}
