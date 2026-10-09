@@ -1,46 +1,43 @@
 # 阶段 D：当前命令
 
 只放最新一条命令，新命令整份覆盖，不是日志（过程记在 `readouts/2026-10-06_stage_d_implementation_log.md`）。
-2026-10-08，Claude 写，用户转发。
+2026-10-09，Claude 写，用户转发。
 
 ```
-你 requests 的 49–53 条用户都定了（2026-10-08），写进 multi_control：
-- D179（49、50）：MC5 只量内存。每种跨度的第一批和行数最多的一批各量一个 worker，再量 pass；
-  记下主机和 GPU 的峰值和每批的时间；不说整轮、不读读数、不量离散度。
-  估算时把测得的峰值乘 1.3，系数记进 profile.json；C 的估算不变。
-  select 集大小（select_per_airport）是开跑前定的设置，D166 里"由第 0 轮离散度定"作废。
-- D180（52、53）：multi_train 和 multi_profile 加 --speak-device，照 C 的做法：
-  - 默认就是 --device（旧行为）；只有一个 worker 时拒绝，campaign 在 CPU 上时也不许把 worker 放到 cuda；
-  - profile 在 worker 所在的设备上量，并记下设备；profiled_fit 拒绝另一种设备的测量；
-  - CPU 上的 worker 算主机内存，不算 GPU。
-  - 1200 s 跨度的批行数（53）是设置，在测量里一起量。
-- 第 51 条：起点、种子、设置、轮数是实验信息，不进设计；测量完和 worker 数一起报给用户定。
+你 requests 的 54–62 条评估完了，写进 multi_control D181（MC11）和 O20：
+- 接受：54（按你建的）、55、56、58、59、60；
+- 57 等 56 量完再定：只有续句确实决定峰值时才做；
+- 61、62 暂不做（O20）。
+  - 61：两种设备混用时，要么一轮不可复现，要么负载不均；57 若能让 GPU 多放 worker，效果相近还更简单。
+  - 62：改动大，只有缓存决定峰值时才值得。
+- post_profile 的 executor_step 读成 0 s：C8 已经结束、不会再跑，写进 docs/code-health-followups.md 一条，不改代码。
+MC6 正在 run-mc6 里跑：不动那个运行工作树，只写代码、只跑改动文件的测试、少开进程（rule 13），不占 GPU。
 路径相对 4dTrajectory/ts_transformer/。
 
 一、代码（在 dev-multi-control 上，先把 dev-two-tier 合进来）
-1. 上一条的求位置 helper（frontend D178 (6)）如果还没做，先做。这是小改动，不用审核 agent。
-2. D179：multi_profile 只留内存测量（第 1–2 部分），删掉整轮、读数和离散度；profiled_fit 乘 1.3。
-3. D180：两个 runner 的 --speak-device。拒绝规则和 C 的一样，能复用共用代码就复用。
-4. 测试：
-   - 默认设备时行为和改之前一样；
-   - 拒绝的几种情况；
-   - CPU 的测量只算主机内存；
-   - 另一种设备的测量被拒绝；
-   - 余量系数写进记录并参与计算；
-   - profile 不再说整轮。
-5. 改动文件的测试和审核同时开始。审核按项目 CLAUDE.md 的 "Code review"：范围是 diff，不搜仓库，S3 不改。
+1. 55：select_per_airport 从 PROFILED_SETTINGS 去掉。这是小改动，不用审核 agent。
+2. 58、59、60，数字都不能变：
+   - 58：WindowLoop.samples(split, rows)，只为读的那些行建样本（copies 只要被改动那架的行）；
+   - 59：一个 tick 里每行的场景只算一次；
+   - 60：Speakers fork 之前在 campaign 进程里 gc.freeze()。
+   58、59 改的是 C 的 post_window_loop，60 改的是 post_train，C 的测试都要原样通过。
+3. 58–60 的核对：在固定输入上（CPU、一个线程），C 的窗口和 D 的窗口各一组，一轮的分支组、样本和读数和改之前逐位相同。
+4. 56：experiments/multi_speed.py。
+   - 一批放在 profiler 下，分开计时：第一遍、第二遍、续句、说话步、执行器（两次同步之间，照 model_speed），
+     再加 GPU 内存按部分分；
+   - 现在只在 CPU 上用冒烟批测通，正式测量等 GPU 空出来。
+5. 审核按项目 CLAUDE.md 的 "Code review"：58–60 和 56 各走一次 agent，范围是 diff；55 是小改动。
    → 显式路径提交 → 日志写一行 → 报告 dev-multi-control 能否快进 dev-two-tier，由用户合并。
 
-二、测量（用户合并后；主机和 GPU 上没有别的任务时，用 systemd 单元，从运行工作树 D163）
-1. CPU 和 GPU 上各量一次（几分钟）。
-2. 1200 s 跨度量 24 行和 48 行两种（另两个跨度用 64、48）。
-3. 报告给用户：
-   - 每个设备、每种跨度一批的时间和峰值，以及按 1.3 余量各能放几个 worker；
-   - 你建议的 MC6 设置：worker 数和设备、批行数、第 51 条的起点、种子、轮数和停止规则，以及估算的一轮时间。
+二、合并以后（每一步都等用户的话）
+1. MC6 换代码：58–60 核对通过并合并后，向用户提议——
+   - 在当前这一轮结束时停下；
+   - 从合并后的提交建新的运行工作树，续跑 MC6（设置不变，D157）。
+   停不停由用户定。
+2. 56 的测量：等 MC6 结束或某一轮的边界、GPU 空着时，按用户的话量一批 1200 s。
+   结果报给用户；如果峰值来自续句，再提议做 57（新设置 continuation_rows，默认等于旧行为，只用于下一个 campaign），
+   核对办法见 D181。
 
-三、MC6
-用户定了设置以后：intent 写进 intents.json，从运行工作树启动（outline D163），用 systemd 单元。
-
-你只能写各文档 §0.3 的状态行、multi_control §0.3 和你的日志。requests_from_d_to_designer.md 整份重写：
-49–53 条已定，删掉；新的读法另起。
+你只能写各文档 §0.3 的状态行、multi_control §0.3、你的日志和 code-health-followups 那一条。
+requests_from_d_to_designer.md 整份重写：54–62 条已处理，删掉；新的读法另起。
 ```
