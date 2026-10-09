@@ -53,7 +53,7 @@ from ts_transformer.instructions.grammar import InForce, column_mask, column_wor
 from ts_transformer.instructions.words import COLUMNS, HEADING, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words
 from ts_transformer.prior.batch import RUNWAY_FIXED_CLASSES, RUNWAY_GO_AROUND_CLASS, RowTensors
 from ts_transformer.prior.inputs import Heard
-from ts_transformer.prior.model import Past, Prior, require_eval
+from ts_transformer.prior.model import CACHE_STEP_ROWS, Past, Prior, require_eval
 from ts_transformer.prior.procedure import PER_AIRCRAFT, Final, ProcedureMasks
 
 
@@ -390,9 +390,10 @@ class Speaker:
         out.model, out.words, out.temperature = self.model, self.words, self.temperature
         out.procedure = self.procedure.select(indices)
         out._n_candidates = self._n_candidates[indices].copy()
+        # the rows written and one step of room (D183; indexing by a tensor makes the copy's own storage)
         index = torch.as_tensor(indices, device=self.past[0].keys.device)
-        out.past = [Past(p.keys[index].clone(), p.values[index].clone(), p.present[index].clone(), p.rows)
-                    for p in self.past]
+        out.past = [Past(p.keys[index, :, : p.rows], p.values[index, :, : p.rows], p.present[index, : p.rows],
+                         p.rows).grown(p.rows + CACHE_STEP_ROWS) for p in self.past]
         out._heard = [self._heard[i].copy() for i in indices]
         out.forbidden = {c: [row[indices] for row in rows] for c, rows in self.forbidden.items()}
         out.go_around_probability = [row[indices] for row in self.go_around_probability]

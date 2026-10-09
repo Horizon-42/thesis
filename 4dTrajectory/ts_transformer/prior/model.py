@@ -53,6 +53,9 @@ from ts_transformer.prior.batch import (
 #: The columns after the runway, whose words are classes of the vocabulary spec (`Words.class_counts`).
 WORD_COLUMNS = COLUMNS[1:]
 ROPE_BASE = 10_000.0
+#: The room a speaker's cache grows by, in rows, and the room a copy keeps past its rows written (multi-aircraft
+#: control D183: 256 s at Δ = 4 s; the attention reads only the rows written, so the room changes no number).
+CACHE_STEP_ROWS = 64
 
 
 @dataclass(frozen=True)
@@ -159,8 +162,9 @@ class Layer(nn.Module):
         batch, rows, d = x.shape
         head = d // self.heads
         start, end = past.rows, past.rows + rows
-        if end > past.keys.shape[2]:                 # a line longer than its room: twice the room, or the rows
-            past = past.grown(max(end, 2 * past.keys.shape[2]))
+        room = past.keys.shape[2]
+        if end > room:                               # a line longer than its room: grown by steps (D183)
+            past = past.grown(room + CACHE_STEP_ROWS * math.ceil((end - room) / CACHE_STEP_ROWS))
         y = self.time_norm(x)
         q, k, v = self.time_qkv(y).reshape(batch, rows, 3, self.heads, head).permute(2, 0, 3, 1, 4)
         cos, sin = rope_angles(time_s, head, self.rope_base)

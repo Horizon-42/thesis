@@ -508,6 +508,36 @@ def test_a_copy_continued_with_the_same_inputs_and_numbers_says_what_the_origina
     assert np.array_equal(speaker.permitted().masks[RUNWAY], twin.permitted().masks[RUNWAY])
 
 
+def test_a_copy_keeps_its_rows_and_one_step_of_room_in_its_own_storage(words, monkeypatch):
+    """D183 (1), (2): a copy's cache is its own storage, made once (no second clone), holding the rows written and one
+    step of room (`CACHE_STEP_ROWS`), whatever the room of the speaker copied."""
+    from ts_transformer.prior.model import CACHE_STEP_ROWS
+
+    model, rows = setup(words, seed=4, count=4, rows=50)
+    speaker = Speaker(model, words, [finals()] * 4, capacity=400)
+    first = int(rows.first[0].nonzero()[0, 0])
+    speaker.observe(rows.between(0, first), [spread(4, r) for r in range(first)])
+    drawn = numbers(5, 4, 10)
+    for r in range(first, first + 10):
+        speaker.speak(rows.between(r, r + 1), spread(4, r), drawn[r - first])
+    written = speaker.past[0].rows
+    assert written == first + 10 and speaker.past[0].keys.shape[2] == 400
+    clones = []
+    real = torch.Tensor.clone
+    monkeypatch.setattr(torch.Tensor, "clone", lambda self, *a, **k: clones.append(1) or real(self, *a, **k))
+    picked = speaker.copy([2, 2, 0])
+    monkeypatch.undo()
+    assert clones == []
+    for p, q in zip(speaker.past, picked.past):
+        assert q.rows == written and q.keys.shape[2] == q.values.shape[2] == q.present.shape[1] == written + CACHE_STEP_ROWS
+        assert torch.equal(q.keys[:, :, :written], p.keys[[2, 2, 0], :, :written])
+        assert torch.equal(q.present[:, :written], p.present[[2, 2, 0], :written]) and not q.present[:, written:].any()
+        before = p.keys.clone()
+        q.keys.add_(1.0)
+        q.present.zero_()
+        assert torch.equal(p.keys, before) and p.present[:, :written].any()        # its own storage
+
+
 class Recorder(torch.nn.Module):
     """An added module (§7 item 5) whose output is zero; it keeps every input of the caller it is given."""
 

@@ -94,6 +94,29 @@ def test_a_past_that_outgrows_its_room_grows_and_gives_the_same_rows(words):
     torch.testing.assert_close(outputs[1], outputs[0], rtol=0, atol=0, equal_nan=True)
 
 
+def test_a_past_grows_by_steps_of_the_cache(words):
+    """D183 (3): a line that outgrows its room grows by steps of `CACHE_STEP_ROWS` (as many as its rows need), never
+    doubles: one row past a room of 2 gives 2 + 64; a sentence written at once into a room of 2, 2 + 64·k for the
+    fewest k."""
+    from ts_transformer.prior.model import CACHE_STEP_ROWS
+
+    model = small_prior(words)
+    rows = collate(sentences(words), CPU)
+    batch = rows.present.shape[0]
+    with torch.no_grad():
+        _, _, past = model.extend(rows.between(0, 2), model.no_past(batch, 2))
+        assert {(p.rows, p.keys.shape[2]) for p in past} == {(2, 2)}
+        _, _, past = model.extend(rows.between(2, 3), past)
+        assert {(p.rows, p.keys.shape[2], p.values.shape[2], p.present.shape[1]) for p in past} == \
+            {(3, 2 + CACHE_STEP_ROWS, 2 + CACHE_STEP_ROWS, 2 + CACHE_STEP_ROWS)}
+        long = collate(sentences(words, count=8), CPU)                   # rows past one step: two steps
+        _, _, past = model.extend(long, model.no_past(long.present.shape[0], 2))
+    written = long.present.shape[1]
+    assert written - 2 > CACHE_STEP_ROWS
+    steps = -(-(written - 2) // CACHE_STEP_ROWS)
+    assert {(p.rows, p.keys.shape[2]) for p in past} == {(written, 2 + steps * CACHE_STEP_ROWS)}
+
+
 def test_a_shift_of_every_time_changes_no_output(words):
     model = small_prior(words)
     rows = collate(sentences(words), CPU)
