@@ -4,6 +4,7 @@ fixture of `test_post_window_loop`); every write root under tmp."""
 from __future__ import annotations
 
 import dataclasses
+import gc
 import json
 import os
 from dataclasses import asdict, replace
@@ -192,9 +193,11 @@ def test_speakers_give_the_groups_and_the_record_of_speaking_here(setup, tmp_pat
     record = speak_round(model, context, windows, settings, 0, here)
     speakers = Speakers(context, settings, 2, CPU)
     try:
+        assert gc.get_freeze_count() > 0                  # D181 (60): frozen before the fork, while the workers live
         assert speak_round(model, context, windows, settings, 0, there, speakers) == record
     finally:
         speakers.close()
+    assert gc.get_freeze_count() == 0
     assert sorted(p.name for p in there.iterdir()) == ["groups_0.pt", "groups_1.pt"]
     assert all((here / name).read_bytes() == (there / name).read_bytes() for name in ("groups_0.pt", "groups_1.pt"))
     torch.save(model.state_dict(), tmp_path / "state.pt")

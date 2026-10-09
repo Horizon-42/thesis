@@ -151,9 +151,10 @@ def branch_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop,
     again = [w for w in everything if rules.again(ends[w])]
     if not again:
         return BranchRound(results, [], [], [])
-    first_samples = first.samples(split)
     #: each window spoken again (its place in ``again``): its varied aircraft and their branch points (ticks)
     varied = {k: rules.varied(windows[w], first, first.members[w], ends[w]) for k, w in enumerate(again)}
+    read = sorted({first.members[again[k]][v] for k in varied for v, points in varied[k] if points})
+    first_samples = dict(zip(read, first.samples(split, read)))       # the varied aircraft's only (D181 (58))
     second = window_loop(again)
     numbers = sources(second, again)
     while second.speaking.observing:
@@ -174,7 +175,8 @@ def branch_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop,
                         drawn.append(rules.continuation(places[again[k]], m, v, t, j) if m == v
                                      else copying.deepcopy(numbers[b]))
             ends_k = copies.finish(drawn)
-            made = copies.samples(split)
+            read = [copies.members[i * continuations + j][v] for i, (_, v) in enumerate(due) for j in range(continuations)]
+            made = dict(zip(read, copies.samples(split, read)))
             for i, (k, v) in enumerate(due):
                 w = again[k]
                 b_first = first.members[w][v]
