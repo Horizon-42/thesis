@@ -8,9 +8,9 @@ shared branch round's (`experiments.post_branches.backward_round`); this module 
   other aircraft of that loss), `GO_AROUND`, or `END` (v's outcome).
 - **The candidate points** (`points`): back from the event every `COARSE_S`, the latest first, at most `POINTS`, never
   before v's first predicted step; ticks of the window's grid.
-- **A continuation avoids the event** (`avoids`), judged at `AFTER_S` after it (`judged_until`): for a loss, the pair
-  keeps its separation and v answers for no loss; for a go-around, v says none; for another end, v's same outcome does
-  not happen (the letter of D182: an aircraft that answers for a loss instead does not end with its outcome).
+- **A continuation avoids the event** (`avoids`, D182 (3)), judged at `AFTER_S` after it (`judged_until`): v answers for
+  no loss, for every kind of event (a worse end, a loss of separation, does not take the event's place), and for a
+  loss the pair keeps its separation, for a go-around v says none, for another end v's same outcome does not happen.
 - **The search** (`search`): the first point going back where a continuation avoids the event is the decision point,
   a group; then the point `FINE_S` after it, a group when a continuation of it avoids the event; then point B, the first
   point (from the decision point back, within the same points) where a continuation avoids the event with no go-around
@@ -110,11 +110,14 @@ def judged_until(happened: Event, interval_s: float) -> int:
 
 def avoids(happened: Event, *, answered: str | None, partner_answered_v: bool, ended: str | None,
            go_around: bool) -> bool:
-    """Whether a continuation avoids ``happened`` (module docstring), from what it did by the judged tick: the other
-    aircraft of the loss v answered for (``answered``, None: none), whether the event's partner answered for a loss with
-    v (``partner_answered_v``), v's outcome if it ended (``ended``) and whether it said a go-around (``go_around``)."""
+    """Whether a continuation avoids ``happened`` (module docstring, D182 (3)), from what it did by the judged tick: the
+    other aircraft of the loss v answered for (``answered``, None: none), whether the event's partner answered for a loss
+    with v (``partner_answered_v``), v's outcome if it ended (``ended``) and whether it said a go-around
+    (``go_around``). Every kind of event requires that v answered for no loss."""
+    if answered is not None:
+        return False
     if happened.kind == LOSS:
-        return answered is None and not partner_answered_v
+        return not partner_answered_v
     if happened.kind == GO_AROUND:
         return not go_around
     return ended != happened.outcome

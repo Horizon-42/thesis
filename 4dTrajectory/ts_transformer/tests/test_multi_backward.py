@@ -46,6 +46,8 @@ def test_the_event_and_its_kind():
 
 
 def test_a_continuation_avoids_its_event():
+    """D182 (3): for every kind of event, v answers for no loss by the judged tick; then a loss's pair keeps its
+    separation, a go-around is not said, another end's outcome does not happen. A worse end does not avoid an event."""
     loss, ga, end = Event(30, LOSS, partner="B"), Event(50, GO_AROUND), Event(80, END, outcome="timeout")
     assert avoids(loss, answered=None, partner_answered_v=False, ended=None, go_around=True)
     assert not avoids(loss, answered="B", partner_answered_v=False, ended=None, go_around=False)
@@ -53,9 +55,12 @@ def test_a_continuation_avoids_its_event():
     assert not avoids(loss, answered=None, partner_answered_v=True, ended=None, go_around=False)
     assert avoids(ga, answered=None, partner_answered_v=False, ended="landed", go_around=False)
     assert not avoids(ga, answered=None, partner_answered_v=False, ended="landed", go_around=True)
+    assert not avoids(ga, answered="B", partner_answered_v=False, ended="lost_separation", go_around=False)
     assert avoids(end, answered=None, partner_answered_v=False, ended=None, go_around=True)
     assert avoids(end, answered=None, partner_answered_v=False, ended="landed", go_around=False)
     assert not avoids(end, answered=None, partner_answered_v=False, ended="timeout", go_around=False)
+    assert not avoids(end, answered="B", partner_answered_v=False, ended="lost_separation", go_around=False)
+    assert not avoids(end, answered="B", partner_answered_v=False, ended=None, go_around=False)    # its loss, still flown
 
 
 def _searched(candidates, judged):
