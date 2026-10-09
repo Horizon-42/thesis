@@ -2,6 +2,7 @@
 
 只放最新一条命令，新命令整份覆盖，不是日志（过程记在 `readouts/2026-10-06_stage_d_implementation_log.md`）。
 2026-10-09 夜，Claude 写，用户转发。上一条（77 (b)、requests 71–77）你已做完；它的"二"已由用户的测量计划代替（日志 §18）。
+同夜在原文上追加了第 3 条（D189），原来的第 3、4 条顺延为第 4、5 条。
 
 ```
 你 requests 的 78、79 条处理完了：用户交给 Claude 评估，两条都接受，写成 multi_control D188。
@@ -22,10 +23,25 @@
    - worker 在第一次用 CUDA 之前设 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True；训练那一遍的主进程不变。
    - 这是进程设置，不改数字：GPU 上同一批开和不开各说一次，批的记录和组文件相同。
    - 小改动，不用审核 agent。
-3. 以上提交后，在 GPU 上用 multi_profile 重新量一次（D179）：设置同 §18（MC6 的设置、--branching backward、
+3. D189（新）：一步的时间拆开量，再砍两处。第 1、2 条提交后做。
+   - 先量：multi_speed 在 GPU 上量 backward 批（设置同 §18：MC6 的设置，跨度 300、600、1200 s 各一批，
+     需要就给 multi_speed 加 --branching）。在现有的分段里再细分：
+     说话器里：模型、遮罩（文法、程序、调用方各一）、等 GPU 结果拿回 CPU 的时间；
+     窗口循环里：每行输入、交通输入、落地登记、场景加间隔判定加谁承担、记录；
+     执行器；再按每步的行数拟合"每步固定开销 + 每行开销"。量的时候主机和 GPU 上不跑别的。
+   - 再砍（都是 D187：提交前在固定输入上核对一次，逐位相同，旧写法删掉，新写法好读）：
+     (1) 说话器每列只把抽中的词拿回 CPU；这一行的记录（被禁止的概率、允许的词、抽中的概率、复飞那两项）
+         留在 GPU 上，一行结束时一次拿回。能在 CPU 上直接算的（允许的词本来就来自 CPU 的遮罩）就别绕 GPU。
+     (2) 测量确认交通输入是窗口循环里最大的一块，就把它改成按批算（post/edges 的 tokens、post/traffic 的 traffic、
+         WindowLoop._traffic）；向量化后最后几位若和逐架的不同，报告给用户，同 D186 (3)，在那之前不用。
+   - 核对：window_behaviour，C 和 D 的窗口逐位相同；prior_behaviour 相同；各自的测试。审核走 agent（范围是 diff）。
+   - 砍完再用 multi_speed 量一次，前后对比写进日志。
+   - 别的（场景、判定和谁承担按批算；文法遮罩搬到 GPU；程序遮罩不动，只占约 2%）先不做：带着测量的数写进
+     requests，由用户定。
+4. 以上提交后，在 GPU 上用 multi_profile 重新量一次（D179）：设置同 §18（MC6 的设置、--branching backward、
    从 run worktree 跑，跑完先断开数据链接再删）。和 §18 比：batch 0、23、86 的时间、保留和已分配峰值、
    搜索占比，以及 4 个 worker 能不能放下。量的时候主机和 GPU 上不跑别的。
-4. 合并前跑一次完整 ts 测试套件，把提交号和通过数写进日志；报告 dev-multi-control 能否快进 dev-two-tier，由用户合并。
+5. 合并前跑一次完整 ts 测试套件，把提交号和通过数写进日志；报告 dev-multi-control 能否快进 dev-two-tier，由用户合并。
    下一个 campaign（起点、轮数、worker 数）你按新的 profile 提出，由用户定。
 
 日志写一行；requests 整份重写，78、79 删掉。
