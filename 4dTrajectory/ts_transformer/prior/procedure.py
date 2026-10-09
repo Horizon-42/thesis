@@ -34,7 +34,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 
 import numpy as np
 
@@ -231,6 +231,25 @@ class ProcedureMasks:
         out.levels, out.bands = self.levels, self.bands
         out.n_candidates = self.n_candidates[indices].copy()
         out.arrays = self.arrays.take(np.asarray(indices, dtype=np.int64))
+        return out
+
+    @staticmethod
+    def together(parts: Sequence[tuple[ProcedureMasks, Sequence[int]]]) -> ProcedureMasks:
+        """The masks of aircraft of several copies of one batch's as one (a speaker's aircraft together, multi-aircraft
+        control D188): ``parts`` each masks and their aircraft (repeats permitted), in that order, with their state."""
+        index = [np.asarray(list(aircraft), dtype=np.int64) for _, aircraft in parts]
+
+        def rows(get: Callable[[ProcedureMasks], np.ndarray]) -> np.ndarray:
+            return np.concatenate([get(masks)[i] for (masks, _), i in zip(parts, index)])
+
+        first = parts[0][0]
+        out = object.__new__(ProcedureMasks)
+        out.finals = [masks.finals[b] for (masks, _), i in zip(parts, index) for b in i]
+        out.words, out.levels, out.bands = first.words, first.levels, first.bands
+        for name in ("joined", "dipped", "cleared", "entry_low", "n_candidates"):
+            setattr(out, name, rows(lambda masks, name=name: getattr(masks, name)))
+        out.arrays = _FinalArrays(**{name: rows(lambda masks, name=name: getattr(masks.arrays, name))
+                                     for name in _FinalArrays.__dataclass_fields__})
         return out
 
     def keep(self, earlier: ProcedureMasks, aircraft: np.ndarray) -> None:

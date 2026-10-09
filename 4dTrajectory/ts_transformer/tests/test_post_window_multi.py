@@ -210,6 +210,54 @@ def test_a_copy_of_a_window_of_several_aircraft_says_and_flies_what_it_does(setu
         assert np.allclose(a.states, b.states, rtol=0.0, atol=STATE_BOUND_M)
 
 
+def test_windows_of_loops_at_different_ticks_flown_together_say_and_fly_what_each_does_alone(setup):
+    """D188: copies of the window taken at two ticks (the last aircraft not yet joined in the first) flown together in
+    one loop, each window at its own tick (its origin the ticks it is behind), then joined again without one window and
+    once more alone (the ticks before any of its aircraft joined left out): each window says and flies what its copy
+    flown alone does, aircraft by aircraft, and reads its own ticks."""
+    s = setup
+    _, loop_of = _multi(s)
+    loop = loop_of(_with_module(s["base"]))
+    numbers = _numbers(len(JOINS))
+
+    def step(loop, streams):
+        loop.step(np.stack([n.random(len(COLUMNS)) if said else np.zeros(len(COLUMNS))
+                            for n, said in zip(streams, loop.speaking.said_now())]))
+
+    def twins(states):
+        out = [np.random.default_rng() for _ in states]
+        for twin, state in zip(out, states):
+            twin.bit_generator.state = state
+        return out
+
+    early, late = JOINS[2] - 2, JOINS[2] + 5
+    while loop.speaking.t < early:
+        step(loop, numbers)
+    a, a_numbers = loop.copy([0]), [n.bit_generator.state for n in numbers]
+    while loop.speaking.t < late:
+        step(loop, numbers)
+    b, b_numbers = loop.copy([0]), [n.bit_generator.state for n in numbers]
+    together = WindowLoop.together([(a, [0]), (b, [0, 0])], CPU)
+    assert together.speaking.t == late and together.origins.tolist() == [late - early, 0, 0]
+    assert together.speaking.join_ticks.tolist() == [late - early + j for j in JOINS] + list(JOINS) * 2
+    streams = twins(a_numbers) + twins(b_numbers) + twins(b_numbers)
+    for _ in range(3):
+        step(together, streams)
+    kept = [0, 2]                                         # window 1 leaves: its aircraft and numbers with it
+    together = WindowLoop.together([(together, kept)], CPU)
+    streams = streams[:3] + streams[6:]
+    for _ in range(4):
+        step(together, streams)
+    alone = WindowLoop.together([(together, [0])], CPU)  # its origin, the ticks before its aircraft joined, left out
+    assert alone.origins.tolist() == [0] and alone.speaking.t == early + 7
+    first = alone.finish(streams[:3])
+    second = together.copy([1]).finish(streams[3:])
+    for flown, reference in ((first, a.finish(twins(a_numbers))), (second, b.finish(twins(b_numbers)))):
+        for x, y in zip(flown, reference):
+            assert np.array_equal(x.words, y.words) and x.outcome == y.outcome and x.loss_step == y.loss_step
+            assert np.allclose(x.states, y.states, rtol=0.0, atol=STATE_BOUND_M)
+
+
 def test_a_callers_rule_of_who_answers_is_asked_with_the_windows_commanded_aircraft_first(setup):
     """D145's place (post-training §9 item 3): the loop asks the caller's rule, for each loss of a window, which of its
     commanded aircraft answer, with the judged set holding the commanded aircraft still flown first; a rule that

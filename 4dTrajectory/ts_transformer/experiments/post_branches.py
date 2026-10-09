@@ -29,9 +29,9 @@ from __future__ import annotations
 
 import copy as copying
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Generator, Mapping, Sequence
 
 import numpy as np
 import torch
@@ -268,7 +268,7 @@ class BackwardRound(BranchRound):
     branch round's parts, and each group's depth (the seconds from its point to its event, in the groups' order), the
     searches made (one a varied aircraft with a candidate point) and those that found a decision point, the
     continuations flown only to the event + 60 s and those flown to their window's end; and, as information on what
-    the search costs (its batches are one point of one window, MC12): its seconds, its loop steps and the rows they
+    the search costs (its points stepped together in one loop, D188): its seconds, the loop's steps and the rows they
     flew (each step's rows summed)."""
 
     depths_s: list[float]
@@ -279,6 +279,37 @@ class BackwardRound(BranchRound):
     search_s: float
     search_steps: int
     search_rows: int
+
+
+@dataclass
+class _Search:
+    """One varied aircraft's search in a backward batch (`backward_round`): its window spoken again (``k`` its place in
+    ``again``, ``w`` in the batch), the aircraft ``v``, its event and judged tick, the search's steps
+    (`multi.backward.search`), the part flown for the point it tries, and its groups in the order chosen."""
+
+    k: int
+    w: int
+    v: int
+    happened: backward.Event
+    until: int
+    steps: Generator[tuple[str, int], Sequence[backward.Trial] | None, backward.Found]
+    trying: _Part | None = None
+    groups: list[tuple[Group, float] | None] = field(default_factory=list)
+
+
+@dataclass
+class _Part:
+    """Windows of the joint loop that one search flies (`backward_round`): a point's continuations, flown to the judged
+    tick and, once chosen (``chosen``: the place of its group among its search's), on to their window's end; or
+    (``base``) the decision point's copy flown on its first-sentence numbers to the fine point. Its ``windows`` and
+    each of their rows' numbers, in order."""
+
+    search: _Search
+    point: int
+    windows: int
+    streams: list[np.random.Generator]
+    base: bool = False
+    chosen: int | None = None
 
 
 def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop, list[int], dict[int, np.ndarray]]],
@@ -293,12 +324,22 @@ def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loo
     `multi.backward`): the first pass and the windows spoken again as `branch_round`'s (``rules``: stage D's,
     `multi.credit.rules`); each varied aircraft's event and candidate points (`multi.backward.event`, `points`); the
     second pass copies each window spoken again at its candidate points and holds the copies on ``host`` (D94's check as
-    `branch_round`'s, up to each window's latest point); then each varied aircraft of a window that did not differ is
-    searched (`multi.backward.search`), one point's ``continuations`` on ``device`` at a time: a point's copies flown
-    to the event + 60 s and judged (`_trials`), a point chosen flown on to its window's end and made a group (D142: its
-    W of D141, v's rows from the point). The fine point is the decision point's copy flown on its first sentences'
-    numbers (every aircraft's) for 16 s. How the continuations are batched (stage D's reading, MC12): one point of one
-    window at a time, its K continuations one batch."""
+    `branch_round`'s, up to each window's latest point). Then every varied aircraft of a window that did not differ is
+    searched (`multi.backward.search`), the searches stepped together on ``device`` (D188):
+
+    - **One loop.** The joint loop holds every search's current point: its ``continuations`` copies of the point's held
+      window, v on numbers of its own, the other aircraft on their first-sentence numbers from the point. A step says
+      and flies one row of every window in it, each window at its own tick (`WindowLoop.together`).
+    - **When a continuation stops.** A point's continuations are flown to the event + 60 s (or their end, if earlier),
+      then judged (`_trials`) and the search sent their trials; a point not chosen leaves the loop there.
+    - **A point chosen** goes on in the same loop to its window's end, beside the points then tried, and its group is
+      made when its windows end (D142: its W of D141, v's rows from the point).
+    - **Joining.** Before a step, the parts that ended leave and the searches' next points join: a point from its held
+      copy; the fine point from the decision point's copy, flown first in the loop for 16 s on every aircraft's
+      first-sentence numbers, its continuations then copied from it.
+
+    The groups are in the order of the searches (the windows', then their varied aircraft's) and, within a search, of
+    their points chosen; a window's held copies are freed once its searches are done."""
     window_loop, sources = _batch_loops(model, start_loop, windows, places, sentences, flights, geometries, rosters,
                                         finals, words, interval_s=interval_s, variant=variant,
                                         edges_reference=edges_reference, faults=faults, device=device, rules=rules,
@@ -350,95 +391,156 @@ def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loo
     del second
     read = sorted({first.members[again[k]][v] for k, plan in plans.items() for v, _, points in plan if points})
     first_samples = dict(zip(read, first.samples(split, read)))
-    groups: list[Group] = []
-    depths: list[float] = []
-    counted = {"searches": 0, "found": 0, "to_event": 0, "to_end": 0, "steps": 0, "rows": 0}
-    search_s = 0.0
-
-    def flown(loop: WindowLoop, until: int, streams: Sequence[np.random.Generator]) -> None:
-        """``loop`` flown to the tick ``until`` (or its end, if earlier) on ``streams``, its steps and rows counted."""
-        while loop.speaking.t < until and loop.speaking.alive.any():
-            loop.step(_draws(loop, streams))
-            counted["steps"] += 1
-            counted["rows"] += len(loop.order)
     fine_ticks = backward.ticks_of(backward.FINE_S, interval_s)
-    for k, w in enumerate(again):
-        for v, happened, points in plans[k] if places[w] not in differed else []:
-            if not points:
-                continue
-            until = backward.judged_until(happened, interval_s)
-            b_first = first.members[w][v]
-            tried: dict[str, Any] = {}
+    searches = [_Search(k, w, v, happened, backward.judged_until(happened, interval_s),
+                        backward.search(points, fine_ticks))
+                for k, w in enumerate(again) if places[w] not in differed
+                for v, happened, points in plans[k] if points]
+    left = {k: sum(s.k == k for s in searches) for k in range(len(again))}
+    for key in [key for key in held if not left[key[0]]]:        # a window searched for nothing: its copies freed
+        del held[key]
+    counted = {"found": 0, "to_event": 0, "to_end": 0, "steps": 0, "rows": 0}
+    joining: list[tuple[_Part, WindowLoop, list[int]]] = []     # parts to join the loop, each from its source's windows
 
-            def trial(p: int) -> list[backward.Trial]:
-                tried.clear()                        # the point tried before: the device holds one point's copies
-                if (k, p) in held:
-                    state, streams = held[(k, p)]
-                else:                                # the fine point: the decision point's copy flown on 16 s
-                    state, streams = held[(k, p - fine_ticks)]
-                    state, streams = state.copy([0], device=device), [copying.deepcopy(n) for n in streams]
-                    flown(state, p, streams)
-                copies = state.copy([0] * continuations, device=device)
-                drawn = [rules.continuation(places[w], m, v, p, j) if m == v else copying.deepcopy(streams[m])
-                         for j in range(continuations) for m in range(len(streams))]
-                flown(copies, until, drawn)
-                counted["to_event"] += continuations
-                tried.update(point=p, copies=copies, drawn=drawn)
-                return _trials(copies, v, happened, p)
+    def tried(s: _Search, point: int, streams: Sequence[np.random.Generator], source: WindowLoop, window: int) -> None:
+        """Point ``point``'s continuations of search ``s`` to join the loop: copies of ``source``'s ``window``, v on
+        its own numbers (D166 (26)), every other aircraft on ``streams`` (its first sentence's, from the point)."""
+        drawn = [rules.continuation(places[s.w], m, s.v, point, j) if m == s.v else copying.deepcopy(streams[m])
+                 for j in range(continuations) for m in range(len(streams))]
+        s.trying = _Part(s, point, continuations, drawn)
+        joining.append((s.trying, source, [window] * continuations))
+        counted["to_event"] += continuations
 
-            def chosen(p: int) -> None:
-                copies, drawn = tried["copies"], tried["drawn"]
-                before = copies.speaking.t
-                ends_k = copies.finish(drawn)
-                counted["steps"] += copies.speaking.t - before
-                counted["rows"] += (copies.speaking.t - before) * len(copies.order)
-                rows_v = [copies.members[j][v] for j in range(continuations)]
-                made = dict(zip(rows_v, copies.samples(split, rows_v)))
-                kept = tuple(Sentence(*made[b], rules.reward([ends_k[c] for c in copies.members[j]]),
-                                      _until(copies, b, len(windows[w].joined)))
-                             for j, b in enumerate(rows_v))
-                join = int(first.speaking.join_ticks[b_first])
-                rows, permitted, tokens = first_samples[b_first]
-                groups.append(Group(places[w], p - join, Sentence(rows, permitted, tokens, rules.reward(ends[w]),
-                                                                  _until(first, b_first, len(windows[w].joined))),
-                                    kept, varied=v))
-                depths.append((happened.tick - p) * interval_s)
+    def ask(s: _Search, answer: Sequence[backward.Trial] | None) -> None:
+        """Search ``s`` sent ``answer`` (the trials of the point it tried; None to start it) and stepped on to the next
+        point it tries: a point chosen stays in the loop for its group; a point to try joins it (the fine point first
+        as the decision point's copy flown to it)."""
+        while True:
+            try:
+                kind, point = s.steps.send(answer)
+            except StopIteration as stop:
+                counted["found"] += stop.value.decision is not None
+                left[s.k] -= 1
+                if not left[s.k]:                         # the window's searches are done: its copies freed
+                    for key in [key for key in held if key[0] == s.k]:
+                        del held[key]
+                return
+            if kind == backward.CHOOSE:
+                s.trying.chosen = len(s.groups)
+                s.groups.append(None)
                 counted["to_event"] -= continuations
                 counted["to_end"] += continuations
+                answer = None
+                continue
+            if (s.k, point) in held:
+                state, streams = held[(s.k, point)]
+                tried(s, point, streams, state, 0)
+            else:                                         # the fine point: the decision point's copy flown on first
+                state, streams = held[(s.k, point - fine_ticks)]
+                s.trying = _Part(s, point, 1, [copying.deepcopy(n) for n in streams], base=True)
+                joining.append((s.trying, state, [0]))
+            return
 
-            began = time.perf_counter()
-            found = backward.search(points, fine_ticks, trial, chosen)
-            search_s += time.perf_counter() - began
-            tried.clear()
-            counted["searches"] += 1
-            counted["found"] += found.decision is not None
-        for key in [key for key in held if key[0] == k]:     # its copies released once its searches are done
-            del held[key]
-    return BackwardRound(results, groups, [places[w] for w in again], differed, depths, counted["searches"],
-                         counted["found"], counted["to_event"], counted["to_end"], search_s, counted["steps"],
-                         counted["rows"])
+    def group(part: _Part, joint: WindowLoop, own: Sequence[int]) -> tuple[Group, float]:
+        """The group of a point chosen whose windows ``own`` (in the joint loop) have ended, and its depth: its windows
+        taken out of the joint loop, so that its records are those of its continuations alone."""
+        s = part.search
+        taken = joint.copy(own)
+        ended = taken.results()
+        rows_v = [rows[s.v] for rows in taken.members]
+        made = dict(zip(rows_v, taken.samples(split, rows_v)))
+        kept = tuple(Sentence(*made[b], rules.reward([ended[c] for c in rows]),
+                              _until(taken, b, len(windows[s.w].joined))) for rows, b in zip(taken.members, rows_v))
+        b_first = first.members[s.w][s.v]
+        join = int(first.speaking.join_ticks[b_first])
+        sentence, permitted, tokens = first_samples[b_first]
+        return (Group(places[s.w], part.point - join, Sentence(sentence, permitted, tokens, rules.reward(ends[s.w]),
+                                                               _until(first, b_first, len(windows[s.w].joined))),
+                      kept, varied=s.v), (s.happened.tick - part.point) * interval_s)
+
+    def settled(joint: WindowLoop | None, flying: Sequence[_Part]) -> list[tuple[_Part, range]]:
+        """The parts of the joint loop still flown, each with its windows in it: a part at its end is judged (a point
+        tried), made into the fine point's continuations (the decision point's copy), or made into its group (a point
+        chosen)."""
+        out, at = [], 0
+        for part in flying:
+            own, at = range(at, at + part.windows), at + part.windows
+            s = part.search
+            tick = joint.speaking.t - int(joint.origins[own[0]])
+            alive = bool(joint.speaking.alive[[b for w in own for b in joint.members[w]]].any())
+            if part.base:
+                if alive and tick < part.point:
+                    out.append((part, own))
+                else:
+                    tried(s, part.point, part.streams, joint, own[0])
+                continue
+            if part.chosen is None:
+                if alive and tick < s.until:
+                    out.append((part, own))
+                    continue
+                ask(s, _trials(joint, own, s.v, s.happened, part.point))
+                if part.chosen is None:                   # not chosen: its continuations end here
+                    continue
+            if alive:
+                out.append((part, own))
+            else:
+                s.groups[part.chosen] = group(part, joint, own)
+        return out
+
+    began = time.perf_counter()
+    for s in searches:
+        ask(s, None)
+    joint: WindowLoop | None = None
+    flying: list[_Part] = []
+    while True:
+        while True:                     # the parts ended leave, the searches' next points join, until none does
+            kept = settled(joint, flying)
+            if not joining and len(kept) == len(flying):
+                break
+            # the joint loop's own windows (those kept, and the fine points' copies of a decision point's) one part of
+            # it, then the points from their held copies; the joint loop replaced is freed as it is copied
+            ours = [(part, own) for part, source, own in joining if source is joint]
+            theirs = [(part, source, own) for part, source, own in joining if source is not joint]
+            mine = [w for _, own in kept for w in own] + [w for _, own in ours for w in own]
+            selected = ([(joint, mine)] if mine else []) + [(source, own) for _, source, own in theirs]
+            flying = [part for part, _ in kept] + [part for part, _ in ours] + [part for part, _, _ in theirs]
+            joining.clear()
+            joint = WindowLoop.together(selected, device, spent=joint if mine else None) if flying else None
+        if not flying:
+            break
+        joint.step(_draws(joint, [n for part in flying for n in part.streams]))
+        counted["steps"] += 1
+        counted["rows"] += len(joint.order)
+    search_s = time.perf_counter() - began
+    del held
+    groups = [g for s in searches for g in s.groups]
+    return BackwardRound(results, [g for g, _ in groups], [places[w] for w in again], differed,
+                         [depth for _, depth in groups], len(searches), counted["found"], counted["to_event"],
+                         counted["to_end"], search_s, counted["steps"], counted["rows"])
 
 
-def _trials(copies: WindowLoop, v: int, happened: backward.Event, point: int) -> list[backward.Trial]:
-    """Each continuation of a point (``copies``: its windows, v the varied aircraft's place among each one's aircraft)
-    judged at the event + 60 s or its end (`multi.backward.avoids`): the loss v answered for, whether the event's partner
-    answered for one with v, v's outcome if it ended, and whether v said a go-around from ``point`` on."""
+def _trials(loop: WindowLoop, own: Sequence[int], v: int, happened: backward.Event, point: int) -> list[backward.Trial]:
+    """Each continuation of a point (``own``: its windows in ``loop``, v the varied aircraft's place among each one's
+    aircraft) judged at the event + 60 s or its end (`multi.backward.avoids`): the loss v answered for, whether the
+    event's partner answered for one with v, v's outcome if it ended, and whether v said a go-around from ``point``
+    on."""
     out = []
-    for rows in copies.members:
+    for w in own:
+        rows = loop.members[w]
         b = rows[v]
-        key = copies.records[b].key
-        if copies.loss[b] is not None:
+        key = loop.records[b].key
+        if loop.loss[b] is not None:
             ended: str | None = LOST_SEPARATION
-        elif not copies.speaking.alive[b] and not copies.speaking.ended[b]:
-            ended = copies.speaking.loop.outcome(b).outcome
+        elif not loop.speaking.alive[b] and not loop.speaking.ended[b]:
+            ended = loop.speaking.loop.outcome(b).outcome
         else:
             ended = None
-        partner = any(copies.loss[c] is not None and copies.other[c] == key and copies.records[c].key == happened.partner
+        partner = any(loop.loss[c] is not None and loop.other[c] == key and loop.records[c].key == happened.partner
                       for c in rows)
-        said = copies.speaking.said(b)
-        own = point - int(copies.speaking.join_ticks[b]) - copies.speaking.start   # the point's row of v's sentence
-        go_around = bool((said[max(own, 0):, RUNWAY] == RUNWAY_GO_AROUND).any())
-        out.append(backward.Trial(backward.avoids(happened, answered=copies.other[b] if copies.loss[b] is not None
+        said = loop.speaking.said(b)
+        mine = loop.own_row(b, point) - loop.speaking.start         # the point's row of v's sentence
+        go_around = bool((said[max(mine, 0):, RUNWAY] == RUNWAY_GO_AROUND).any())
+        out.append(backward.Trial(backward.avoids(happened, answered=loop.other[b] if loop.loss[b] is not None
                                                   else None, partner_answered_v=partner, ended=ended,
                                                   go_around=go_around), go_around))
     return out

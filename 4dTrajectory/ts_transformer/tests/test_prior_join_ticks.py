@@ -363,3 +363,38 @@ def test_a_row_refused_at_a_flights_first_predicted_step_leaves_the_loop_as_it_w
     never, refused = flown(False), flown(True)
     for b in range(4):
         assert np.array_equal(never.said(b), refused.said(b)) and np.array_equal(never.states(b), refused.states(b))
+
+
+def test_loops_flown_together_move_each_parts_rows_and_pad_a_copys_narrower_rows():
+    """D188: the records of the rows said (`Speaker.together`) and the inputs of every tick (`SpeakingLoop.together`)
+    of loops flown together: each part's rows moved by its shift (a row before its first: the fill, no row present), its
+    first rows left out below 0, and a row narrower than the widest (a copy's batch has fewer candidates than the batch
+    it was copied from) padded to it."""
+    from types import SimpleNamespace
+
+    from ts_transformer.experiments.prior_speaking_loop import _inputs_together
+    from ts_transformer.prior.batch import RowTensors
+    from ts_transformer.prior.speaker import _rows_together
+
+    wide = [np.full((2, 4), r + 1.0) for r in range(2)] + [np.full((2, 3), 3.0)]       # copied before its third row
+    other = [np.full((1, 4), 10.0 + r) for r in range(5)]
+    out = _rows_together([wide, other], [np.array([1]), np.array([0, 0])], [1, -1], -1.0)
+    assert len(out) == 4 and all(row.shape == (3, 4) for row in out)
+    assert out[0][0].tolist() == [-1.0] * 4 and out[1][0].tolist() == [1.0] * 4
+    assert out[3][0].tolist() == [3.0, 3.0, 3.0, -1.0]                                   # the narrower row padded
+    assert [row[1:, 0].tolist() for row in out] == [[11.0, 11.0], [12.0, 12.0], [13.0, 13.0], [14.0, 14.0]]
+
+    def row(b, k, value):                                     # one tick's inputs of b aircraft and k candidates
+        return RowTensors(np.full((b, 1), value), np.zeros((b, 1, 4)), np.full((b, 1, k, 7), value),
+                          np.ones((b, k), bool), np.zeros((b, 1), np.int64), np.zeros((b, 1), bool),
+                          np.zeros((b, 1, 2)), np.zeros((b, 1, 3), np.int64), np.zeros((b, 1, 5)),
+                          np.ones((b, 1), bool), np.zeros((b, 1), bool), np.ones((b, 1), bool),
+                          np.zeros((b, 1, 5), np.int64))
+
+    copy = SimpleNamespace(_inputs=[row(1, 3, 1.0), row(1, 2, 2.0)])                  # narrower after it was copied
+    later = SimpleNamespace(_inputs=[row(1, 3, 5.0 + t) for t in range(4)])
+    ticks = _inputs_together([(copy, np.array([0]), 1), (later, np.array([0]), -1)], 3)
+    assert len(ticks) == 3 and all(t.candidates.shape == (2, 1, 3, 7) and t.valid.shape == (2, 3) for t in ticks)
+    assert not ticks[0].present[0, 0] and ticks[0].present[1, 0] and ticks[0].time_s[1, 0] == 6.0
+    assert ticks[2].time_s[0, 0] == 2.0 and ticks[2].valid[0].tolist() == [True, True, False]
+    assert ticks[2].candidates[0, 0, 2].tolist() == [0.0] * 7 and ticks[2].time_s[1, 0] == 8.0

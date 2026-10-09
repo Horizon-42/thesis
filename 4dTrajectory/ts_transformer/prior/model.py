@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import asdict, dataclass, fields
-from typing import Any, Callable, NamedTuple
+from typing import Any, Callable, NamedTuple, Sequence
 
 import torch
 from torch import nn
@@ -150,6 +150,32 @@ class Past(NamedTuple):
             torch.index_select(self.present[:, :rows], 0, index, out=present[:, :rows])
         else:
             present[:, :rows] = self.present[index, :rows]
+        return Past(keys, values, present, rows)
+
+    @staticmethod
+    def together(parts: Sequence[tuple[Past, torch.Tensor, int]], room: int, device: torch.device) -> Past:
+        """Lines of several pasts as one past (multi-aircraft control D188), in new storage of the rows written and
+        ``room`` rows more on ``device``: ``parts`` each a past, its lines (``[K]``, repeats permitted, on its device)
+        and the rows it moves later by (below 0: its first rows, which none of its lines has present, are left out), so
+        that every part's rows written end at one row. A line reads the same: its rows present are the same rows at the
+        same times (the rotation is by a row's time, not its place), the rows moved in before them not present."""
+        ends = {past.rows + shift for past, _, shift in parts}
+        if len(ends) != 1:
+            raise ValueError(f"the parts' rows, moved, end at the rows {sorted(ends)}, not one")
+        (rows,) = ends
+        like = parts[0][0].keys
+        batch = sum(len(index) for _, index, _ in parts)
+        keys = like.new_zeros((batch, like.shape[1], rows + room, like.shape[3]), device=device)
+        values = torch.zeros_like(keys)
+        present = torch.zeros((batch, rows + room), dtype=torch.bool, device=device)
+        at = 0
+        for past, index, shift in parts:
+            kept, into = slice(max(-shift, 0), past.rows), slice(max(shift, 0), rows)
+            lines = slice(at, at + len(index))
+            keys[lines, :, into] = torch.index_select(past.keys[:, :, kept], 0, index).to(device)
+            values[lines, :, into] = torch.index_select(past.values[:, :, kept], 0, index).to(device)
+            present[lines, into] = torch.index_select(past.present[:, kept], 0, index).to(device)
+            at += len(index)
         return Past(keys, values, present, rows)
 
     @classmethod

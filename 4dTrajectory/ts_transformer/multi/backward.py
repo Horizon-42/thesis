@@ -16,14 +16,15 @@ shared branch round's (`experiments.post_branches.backward_round`); this module 
   point (from the decision point back, within the same points) where a continuation avoids the event with no go-around
   said by v from the point to the judged tick, a group — B is the decision point when one of its avoiding
   continuations says none, and then one group. Every other point tried gives none; an event that no point avoids gives
-  none. The caller flies a point's continuations to the judged tick (``trial``), and a point chosen to its window's end
-  right after it is tried (``chosen``), so that one point's continuations are flown at a time.
+  none. The search is a generator of its steps, so that a caller steps the searches of a batch together (D188): it asks
+  for a point's continuations flown to the judged tick and judged (`TRY`), and says which point tried is chosen, to be
+  flown on to its window's end (`CHOOSE`).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Sequence
+from typing import Generator, Sequence
 
 from ts_transformer.multi.credit import Aircraft
 from ts_transformer.multi.credit import event as d143_event
@@ -36,6 +37,8 @@ BRANCHINGS = (GRID, BACKWARD)
 COARSE_S, FINE_S, POINTS, AFTER_S = 32.0, 16.0, 8, 60.0
 #: The kinds of an event (module docstring).
 LOSS, GO_AROUND, END = "loss", "go_around", "end"
+#: What a search asks of its caller (`search`): a point's continuations tried, or the point last tried chosen.
+TRY, CHOOSE = "try", "choose"
 
 
 @dataclass(frozen=True)
@@ -123,33 +126,34 @@ def avoids(happened: Event, *, answered: str | None, partner_answered_v: bool, e
     return ended != happened.outcome
 
 
-def search(candidates: Sequence[int], fine_ticks: int, trial: Callable[[int], Sequence[Trial]],
-           chosen: Callable[[int], None]) -> Found:
-    """The search of one varied aircraft (module docstring) over its ``candidates`` (the latest first): ``trial(p)``
-    flies point p's continuations to the judged tick and judges them; ``chosen(p)`` flies the point last tried to its
-    window's end and makes its group."""
+def search(candidates: Sequence[int], fine_ticks: int
+           ) -> Generator[tuple[str, int], Sequence[Trial] | None, Found]:
+    """The search of one varied aircraft (module docstring) over its ``candidates`` (the latest first), step by step:
+    it yields ``(TRY, p)``, and the caller flies point p's continuations to the judged tick and sends their trials back;
+    it yields ``(CHOOSE, p)`` for the point it tried last, and the caller flies that point's continuations on to their
+    window's end, makes its group and sends nothing; it returns what it found."""
     tried: list[int] = []
     decision = fine = b = None
     for k, p in enumerate(candidates):
-        trials = trial(p)
+        trials = yield TRY, p
         tried.append(p)
         if any(t.avoids for t in trials):
             decision = p
-            chosen(p)
+            yield CHOOSE, p
             break
     if decision is None:
         return Found(None, None, None, tuple(tried))
     at_decision = any(t.avoids and not t.go_around for t in trials)
     point = decision + fine_ticks
     tried.append(point)
-    if any(t.avoids for t in trial(point)):
+    if any(t.avoids for t in (yield TRY, point)):
         fine = point
-        chosen(point)
+        yield CHOOSE, point
     if not at_decision:
         for p in candidates[k + 1:]:
             tried.append(p)
-            if any(t.avoids and not t.go_around for t in trial(p)):
+            if any(t.avoids and not t.go_around for t in (yield TRY, p)):
                 b = p
-                chosen(p)
+                yield CHOOSE, p
                 break
     return Found(decision, fine, b, tuple(tried))

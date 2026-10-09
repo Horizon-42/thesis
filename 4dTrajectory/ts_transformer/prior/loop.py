@@ -117,3 +117,20 @@ class LoopRows:
                         self.entry_utc_s[indices], self.first_rows[indices], self.start, variant=self.variant,
                         interval_s=self.interval_s, step_s=self.step_s, device=self.device if device is None else device,
                         join_ticks=self.join_ticks[indices])
+
+    @staticmethod
+    def together(parts: Sequence[tuple[LoopRows, Sequence[int], int]], device: torch.device) -> LoopRows:
+        """The rows of aircraft of several loops as one loop's (a speaking loop's flights together, multi-aircraft
+        control D188): ``parts`` each rows, its aircraft (repeats permitted) and the ticks its clock moves later by, its
+        join ticks with it; each aircraft with its landings as they are now, its own rows the same rows. On
+        ``device``."""
+        index = [list(aircraft) for _, aircraft, _ in parts]
+        first = parts[0][0]
+        ticks = np.concatenate([rows.join_ticks[i] + shift for (rows, _, shift), i in zip(parts, index)])
+        return LoopRows([rows.geometries[b] for (rows, _, _), i in zip(parts, index) for b in i],
+                        [rows.landings[b] for (rows, _, _), i in zip(parts, index) for b in i],
+                        [rows.keys[b] for (rows, _, _), i in zip(parts, index) for b in i],
+                        np.concatenate([rows.entry_utc_s[i] for (rows, _, _), i in zip(parts, index)]),
+                        np.concatenate([rows.first_rows[i] for (rows, _, _), i in zip(parts, index)]), first.start,
+                        variant=first.variant, interval_s=first.interval_s, step_s=first.step_s, device=device,
+                        join_ticks=ticks)

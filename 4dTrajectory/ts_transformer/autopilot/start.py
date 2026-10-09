@@ -266,6 +266,29 @@ class Loop:
         out._flown = None
         return out
 
+    @staticmethod
+    def together(parts: Sequence[tuple[Loop, Sequence[int], int]], device: torch.device) -> Loop:
+        """Flights of several loops flown on as one loop (multi-aircraft control D188), on ``device``: ``parts`` each a
+        loop, its flights (repeats permitted) and the steps its clock moves later by, its join ticks with it (below 0:
+        its first steps, before any of its flights joined, are left out), so that every part is at one step. Each
+        flight keeps what `copy` keeps (`Executor.together`, `Spoken.together`) and its own clock: flown on with the
+        same words, it flies what its original flies."""
+        steps = {loop.steps + shift for loop, _, shift in parts}
+        if len(steps) != 1:
+            raise ValueError(f"the parts' clocks, moved, are at the steps {sorted(steps)}, not one")
+        index = [np.asarray(flights, dtype=np.int64) for _, flights, _ in parts]
+        out = copy.copy(parts[0][0])
+        out.executor = Executor.together([(loop.executor, torch.as_tensor(i), shift * loop.step_cycles)
+                                          for (loop, _, shift), i in zip(parts, index)], device)
+        out.spoken = Spoken.together([(loop.spoken, i, shift) for (loop, _, shift), i in zip(parts, index)], device)
+        out.geometries = [loop.geometries[f] for (loop, _, _), i in zip(parts, index) for f in i]
+        out.go_arounds = np.concatenate([loop.go_arounds[i] for (loop, _, _), i in zip(parts, index)])
+        out.join_ticks = np.concatenate([loop.join_ticks[i] + shift for (loop, _, shift), i in zip(parts, index)])
+        out.grammar = [loop.grammar[f] for (loop, _, _), i in zip(parts, index) for f in i]
+        out.steps = steps.pop()
+        out._flown = None
+        return out
+
     def outcome(self, flight: int) -> Outcome:
         """Flight ``flight``'s outcome, read by the judge off what the executor recorded (`judge.outcome_of`); refused for a
         flight not done (a halted flight is never done)."""

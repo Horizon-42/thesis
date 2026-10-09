@@ -162,6 +162,32 @@ def runway_after(word: np.ndarray, in_force: Sequence[InForce | None], n_candida
     return np.minimum(runway, np.asarray(n_candidates) - 1), go_around
 
 
+def _rows_together(records: Sequence[list[np.ndarray]], index: Sequence[np.ndarray], shifts: Sequence[int],
+                   fill: Any) -> list[np.ndarray]:
+    """Several speakers' records of the rows said (one ``[B, ...]`` array a row; `Speaker.together`): of each, its
+    aircraft ``index`` moved by its shift (its first rows left out below 0), joined row by row; a row a part did not say
+    is ``fill``, and a narrower row (the runway column: a copy's batch has fewer candidates than the batch it was copied
+    from, `permitted`) is padded with it to the widest."""
+    lengths = {len(rows) + shift for rows, shift in zip(records, shifts)}
+    if len(lengths) != 1:
+        raise ValueError(f"the parts' rows said, moved, end at the rows {sorted(lengths)}, not one")
+    (length,) = lengths
+    if length == 0:
+        return []
+    widest = max((row for rows in records for row in rows), key=lambda row: row.shape[1:])
+    width = widest.shape[1:]
+    blocks = []
+    for rows, i, shift in zip(records, index, shifts):
+        kept = [row if row.shape[1:] == width else
+                np.pad(row, [(0, 0)] + [(0, n - m) for n, m in zip(width, row.shape[1:])], constant_values=fill)
+                for row in rows[max(-shift, 0):]]
+        block = np.full((length, len(i), *width), fill, dtype=widest.dtype)
+        if kept:
+            block[length - len(kept):] = np.stack(kept)[:, i]
+        blocks.append(block)
+    return list(np.concatenate(blocks, axis=1))
+
+
 class Speaker:
     """A batch of aircraft the prior speaks to, all at the same row. `observe` encodes the rows before the first
     predicted step; `speak` says the next row (the first predicted step first). Rows come in time order, each later
@@ -406,6 +432,53 @@ class Speaker:
         out._role = self._role[indices].copy()
         out._go_arounds = self._go_arounds[indices].copy()
         out._last_s = self._last_s[indices].copy()
+        return out
+
+    @staticmethod
+    def together(parts: Sequence[tuple[Speaker, Sequence[int], int]], device: torch.device,
+                 spent: Speaker | None = None) -> Speaker:
+        """Aircraft of several speakers as one speaker (multi-aircraft control D188), its cache on ``device``: ``parts``
+        each a speaker, its aircraft (repeats permitted) and the rows its clock moves later by (below 0: its first rows,
+        before any of its aircraft's own, are left out), so that every part has encoded the same rows and said the same
+        rows since. Each aircraft keeps what `copy` keeps (the cache's rows written and one step of room, D183), its
+        records of the rows said moved with its rows (a row its speaker did not say: said by none, nothing permitted).
+        Continued with the same inputs and numbers, an aircraft says what it says in its own speaker. The parts' model,
+        words and temperature are one speaker's. ``spent``: a speaker among the parts that nothing reads after (the one
+        this speaker replaces), its cache freed a layer at a time as it is copied, so that the device holds the two
+        speakers' caches whole at no time."""
+        first = parts[0][0]
+        index = [np.asarray(list(aircraft), dtype=np.int64) for _, aircraft, _ in parts]
+        shifts = [shift for _, _, shift in parts]
+        out = object.__new__(Speaker)
+        out.model, out.words, out.temperature = first.model, first.words, first.temperature
+        out.procedure = ProcedureMasks.together([(s.procedure, i) for (s, _, _), i in zip(parts, index)])
+        out._n_candidates = np.concatenate([s._n_candidates[i] for (s, _, _), i in zip(parts, index)])
+        out.past = []
+        for layer in range(len(first.past)):
+            out.past.append(Past.together([(s.past[layer], torch.as_tensor(i, device=s.past[layer].keys.device), shift)
+                                           for (s, _, shift), i in zip(parts, index)], CACHE_STEP_ROWS, device))
+            if spent is not None:
+                spent.past[layer] = None                  # copied: the spent speaker's layer freed
+        out._heard = [s._heard[b].copy() for (s, _, _), i in zip(parts, index) for b in i]
+
+        def said(get: Callable[[Speaker], list[np.ndarray]], fill: Any) -> list[np.ndarray]:
+            return _rows_together([get(s) for s, _, _ in parts], index, shifts, fill)
+
+        out.forbidden = {c: said(lambda s, c=c: s.forbidden[c], np.nan) for c in first.forbidden}
+        out.go_around_probability = said(lambda s: s.go_around_probability, np.nan)
+        out.go_around_permitted = said(lambda s: s.go_around_permitted, False)
+        blocked = {c: said(lambda s, c=c: [row[c] for row in s.procedure_blocked], False)
+                   for c in first.procedure.columns}
+        out.said_rows = said(lambda s: s.said_rows, False)
+        out.procedure_blocked = [{c: rows[r] for c, rows in blocked.items()} for r in range(len(out.said_rows))]
+        out.permitted_rows = list(zip(*(said(lambda s, c=c: [row[c] for row in s.permitted_rows], False)
+                                        for c in range(len(COLUMNS)))))
+        out.permitted_times = said(lambda s: s.permitted_times, np.nan)
+        out.permitted_own = said(lambda s: s.permitted_own, 0.0)
+        out.drawn_probability = said(lambda s: s.drawn_probability, np.nan)
+        out._role = np.concatenate([s._role[i] for (s, _, _), i in zip(parts, index)])
+        out._go_arounds = np.concatenate([s._go_arounds[i] for (s, _, _), i in zip(parts, index)])
+        out._last_s = np.concatenate([s._last_s[i] for (s, _, _), i in zip(parts, index)])
         return out
 
     # ---- what a loop reads of the speaker, and does not change (§7 item 3, D106 item 6)

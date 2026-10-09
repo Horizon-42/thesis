@@ -6,6 +6,8 @@ not chosen flown only to the event + 60 s, a group's W of D141; the copies held 
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 import torch
@@ -14,7 +16,7 @@ from ts_transformer.experiments import post_branches
 from ts_transformer.experiments.post_branches import Rules, backward_round
 from ts_transformer.experiments.post_window_loop import WindowLoop, start_move_of
 from ts_transformer.multi import backward, credit
-from ts_transformer.multi.backward import END, GO_AROUND, LOSS, Event, Trial, avoids, event, points, search
+from ts_transformer.multi.backward import END, GO_AROUND, LOSS, Event, Trial, TRY, avoids, event, points, search
 from ts_transformer.multi.credit import Aircraft
 from ts_transformer.tests.test_post_window_loop import CPU, DELTA, _with_module, setup  # noqa: F401
 
@@ -64,15 +66,15 @@ def test_a_continuation_avoids_its_event():
 
 
 def _searched(candidates, judged):
-    """`search` on ``candidates`` with ``judged(point)`` → the point's trials; the calls in order."""
-    calls = []
-
-    def trial(p):
-        calls.append(("trial", p))
-        return judged(p)
-
-    found = search(candidates, FINE, trial, lambda p: calls.append(("chosen", p)))
-    return found, calls
+    """`search`'s steps on ``candidates``, a point tried answered by ``judged(point)``; its requests in order."""
+    calls, steps, answer = [], search(candidates, FINE), None
+    while True:
+        try:
+            kind, p = steps.send(answer)
+        except StopIteration as stop:
+            return stop.value, calls
+        calls.append(("trial" if kind == TRY else "chosen", p))
+        answer = judged(p) if kind == TRY else None
 
 
 def test_the_search_stops_at_the_first_avoiding_point_and_tries_the_fine_point_and_point_b():
@@ -135,20 +137,20 @@ def test_a_round_found_backward_on_a_window_whose_first_avoiding_point_is_known(
     reached, finished = [], []
     events = {}
 
-    def judged(copies, v, happened, point):
+    def judged(loop, own, v, happened, point):
         events["event"] = happened
-        reached.append((point, int(copies.speaking.t)))
-        return [Trial(point <= happened.tick - 3 * STEP, False) for _ in copies.members]
+        reached.append((point, int(loop.speaking.t - loop.origins[own[0]])))     # in its window's ticks
+        return [Trial(point <= happened.tick - 3 * STEP, False) for _ in own]
 
-    real_finish = WindowLoop.finish
+    real_results = WindowLoop.results
 
-    def finish(self, numbers):
-        out = real_finish(self, numbers)
+    def results(self):
+        out = real_results(self)
         finished.append(out)
         return out
 
     monkeypatch.setattr(post_branches, "_trials", judged)
-    monkeypatch.setattr(WindowLoop, "finish", finish)
+    monkeypatch.setattr(WindowLoop, "results", results)
     found = _backward(s, model, rules)
     happened = events["event"]
     assert happened.kind == END and found.spoken_again == [0] and found.differed == []
@@ -295,3 +297,51 @@ def test_stage_ds_batch_record_holds_the_searches_with_backward_only(setup, tmp_
     assert all(span == 1.0 for span, _ in searched["group_depths_s"])
     assert searched["continuations_to_end"] == 2 * searched["groups"]
     assert post_branches.branch_round is multi_train.branch_round and multi_train.backward_round is backward_round
+
+
+def test_the_searches_of_a_batch_step_together_and_find_what_each_finds_alone(setup, monkeypatch):
+    """D188: on the window of three commanded aircraft (`test_post_window_multi._multi`), the searches of its varied
+    aircraft stepped together in one loop find what each finds searched alone (its aircraft the only one varied): the
+    same groups (point, varied aircraft, depth; each continuation's words, reward and bound). Each point tried is judged
+    at its own event + 60 s, or where its continuations ended before; each point chosen is flown to its window's end."""
+    from ts_transformer.tests.test_post_window_multi import _multi
+
+    s = setup
+    multi, loop_of = _multi(s, joins=(0, 30, 60))
+    parts = loop_of.parts
+    model = _with_module(s["base"])
+    rules = Rules(**credit.rules(1337, 0, DELTA))
+    judged, real = [], post_branches._trials
+
+    def trials(loop, own, v, happened, point):
+        alive = loop.speaking.alive[[b for w in own for b in loop.members[w]]].any()
+        judged.append((v, point, int(loop.speaking.t - loop.origins[own[0]]), backward.judged_until(happened, DELTA),
+                       bool(alive)))
+        return real(loop, own, v, happened, point)
+
+    monkeypatch.setattr(post_branches, "_trials", trials)
+
+    def round_of(varied):
+        return backward_round(model, parts["start"], [multi], [5], parts["sentences"], parts["flights"],
+                              s["geometries"], parts["rosters"], s["finals"], s["words"], interval_s=DELTA,
+                              variant="full", edges_reference=s["reference"], faults={s["geometry"].code: {}},
+                              device=CPU, split="train", continuations=2, rules=replace(rules, varied=varied))
+
+    together = round_of(rules.varied)
+    assert together.searches == 3 and len({g.varied for g in together.groups}) == 3       # every aircraft varied
+    for v, point, tick, until, alive in judged:                  # each point tried at its own judged tick
+        assert tick == until or (tick < until and not alive)
+    assert together.to_end == 2 * len(together.groups) and together.to_event == 2 * (len(judged) - len(together.groups))
+    alones = [round_of(lambda window, loop, rows, results, v=v: [x for x in rules.varied(window, loop, rows, results)
+                                                                  if x[0] == v]) for v in range(3)]
+    # the groups in the order of the searches, then of their points chosen
+    assert ([(g.varied, g.branch) for g in together.groups]
+            == [(h.varied, h.branch) for one in alones for h in one.groups])
+    for v, alone in enumerate(alones):
+        ours = [(g, d) for g, d in zip(together.groups, together.depths_s) if g.varied == v]
+        assert alone.searches == 1 and len(alone.groups) == len(ours) > 0
+        for (g, depth), h, other in zip(ours, alone.groups, alone.depths_s):
+            assert (g.window, g.branch, g.varied, depth) == (h.window, h.branch, h.varied, other)
+            for x, y in zip(g.continuations, h.continuations):
+                assert np.array_equal(x.rows.targets, y.rows.targets) and (x.reward, x.until) == (y.reward, y.until)
+                assert all(np.array_equal(a, b) for a, b in zip(x.permitted.masks, y.permitted.masks))   # same shape

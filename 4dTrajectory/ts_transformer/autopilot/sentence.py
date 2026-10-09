@@ -171,6 +171,36 @@ class Spoken:
         out.grid = [row[flights].copy() for row in self.grid]
         return out
 
+    @staticmethod
+    def together(parts: Sequence[tuple[Spoken, np.ndarray, int]], device: torch.device) -> Spoken:
+        """Flights of several `Spoken` as one multi-aircraft batch (`Executor.together`'s, for the words), on
+        ``device``: ``parts`` each one, its flights (repeats permitted) and the steps its clock moves later by (below 0:
+        its first steps, before any of its flights' first, are left out), so that every part is at one step. Each
+        flight keeps what `take` keeps, its first step moved with its part."""
+        steps = {spoken.steps + shift for spoken, _, shift in parts}
+        if len(steps) != 1:
+            raise ValueError(f"the parts' clocks, moved, are at the steps {sorted(steps)}, not one")
+        (length,) = steps
+        first = parts[0][0]
+        out = copy.copy(first)
+        out.device = torch.device(device)
+        if out.device != torch.device(first.device):
+            out.tables = WordTables(first.tables.words, device=out.device)
+        index = [np.asarray(flights, dtype=np.int64) for _, flights, _ in parts]
+        out.value, out.issued, out.runway = (
+            torch.cat([getattr(s, name)[torch.as_tensor(i, device=s.device)].to(out.device)
+                       for (s, _, _), i in zip(parts, index)]) for name in ("value", "issued", "runway"))
+        out.start = np.concatenate([s.start[i] + shift for (s, _, shift), i in zip(parts, index)])
+        if (out.start < 0).any():
+            raise ValueError("a part's steps left out are a flight's own")
+        out.staggered = bool((out.start != 0).any())
+        blocks = []
+        for (s, _, shift), i in zip(parts, index):          # each part's steps moved by its shift (before: none said)
+            kept = np.stack(s.grid)[:, i][max(-shift, 0):] if s.grid else np.zeros((0, len(i), len(COLUMNS)), np.int64)
+            blocks.append(np.concatenate((np.full((length - len(kept), len(i), len(COLUMNS)), UNCHANGED), kept)))
+        out.grid = list(np.concatenate(blocks, axis=1)) if length else []
+        return out
+
     def say(self, row: np.ndarray) -> None:
         """The next step's words, ``[B, 5]``; a flight's first step must write every column, and before it what is
         said for the flight is not its own."""
