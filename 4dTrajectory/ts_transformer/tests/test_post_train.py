@@ -18,8 +18,8 @@ import torch
 from ts_transformer.experiments import post_train
 from ts_transformer.experiments import training_export as export
 from ts_transformer.experiments.post_train import (
-    INPUT_PATHS, KINDS, Context, Settings, Speakers, batches, done_rounds, draw_round, open_campaign, run_campaign,
-    speak_round, start_model, train_pass, update_pairs, window_record,
+    INPUT_PATHS, KINDS, Context, Settings, Speakers, batches, done_rounds, draw_round, launch_of, open_campaign,
+    run_campaign, speak_round, start_model, train_pass, update_pairs, window_record,
 )
 from ts_transformer.autopilot.start import Start, start_moved
 from ts_transformer.instructions.artefact import closed_loop_sentences
@@ -198,12 +198,14 @@ def test_speakers_give_the_groups_and_the_record_of_speaking_here(setup, tmp_pat
     finally:
         speakers.close()
     assert gc.get_freeze_count() == 0
-    assert sorted(p.name for p in there.iterdir()) == ["groups_0.pt", "groups_1.pt"]
+    assert sorted(p.name for p in there.iterdir()) == ["groups_0.pt", "groups_1.pt", "record_0.json", "record_1.json"]
+    assert [json.loads((there / f"record_{k}.json").read_text())["record"] for k in (0, 1)] == \
+        [json.loads((here / f"record_{k}.json").read_text())["record"] for k in (0, 1)]          # written by the workers
     assert all((here / name).read_bytes() == (there / name).read_bytes() for name in ("groups_0.pt", "groups_1.pt"))
     torch.save(model.state_dict(), tmp_path / "state.pt")
     wrong = [{**window_record(windows[0]), "row0_s": windows[0].row0_s + 4.0}]
     with pytest.raises(ValueError, match="other windows"):
-        post_train._speak(0, str(tmp_path / "state.pt"), str(tmp_path), 0, [0], wrong)
+        post_train._speak(0, str(tmp_path / "state.pt"), str(tmp_path), 0, [0], wrong, launch_of())
     with pytest.raises(ValueError, match="2 or more"):
         Speakers(context, settings, 1, CPU)
 
@@ -239,13 +241,13 @@ def test_each_speaker_speaks_with_the_round_s_model_and_a_dead_one_fails_the_rou
             with torch.no_grad():
                 for p in model.parameters():
                     p.add_(shift)
-            parts = speakers.speak(model, windows, places, round_, tmp_path)
+            parts = speakers.speak(model, windows, places, round_, tmp_path, range(len(places)), launch_of())
             assert [(x["round"], x["k"]) for x in parts] == [(round_, 0), (round_, 1)]
             assert all(abs(x["digest"] - _digest(model)) < 1e-6 for x in parts)
             assert [x["windows"] for x in parts] == [[window_record(windows[i]) for i in p] for p in places]
             assert not (tmp_path / "speaking_model.pt").exists()
         with pytest.raises(BrokenProcessPool):
-            speakers.speak(model, windows, places, 9, tmp_path)
+            speakers.speak(model, windows, places, 9, tmp_path, range(len(places)), launch_of())
         assert not (tmp_path / "speaking_model.pt").exists()
     finally:
         speakers.close()
@@ -295,7 +297,9 @@ def test_a_round_started_through_start_is_the_round_started_by_the_one_call_form
     assert (speak_round(model, context, windows, settings, 0, here)
             == speak_round(model, reference, windows, settings, 0, there))
     assert sorted(p.name for p in here.iterdir()) == sorted(p.name for p in there.iterdir())
-    assert all((here / p.name).read_bytes() == p.read_bytes() for p in there.iterdir())
+    assert all((here / p.name).read_bytes() == p.read_bytes() for p in there.glob("*.pt"))
+    assert all(json.loads((here / p.name).read_text())["record"] == json.loads(p.read_text())["record"]
+               for p in there.glob("record_*.json"))           # D185: each batch's record (its launch's time apart)
     _same_ends(post_train.read_batch(model, context, windows, [0], settings, "train"),
                post_train.read_batch(model, reference, windows, [0], settings, "train"))
     assert moved.start_move != NO_START_MOVE
@@ -547,13 +551,13 @@ def test_a_launch_measures_once_and_a_resume_reads_the_recorded_measure(tmp_path
     monkeypatch.setattr(post_train, "run_campaign", lambda *a, **k: None)
     out = tmp_path / "campaign"
 
-    def launch(rounds, workers):
+    def launch(rounds, workers, *more):
         argv = ["--prior", str(tmp_path / "p"), "--instructions", str(tmp_path / "i"), "--executor",
                 str(tmp_path / "e"), "--windows", str(tmp_path / "w"), "--out", str(out), "--rounds", str(rounds),
                 "--batch-windows", "1", "--seed", "1", "--prior-lr", "1e-4", "--traffic-lr", "1e-3",
                 "--weight-decay", "0", "--update-groups", "1", "--data-sentences", "1", "--select-per-airport", "1",
                 "--traffic-hidden", "16", "--traffic-heads", "4", "--method", "branch", "--select-seed", "1",
-                "--device", "cpu", *(["--speak-workers", str(workers)] if workers > 1 else [])]
+                "--device", "cpu", *(["--speak-workers", str(workers)] if workers > 1 else []), *more]
         assert post_train.main(argv + [x for kind in KINDS for x in (f"--windows-{kind.lower()}", "1")]) == 0
         return json.loads((out / "campaign.json").read_text())
 
@@ -572,6 +576,9 @@ def test_a_launch_measures_once_and_a_resume_reads_the_recorded_measure(tmp_path
     (out / "campaign.json").write_text(json.dumps(record))
     older = launch(2, 2)
     assert measured == [3, 4, 2] and len(older["measures"]) == 1 and older["resumed"][-1]["fit"]["measured"] is True
+    (out / "round_0").mkdir()                                     # D185: a round left half done, restarted by name
+    restarted = launch(2, 1, "--restart-round")
+    assert restarted["resumed"][-1]["restart_round"] is True and len(restarted["aborted"]) == 1
 
 
 def short_round(monkeypatch, s):
@@ -609,6 +616,78 @@ def test_a_campaign_round_end_to_end(setup, tmp_path, monkeypatch):
     assert identity["rounds"] == [record["windows"]]
 
 
+def test_a_round_stopped_after_some_batches_resumes_by_its_batches(setup, tmp_path, monkeypatch):
+    """C27, D185: a round's speaking stopped after its first batch (the second's groups written, its record not, and a
+    file left under a temporary name) and spoken again gives the record and the groups files of the round spoken whole,
+    byte for byte; the done batch is read back, not spoken; the batch without its record is spoken again; the
+    temporary file is never read (removed). Refused by name: a done batch of another draw, or spoken on another kind of
+    device than the rest."""
+    s = setup
+    context = _context(s)
+    settings = _settings(continuations=2)
+    model, _ = start_model(context, settings)
+    windows = [_ahead(s["windows"][0])] * 2
+    assert len(batches(windows, settings.batch_windows)) == 2
+    whole, stopped = tmp_path / "whole", tmp_path / "stopped"
+    whole.mkdir()
+    stopped.mkdir()
+    record = speak_round(model, context, windows, settings, 0, whole)
+    assert sorted(p.name for p in whole.iterdir()) == ["groups_0.pt", "groups_1.pt", "record_0.json", "record_1.json"]
+    direct = tmp_path / "groups_0.pt"                          # the bytes of a file written in place
+    torch.save(torch.load(whole / "groups_0.pt", weights_only=False), direct)
+    assert direct.read_bytes() == (whole / "groups_0.pt").read_bytes()
+    held = json.loads((whole / "record_1.json").read_text())
+    assert held["batch"] == 1 and held["device"] == "cpu" and held["windows"] == [post_train.window_record(windows[1])]
+    assert set(held["launch"]) == {"utc", "commit", "dirty"}
+    real = post_train.speak_batch
+    spoken, stop = [], [True]
+
+    def stopping(model, context, windows, places, settings, round_, directory, k):
+        spoken.append(k)
+        out = real(model, context, windows, places, settings, round_, directory, k)
+        if k == 1 and stop:                                       # the first launch only
+            stop.clear()
+            (directory / "groups_1.tmp").write_bytes(b"half written")
+            raise RuntimeError("stopped")
+        return out
+
+    monkeypatch.setattr(post_train, "speak_batch", stopping)
+    with pytest.raises(RuntimeError, match="stopped"):
+        speak_round(model, context, windows, settings, 0, stopped)
+    assert (stopped / "groups_1.pt").exists() and not (stopped / "record_1.json").exists()
+    spoken.clear()
+    assert speak_round(model, context, windows, settings, 0, stopped) == record
+    assert spoken == [1] and not list(stopped.glob("*.tmp"))
+    for name in ("groups_0.pt", "groups_1.pt"):
+        assert (stopped / name).read_bytes() == (whole / name).read_bytes()
+    spoken.clear()
+    assert speak_round(model, context, windows, settings, 0, stopped) == record and spoken == []   # all read back
+    for change, message in (({"windows": [{"other": 1}]}, "another draw"), ({"device": "cuda"}, "kind of device")):
+        path = stopped / "record_0.json"
+        kept = path.read_text()
+        path.write_text(json.dumps({**json.loads(kept), **change}))
+        with pytest.raises(SystemExit, match=message):
+            speak_round(model, context, windows, settings, 0, stopped)
+        path.write_text(kept)
+
+
+def test_a_resume_keeps_the_round_left_half_done_unless_it_restarts_it(tmp_path):
+    """D185: a resume keeps a round directory without its checkpoint (its done batches); ``restart_round`` moves it aside
+    and records it."""
+    settings = _settings(rounds=1)
+    inputs = _inputs(settings, tmp_path)
+    out = tmp_path / "campaign"
+    open_campaign(out, inputs, {"head": "x", "dirty": False}, {})
+    (out / "round_0").mkdir()
+    (out / "round_0" / "record_0.json").write_text("{}")
+    kept = open_campaign(out, inputs, {"head": "y", "dirty": False}, {})
+    assert kept["aborted"] == [] and (out / "round_0" / "record_0.json").exists()
+    assert kept["resumed"][-1]["restart_round"] is False
+    moved = open_campaign(out, inputs, {"head": "y", "dirty": False}, {}, restart_round=True)
+    assert len(moved["aborted"]) == 1 and not (out / "round_0").exists()
+    assert (out / moved["aborted"][0] / "record_0.json").exists() and moved["resumed"][-1]["restart_round"] is True
+
+
 def test_a_resumed_campaign_is_the_campaign_run_through(setup, tmp_path, monkeypatch):
     """The resume's mechanics, with the speaking and the readout replaced (each round writes the same informative
     groups, so every round updates the model, its data term with dropout): a round broken off is moved aside and run
@@ -621,7 +700,7 @@ def test_a_resumed_campaign_is_the_campaign_run_through(setup, tmp_path, monkeyp
     (group,) = _round(s, model, [_ahead(s["windows"][0])]).groups
     rewarded = replace(group, continuations=(replace(group.continuations[0], reward=1.0), group.continuations[1]))
 
-    def speak(model, context, windows, settings, round_, directory, speakers, *, stage):
+    def speak(model, context, windows, settings, round_, directory, speakers, *, stage, launch):
         torch.save([rewarded, rewarded], directory / "groups_0.pt")
         return {"windows": len(windows)}
 
@@ -650,8 +729,9 @@ def test_a_resumed_campaign_is_the_campaign_run_through(setup, tmp_path, monkeyp
         run_campaign(broken, settings, context)
     assert done_rounds(broken) == 1 and (broken / "round_1").exists()
     monkeypatch.setattr(post_train, "train_pass", real)
-    reopened = open_campaign(broken, inputs, {"head": "y", "dirty": False}, {})
+    reopened = open_campaign(broken, inputs, {"head": "y", "dirty": False}, {}, restart_round=True)
     assert len(reopened["aborted"]) == 1 and (broken / reopened["aborted"][0]).is_dir()
+    assert reopened["resumed"][0]["restart_round"]
     assert reopened["resumed"][0]["git"] == {"head": "y", "dirty": False}
     run_campaign(broken, settings, context)
     resumed = torch.load(broken / "round_1" / "checkpoint.pt", weights_only=False)
@@ -689,7 +769,7 @@ def test_a_campaign_raised_to_more_rounds_is_the_campaign_of_that_count_from_its
     (group,) = _round(s, model, [_ahead(s["windows"][0])]).groups
     rewarded = replace(group, continuations=(replace(group.continuations[0], reward=1.0), group.continuations[1]))
 
-    def speak(model, context, windows, settings, round_, directory, speakers, *, stage):
+    def speak(model, context, windows, settings, round_, directory, speakers, *, stage, launch):
         torch.save([rewarded, rewarded], directory / "groups_0.pt")
         return {"windows": len(windows), "weights": _digest(model)}
 
@@ -733,7 +813,7 @@ def test_a_campaign_starts_from_a_round_of_another_campaign_with_a_new_optimizer
     model, _ = start_model(context, settings)
     (group,) = _round(s, model, [_ahead(s["windows"][0])]).groups
     rewarded = replace(group, continuations=(replace(group.continuations[0], reward=1.0), group.continuations[1]))
-    monkeypatch.setattr(post_train, "speak_round", lambda model, context, windows, settings, round_, directory, speakers, *, stage: (
+    monkeypatch.setattr(post_train, "speak_round", lambda model, context, windows, settings, round_, directory, speakers, *, stage, launch: (
         torch.save([rewarded, rewarded], directory / "groups_0.pt"), {"windows": 1, "weights": _digest(model)})[1])
     monkeypatch.setattr(post_train, "selection_readout", lambda model, *a, **k: {"KXXX": {"reward_mean": _digest(model)}})
     source, out = tmp_path / "source", tmp_path / "from_round_0"
@@ -1073,8 +1153,8 @@ def test_a_stage_gives_the_campaigns_round_its_parts_and_stage_cs_is_the_campaig
         run_campaign(out, settings, _context(s), stage=stage)
         states.append(torch.load(out / "round_0" / "checkpoint.pt", weights_only=False))
     # the speaking and the readout run the stage's own batch speaker and reader (the campaign hands them the stage)
-    assert called == ["start", "selection", "companion", "draw", "speak", "batches", "speak_batch", "train", "readout",
-                      "batches", "read_batch", "record", "close_round", "identity"]
+    assert called == ["start", "selection", "companion", "draw", "speak", "batches", "speak_batch", "record", "train",
+                      "readout", "batches", "read_batch", "record", "close_round", "identity"]     # D185: the batch's record
     assert states[0]["model"].keys() == states[1]["model"].keys()
     assert all(torch.equal(states[0]["model"][k], states[1]["model"][k]) for k in states[0]["model"])
     assert states[0]["identity"] == states[1]["identity"]
@@ -1132,7 +1212,8 @@ def test_the_speaking_workers_run_the_stages_parts(setup, tmp_path):
     measured = tmp_path / "measured"
     measured.mkdir()
     try:
-        assert [(x["k"], x["windows"]) for x in speakers.speak(model, windows, places, 0, tmp_path)] == [(0, 1), (1, 1)]
+        assert [(x["k"], x["windows"]) for x in speakers.speak(model, windows, places, 0, tmp_path, range(len(places)),
+                                                                                  launch_of())] == [(0, 1), (1, 1)]
         assert list(marks.glob("started_*"))                     # the speaking workers' model: the stage's
         assert speakers.read(model, windows, places, "select") == [[("read", "select", 1)]] * 2
         given, _ = start_model(context, settings)               # the round's model, not the stage's start model

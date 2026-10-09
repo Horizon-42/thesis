@@ -1704,7 +1704,13 @@ Both keep the pull toward the base and the data term, and each round ends with t
 checkpoint.
 - The start is the base with zero-output traffic modules, or a round of another campaign (`--start-campaign`,
   `--start-round`; D162: a seed other than the source's).
-- A resume continues from the last checkpoint and may raise `--rounds` (D157).
+- A resume continues from the last checkpoint and may raise `--rounds` (D157). A round left half done keeps its done
+  batches (D185, C27; stage D's `multi_train` alike): each batch writes its files and then `record_<k>.json` (its
+  record, its windows, its launch's commit as information, the kind of device), each under a temporary name renamed
+  when complete; a resume reads the done batches back and speaks the others, and refuses by name done batches of
+  another draw or of another kind of device. `--restart-round` moves the round aside as `round_<r>.aborted-<UTC>`
+  instead. On changed code choose one: `--restart-round`, or keep the done batches after `window_behaviour` (R68) on
+  the code before and after.
 - `--speak-workers` speaks the batches in worker processes, measured against the host's and the GPU's memory before
   the first round (O15). The measure is kept in `campaign.json` (`measures`); a later launch on the same devices with
   at most the workers it admitted reads it and checks only the memory free now (seconds, D167, C18); a record without

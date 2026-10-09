@@ -75,8 +75,8 @@ from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
 from ts_transformer.experiments.post_branches import Rules, branch_round
 from ts_transformer.experiments.post_train import (
     Context, Speakers, Stage, available_memory, batches, done_rounds, open_campaign, open_context, round_start,
-    run_campaign, settings_of, source_campaign, speak_device_refused, speak_round, start_checkpoint, start_model,
-    start_of, workers_fit,
+    run_campaign, save_batch_file, settings_of, source_campaign, speak_device_refused, speak_round, start_checkpoint,
+    start_model, start_of, workers_fit,
 )
 from ts_transformer.experiments.post_window_loop import LANDED, LOST_SEPARATION, WindowLoop, checked_edges
 from ts_transformer.multi import credit
@@ -255,7 +255,7 @@ def speak_batch(model: Prior, context: Context, windows: Sequence[Window], place
                          rules=Rules(**credit.rules(settings.seed, round_, context.interval_s)),
                          loop_options=loop_options(context))
     informative = [g for g in found.groups if g.informative]
-    torch.save(informative, directory / f"groups_{k}.pt")
+    save_batch_file(informative, directory / f"groups_{k}.pt")
     anchors = {w.signal_index for w in batch}              # a window's count is in each of its aircraft's ends
     return {"groups": len(found.groups), "informative_groups": len(informative),
             "spoken_again": len(found.spoken_again), "differed": list(found.differed),
@@ -534,7 +534,7 @@ def stage_d() -> Stage:
     return Stage(start_model=shape, start=start, identity=identity,
                  draw=lambda context, settings, round_: draw_windows(context, settings,
                                                                      np.random.default_rng([settings.seed, round_])),
-                 speak=lambda *args, stage: speak_round(*args, stage=stage),
+                 speak=lambda *args, stage, launch: speak_round(*args, stage=stage, launch=launch),
                  selection=lambda context, settings, split: selection_windows(context, settings, split),
                  readout=selection_readout, record=window_record, speak_batch=speak_batch, read_batch=read_batch,
                  part_width=TokenPart.width, batches=span_batches)
@@ -586,6 +586,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--profile", type=Path,
                         help="stage D's profile (multi_profile) of these inputs and settings, which the speaking workers "
                              "are sized from: with --speak-workers above 1")
+    parser.add_argument("--restart-round", action="store_true",
+                        help="D185: a resume moves the round left half done aside and speaks it whole (default: its "
+                             "done batches kept; on changed code, keep them only after a behaviour check)")
     parser.add_argument("--smoke", action="store_true", help="SMOKE: a tree with changes too; no result")
     args = parser.parse_args(argv)
     if args.speak_workers < 1:
@@ -632,7 +635,7 @@ def main(argv: list[str] | None = None) -> int:
     context = replace(context, device=device, base=context.base.to(device).eval())
     try:
         open_campaign(out, inputs, git, opened["checks"], schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER,
-                      settings_type=MultiSettings)
+                      settings_type=MultiSettings, restart_round=args.restart_round)
         run_campaign(out, settings, context, speakers, stage=stage)
     finally:
         if speakers is not None:

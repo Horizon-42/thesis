@@ -137,7 +137,7 @@ def stage_c_campaign_scenario(s, tmp_path, monkeypatch) -> dict[str, str]:
     (group,) = _round(s, model, [_ahead(s["windows"][0])]).groups
     rewarded = replace(group, continuations=(replace(group.continuations[0], reward=1.0), group.continuations[1]))
 
-    def speak(model, context, windows, settings, round_, directory, speakers, *, stage):
+    def speak(model, context, windows, settings, round_, directory, speakers, *, stage, launch):
         torch.save([rewarded, rewarded], directory / "groups_0.pt")
         return {"windows": len(windows)}
 

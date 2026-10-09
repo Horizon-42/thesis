@@ -48,8 +48,14 @@ D69, with the labeller's and the executor's) and the edge features' reference of
 ONE CAMPAIGN: from a clean checkout (``--smoke``: a tree with changes too; no result); each round's commit recorded as
 information and never compared (prior D108). Its intent is written by hand (L27, read by the publisher), not checked
 here (the user, 2026-10-07). RESUMABLE: a round is done when its checkpoint is
-there (the last file it writes); a rerun with the same inputs and settings continues from the last checkpoint, a round
-left half done is moved aside as ``round_<r>.aborted-<UTC>`` (outline E8) and run again; other inputs are refused. A
+there (the last file it writes); a rerun with the same inputs and settings continues from the last checkpoint; a round
+left half done keeps the batches it spoke and speaks the others (D185: a batch is done when its record
+``record_<k>.json`` is there, written after its files, each under a temporary name renamed when complete; a batch with
+files and no record is spoken again; done batches of another draw, or spoken on another kind of device than the rest,
+are refused by name), or with ``--restart-round`` is moved aside as ``round_<r>.aborted-<UTC>`` (outline E8) and run
+again whole. On changed code the operator chooses: restart, or keep the done batches after a behaviour check on fixed
+inputs (`window_behaviour`, a few windows of each span with the code before and after); each batch's record holds the
+commit of its launch as information, never compared (outline D21). Other inputs are refused. A
 rerun may raise the rounds and change nothing else (D157): the campaign goes on to the new count, unless its val read
 is claimed (P47: the round would then be chosen after the val days were read). The recorded paths
 are compared as this checkout reads them (`inputs_here`: a campaign recorded in a worktree resumes from another
@@ -405,7 +411,7 @@ STAGE_C = Stage(start_model=lambda context, settings: start_model(context, setti
                 start=lambda context, settings: campaign_start(context, settings),
                 identity=lambda context, settings, out, rounds: identity(context, settings, out, rounds),
                 draw=lambda context, settings, round_: _stage_c_draw(context, settings, round_),
-                speak=lambda *args, stage: speak_round(*args, stage=stage),
+                speak=lambda *args, stage, launch: speak_round(*args, stage=stage, launch=launch),
                 selection=lambda context, settings, split: selection_windows(context, settings, split),
                 readout=lambda *args, stage: _stage_c_readout(*args, stage=stage),
                 record=lambda window: window_record(window),
@@ -515,7 +521,7 @@ def speak_batch(model: Prior, context: Context, windows: Sequence[Window], place
                          seed=settings.seed, round_=round_, split="train", continuations=settings.continuations,
                          rules=stage_c_rules(settings.seed, round_, context.interval_s, settings.branch_every_s))
     informative = [g for g in found.groups if g.informative]
-    torch.save(informative, directory / f"groups_{k}.pt")
+    save_batch_file(informative, directory / f"groups_{k}.pt")
     return {"groups": len(found.groups), "informative_groups": len(informative),
             "spoken_again": len(found.spoken_again), "differed": list(found.differed),
             "reward_sum": sum(r.reward for r in found.first), "faulty_steps": sum(r.faulty_steps for r in found.first),
@@ -559,25 +565,88 @@ def speak_landed_batch(model: Prior, context: Context, windows: Sequence[Window]
     first = drawn[0][0]
     landings = sum(end.outcome == LANDED for ends, _ in drawn for end in ends)
     kept = [Landed(places[b], best[b]) for b in sorted(best)]
-    torch.save(kept, directory / f"kept_{k}.pt")
+    save_batch_file(kept, directory / f"kept_{k}.pt")
     return {"kept": len(kept), "landings": landings,
             "reward_sum": sum(r.reward for r in first), "faulty_steps": sum(r.faulty_steps for r in first),
             "losses_reading_fault": sum(r.loss_reads_fault for r in first),
             "outcomes": dict(Counter(r.outcome for r in first))}
 
 
+def save_batch_file(value: Any, path: Path) -> None:
+    """A batch's file of a round (its groups, kept or value sentences) written under a temporary name and renamed when
+    complete (D185): a file is never read half written, and its temporary name is no batch file's (``groups_<k>.tmp``:
+    the stem kept, so torch names the file's inner folder as a file written in place, the same bytes)."""
+    temporary = path.with_suffix(".tmp")
+    torch.save(value, temporary)
+    temporary.replace(path)
+
+
+def batch_record_path(directory: Path, k: int) -> Path:
+    """Batch ``k``'s record (D185): written after its files, the mark that the batch is done."""
+    return directory / f"record_{k}.json"
+
+
+def spoken_batch(stage: Stage, model: Prior, context: Context, windows: Sequence[Window], places: Sequence[int],
+                 settings: Settings, round_: int, directory: Path, k: int, launch: Mapping[str, Any]
+                 ) -> dict[str, Any]:
+    """Batch ``k`` spoken by ``stage``'s `Stage.speak_batch` (its files written), then its record ``record_<k>.json``
+    (D185, the last file: the batch is done): the batch's own record (`Stage.speak_batch`'s), its windows (`Stage.record`),
+    the launch that spoke it (``launch``: its time and commit, information) and the kind of device it was spoken on."""
+    part = stage.speak_batch(model, context, windows, places, settings, round_, directory, k)
+    write_json_atomic(batch_record_path(directory, k), {
+        "batch": k, "record": part, "windows": [stage.record(windows[p]) for p in places], "launch": dict(launch),
+        "device": context.device.type})
+    return part
+
+
+def done_batches(directory: Path, windows: Sequence[Window], places: Sequence[Sequence[int]], stage: Stage,
+                 device: str) -> dict[int, dict[str, Any]]:
+    """The batches of a round left half done that are done (D185: their records, ``record_<k>.json``), by batch: their
+    own records. Refused by name: a record of another draw of the round (its windows not the batch's), of a batch the
+    round has not, or spoken on another kind of device than ``device`` (the rest of the round's). Files under a
+    temporary name are removed (never read)."""
+    for path in directory.glob("*.tmp"):
+        path.unlink()
+    out = {}
+    for path in sorted(directory.glob("record_*.json")):
+        held = json.loads(path.read_text(encoding="utf-8"))
+        k = held["batch"]
+        if path != batch_record_path(directory, k) or not 0 <= k < len(places):
+            raise SystemExit(f"{path}: a record of a batch this round has not (it has {len(places)})")
+        if held["windows"] != [stage.record(windows[p]) for p in places[k]]:
+            raise SystemExit(f"{path}: batch {k} of another draw of the round; restart the round (--restart-round)")
+        if held["device"] != device:
+            raise SystemExit(f"{path}: batch {k} spoken on {held['device']}, the rest of its round would be spoken on "
+                             f"{device}: a round is spoken on one kind of device (D185; --restart-round)")
+        out[k] = held["record"]
+    return out
+
+
 def speak_round(model: Prior, context: Context, windows: Sequence[Window], settings: Settings, round_: int,
-                directory: Path, speakers: Speakers | None = None, *, stage: Stage = STAGE_C) -> dict[str, Any]:
-    """Step 3 of a round (module docstring): every batch spoken by ``stage``'s `Stage.speak_batch` (stage C's
+                directory: Path, speakers: Speakers | None = None, *, stage: Stage = STAGE_C,
+                launch: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Step 3 of a round (module docstring): every batch not done spoken by ``stage``'s `Stage.speak_batch` (stage C's
     `speak_batch`: its two passes and its informative groups; `STAGE_C_LANDED`'s `speak_landed_batch`: its draws and its
     kept sentences, P49), here or by ``speakers`` (the same files and records: a batch reads only its windows' own random
-    numbers; refused unless they run ``stage``); the batches' records summed in batch order: each count, the list of
-    windows that differed, the outcomes."""
+    numbers; refused unless they run ``stage``), each closed by its record (`spoken_batch`; ``launch``: this launch's
+    time and commit); the batches a launch before spoke read back (`done_batches`, D185); the batches' records summed in
+    batch order: each count, the list of windows that differed, the outcomes."""
     _require_stage(speakers, stage)
+    launch = launch_of() if launch is None else launch
     places = stage.batches(windows, settings)
-    parts = (speakers.speak(model, windows, places, round_, directory) if speakers is not None else
-             [stage.speak_batch(model, context, windows, p, settings, round_, directory, k)
-              for k, p in enumerate(places)])
+    done = done_batches(directory, windows, places, stage,
+                        (speakers.device if speakers is not None else context.device).type)
+    if done:
+        commits = sorted({json.loads(batch_record_path(directory, k).read_text(encoding="utf-8"))["launch"]["commit"]
+                          for k in done})
+        print(f"round {round_}: {len(done)} of {len(places)} batches read back, spoken at {commits}; this launch at "
+              f"{launch['commit']} (D185: a changed code restarts the round or keeps them after a behaviour check)",
+              flush=True)
+    todo = [k for k in range(len(places)) if k not in done]
+    spoken = (speakers.speak(model, windows, places, round_, directory, todo, launch) if speakers is not None else
+              [spoken_batch(stage, model, context, windows, places[k], settings, round_, directory, k, launch)
+               for k in todo])
+    parts = [done[k] if k in done else spoken[todo.index(k)] for k in range(len(places))]
     record: dict[str, Any] = {"batches": len(parts)}
     outcomes: Counter = Counter()
     for part in parts:
@@ -587,6 +656,12 @@ def speak_round(model: Prior, context: Context, windows: Sequence[Window], setti
             else:
                 record[key] = record[key] + value if key in record else value
     return {**record, "windows": len(windows), "outcomes": dict(outcomes)}
+
+
+def launch_of() -> dict[str, Any]:
+    """This launch's time and commit, as the records of the batches it speaks hold them (information, outline D21)."""
+    git = git_state()
+    return {"utc": utc_now(), "commit": git["head"], "dirty": git["dirty"]}
 
 
 def _require_stage(speakers: Speakers | None, stage: Stage) -> None:
@@ -641,13 +716,14 @@ class Speakers:
         self.readings = 0
 
     def speak(self, model: Prior, windows: Sequence[Window], places: Sequence[Sequence[int]], round_: int,
-              directory: Path) -> list[dict[str, Any]]:
-        """Every batch's record, in batch order; on a failure the batches not started are cancelled."""
+              directory: Path, batches: Sequence[int], launch: Mapping[str, Any]) -> list[dict[str, Any]]:
+        """The records of the batches ``batches`` (their indices in ``places``), each closed by its record file
+        (`spoken_batch`), in that order; on a failure the batches not started are cancelled."""
         state = directory / "speaking_model.pt"
         torch.save(model.state_dict(), state)
-        return self._results(state, [self.pool.submit(_speak, round_, str(state), str(directory), k, list(p),
-                                                      [self.stage.record(windows[i]) for i in p])
-                                     for k, p in enumerate(places)])
+        return self._results(state, [self.pool.submit(_speak, round_, str(state), str(directory), k, list(places[k]),
+                                                      [self.stage.record(windows[i]) for i in places[k]], dict(launch))
+                                     for k in batches])
 
     def read(self, model: Prior, windows: Sequence[Window], places: Sequence[Sequence[int]], split: str,
              draw: int = 0) -> list[list[WindowResult]]:
@@ -730,10 +806,10 @@ def _cap_gpu(device: torch.device, budget: int) -> None:
     torch.cuda.set_per_process_memory_fraction((budget - context_bytes) / total, index)
 
 
-def _speak(round_: int, state: str, directory: str, k: int, places: list[int], records: list[dict[str, Any]]
-           ) -> dict[str, Any]:
+def _speak(round_: int, state: str, directory: str, k: int, places: list[int], records: list[dict[str, Any]],
+           launch: dict[str, Any]) -> dict[str, Any]:
     """A worker's batch (`Speakers`): the round's model and windows made once a round (the stage's), then the stage's
-    `Stage.speak_batch`."""
+    `Stage.speak_batch` and the batch's record (`spoken_batch`)."""
     held = _SPEAKER
     context, settings, stage = _worker_context()
     if held.get("round") != round_:
@@ -746,7 +822,7 @@ def _speak(round_: int, state: str, directory: str, k: int, places: list[int], r
     if [stage.record(windows[i]) for i in places] != records:
         raise ValueError(f"round {round_}, batch {k}: the worker drew other windows than the campaign")
     try:
-        return stage.speak_batch(held["model"], context, windows, places, settings, round_, Path(directory), k)
+        return spoken_batch(stage, held["model"], context, windows, places, settings, round_, Path(directory), k, launch)
     finally:
         if context.device.type == "cuda":
             torch.cuda.empty_cache()
@@ -1226,7 +1302,7 @@ def speak_value_batch(model: Prior, context: Context, windows: Sequence[Window],
     kept = [ValueSample(places[b], Sentence(rows, permitted, tokens, end.reward), part, left)
             for b, ((rows, permitted, tokens), (part, left), end) in enumerate(zip(flown.samples("train"),
                                                                                   flown.values("train"), ends))]
-    torch.save(kept, directory / f"sentences_{k}.pt")
+    save_batch_file(kept, directory / f"sentences_{k}.pt")
     return {"windows": len(kept), "rows": sum(len(one.sentence.rows.time_s) - one.sentence.rows.first_step
                                               for one in kept),
             "reward_sum": sum(r.reward for r in ends), "faulty_steps": sum(r.faulty_steps for r in ends),
@@ -1601,14 +1677,15 @@ def _but_rounds(inputs: Mapping[str, Any]) -> dict[str, Any]:
 
 def open_campaign(out: Path, inputs: dict[str, Any], git: dict[str, Any], checks: Any, *,
                   schema: str = CAMPAIGN_SCHEMA, reader: str = CLAIM_READER,
-                  settings_type: Callable[..., Any] = Settings) -> dict[str, Any]:
+                  settings_type: Callable[..., Any] = Settings, restart_round: bool = False) -> dict[str, Any]:
     """``campaign.json``: a new campaign's, or a resume's. A resume is refused unless its inputs are the record's — the
     recorded paths as this checkout reads them (`inputs_here`), the recorded settings as ``settings_type`` reads them
     (a setting added after the record takes its default, `SETTINGS_ADDED`), the rounds left out — and its rounds at least the
     record's; more rounds raise the record's count (D157), its paths kept as recorded, and are refused once the
     campaign's val read is claimed (`post_validation`, P47), spent or not. Each resume adds its entry: the
-    time, the commit, the checks, the paths it read and the rounds before and after it. A round left half done (its
-    directory without its checkpoint) is moved aside as ``round_<r>.aborted-<UTC>``. A stage's own campaign gives its
+    time, the commit, the checks, the paths it read, the rounds before and after it and whether it restarted the round
+    left half done. A round left half done (its directory without its checkpoint) keeps the batches it spoke (D185,
+    `done_batches`), or with ``restart_round`` is moved aside as ``round_<r>.aborted-<UTC>``. A stage's own campaign gives its
     format (``schema``), the reader of its val read's claim (``reader``) and its settings (``settings_type``); stage C's
     by default (post-training §9 item 11)."""
     path = out / "campaign.json"
@@ -1628,14 +1705,14 @@ def open_campaign(out: Path, inputs: dict[str, Any], git: dict[str, Any], checks
             raise SystemExit(f"{out}: its val read is claimed ({validation_claim(out, reader)}); its rounds are not "
                              f"raised after it (P47)")
         left = out / f"round_{done_rounds(out)}"
-        if left.exists():
+        if left.exists() and restart_round:
             aborted = left.with_name(f"{left.name}.aborted-{utc_now().replace(':', '')}")
             left.rename(aborted)
             record["aborted"].append(aborted.name)
         record["inputs"]["settings"]["rounds"] = after
         record["resumed"].append({"utc": utc_now(), "git": git, "checks": checks,
                                   "inputs": {key: asked[key] for key in INPUT_PATHS},
-                                  "rounds": {"before": before, "after": after}})
+                                  "rounds": {"before": before, "after": after}, "restart_round": restart_round})
         write_json_atomic(path, record)
         return record
     if out.exists():
@@ -1776,14 +1853,15 @@ def run_campaign(out: Path, settings: Settings, context: Context, speakers: Spea
     model, optimizer = campaign_model(out, context, settings, stage)
     select = stage.selection(context, settings, "select")
     companion = stage.companion(context, settings, out, first, model)
+    launch = launch_of()
     for round_ in range(first, settings.rounds):
         directory = out / f"round_{round_}"
-        directory.mkdir()
+        directory.mkdir(exist_ok=round_ == first)          # a round left half done keeps its done batches (D185)
         windows, drawn = stage.draw(context, settings, round_)
         context.splits["train"]["start"].release()        # a round's flights kept, not the campaign's (C13)
         if speakers is not None and context.device.type == "cuda":
             torch.cuda.empty_cache()     # the speakers share the GPU: the memory this process cached in the last pass
-        spoken = stage.speak(model, context, windows, settings, round_, directory, speakers, stage=stage)
+        spoken = stage.speak(model, context, windows, settings, round_, directory, speakers, stage=stage, launch=launch)
         torch.manual_seed(pass_seed(settings.seed, round_))                    # the data term's dropout
         passed = stage.train(model, context, optimizer, directory, settings,
                             np.random.default_rng([settings.seed, round_, 1]), part_width=stage.part_width,
@@ -1864,6 +1942,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="processes that speak a round's batches in parallel (Speakers; the same results)")
     parser.add_argument("--speak-device",
                         help="the speaking workers' device (default: --device); e.g. cpu beside a pass on cuda")
+    parser.add_argument("--restart-round", action="store_true",
+                        help="D185: a resume moves the round left half done aside and speaks it whole (default: its "
+                             "done batches kept; on changed code, keep them only after a behaviour check)")
     parser.add_argument("--smoke", action="store_true", help="SMOKE: a tree with changes too; no result")
     args = parser.parse_args(argv)
     if args.speak_workers < 1:
@@ -1916,7 +1997,8 @@ def main(argv: list[str] | None = None) -> int:
               "windows": str(census), "procedure_root": str(procedure_root), "settings": asdict(settings),
               "smoke": args.smoke}
     try:
-        record = open_campaign(out, inputs, git, opened["checks"])   # a resume of other inputs refused before the measure
+        record = open_campaign(out, inputs, git, opened["checks"],      # a resume of other inputs refused before the measure
+                               restart_round=args.restart_round)
         measuring = speakers is not None and done_rounds(out) < settings.rounds        # O15, before any round
         fit = recorded_fit(record, speakers.workers, device, speak_device) if measuring else None   # D167, GPU unused
         context = replace(context, device=device, base=context.base.to(device).eval())

@@ -111,7 +111,7 @@ def test_a_round_speaks_each_window_n_times_and_writes_the_kept_sentences(setup,
         assert speak_round(model, context, windows, settings, 0, there, speakers, stage=STAGE_C_LANDED) == record
     finally:
         speakers.close()
-    assert sorted(p.name for p in there.iterdir()) == ["kept_0.pt", "kept_1.pt"]
+    assert sorted(p.name for p in there.iterdir()) == ["kept_0.pt", "kept_1.pt", "record_0.json", "record_1.json"]
     assert all((here / n).read_bytes() == (there / n).read_bytes() for n in ("kept_0.pt", "kept_1.pt"))
 
 
@@ -169,7 +169,7 @@ def test_a_landed_campaign_resumed_is_the_campaign_run_through(setup, tmp_path, 
     monkeypatch.setattr(post_train, "landed_train_pass", real)
     assert done_rounds(broken) == 1
     reopened = open_campaign(broken, _inputs(settings, tmp_path), {"head": "y", "dirty": False}, {})
-    assert len(reopened["aborted"]) == 1
+    assert reopened["aborted"] == [] and (broken / "round_1" / "record_0.json").exists()   # D185: its batches kept
     run_campaign(broken, settings, context, stage=STAGE_C_LANDED)
     assert _same(torch.load(broken / "round_1" / "checkpoint.pt", weights_only=False)["model"], state["model"])
     with pytest.raises(SystemExit, match="other inputs"):

@@ -333,6 +333,49 @@ def test_stage_ds_round_with_speaking_workers_is_the_round_of_one_process(setup,
     assert records[0] == records[1]
 
 
+def test_stage_ds_round_stopped_after_a_batch_resumes_by_its_batches(setup, tmp_path, monkeypatch):
+    """C27, D185 for stage D: a round stopped after its first batch (two batches: the same flight's windows) and resumed
+    keeps that batch and speaks the other, and gives the round of a campaign run through: its speaking record and its
+    checkpoint, bit for bit."""
+    from ts_transformer.tests.test_post_train import _same
+
+    s = setup
+    short_round(monkeypatch, s)
+    context = _context(s)
+    start = _stage_c(s, tmp_path, context)
+    window = replace(_ahead(s["windows"][0]), span_s=1.0)
+    monkeypatch.setattr(multi_train, "draw_windows",
+                        lambda context, settings, rng: ([window, window], {"drawn": {REAL_KIND: 2}}))
+    settings = _multi_settings(start=start, per_kind={REAL_KIND: 2, COMPRESSED: 0})
+    options = dict(schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER, settings_type=MultiSettings)
+    inputs = {**{key: str(tmp_path / "inputs" / key) for key in post_train.INPUT_PATHS}, "settings": asdict(settings),
+              "smoke": True}
+    through, stopped = tmp_path / "through", tmp_path / "stopped"
+    post_train.open_campaign(through, inputs, {"head": "x", "dirty": False}, {}, **options)
+    post_train.run_campaign(through, settings, context, stage=stage_d())
+    real = multi_train.speak_batch
+    spoken = []
+
+    def stopping(*args):
+        spoken.append(args[-1])
+        if args[-1] == 1 and len(spoken) == 2:
+            raise RuntimeError("stopped")
+        return real(*args)
+
+    monkeypatch.setattr(multi_train, "speak_batch", stopping)
+    stage = stage_d()                                           # its batch speaker the stopping one
+    post_train.open_campaign(stopped, inputs, {"head": "x", "dirty": False}, {}, **options)
+    with pytest.raises(RuntimeError, match="stopped"):
+        post_train.run_campaign(stopped, settings, context, stage=stage)
+    assert (stopped / "round_0" / "record_0.json").exists() and not (stopped / "round_0" / "record_1.json").exists()
+    post_train.open_campaign(stopped, inputs, {"head": "y", "dirty": False}, {}, **options)
+    post_train.run_campaign(stopped, settings, context, stage=stage)
+    assert spoken == [0, 1, 1]
+    ours, theirs = (json.loads((out / "round_0" / "round.json").read_text()) for out in (stopped, through))
+    assert ours["speaking"] == theirs["speaking"] and ours["speaking"]["batches"] == 2
+    assert _same(*(torch.load(out / "round_0" / "checkpoint.pt", weights_only=False) for out in (stopped, through)))
+
+
 def test_the_readouts_losses_by_pair_are_the_loops_on_a_window_of_several_aircraft(setup):
     """§5 item 4 (the review of MC4, S2-4): on the window of three commanded aircraft (each lost against another), the
     readout's judgement again on the states flown (`window_losses_of`) finds, at the step of each loss the loop charged,
@@ -491,7 +534,10 @@ def test_the_runner_records_stage_ds_campaign_and_opens_its_context_formal_or_sm
         assert calls == [("start_of", formal)] + [("finished", tmp_path / "c")] * formal + [
             ("spans", [300.0, 600.0]), ("context", formal), ("start", start),
             ("campaign", {"schema": MULTI_CAMPAIGN_SCHEMA, "reader": MULTI_CLAIM_READER,
-                          "settings_type": MultiSettings}), ("run", True)]
+                          "settings_type": MultiSettings, "restart_round": False}), ("run", True)]
+    calls.clear()
+    assert multi_train.main(argv + ["--smoke", "--restart-round"]) == 0                   # D185
+    assert [k["restart_round"] for name, k in calls if name == "campaign"] == [True]
 
 
 def test_the_time_the_aircraft_take(built):
