@@ -645,3 +645,18 @@ timers against one process with them); it gives the whole change only. Read: (1)
 batch (64–79 %) and a search step costs about 21 ms more than its rows (31 ms at 20 rows, 52 ms at 63): one window's
 point at a time is the bottleneck — requests item 78; (2) on batch 86 the reserved peak is 2.2 times the allocated one
 (before: 1.16): the cache grown in steps fragments the allocator — requests item 79.
+
+## 19 D188, D189 (notes/stage_d.md orders 1–5, 2026-10-09 night)
+
+On `dev-multi-control`: D188 (1) efef5c4d, (2) c024a333; D189 (0)–(2) ceccd417, (3) 9c2161fa — each checked once on
+fixed inputs (CPU, one thread) and reviewed by the agent (D188 (2) a small change); D188 (1) against ab41cf93 on MC6's
+backward batches 0 / 23 / 86: groups, order, depths and every continuation's words, rewards, bounds, states, permitted
+words and tokens bit for bit, the same rows flown (no draw near a boundary differed); D188 (2): batches 0 and 86 with
+and without the allocator setting, the group files identical (`~/.bashrc` sets it for interactive shells; a formal run's
+systemd unit reads no `.bashrc`: §18's workers ran without it); D189 (0)–(3): window_behaviour on stage C's and D's
+windows "the same behaviour", prior_behaviour identical; the profile at §18's settings (9c2161fa,
+`outputs/POOLED/multi/profile_d189_20261009`): batch 0 111.8 → 55.3 s (search 74 → 54 %, 2,684 → 350 steps), 23
+116.8 → 64.9 s (79 → 63 %, 2,731 → 408), 86 80.8 → 61.0 s (64 → 56 %, 998 → 465); reserved / allocated peaks 0.99 /
+0.78, 2.07 / 1.77, 1.80 / 1.53 GiB (§18: 0.39 / 0.32, 0.63 / 0.41, 1.46 / 0.66); a worker's GPU peak 2.21 GiB (§18:
+1.6): 2 workers fit, 3 do not (8.7 GiB against 6.8) — requests item 80; the full ts suite at 9c2161fa: 2092 passed,
+1 skipped.
