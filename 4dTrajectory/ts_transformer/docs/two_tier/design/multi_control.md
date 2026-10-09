@@ -70,9 +70,9 @@ the evidence is in §9.
 ### 0.3 Implementation
 
 Stage D's implementer keeps this table and its log, `readouts/2026-10-06_stage_d_implementation_log.md` (outline §5
-rule 10); its readings and requests go to `requests_from_d_to_designer.md`. State, 2026-10-09: MC0–MC5 built, reviewed
-and merged into `dev-two-tier` (last `db0ac00a`, with the two bug fixes of MC6's round 0 in `a79c1517` and `e4bbafac`);
-MC6 runs; MC11's code (D181) is on `dev-multi-control`, not merged.
+rule 10); its readings and requests go to `requests_from_d_to_designer.md`. State, 2026-10-09 (evening): MC0–MC5 and
+MC11's D181 merged into `dev-two-tier`; MC6 stopped by the user in its round 0; D183, D186, D185 (post-training C27),
+MC12 (D182) and the orders A–D of 2026-10-09 (D187) built on `dev-multi-control`, not merged.
 
 | Milestone | State |
 |---|---|
@@ -82,8 +82,11 @@ MC6 runs; MC11's code (D181) is on `dev-multi-control`, not merged.
 | MC4 | Committed 054727db, ac919f9c, 2b370d37, fccbab8d, 6cc49ad1; the smoke and its resume passed (log §7, §8, §11) |
 | MC5 | The memory measure (D179, D180): committed 48c21e50; measured once for MC6's settings, the GPU's profile `outputs/POOLED/multi/profile_mc6_gpu32_20261009` (log §14, §15) |
 | Frontend D177 (12), D178 (6) | `multi.census.judged_steps` 897e433f, `loop_positions` a332466a (log §13, §14) |
-| MC6 | Running since 2026-10-09: start `post_seg60_20261007` round 5, `outputs/POOLED/multi/multi_train_20261009`, run worktree `.claude/worktrees/run-mc6` at `e4bbafac`, systemd unit `mc6-run-112034`, 2 GPU workers; round 0 restarted twice on two fixed bugs; results in the log from §15 |
-| MC11 (D181) | On `dev-multi-control`: 55 (92341758), 58–60 (37526695, bit for bit on real windows), 56 `multi_speed` (a8df27f7); not merged; 56's measure waits for the GPU (log §16) |
+| MC6 | Stopped by the user inside round 0 (2026-10-09 14:31, 134 of 224 batches); not resumed; `outputs/POOLED/multi/multi_train_20261009` kept as it was (log §15, §16) |
+| MC11 (D181) | Merged: 55 (92341758), 58–60 (37526695), 56 `multi_speed` (a8df27f7); item 56 measured on the GPU (log §16) |
+| MC11 (D183, D186) | On `dev-multi-control`: 69 (0fa9df2e), D183 (317979f9; its copy allocated once, order B, 64e62b4e), D186 (1) (ab6b2e8e), (2) (3) (ad950c8a; the fast forms replace the old code, order A, ae4249fd); the behaviour check `window_behaviour` (cfe5da0f); every change the same on stage C's and D's fixed windows and in prior_behaviour; the CPU batch 86: 189 → 130 s (log §17) |
+| Post-training C27 (D185) | On `dev-multi-control`: 33e24bbe; the resume through the speaking workers (order C, 646ffb3a) (log §17) |
+| MC12 (D182) | On `dev-multi-control`: de0711aa; the grid the same on stage C's and D's fixed windows; the GPU measures of grid against backward wait for the user's word (log §17) |
 | MC7–MC10 | Not started |
 
 ### 0.4 Plan
