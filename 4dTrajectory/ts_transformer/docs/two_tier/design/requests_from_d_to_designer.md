@@ -9,7 +9,7 @@ census's sample: 18; D172: 46–48; D179, D180: 49–53; D181, O20: 54–62), it
 
 State: 2026-10-09: items 54–62 decided (D181, O20) and deleted. MC11's code (D181 items 55, 58–60, 56) is built on
 `dev-multi-control`; items 63–65 are readings of it for the designer. Item 66 is the user's proposal of 2026-10-09 (a
-new rule of branch training), written here at the user's word.
+new rule of branch training) and item 67 the speaker's cache allocated as needed; both written here at the user's word.
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -217,3 +217,33 @@ new rule of branch training), written here at the user's word.
       measure shows that the cache sets the peak.
     - *Storage.* A group's first sentence and its continuations share their rows up to the point; stored as a tree (a
       node holds the rows after its parent), the groups' files shrink; the loss still reads whole sentences.
+
+## The speaker's cache allocated as needed (the user's word, 2026-10-09)
+
+67. **The cache's room: what is written, a step more, and no second copy.** Claude's estimate (to be confirmed by item
+    56's measure, D181): the K continuations' speaker caches are most of a stage D worker's GPU peak. A row of an
+    aircraft costs 8 KiB (the base: 4 layers, d_model 256, float32; a key and a value each). The cache is
+    `[B, heads, room, head]` a layer (`prior/model.py` `Past`), its room one for the whole batch: at first the latest
+    join tick + the observed steps + `FIRST_ROWS` (128, `experiments/prior_speaking_loop.py`), doubled when a row
+    outgrows it (`Past.grown`, `Layer.extend`: `max(end, 2 × room)`). A 1200 s window: about 430 rows at first, about
+    860 once doubled, so 3.4–6.9 MB an aircraft. At a branch tick of a 1200 s batch (24 aircraft), e.g. 2 windows × 3
+    varied aircraft × K 8 × 6 aircraft a window = 288 rows: about 1.0–2.0 GB, against a measured peak of about 2.5 GiB
+    (the CUDA context included). Three places where room is held that no row uses:
+    - **The copy clones twice.** `Speaker.copy` (`prior/speaker.py`) takes `p.keys[index].clone()`: indexing by a
+      tensor already makes a new tensor, so the clone is a second whole copy, alive at once with the first — at a
+      branch tick the copies' cache momentarily twice over. Proposal: drop the `.clone()` (the indexed tensor is the
+      copy's own storage; `present` likewise).
+    - **The copy takes the whole room.** A copy holds the room of the loop it is copied from, rows not yet written
+      included. Proposal: a copy keeps the rows written (`rows`) and a step of room after them.
+    - **Doubling.** A cache that outgrows its room becomes twice as large; at the moment of growth the old and the new
+      are both alive (`torch.cat`: about three times the old). Proposal: grow by a fixed step (e.g. 64 rows, about
+      256 s at Δ = 4 s), so the room is at most a step past the rows; more growths (each copies the cache once), each
+      smaller.
+
+    **No number changes, on the CPU and the GPU:** the attention reads only the rows written (`Layer.extend`:
+    `past.keys[:, :, :end]`, the mask over `:end`); the room never enters a computation. Before use, the check of
+    D181 (58–60) on fixed inputs (stage C's and stage D's windows; groups, samples, readout bit for bit), and item 56's
+    measure before and after for the gain. Gain (estimate): the continuations' peak lower by about a third to a half,
+    so possibly a third GPU worker. The code is stage B's speaker and model (prior §7), shared by stages C and D; the
+    designer names the owner. It needs no tree of shared prefixes (O20's item 62) and does not exclude one: the tree
+    would also share the copies' prefix, this only stops holding room that no row uses.
