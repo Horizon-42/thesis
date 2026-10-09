@@ -158,17 +158,32 @@ readings); the others are MC0–MC5's readings still open.
 ## D188, D189 (stage D's log §19; 2026-10-09, night)
 
 80. **The joint loop's memory sets the workers** (D188 (1), measured by the profile at §18's settings,
-    `outputs/POOLED/multi/profile_d189_20261009`). A batch is faster (batch 0 111.8 → 55.3 s, 23 116.8 → 64.9 s,
-    86 80.8 → 61.0 s), but a worker's GPU peak rose from 1.6 to 2.21 GiB (batch 23: 2.07 GiB reserved, 1.77
-    allocated): with D179's margin 1.3, 2 workers fit where 3 did (3 need 8.7 GiB against 6.8). At a round's batches of
-    MC6 (23 / 63 / 138 by span) the speaking is about 13,800 worker-seconds against §18's 21,100: on 2 workers about
-    1.9 h, the time 3 workers took before. The peak is the joint loop's: every search's current point (K copies of its
-    window, each with its history in the cache) and every chosen point until its window's end; at a rebuild the old
-    and new loops' executors (the cache is freed a layer at a time). Proposal: a campaign setting that bounds the rows
-    the joint loop holds — a point waits for room (D181 (57)'s `continuation_rows`, never built: its default "all",
-    today's behaviour), checked as D188 (1) (the batching only changes: on the CPU bit for bit) — sized so that 3
-    workers fit (about 1.7 GiB a worker); estimate: a round's speaking about 1.3–1.6 h. Otherwise the next campaign
-    runs 2 workers.
+    `outputs/POOLED/multi/profile_d189_20261009`, and by part, stage D's log §19). A batch is faster (batch 0 111.8 →
+    55.3 s, 23 116.8 → 64.9 s, 86 80.8 → 61.0 s), but a worker's GPU peak rose from 1.6 to 2.21 GiB (batch 23: 2.07
+    GiB reserved, 1.77 allocated): with D179's margin 1.3, 2 workers fit where 3 did (3 need 8.7 GiB against 6.8). At
+    a round's batches of MC6 (23 / 63 / 138 by span) the speaking is about 13,800 worker-seconds against §18's 21,100:
+    on 2 workers about 1.9 h, the time 3 workers took before.
+
+    By part (one process on the GPU, at each batch's step of the most allocated; GiB): the joint loop's cache is most
+    of it — batch 0: 0.40 of 0.63 allocated, 23: 1.10 of 1.44, 86: 0.96 of 1.24; the executor and words 0.02 / 0.12 /
+    0.10; a rebuild's peak 0.79 / 1.77 / 1.53. Of the cache, the rows of history 37 / 26 / 42 %, the rows written but
+    not present 37 / 60 / 44 % (a line is aligned to the joint loop's clock: a point from an early tick is padded to
+    the latest part's length, and an aircraft not yet joined writes rows not present) and the room of a step (D183's
+    64 rows, after each rebuild) 26 / 14 / 14 %. The K copies of one point are the same, bit for bit, up to where they
+    part — their history and the padding before it: one copy of that front instead of K would free 0.24 / 0.76 / 0.75
+    (61–79 % of the cache), of which history alone 0.12 / 0.19 / 0.36.
+
+    Proposals, by what each frees (the user chooses; none changes a number but (c)'s kernel on the GPU):
+    (a) the room after a rebuild of the joint loop: the steps to its next rebuild, not 64 rows (rebuilds come every
+        few steps): about 0.10–0.16 GiB, the room no row reads (the cache grows by D183's step if it outlives it);
+    (b) a campaign setting that bounds the rows the joint loop holds, a point waiting for room (D181 (57)'s
+        `continuation_rows`, never built; default "all", today's behaviour): the memory in proportion, at the price of
+        steps;
+    (c) the shared prefix (O20 (62); the condition it was deferred on — that the cache sets the peak — now holds): the
+        K copies of a point read one front, each its own rows after the point; frees most of the cache (above); a change
+        of the speaker's cache and its attention (stage B), two pieces of attention merged — on the GPU a rounding,
+        checked by D181 (57)'s bound. Estimate with (a) and (c): a worker's peak about 1.2–1.5 GiB, 3–4 workers.
+    Today, without them, the next campaign runs 2 workers.
 81. **D189 (0)'s "window's end"** (reading). A window has no end of its own: its aircraft fly until the executor ends
     them, and a batch's windows are said together (a window's halted rows are said while another's fly). Read: a
     commanded aircraft's landings are those from 30 min and one Δ before its window's row 0 to the latest a row of its
