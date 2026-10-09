@@ -10,7 +10,8 @@ census's sample: 18; D172: 46–48; D179, D180: 49–53; D181, O20: 54–62), it
 State: 2026-10-09: items 54–62 decided (D181, O20) and deleted. MC11's code (D181 items 55, 58–60, 56) is built on
 `dev-multi-control`; items 63–65 are readings of it for the designer. Item 66 is the user's proposal of 2026-10-09 (a
 new rule of branch training) item 67 the speaker's cache allocated as needed, item 68 a round resumed by its batches and item 69 a branch
-point's copies freed once used; written here at the user's word. MC6 was stopped by the user inside its round 0 (2026-10-09 14:31, 134 of 224 batches; "太慢而且不一定有用").
+point's copies freed once used; written here at the user's word. Item 70: the profile of the continuations'
+window-loop time (item 56's rule: cProfile on the CPU where the timers leave a part unexplained). MC6 was stopped by the user inside its round 0 (2026-10-09 14:31, 134 of 224 batches; "太慢而且不一定有用").
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -304,3 +305,29 @@ the loop's copy: the CPU's) more than the model and the executor together; a pro
     with item 67 lower still — 4 to 5 GPU workers instead of 2 (an estimate; a new memory measure, D179, reads it).
     A worker remains one CPU core: the round's time then rests on item 66 (fewer continuations) and on the window
     loop's own work (the profile).
+
+70. **Where the continuations' own time goes** (the CPU profile: `outputs/POOLED/multi/speed_mc6_r0_b86_cpu_profile_20261009`,
+    the same batch, the CPU with one thread, cProfile inside the continuations only; 240 s whole, the continuations
+    211 s: the speaker 79, the executor 18, the window loop's own 114; cProfile inflates Python-heavy parts, so the
+    shares are what to read). Cumulative times of the 209 s profiled, the largest first that a change could cut:
+    - **The rows' inputs, 38 s (18 %)**: `prior/loop.py` `__call__` → `prior/inputs.state_inputs` (133,056 calls, one an
+      aircraft and row) → `instructions/airport.relative_to_runway` (2.0 M calls). Per aircraft in Python.
+    - **A landing added to a window, 36 s (17 %)**: `WindowLoop._landed` → `SpeakingLoop.add_landing` →
+      `LandingIndex.with_landing` (1,710 calls) builds a new index whose `__post_init__` checks the day of EVERY
+      landing of the airport's roster again (`operational_day`: 22.4 M calls, about 13,000 a landing added), to add one.
+      Proposal: check the new landing only and insert it (its order, its runway's times); the same index, so no number
+      changes — the cheapest of these.
+    - **The grammar's masks, 33 s (16 %)**: `Speaker._allowed` → `instructions/grammar.column_mask` (17,426 calls) →
+      `_rules` (186,218) → `broken` (1.68 M). Per aircraft and column in Python (the procedure masks were batched by
+      B14, the grammar's are not).
+    - **The model's step, 40 s (19 %)**: `Prior.extend` (the attention 20 s, the linear layers 15 s) — on the CPU here;
+      on the GPU this is most of the speaker's 44 s of item 56's GPU measure less the masks.
+    - **The traffic module's input, 22 s (11 %)**: `WindowLoop._traffic` → `post/edges.tokens` (130,160 calls, 12 s),
+      `post/traffic.traffic` (49,694 calls, 9 s).
+    - **The executor, 18 s (8 %)**: `autopilot/start.Loop.step` (the rollout 10 s).
+    Proposals (each a fast mode or a change checked bit for bit on fixed inputs, outline D138, as D181 items 58–60;
+    the owners are stages A and B, the designer names them): the landing first (one function, no arithmetic changed);
+    then the rows' inputs and the grammar's masks over the batch (vectorised, the readable code kept as the reference
+    and checked equal). Together with item 66 (fewer continuations) these cut a round's time; items 67 and 69 add
+    workers. Bit for bit is expected for the landing; the vectorised inputs and masks change the order of float
+    operations, so their check may need the bound of D181 (57) rather than equality.

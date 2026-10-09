@@ -553,3 +553,13 @@ of 1200 s 210 → 208 s, the readout 19 → 18 s. The changed modules' tests: 16
 **Next (notes 二, each on the user's word):** MC6 to resume on 58–60 at a round's boundary — round 0 had 25 of about
 219 batches at 12:03 (about 1.7 min a batch), so its end is about 17:30–18:00; stopping inside a round moves it aside
 whole (D157). Item 56's measure of one 1200 s batch on the GPU once the GPU is free; item 57 only on its evidence.
+
+**MC6 stopped; item 56 measured (2026-10-09, the user's word).** The user stopped MC6 inside its round 0 at 14:31 (134
+of 224 batches; "太慢而且不一定有用"); it is not resumed, its directory kept as it was (`round_0` unfinished, two
+aborted). The run worktree `run-mc6` removed (data links unlinked first); `run-mc6b` (`0d60d86c`) ran the measures.
+Item 56 on the GPU (`outputs/POOLED/multi/speed_mc6_r0_b86_20261009`): MC6's round-0 batch 86 (1200 s, 4 windows, 24
+aircraft), the start's model, 166.5 s — the continuations 130.7 s (78 %: the speaker 44.4, the executor 18.0, the
+window loop's own 68.3), the first pass 19.7, the second 10.8, the samples 0.3; the allocated peak 1.98 GiB in the
+continuations and 1.40 GiB in the second pass with none flown (a branch point's copies outlive their use: requests item
+69). On the CPU with cProfile inside the continuations (`speed_mc6_r0_b86_cpu_profile_20261009`): requests item 70.
+Requests 66–70 written at the user's word (dev-two-tier `eb62727d`, `7122ee55`, `bc393217`, `a51deb4a` and this commit).
