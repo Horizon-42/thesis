@@ -215,6 +215,11 @@ class Settings:
     #: time, bit for bit the code before it; `MERGED`, read once for them all (a sum's last bits may move). Added as
     #: ``clip_norm`` (its default the code's behaviour before it).
     front_attention: str = COPIED
+    #: multi-aircraft control D191 (the user, 2026-10-10): of every ``cpu_period`` batches of a round and of the
+    #: selection readout, by index, the first ``cpu_batches`` spoken by the CPU speaking workers (`batch_device`), the
+    #: others on the speak device. Added as ``clip_norm`` (the default: every batch on the speak device).
+    cpu_batches: int = 0
+    cpu_period: int = 1
 
     def __post_init__(self) -> None:
         if set(self.per_kind) != set(KINDS) or min(self.per_kind.values()) < 0 or not any(self.per_kind.values()):
@@ -249,6 +254,9 @@ class Settings:
             raise ValueError(f"clip_norm {self.clip_norm} is positive, or None (not clipped)")
         if self.front_attention not in FRONT_ATTENTIONS:
             raise ValueError(f"front_attention {self.front_attention!r} is none of {FRONT_ATTENTIONS}")
+        if not 0 <= self.cpu_batches <= self.cpu_period or self.cpu_period < 1:
+            raise ValueError(f"cpu_batches {self.cpu_batches} of every cpu_period {self.cpu_period}: a period of 1 or "
+                             f"more, at most its batches on the CPU")
 
 
 @dataclass
@@ -596,6 +604,13 @@ def batch_record_path(directory: Path, k: int) -> Path:
     return directory / f"record_{k}.json"
 
 
+def batch_device(k: int, cpu_batches: int, cpu_period: int, speak: str) -> str:
+    """The kind of device batch ``k`` of a round or of the selection readout is spoken on (multi-aircraft control D191):
+    of every ``cpu_period`` batches by index, the first ``cpu_batches`` on the CPU, the others on the speak device's kind
+    ``speak`` — a rule of the batch's place, so a round is the same whatever the workers' timing."""
+    return "cpu" if k % cpu_period < cpu_batches else speak
+
+
 def spoken_batch(stage: Stage, model: Prior, context: Context, windows: Sequence[Window], places: Sequence[int],
                  settings: Settings, round_: int, directory: Path, k: int, launch: Mapping[str, Any]
                  ) -> dict[str, Any]:
@@ -610,11 +625,11 @@ def spoken_batch(stage: Stage, model: Prior, context: Context, windows: Sequence
 
 
 def done_batches(directory: Path, windows: Sequence[Window], places: Sequence[Sequence[int]], stage: Stage,
-                 device: str) -> dict[int, dict[str, Any]]:
+                 device_of: Callable[[int], str]) -> dict[int, dict[str, Any]]:
     """The batches of a round left half done that are done (D185: their records, ``record_<k>.json``), by batch: their
     own records. Refused by name: a record of another draw of the round (its windows not the batch's), of a batch the
-    round has not, or spoken on another kind of device than ``device`` (the rest of the round's). Files under a
-    temporary name are removed (never read)."""
+    round has not, or spoken on another kind of device than ``device_of`` gives the batch (the campaign's rule,
+    `batch_device`; multi-aircraft control D191). Files under a temporary name are removed (never read)."""
     for path in directory.glob("*.tmp"):
         path.unlink()
     out = {}
@@ -625,9 +640,9 @@ def done_batches(directory: Path, windows: Sequence[Window], places: Sequence[Se
             raise SystemExit(f"{path}: a record of a batch this round has not (it has {len(places)})")
         if held["windows"] != [stage.record(windows[p]) for p in places[k]]:
             raise SystemExit(f"{path}: batch {k} of another draw of the round; restart the round (--restart-round)")
-        if held["device"] != device:
-            raise SystemExit(f"{path}: batch {k} spoken on {held['device']}, the rest of its round would be spoken on "
-                             f"{device}: a round is spoken on one kind of device (D185; --restart-round)")
+        if held["device"] != device_of(k):
+            raise SystemExit(f"{path}: batch {k} spoken on {held['device']}, its round's rule speaks it on "
+                             f"{device_of(k)} (D185, D191; --restart-round)")
         out[k] = held["record"]
     return out
 
@@ -644,8 +659,15 @@ def speak_round(model: Prior, context: Context, windows: Sequence[Window], setti
     _require_stage(speakers, stage)
     launch = launch_of() if launch is None else launch
     places = stage.batches(windows, settings)
-    done = done_batches(directory, windows, places, stage,
-                        (speakers.device if speakers is not None else context.device).type)
+    speak = (speakers.device if speakers is not None else context.device).type
+
+    def device_of(k: int) -> str:
+        return batch_device(k, settings.cpu_batches, settings.cpu_period, speak)
+
+    if speakers is None and any(device_of(k) != speak for k in range(len(places))):
+        raise ValueError("a rule that speaks batches on the CPU beside another device needs CPU speaking workers "
+                         "(Speakers(cpu_workers=); D191)")
+    done = done_batches(directory, windows, places, stage, device_of)
     if done:
         commits = sorted({json.loads(batch_record_path(directory, k).read_text(encoding="utf-8"))["launch"]["commit"]
                           for k in done})
@@ -698,32 +720,53 @@ class Speakers:
     only its windows' own random numbers): the same groups and records; the pass after it agrees to float rounding (the
     GPU's kernels depend on what a process ran before, as on any resume). The number of workers is recorded as
     information. They read the selection readout's batches too (`read`, C13; one process is the reference mode). Before
-    a campaign, one worker speaks a batch at the formal size and its memory is measured (`measure`, O15)."""
+    a campaign, one worker speaks a batch at the formal size and its memory is measured (`measure`, O15).
+
+    **Workers on two devices** (multi-aircraft control D191). Beside the workers on the speak device, workers on the CPU
+    (one thread each, as every worker): each batch of a round and of the selection readout goes to the workers of the
+    device the campaign's rule gives it by its place (`batch_device`), and each device's workers take its batches in
+    order, so a round is the same whatever the workers' timing."""
 
     def __init__(self, context: Context, settings: Settings, workers: int, device: torch.device,
-                 stage: Stage = STAGE_C, gpu_budget: int | None = None) -> None:
+                 stage: Stage = STAGE_C, gpu_budget: int | None = None, cpu_workers: int = 0) -> None:
         """``gpu_budget``: each worker's GPU memory, bytes (its CUDA context and what its allocator holds; stage D's,
         from its profile, `multi_train.profiled_fit`): a worker's allocator is capped at it less its context, measured
         at its first task, so a worker past it stops by name (CUDA's out of memory) and takes nothing of the others';
-        None: no cap (stage C's campaign)."""
-        if workers < 2:
-            raise ValueError(f"{workers} worker(s): speakers are 2 or more processes (one speaks without them)")
+        None: no cap (stage C's campaign). ``cpu_workers``: workers on the CPU besides, for the batches the rule
+        (``settings``' ``cpu_batches`` of every ``cpu_period``) gives the CPU (D191; refused as `cpu_workers_refused`)."""
+        if workers < 1 or workers + cpu_workers < 2:
+            raise ValueError(f"{workers} worker(s) and {cpu_workers} on the CPU: speakers are 2 or more processes (one "
+                             f"speaks without them)")
+        refused = cpu_workers_refused(cpu_workers, settings.cpu_batches, device)
+        if refused is not None:
+            raise ValueError(refused)
         if context.device.type != "cpu" or torch.cuda.is_initialized():
             raise ValueError("speakers are forked before the campaign's process uses the GPU: open the context on the "
                              "CPU, fork them, then move it")
-        _SPEAKER.clear()
-        _SPEAKER.update(context=context, settings=settings, device=device, stage=stage, gpu_budget=gpu_budget)
         self.stage = stage
         # the campaign's objects moved out of the collector's reach before the fork (D181 (60)): a worker's collection
         # then writes no page of the context it shares (copy on write); back in its reach once the workers are closed
         gc.collect()
         gc.freeze()
-        self.pool = ProcessPoolExecutor(workers, mp_context=multiprocessing.get_context("fork"),
-                                        initializer=_initialise_speaker)
-        list(self.pool.map(_started, range(workers)))         # every worker forked now, before the GPU is used
-        self.workers = workers
+        #: each device's workers by its kind, each forked with its own device (what `_SPEAKER` holds at its fork)
+        self.pools: dict[str, ProcessPoolExecutor] = {}
+        for kind, count, budget in ((device.type, workers, gpu_budget), ("cpu", cpu_workers, None)):
+            if not count:
+                continue
+            _SPEAKER.clear()
+            _SPEAKER.update(context=context, settings=settings, device=device if kind == device.type else
+                            torch.device("cpu"), stage=stage, gpu_budget=budget)
+            self.pools[kind] = ProcessPoolExecutor(count, mp_context=multiprocessing.get_context("fork"),
+                                                   initializer=_initialise_speaker)
+            list(self.pools[kind].map(_started, range(count)))   # every worker forked now, before the GPU is used
+        self.workers, self.cpu_workers = workers, cpu_workers
         self.device = device
+        self.cpu_batches, self.cpu_period = settings.cpu_batches, settings.cpu_period
         self.readings = 0
+
+    def _pool(self, k: int) -> ProcessPoolExecutor:
+        """The workers of the device that batch ``k`` is spoken on (`batch_device`)."""
+        return self.pools[batch_device(k, self.cpu_batches, self.cpu_period, self.device.type)]
 
     def speak(self, model: Prior, windows: Sequence[Window], places: Sequence[Sequence[int]], round_: int,
               directory: Path, batches: Sequence[int], launch: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -731,33 +774,36 @@ class Speakers:
         (`spoken_batch`), in that order; on a failure the batches not started are cancelled."""
         state = directory / "speaking_model.pt"
         torch.save(model.state_dict(), state)
-        return self._results(state, [self.pool.submit(_speak, round_, str(state), str(directory), k, list(places[k]),
-                                                      [self.stage.record(windows[i]) for i in places[k]], dict(launch))
+        return self._results(state, [self._pool(k).submit(_speak, round_, str(state), str(directory), k,
+                                                          list(places[k]),
+                                                          [self.stage.record(windows[i]) for i in places[k]],
+                                                          dict(launch))
                                      for k in batches])
 
     def read(self, model: Prior, windows: Sequence[Window], places: Sequence[Sequence[int]], split: str,
              draw: int = 0) -> list[list[WindowResult]]:
         """The selection readout's batches of ``split`` (``windows``, its `selection_windows`, at ``places``): each
-        batch's ends (`read_batch` of ``draw``), in batch order (C13)."""
+        batch's ends (`read_batch` of ``draw``), in batch order (C13), each read on its device by its place (D191)."""
         self.readings += 1
         with tempfile.TemporaryDirectory(prefix="post_reading_") as scratch:
             state = Path(scratch) / "reading_model.pt"
             torch.save(model.state_dict(), state)
-            return self._results(state, [self.pool.submit(_read, self.readings, str(state), split, list(p),
-                                                          [self.stage.record(windows[i]) for i in p], draw)
-                                         for p in places])
+            return self._results(state, [self._pool(k).submit(_read, self.readings, str(state), split, list(p),
+                                                              [self.stage.record(windows[i]) for i in p], draw)
+                                         for k, p in enumerate(places)])
 
-    def measure(self, round_: int, directory: Path, model: Prior) -> dict[str, Any]:
+    def measure(self, round_: int, directory: Path, model: Prior, kind: str | None = None) -> dict[str, Any]:
         """O15: one worker's memory at the formal size — the measured batches of round ``round_`` (`measured_batches`: stage
         C's first batch) spoken by one worker with ``model``, the model the round starts from (`campaign_model`; it
         reaches the worker as a file in ``directory``, deleted after), its groups written to ``directory`` — its own peak
         host memory (sampled, not shared with the campaign's process), and on the GPU its peak (the CUDA context and the
         most the allocator held), each with what it still holds after the batch, and what a worker holds besides in a
-        round (`_measure`)."""
+        round (`_measure`). ``kind``: the device of the worker measured (the speak device's when not given; "cpu": a
+        CPU worker, D191)."""
         state = directory / "measuring_model.pt"
         torch.save(model.state_dict(), state)
         try:
-            return self.pool.submit(_measure, round_, str(state), str(directory)).result()
+            return self.pools[kind or self.device.type].submit(_measure, round_, str(state), str(directory)).result()
         finally:
             state.unlink()
 
@@ -776,7 +822,8 @@ class Speakers:
             state.unlink()
 
     def close(self) -> None:
-        self.pool.shutdown(wait=True, cancel_futures=True)
+        for pool in self.pools.values():
+            pool.shutdown(wait=True, cancel_futures=True)
         gc.unfreeze()
 
 
@@ -1063,7 +1110,8 @@ def landed_pass_memory(context: Context, settings: Settings, directory: Path) ->
 
 
 def workers_fit(workers: int, measured: Mapping[str, Any], passed: Mapping[str, Any] | None,
-                available: Mapping[str, int | None], *, held_now: bool) -> list[str]:
+                available: Mapping[str, int | None], *, held_now: bool, cpu_workers: int = 0,
+                cpu_measured: Mapping[str, Any] | None = None) -> list[str]:
     """O15: where ``workers`` workers do not fit (``available``: the host's and the GPU's free memory; ``held_now``:
     with the measured worker and this process holding what they hold after the measures, as just after them
     (`require_workers_fit`), or with nothing held yet, as before this process uses the GPU with a recorded measure
@@ -1076,24 +1124,40 @@ def workers_fit(workers: int, measured: Mapping[str, Any], passed: Mapping[str, 
     its readout's model besides. With nothing held yet, the workers on the GPU speak beside what this process holds of
     it after a pass (``passed["now"]``: its model and optimizer stay there). APPROXIMATION, stated, with nothing held
     yet: the host's free memory is read before this process starts CUDA, so its own host memory for it (some hundred
-    MB, not measured) is not taken out. One line for each that does not fit; none: they fit."""
-    held = measured["held"]
-    reader = {"host": 0 if measured["gpu"] is not None else held["reader_model"],
-              "gpu": held["reader_model"] if measured["gpu"] is not None else 0}
-    besides = {"host": reader["host"] + held["series"], "gpu": reader["gpu"]}
+    MB, not measured) is not taken out. ``cpu_workers`` workers on the CPU besides (multi-aircraft control D191;
+    ``cpu_measured``: one's measure, held as the measured one's where ``held_now``) count in the host's budget alone (a
+    CPU worker's whole peak and what it holds besides in a round, the readout's model on the host); the GPU's is the
+    other workers' and the pass's. One line for each that does not fit; none: they fit."""
+
+    def besides_of(one: Mapping[str, Any]) -> dict[str, int]:
+        """What a worker of measure ``one`` holds besides in a round, by budget: the readout's model on its device."""
+        held = one["held"]
+        on_gpu = one["gpu"] is not None
+        return {"host": (0 if on_gpu else held["reader_model"]) + held["series"],
+                "gpu": held["reader_model"] if on_gpu else 0}
+
+    groups = [(workers, measured, besides_of(measured))] + \
+        ([(cpu_workers, cpu_measured, besides_of(cpu_measured))] if cpu_workers else [])
+    reader = {"gpu": besides_of(measured)["gpu"]}
     out = []
     for name in ("host", "gpu"):
-        if measured[name] is None:
+        counted = [(count, m, b) for count, m, b in groups if m[name] is not None]
+        if not counted:
             continue
-        one = measured[name]["peak"] + besides[name]
         mine = passed["now"] if name == "gpu" and passed is not None else 0     # this process's, after a pass
-        need, have = workers * one, available[name] + (measured[name]["now"] if held_now else -mine)
+        need = sum(count * (m[name]["peak"] + b[name]) for count, m, b in counted)
+        have = available[name] + (sum(m[name]["now"] for _, m, _ in counted) if held_now else -mine)
         if need > have:
+            each = [f"{count} {'on the CPU' if m is cpu_measured else 'workers speaking'}: one's peak "
+                    f"{m[name]['peak'] / 2**30:.2f} GiB and {b[name] / 2**30:.2f} GiB held in a round"
+                    for count, m, b in counted]
             out.append(f"{name}: {workers} workers speaking need {need / 2**30:.1f} GiB (one worker's peak "
-                       f"{measured[name]['peak'] / 2**30:.2f} GiB and {besides[name] / 2**30:.2f} GiB held in a round), "
-                       f"{have / 2**30:.1f} GiB available")
+                       f"{measured[name]['peak'] / 2**30:.2f} GiB and {besides_of(measured)[name] / 2**30:.2f} GiB "
+                       f"held in a round), {have / 2**30:.1f} GiB available" if len(counted) == 1 else
+                       f"{name}: {workers} workers speaking and {cpu_workers} on the CPU need {need / 2**30:.1f} GiB "
+                       f"({'; '.join(each)}), {have / 2**30:.1f} GiB available")
     if passed is not None:
-        # a worker on the CPU (``--speak-device cpu`` beside a pass on the GPU) holds nothing of the GPU
+        # a worker on the CPU (``--speak-device cpu`` beside a pass on the GPU, or a CPU worker) holds nothing of the GPU
         each = (measured["gpu"]["now"] if measured["gpu"] is not None else 0) + reader["gpu"]
         need = (passed["peak"] - passed["now"] + (workers - 1) * each + reader["gpu"] if held_now else
                 passed["peak"] + workers * each)
@@ -1102,6 +1166,21 @@ def workers_fit(workers: int, measured: Mapping[str, Any], passed: Mapping[str, 
                        f"{passed['peak'] / 2**30:.2f} GiB, each worker holding {each / 2**30:.2f} GiB), "
                        f"{available['gpu'] / 2**30:.1f} GiB free")
     return out
+
+
+def cpu_workers_refused(cpu_workers: int, cpu_batches: int, speak_device: torch.device) -> str | None:
+    """Why ``cpu_workers`` speaking workers on the CPU are refused with a rule that speaks ``cpu_batches`` batches of a
+    period on the CPU (multi-aircraft control D191), None where they are not: they speak beside workers on another
+    device, the CPU's batches need them and they need batches."""
+    if cpu_workers < 0:
+        return f"--cpu-workers {cpu_workers}: none or more"
+    if speak_device.type == "cpu":
+        return ("--cpu-workers speak beside workers on another device: the speak device is the CPU" if cpu_workers else
+                None)
+    if (cpu_workers > 0) != (cpu_batches > 0):
+        return ("--cpu-batches above 0 needs --cpu-workers (the CPU's batches are theirs) and --cpu-workers needs "
+                "--cpu-batches above 0")
+    return None
 
 
 def speak_device_refused(speak_device: str | None, workers: int, device: str) -> str | None:
@@ -1131,19 +1210,25 @@ def require_workers_fit(speakers: Speakers, context: Context, settings: Settings
                         ) -> dict[str, Any]:
     """O15, before a campaign's rounds: one worker's memory measured on the measured batches of round ``round_``
     (`Speakers.measure`, `measured_batches`; spoken with ``model``, the round's start: `campaign_model`) and this
-    process's in one update of the pass on their groups (`pass_memory_of`), and
-    the workers refused by name where they do not fit (`workers_fit`). The measures are printed (the campaign's log)
+    process's in one update of the pass on their groups (`pass_memory_of`), one CPU worker's besides where there are
+    CPU workers (D191), and the workers refused by name where they do not fit (`workers_fit`). The measures are printed (the campaign's log)
     and returned."""
     with tempfile.TemporaryDirectory(prefix="post_measure_") as scratch:
         measured = speakers.measure(round_, Path(scratch), model)
         passed = speakers.stage.pass_memory(context, settings, Path(scratch), speakers.stage)
+    cpu_measured = None
+    if speakers.cpu_workers:                                       # a CPU worker besides (D191), its own groups
+        with tempfile.TemporaryDirectory(prefix="post_measure_cpu_") as scratch:
+            cpu_measured = speakers.measure(round_, Path(scratch), model, "cpu")
     available = available_memory(context.device)
-    out = {"speak_workers": speakers.workers, "measured": measured, "pass": passed, "available": available}
+    out = {"speak_workers": speakers.workers, "measured": measured, "pass": passed, "available": available,
+           "cpu_workers": speakers.cpu_workers, "cpu_measured": cpu_measured}
     print(json.dumps(out), flush=True)
-    short = workers_fit(speakers.workers, measured, passed, available, held_now=True)
+    short = workers_fit(speakers.workers, measured, passed, available, held_now=True, cpu_workers=speakers.cpu_workers,
+                        cpu_measured=cpu_measured)
     if short:
         raise SystemExit("the speaking workers do not fit (O15): " + "; ".join(short) + " — start fewer "
-                         "(--speak-workers)")
+                         "(--speak-workers, --cpu-workers)")
     return out
 
 
@@ -1152,25 +1237,31 @@ def _measures(record: Mapping[str, Any]) -> list[dict[str, Any]]:
     return record["measures"] if "measures" in record else []
 
 
-def recorded_fit(record: Mapping[str, Any], workers: int, device: torch.device, speak_device: torch.device
-                 ) -> dict[str, Any] | None:
+def recorded_fit(record: Mapping[str, Any], workers: int, device: torch.device, speak_device: torch.device,
+                 cpu_workers: int = 0) -> dict[str, Any] | None:
     """D167: the launch's O15 read from campaign ``record``'s newest measure taken on these devices (``device``: the
     pass's, ``speak_device``: the workers'), before this process uses the GPU — the host's and the GPU's free memory now
     checked against ``workers`` workers (`workers_fit` with nothing held yet), refused by name where they do not fit;
     its fit (the measure's place in the record, the memory read). None: a new measure is due — the record holds no
-    measure on these devices, or its newest admitted fewer workers than ``workers`` (the measure allows the workers it
-    was checked for)."""
+    measure on these devices, or its newest admitted fewer workers than ``workers``, or fewer CPU workers than
+    ``cpu_workers`` (D191; a measure taken before D191 holds no CPU worker's: it measures) (the measure allows the
+    workers it was checked for)."""
     mine = [k for k, m in enumerate(_measures(record))
             if (m["device"], m["speak_device"]) == (str(device), str(speak_device))]
     if not mine or record["measures"][mine[-1]]["speak_workers"] < workers:
         return None
     measure = record["measures"][mine[-1]]
+    if cpu_workers and ("cpu_workers" not in measure or measure["cpu_workers"] < cpu_workers):
+        return None
     available = available_memory(device)
-    short = workers_fit(workers, measure["measured"], measure["pass"], available, held_now=False)
+    short = workers_fit(workers, measure["measured"], measure["pass"], available, held_now=False,
+                        cpu_workers=cpu_workers, cpu_measured=measure["cpu_measured"] if cpu_workers else None)
     if short:
         raise SystemExit(f"the speaking workers do not fit (O15, the measure recorded {measure['utc']}): "
-                         + "; ".join(short) + " — start fewer (--speak-workers)")
-    return {"measure": mine[-1], "measured": False, "speak_workers": workers, "available": available}
+                         + "; ".join(short) + " — start fewer (--speak-workers, "
+                         "--cpu-workers)")
+    return {"measure": mine[-1], "measured": False, "speak_workers": workers, "cpu_workers": cpu_workers,
+            "available": available}
 
 
 def record_measure(out: Path, measure: Mapping[str, Any], device: torch.device, speak_device: torch.device,
@@ -1183,7 +1274,7 @@ def record_measure(out: Path, measure: Mapping[str, Any], device: torch.device, 
                                                "speak_device": str(speak_device), **measure}]
     write_json_atomic(path, record)
     return {"measure": len(record["measures"]) - 1, "measured": True, "speak_workers": measure["speak_workers"],
-            "available": measure["available"]}
+            "cpu_workers": measure["cpu_workers"], "available": measure["available"]}
 
 
 def name_fit(out: Path, fit: dict[str, Any] | None) -> None:
@@ -1688,7 +1779,7 @@ def inputs_here(inputs: Mapping[str, Any]) -> dict[str, Any]:
 #: The settings added after campaigns were recorded, each with its default: the code's behaviour before it (the user's
 #: standing permission, 2026-10-07): a record without one reads as its default, and no record is edited.
 SETTINGS_ADDED = ("clip_norm", "epochs", "segment_only", "branch_every_s", "value_lr", "value_warmup",
-                  "advantage_centering", "value_epochs", "front_attention")
+                  "advantage_centering", "value_epochs", "front_attention", "cpu_batches", "cpu_period")
 
 
 def _but_rounds(inputs: Mapping[str, Any]) -> dict[str, Any]:
@@ -1896,6 +1987,7 @@ def run_campaign(out: Path, settings: Settings, context: Context, speakers: Spea
             "round": round_, "git": git_state(), "finished_utc": utc_now(), "draw": drawn,
             "speak_workers": speakers.workers if speakers is not None else 1,         # information (`Speakers`)
             "speak_device": str(speakers.device if speakers is not None else context.device),      # information
+            "cpu_workers": speakers.cpu_workers if speakers is not None else 0,       # information (D191)
             "windows": [stage.record(w) for w in windows], "speaking": spoken,
             "groups_bytes": sum(p.stat().st_size for p in written), "pass": passed, "selection_readout": readout}
         write_json_atomic(directory / "round.json", record)
@@ -1966,6 +2058,11 @@ def main(argv: list[str] | None = None) -> int:
                         help="processes that speak a round's batches in parallel (Speakers; the same results)")
     parser.add_argument("--speak-device",
                         help="the speaking workers' device (default: --device); e.g. cpu beside a pass on cuda")
+    parser.add_argument("--cpu-workers", type=int, default=0,
+                        help="D191: speaking workers on the CPU besides, for the batches --cpu-batches gives the CPU")
+    parser.add_argument("--cpu-batches", type=int, default=Settings.cpu_batches,
+                        help="D191: of every --cpu-period batches by index, the first this many on the CPU workers")
+    parser.add_argument("--cpu-period", type=int, default=Settings.cpu_period, help="D191: the rule's period, batches")
     parser.add_argument("--restart-round", action="store_true",
                         help="D185: a resume moves the round left half done aside and speaks it whole (default: its "
                              "done batches kept; on changed code, keep them only after a behaviour check)")
@@ -1973,7 +2070,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.speak_workers < 1:
         parser.error("--speak-workers is at least 1")
-    refused = speak_device_refused(args.speak_device, args.speak_workers, args.device)
+    refused = speak_device_refused(args.speak_device, args.speak_workers + args.cpu_workers, args.device)
     if refused is not None:
         parser.error(refused)
     if (args.start_campaign is None) != (args.start_round is None):
@@ -1993,9 +2090,15 @@ def main(argv: list[str] | None = None) -> int:
                             args.weight_decay, args.update_groups, args.data_sentences, args.select_per_airport,
                             args.traffic_hidden, args.traffic_heads, start, args.method, args.select_seed,
                             args.clip_norm, args.epochs, args.segment_only, args.branch_every_s, args.value_lr,
-                            args.value_warmup, args.advantage_centering, args.value_epochs, args.front_attention)
+                            args.value_warmup, args.advantage_centering, args.value_epochs, args.front_attention,
+                            args.cpu_batches, args.cpu_period)
     except ValueError as refused:                   # a setting refused by name (`Settings`), before anything opens
         parser.error(str(refused))
+    speak_device = torch.device(args.speak_device or args.device)
+    refused = cpu_workers_refused(args.cpu_workers, settings.cpu_batches, speak_device)      # D191
+    if refused is not None:
+        parser.error(refused)
+    speaking = args.speak_workers > 1 or args.cpu_workers > 0
     git = git_state()
     if git["dirty"] and not args.smoke:
         parser.error("a campaign that is not a smoke runs on a clean checkout")
@@ -2005,7 +2108,7 @@ def main(argv: list[str] | None = None) -> int:
     device = torch.device(args.device)
     # with speakers, the context is opened on the CPU and they are forked before this process uses the GPU
     context = open_context(prior_dir, instructions, executor, edges_reference,
-                           torch.device("cpu") if args.speak_workers > 1 else device, procedure_root,
+                           torch.device("cpu") if speaking else device, procedure_root,
                            formal=not args.smoke)                                  # D132
     try:                                # D170: refused before the workers
         branch_rows(context.interval_s, settings.branch_every_s)
@@ -2014,9 +2117,8 @@ def main(argv: list[str] | None = None) -> int:
     if settings.start is not None:      # refused by name before the workers and campaign.json (D162)
         campaign_start(context, settings)
     stage = STAGES_C[settings.method]
-    speak_device = torch.device(args.speak_device or args.device)
-    speakers = (Speakers(context, settings, args.speak_workers, speak_device, stage=stage) if args.speak_workers > 1
-                else None)
+    speakers = (Speakers(context, settings, args.speak_workers, speak_device, stage=stage,
+                         cpu_workers=args.cpu_workers) if speaking else None)
     inputs = {"prior": str(prior_dir), "instructions": str(instructions), "executor": str(executor),
               "windows": str(census), "procedure_root": str(procedure_root), "settings": asdict(settings),
               "smoke": args.smoke}
@@ -2024,7 +2126,8 @@ def main(argv: list[str] | None = None) -> int:
         record = open_campaign(out, inputs, git, opened["checks"],      # a resume of other inputs refused before the measure
                                restart_round=args.restart_round)
         measuring = speakers is not None and done_rounds(out) < settings.rounds        # O15, before any round
-        fit = recorded_fit(record, speakers.workers, device, speak_device) if measuring else None   # D167, GPU unused
+        fit = (recorded_fit(record, speakers.workers, device, speak_device, speakers.cpu_workers) if measuring
+               else None)                                                       # D167, the GPU unused
         context = replace(context, device=device, base=context.base.to(device).eval())
         if measuring and fit is None:              # the round's own model speaks the measure (campaign_model)
             fit = record_measure(out, require_workers_fit(speakers, context, settings, done_rounds(out),

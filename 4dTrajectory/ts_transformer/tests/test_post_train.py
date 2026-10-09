@@ -383,7 +383,7 @@ def test_the_selection_readout_through_two_workers_is_the_one_process_readout(se
                 == post_train.selection_readout(model, context, select, settings))
         wrong = [{**window_record(select[0]), "row0_s": real.row0_s + 4.0}]
         with pytest.raises(ValueError, match="other readout windows"):
-            speakers.pool.submit(post_train._read, 99, str(tmp_path / "x.pt"), "select", [0], wrong, 0).result()
+            speakers.pools["cpu"].submit(post_train._read, 99, str(tmp_path / "x.pt"), "select", [0], wrong, 0).result()
     finally:
         speakers.close()
 
@@ -536,7 +536,165 @@ def _measure(workers):
     """A measure as `require_workers_fit` returns it (on the CPU: the host only)."""
     return {"speak_workers": workers, "pass": None, "available": {"host": 64 << 30, "gpu": None},
             "measured": {"host": {"peak": 1 << 30, "now": 1 << 29}, "gpu": None,
-                         "held": {"reader_model": 1 << 20, "series": 1 << 20, "round_flights": 1}}}
+                         "held": {"reader_model": 1 << 20, "series": 1 << 20, "round_flights": 1}},
+            "cpu_workers": 0, "cpu_measured": None}
+
+
+def test_each_batch_is_spoken_on_the_device_its_place_gives_the_same_every_time():
+    """Multi-aircraft control D191: of every period of batches by index, its first ones on the CPU and the others on the
+    speak device; the rule gives the same devices every time; its default puts every batch on the speak device."""
+    rule = [post_train.batch_device(k, 2, 5, "cuda") for k in range(12)]
+    assert rule == ["cpu", "cpu", "cuda", "cuda", "cuda"] * 2 + ["cpu", "cpu"]
+    assert rule == [post_train.batch_device(k, 2, 5, "cuda") for k in range(12)]
+    assert {post_train.batch_device(k, _settings().cpu_batches, _settings().cpu_period, "cuda")
+            for k in range(12)} == {"cuda"}
+
+
+def test_the_rule_and_its_cpu_workers_are_refused_by_name_where_they_do_not_go_together():
+    """D191: the CPU's batches need CPU workers and CPU workers need batches, beside workers on another device; a period
+    of 1 or more, at most its batches on the CPU."""
+    cuda, cpu = torch.device("cuda"), torch.device("cpu")
+    assert post_train.cpu_workers_refused(0, 0, cuda) is None and post_train.cpu_workers_refused(2, 2, cuda) is None
+    assert "needs --cpu-workers" in post_train.cpu_workers_refused(0, 2, cuda)
+    assert "--cpu-workers needs --cpu-batches" in post_train.cpu_workers_refused(2, 0, cuda)
+    assert "the speak device is the CPU" in post_train.cpu_workers_refused(2, 2, cpu)
+    assert post_train.cpu_workers_refused(0, 2, cpu) is None                      # every batch on the CPU already
+    for batches, period in ((3, 2), (0, 0), (-1, 2)):
+        with pytest.raises(ValueError, match=f"cpu_batches {batches} of every cpu_period {period}"):
+            _settings(cpu_batches=batches, cpu_period=period)
+
+
+def test_each_devices_workers_take_its_batches_in_order(tmp_path):
+    """D191: with workers on two devices, each batch of a round and of the selection readout goes to the workers of the
+    device the rule gives it, each device's in the batches' order; the results come back in batch order."""
+    from concurrent.futures import Future
+
+    class Pool:
+        def __init__(self):
+            self.places = []
+
+        def submit(self, task, *args):
+            places = args[4] if task is post_train._speak else args[3]
+            self.places.append(places[0])
+            done = Future()
+            done.set_result(places[0])
+            return done
+
+    speakers = object.__new__(Speakers)
+    speakers.pools = {"cuda": Pool(), "cpu": Pool()}
+    speakers.device, speakers.cpu_batches, speakers.cpu_period = torch.device("cuda"), 2, 5
+    speakers.stage, speakers.readings = SimpleNamespace(record=lambda w: w), 0
+    windows, places = list(range(7)), [[k] for k in range(7)]
+    model = torch.nn.Linear(1, 1)
+    assert speakers.speak(model, windows, places, 0, tmp_path, list(range(7)), {}) == list(range(7))
+    assert speakers.pools["cpu"].places == [0, 1, 5, 6] and speakers.pools["cuda"].places == [2, 3, 4]
+    assert speakers.read(model, windows, places, "select") == list(range(7))       # the readout's by the same rule
+    assert speakers.pools["cpu"].places == [0, 1, 5, 6] * 2 and speakers.pools["cuda"].places == [2, 3, 4] * 2
+
+
+def _held_device(_):
+    """What a speaking worker was forked with (`Speakers`): its device's kind and its GPU budget."""
+    return post_train._SPEAKER["device"].type, post_train._SPEAKER["gpu_budget"]
+
+
+def test_each_pool_of_workers_is_forked_with_its_own_device_and_budget(tmp_path):
+    """D191: beside the workers on the speak device (its GPU budget theirs), the CPU workers are forked with the CPU and
+    no budget (no worker touches the GPU here); a rule that speaks batches on the CPU beside another device refuses a
+    round spoken without speakers, before any change."""
+    context = SimpleNamespace(device=CPU)
+    speakers = Speakers(context, _settings(cpu_batches=1, cpu_period=2), 1, torch.device("cuda"), gpu_budget=123,
+                        cpu_workers=1)
+    try:
+        assert speakers.pools["cuda"].submit(_held_device, 0).result() == ("cuda", 123)
+        assert speakers.pools["cpu"].submit(_held_device, 0).result() == ("cpu", None)
+    finally:
+        speakers.close()
+    stage = SimpleNamespace(batches=lambda windows, settings: [[0], [1]])
+    with pytest.raises(ValueError, match="needs CPU speaking workers"):
+        speak_round(None, SimpleNamespace(device=torch.device("cuda")), [0, 1], _settings(cpu_batches=1, cpu_period=2),
+                    0, tmp_path, stage=stage)
+
+
+def test_the_runner_forks_cpu_workers_beside_one_worker_on_the_speak_device(tmp_path, monkeypatch, capsys):
+    """D191 through the runner: ``--cpu-workers`` with ``--cpu-batches`` beside one worker on the speak device opens the
+    context on the CPU, gives `Speakers` the CPU workers and keeps the rule as the campaign's settings; the CPU's
+    batches without CPU workers are refused by name before anything opens."""
+    handed, opened = {}, []
+
+    class Workers:
+        workers, cpu_workers = 1, 2
+
+        def __init__(self, context, settings, workers, device, *, stage, cpu_workers):
+            handed.update(workers=workers, device=device.type, cpu_workers=cpu_workers,
+                          rule=(settings.cpu_batches, settings.cpu_period))
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(post_train, "git_state", lambda: {"head": "x", "dirty": False})
+    monkeypatch.setattr(post_train, "require_conforming_closed_loop", lambda *a: (None, {"checks": {}}, None))
+    monkeypatch.setattr(post_train, "checked_edges", lambda path: None)
+    monkeypatch.setattr(post_train, "open_context", lambda *a, **k: (opened.append(a[4].type),
+                                                                     SimpleNamespace(base=torch.nn.Linear(1, 1),
+                                                                                     device=a[4], interval_s=4.0))[1])
+    monkeypatch.setattr(post_train, "replace", lambda c, **k: c)
+    monkeypatch.setattr(post_train, "Speakers", Workers)
+    monkeypatch.setattr(post_train, "campaign_model", lambda *a: (None, None))
+    monkeypatch.setattr(post_train, "require_workers_fit", lambda *a: {**_measure(1), "cpu_workers": 2})
+    monkeypatch.setattr(post_train, "run_campaign", lambda *a, **k: None)
+    argv = ["--prior", str(tmp_path / "p"), "--instructions", str(tmp_path / "i"), "--executor", str(tmp_path / "e"),
+            "--windows", str(tmp_path / "w"), "--out", str(tmp_path / "campaign"), "--rounds", "1",
+            "--batch-windows", "1", "--seed", "2024", "--prior-lr", "1e-4", "--traffic-lr", "1e-3",
+            "--weight-decay", "0", "--update-groups", "1", "--data-sentences", "1", "--select-per-airport", "1",
+            "--traffic-hidden", "16", "--traffic-heads", "4", "--method", "branch", "--select-seed", "1337",
+            "--device", "cuda", "--cpu-batches", "1", "--cpu-period", "2"]
+    argv += [x for kind in KINDS for x in (f"--windows-{kind.lower()}", "1")]
+    assert post_train.main(argv + ["--cpu-workers", "2"]) == 0
+    assert opened == ["cpu"] and handed == {"workers": 1, "device": "cuda", "cpu_workers": 2, "rule": (1, 2)}
+    recorded = json.loads((tmp_path / "campaign" / "campaign.json").read_text())["inputs"]["settings"]
+    assert (recorded["cpu_batches"], recorded["cpu_period"]) == (1, 2)
+    with pytest.raises(SystemExit):
+        post_train.main(argv)                                       # the CPU's batches and no CPU workers
+    assert "--cpu-batches above 0 needs --cpu-workers" in capsys.readouterr().err and opened == ["cpu"]
+
+
+def test_a_resume_reads_back_each_batch_spoken_on_its_rules_device_and_refuses_another(tmp_path):
+    """D191 (D185's resume): each done batch's device is the one the rule gives it, refused by name otherwise."""
+    from ts_transformer.io_utils import write_json_atomic
+
+    stage = SimpleNamespace(record=lambda w: w)
+    windows, places = list(range(4)), [[k] for k in range(4)]
+
+    def device_of(k):
+        return post_train.batch_device(k, 1, 2, "cuda")                           # 0 and 2 on the CPU
+
+    for k, device in ((0, "cpu"), (1, "cuda")):
+        write_json_atomic(post_train.batch_record_path(tmp_path, k),
+                          {"batch": k, "record": {"k": k}, "windows": [k], "launch": {}, "device": device})
+    assert post_train.done_batches(tmp_path, windows, places, stage, device_of) == {0: {"k": 0}, 1: {"k": 1}}
+    write_json_atomic(post_train.batch_record_path(tmp_path, 2),
+                      {"batch": 2, "record": {"k": 2}, "windows": [2], "launch": {}, "device": "cuda"})
+    with pytest.raises(SystemExit, match="batch 2 spoken on cuda, its round's rule speaks it on cpu"):
+        post_train.done_batches(tmp_path, windows, places, stage, device_of)
+
+
+def test_cpu_workers_count_in_the_host_budget_alone():
+    """D191: the host's budget holds every worker's host memory — the workers on the speak device and the CPU workers
+    (a CPU worker's whole peak, the readout's model on the host) —, the GPU's the workers on it and the pass."""
+    gib = 1 << 30
+    held = {"reader_model": gib // 4, "series": gib // 2, "round_flights": 100}
+    measured = {"host": {"peak": 2 * gib, "now": 1 * gib}, "gpu": {"peak": 1 * gib, "now": gib // 4}, "held": held}
+    on_cpu = {"host": {"peak": 3 * gib // 2, "now": 1 * gib}, "gpu": None, "held": held}
+    passed = {"peak": 3 * gib, "now": gib // 2, "groups": 4}
+    # host: 3 × (2 + 0.5) + 2 × (1.5 + 0.25 + 0.5) = 12 ≤ 10 + 1 + 1 (each measured worker holds its own now)
+    fits = dict(held_now=True, cpu_workers=2, cpu_measured=on_cpu)
+    assert post_train.workers_fit(3, measured, passed, {"host": 10 * gib, "gpu": int(3.75 * gib)}, **fits) == []
+    short = post_train.workers_fit(3, measured, passed, {"host": int(9.9 * gib), "gpu": int(3.75 * gib)}, **fits)
+    assert len(short) == 1 and short[0].startswith("host: 3 workers speaking and 2 on the CPU need 12.0 GiB")
+    # the GPU's as without them
+    assert ([line.split(":")[0] for line in post_train.workers_fit(3, measured, passed, {"host": 10 * gib,
+                                                                                        "gpu": int(3.7 * gib)}, **fits)]
+            == ["gpu"])
 
 
 def test_a_recorded_measure_is_read_on_its_devices_for_as_many_workers_as_it_was_checked_for(monkeypatch):
@@ -552,12 +710,20 @@ def test_a_recorded_measure_is_read_on_its_devices_for_as_many_workers_as_it_was
     assert post_train.recorded_fit({}, 2, cpu, cpu) is None                       # a record from before D167
     assert post_train.recorded_fit(record, 4, cpu, cpu) is None                    # the newest admitted 3
     fit = post_train.recorded_fit(record, 3, cpu, cpu)
-    assert fit == {"measure": 2, "measured": False, "speak_workers": 3, "available": {"host": 8 << 30, "gpu": None}}
+    assert fit == {"measure": 2, "measured": False, "speak_workers": 3, "cpu_workers": 0,
+                   "available": {"host": 8 << 30, "gpu": None}}
     assert post_train.recorded_fit(record, 2, cuda, cpu)["measure"] == 1
     assert post_train.recorded_fit(record, 2, cuda, cuda) is None                  # no measure on these devices
     monkeypatch.setattr(post_train, "available_memory", lambda device: {"host": 2 << 30, "gpu": None})
     with pytest.raises(SystemExit, match=r"do not fit \(O15, the measure recorded newest\): host: 3 workers"):
         post_train.recorded_fit(record, 3, cpu, cpu)
+    # D191: CPU workers read a measure that holds one of theirs, for as many (one from before D191: it measures)
+    assert post_train.recorded_fit(record, 2, cuda, cpu, cpu_workers=1) is None
+    monkeypatch.setattr(post_train, "available_memory", lambda device: {"host": 8 << 30, "gpu": None})
+    with_cpu = {"measures": [{**_measure(2), "utc": "mixed", "round": 0, "device": "cuda", "speak_device": "cuda",
+                              "cpu_workers": 2, "cpu_measured": _measure(2)["measured"]}]}
+    assert post_train.recorded_fit(with_cpu, 2, cuda, cuda, cpu_workers=2)["cpu_workers"] == 2
+    assert post_train.recorded_fit(with_cpu, 2, cuda, cuda, cpu_workers=3) is None
 
 
 def test_a_launch_measures_once_and_a_resume_reads_the_recorded_measure(tmp_path, monkeypatch):
@@ -567,8 +733,8 @@ def test_a_launch_measures_once_and_a_resume_reads_the_recorded_measure(tmp_path
     measured = []
 
     class Workers:
-        def __init__(self, context, settings, workers, device, *, stage):
-            self.workers = workers
+        def __init__(self, context, settings, workers, device, *, stage, cpu_workers):
+            self.workers, self.cpu_workers = workers, cpu_workers
 
         def close(self):
             pass
@@ -606,7 +772,7 @@ def test_a_launch_measures_once_and_a_resume_reads_the_recorded_measure(tmp_path
     again = launch(2, 2)                                                          # fewer workers: the record read
     assert order[-2:] == ["read", "moved"]                     # the free memory read before the GPU is used
     assert measured == [3] and again["resumed"][-1]["fit"] == {
-        "measure": 0, "measured": False, "speak_workers": 2, "available": {"host": 64 << 30, "gpu": None}}
+        "measure": 0, "measured": False, "speak_workers": 2, "cpu_workers": 0, "available": {"host": 64 << 30, "gpu": None}}
     more = launch(2, 4)                                                           # more than it admitted
     assert measured == [3, 4] and len(more["measures"]) == 2 and more["resumed"][-1]["fit"]["measure"] == 1
     assert launch(2, 1)["resumed"][-1]["fit"] is None                             # no workers
@@ -701,7 +867,7 @@ def test_a_round_stopped_after_some_batches_resumes_by_its_batches(setup, tmp_pa
         assert (stopped / name).read_bytes() == (whole / name).read_bytes()
     spoken.clear()
     assert speak_round(model, context, windows, settings, 0, stopped) == record and spoken == []   # all read back
-    for change, message in (({"windows": [{"other": 1}]}, "another draw"), ({"device": "cuda"}, "kind of device")):
+    for change, message in (({"windows": [{"other": 1}]}, "another draw"), ({"device": "cuda"}, "its round's rule")):
         path = stopped / "record_0.json"
         kept = path.read_text()
         path.write_text(json.dumps({**json.loads(kept), **change}))

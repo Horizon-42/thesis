@@ -1708,7 +1708,8 @@ checkpoint.
   batches (D185, C27; stage D's `multi_train` alike): each batch writes its files and then `record_<k>.json` (its
   record, its windows, its launch's commit as information, the kind of device), each under a temporary name renamed
   when complete; a resume reads the done batches back and speaks the others, and refuses by name done batches of
-  another draw or of another kind of device. `--restart-round` moves the round aside as `round_<r>.aborted-<UTC>`
+  another draw, or spoken on another kind of device than the campaign's rule gives the batch (multi-aircraft control
+  D191, below). `--restart-round` moves the round aside as `round_<r>.aborted-<UTC>`
   instead. On changed code choose one: `--restart-round`, or keep the done batches after `window_behaviour` (R68) on
   the code before and after.
 - `--speak-workers` speaks the batches in worker processes, measured against the host's and the GPU's memory before
@@ -1726,6 +1727,20 @@ checkpoint.
 - `--branch-every-s` and `--segment-only` (D170, C21; branch training only): the branch points' interval (default
   120 s, a whole number of Δ rows) and a group's advantage counted only up to the next branch point (default: to the
   event).
+- `--front-attention copied|merged` (multi-aircraft control D190 (2), a setting): how a window's copies read the
+  front of the speaker's cache they hold once — copied back a layer at a time (the default, bit for bit the code
+  before) or read once for them all (no copy; the last bits of the attention may move).
+- `--cpu-workers N` with `--cpu-batches B --cpu-period P` (multi-aircraft control D191; the two last are settings, by
+  default 0 of 1): N speaking workers on the CPU (one thread each) beside the workers on the speak device; of every P
+  batches of a round and of the selection readout, by index, the first B are spoken on the CPU, the others on the
+  speak device, each device's workers taking its batches in order. The fit counts two budgets: the GPU's (its workers
+  and the pass), the host's (every worker's host memory, a CPU worker's whole peak); a launch measures one CPU worker
+  besides (a recorded measure without one measures again). Refused by name: CPU batches without CPU workers or the
+  reverse, CPU workers beside a speak device that is the CPU.
+  `post_ceiling` (R64) and `post_diagnose` (R66) read such a campaign by its rule (`--cpu-workers`).
+- Stage D's `multi_train` takes `--front-attention`, `--cpu-workers`, `--cpu-batches` and `--cpu-period` alike; its
+  workers are sized from `--profile` (`multi_profile`) and, with CPU workers, `--cpu-profile` (a `multi_profile
+  --speak-device cpu` of the same inputs and settings).
 - A clean tree unless `--smoke`; formal runs from a detached run worktree (D163).
 - Writes `campaign.json` (`ts-post-train-v1`) and, for each round, `round.json` and `checkpoint.pt`
   (`ts-post-checkpoint-v1`).

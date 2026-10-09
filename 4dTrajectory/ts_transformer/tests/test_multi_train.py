@@ -656,7 +656,7 @@ def test_a_round_of_stage_d_is_refused_unless_its_identity_is_the_campaigns(setu
 
 
 def _profile(tmp_path, settings, inputs, *, gpu=True, workers=True, schema=multi_train.MULTI_PROFILE_SCHEMA,
-             margin=1.0, speak_device=None, campaign_gpu=None):
+             margin=1.0, speak_device=None, campaign_gpu=None, name="profile"):
     """A profile record of stage D (`multi_profile`'s ``profile.json``) of ``settings`` and ``inputs``: its worker
     measured on the GPU (``gpu``) or the CPU, its pass on the GPU (``campaign_gpu``, by default as the worker)."""
     gib = 1 << 30
@@ -668,10 +668,30 @@ def _profile(tmp_path, settings, inputs, *, gpu=True, workers=True, schema=multi
     if workers:
         record["workers"] = {"measured": measured, "pass": {"peak": 3 * gib, "now": gib // 2} if on_gpu else None,
                              "speak_device": speak_device or ("cuda" if gpu else "cpu"), "margin": margin}
-    directory = tmp_path / "profile"
+    directory = tmp_path / name
     directory.mkdir(exist_ok=True)
     (directory / "profile.json").write_text(json.dumps(record))
     return directory
+
+
+def test_cpu_workers_are_sized_from_a_cpu_workers_profile_in_the_hosts_budget(tmp_path, monkeypatch):
+    """D191: CPU workers beside the GPU workers read their measure from a profile of a CPU worker (these inputs and
+    settings, ``--speak-device cpu``), counted in the host's budget with the GPU workers' host part; the GPU's budget and
+    each GPU worker's share as without them; a profile of a GPU worker as the CPU's refused by name."""
+    gib = 1 << 30
+    settings = _multi_settings(spans_s=[300.0, 600.0], batch_rows=[64, 48], cpu_batches=2, cpu_period=5)
+    inputs = {key: str(tmp_path / key) for key in multi_train.PROFILED_INPUTS}
+    cuda = torch.device("cuda")
+    monkeypatch.setattr(multi_train, "available_memory", lambda device: {"host": 13 * gib, "gpu": 5 * gib})
+    profile = _profile(tmp_path, settings, inputs)
+    cpu_profile = _profile(tmp_path, settings, inputs, gpu=False, campaign_gpu=True, name="cpu_profile")
+    # host: 3 × (2 + 0.5) for the GPU workers, 2 × (2 + 0.25 + 0.5) for the CPU workers: 13 ≤ 13 GiB
+    fit = multi_train.profiled_fit(profile, settings, inputs, 3, cuda, cuda, cpu_profile, 2)
+    assert fit["cpu_workers"] == 2 and fit["gpu_budget"] == (5 * gib - gib // 2) // 3
+    with pytest.raises(SystemExit, match=r"host: 3 workers speaking and 3 on the CPU need 15.8 GiB"):
+        multi_train.profiled_fit(profile, settings, inputs, 3, cuda, cuda, cpu_profile, 3)
+    with pytest.raises(SystemExit, match="other speaking device than"):
+        multi_train.profiled_fit(profile, settings, inputs, 3, cuda, cuda, profile, 2)
 
 
 def test_the_workers_are_sized_from_the_profile_and_the_memory_free_now(tmp_path, monkeypatch):
@@ -802,7 +822,7 @@ def test_the_runner_takes_a_profile_with_its_speaking_workers_only(tmp_path, cap
     for extra in (["--speak-workers", "2"], ["--profile", str(tmp_path / "profile")]):
         with pytest.raises(SystemExit):
             multi_train.main(argv + extra)
-        assert "--profile goes with --speak-workers above 1" in capsys.readouterr().err
+        assert "--profile goes with speaking workers" in capsys.readouterr().err
     for extra, message in ((["--speak-device", "cpu"], "it needs --speak-workers 2 or more"),
                            (["--device", "cpu", "--speak-workers", "2", "--speak-device", "cuda",
                              "--profile", str(tmp_path / "profile")], "--speak-device cuda needs --device cuda")):
@@ -832,12 +852,13 @@ def test_the_runner_sizes_its_workers_from_the_profile_before_any_process_uses_t
     monkeypatch.setattr(multi_train, "open_context", lambda *a, **k: (calls.append(("context", a[4].type)),
                                                                       FakeContext(a[4], base))[1])
     monkeypatch.setattr(multi_train, "stage_d", lambda: SimpleNamespace(start=lambda c, s: calls.append(("start",))))
-    monkeypatch.setattr(multi_train, "profiled_fit", lambda profile, settings, inputs, workers, device, speak_device: (
+    monkeypatch.setattr(multi_train, "profiled_fit", lambda profile, settings, inputs, workers, device, speak_device,
+                        cpu_profile, cpu_workers: (
         calls.append(("fit", profile, workers, inputs["settings"]["batch_rows"], speak_device.type)),
         {"gpu_budget": 123})[1])
 
     class FakeSpeakers:
-        def __init__(self, context, settings, workers, device, *, stage, gpu_budget):
+        def __init__(self, context, settings, workers, device, *, stage, gpu_budget, cpu_workers):
             calls.append(("speakers", context.device.type, workers, device.type, gpu_budget))
 
         def close(self):

@@ -80,9 +80,9 @@ from flight_scenarios.procedure_final import DEFAULT_PROCEDURE_ROOT
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
 from ts_transformer.experiments.post_branches import Rules, backward_round, branch_round
 from ts_transformer.experiments.post_train import (
-    Context, Speakers, Stage, available_memory, batches, done_rounds, open_campaign, open_context, round_start,
-    run_campaign, save_batch_file, settings_of, source_campaign, speak_device_refused, speak_round, start_checkpoint,
-    start_model, start_of, workers_fit,
+    Context, Speakers, Stage, available_memory, batches, cpu_workers_refused, done_rounds, open_campaign, open_context,
+    round_start, run_campaign, save_batch_file, settings_of, source_campaign, speak_device_refused, speak_round,
+    start_checkpoint, start_model, start_of, workers_fit,
 )
 from ts_transformer.experiments.post_window_loop import LANDED, LOST_SEPARATION, WindowLoop, checked_edges
 from ts_transformer.multi import credit
@@ -149,6 +149,11 @@ class MultiSettings:
     #: (D190 (2), the user's choice; `FRONT_ATTENTIONS`): `COPIED`, the default (bit for bit the behaviour before it; a
     #: record without the setting reads as it), or `MERGED` (no copy; a sum's last bits may move)
     front_attention: str = COPIED
+    #: D191 (the user, 2026-10-10): of every ``cpu_period`` batches of a round and of the selection readout, by index,
+    #: the first ``cpu_batches`` spoken by the CPU speaking workers (`post_train.batch_device`), the others on the speak
+    #: device; the default every batch on the speak device (the behaviour before it; a record without it reads so)
+    cpu_batches: int = 0
+    cpu_period: int = 1
 
     def __post_init__(self) -> None:
         if set(self.per_kind) != set(KINDS) or min(self.per_kind.values()) < 0 or not any(self.per_kind.values()):
@@ -169,6 +174,9 @@ class MultiSettings:
             raise ValueError(f"branching {self.branching!r} is none of {BRANCHINGS}")
         if self.front_attention not in FRONT_ATTENTIONS:
             raise ValueError(f"front_attention {self.front_attention!r} is none of {FRONT_ATTENTIONS}")
+        if not 0 <= self.cpu_batches <= self.cpu_period or self.cpu_period < 1:
+            raise ValueError(f"cpu_batches {self.cpu_batches} of every cpu_period {self.cpu_period}: a period of 1 or "
+                             f"more, at most its batches on the CPU")
 
 
 def span_key(span_s: float) -> str:
@@ -464,17 +472,11 @@ def with_margin(measure: Mapping[str, Any] | None, margin: float) -> dict[str, A
                           for name in ("host", "gpu")}}
 
 
-def profiled_fit(profile: Path, settings: MultiSettings, inputs: dict[str, Any], workers: int,
-                 device: torch.device, speak_device: torch.device) -> dict[str, Any]:
-    """The speaking workers' memory read from stage D's profile (the user, 2026-10-07: measured once, never before each
-    run): the profile's measure of one worker and of the pass (`multi_profile`), each peak times its recorded margin
-    (D179), and the memory free now (`post_train.available_memory`, before any worker or this process uses the GPU),
-    ``workers`` workers refused by name where they do not fit (`post_train.workers_fit` with nothing held yet: a worker
-    on the CPU counts the host's memory only, D180), and each worker's GPU budget (the GPU free now less what this
-    process holds beside its pass, in equal shares: `Speakers`' ``gpu_budget``; None for workers off the GPU). Refused
-    by name besides unless the profile is of these inputs (`PROFILED_INPUTS`, as this checkout reads them) and these
-    settings (`PROFILED_SETTINGS`), its pass on this kind of device and its worker measured on the workers' kind of
-    device (``speak_device``)."""
+def _profiled(profile: Path, settings: MultiSettings, inputs: dict[str, Any], device: torch.device,
+              speak_device: torch.device) -> dict[str, Any]:
+    """Stage D's profile ``profile``'s measure of the speaking workers (`multi_profile`), refused by name unless it is of
+    these inputs (`PROFILED_INPUTS`, as this checkout reads them) and these settings (`PROFILED_SETTINGS`), its pass on
+    this kind of device and its worker measured on ``speak_device``'s kind."""
     from ts_transformer.experiments.training_export import this_checkout
 
     record = json.loads((profile / "profile.json").read_text(encoding="utf-8"))
@@ -494,15 +496,34 @@ def profiled_fit(profile: Path, settings: MultiSettings, inputs: dict[str, Any],
     if other:
         raise SystemExit(f"{profile} is a profile of other {', '.join(other)} than this campaign's: profile these "
                          f"(multi_profile)")
+    return measure
+
+
+def profiled_fit(profile: Path, settings: MultiSettings, inputs: dict[str, Any], workers: int,
+                 device: torch.device, speak_device: torch.device, cpu_profile: Path | None = None,
+                 cpu_workers: int = 0) -> dict[str, Any]:
+    """The speaking workers' memory read from stage D's profile (the user, 2026-10-07: measured once, never before each
+    run): the profile's measure of one worker and of the pass (`multi_profile`, `_profiled`), each peak times its
+    recorded margin (D179), and the memory free now (`post_train.available_memory`, before any worker or this process
+    uses the GPU), ``workers`` workers refused by name where they do not fit (`post_train.workers_fit` with nothing
+    held yet: a worker on the CPU counts the host's memory only, D180), and each worker's GPU budget (the GPU free now
+    less what this process holds beside its pass, in equal shares: `Speakers`' ``gpu_budget``; None for workers off the
+    GPU). ``cpu_workers`` CPU workers besides (D191): their measure from ``cpu_profile`` (a profile of these inputs and
+    settings with ``--speak-device cpu``), counted in the host's budget with the others'."""
+    measure = _profiled(profile, settings, inputs, device, speak_device)
+    cpu = _profiled(cpu_profile, settings, inputs, device, torch.device("cpu")) if cpu_workers else None
     measured, passed = (with_margin(measure[k], measure["margin"]) for k in ("measured", "pass"))
+    cpu_measured = with_margin(cpu["measured"], cpu["margin"]) if cpu is not None else None
     available = available_memory(device)
-    short = workers_fit(workers, measured, passed, available, held_now=False)
+    short = workers_fit(workers, measured, passed, available, held_now=False, cpu_workers=cpu_workers,
+                        cpu_measured=cpu_measured)
     if short:
         raise SystemExit("the speaking workers do not fit (O15, from the profile): " + "; ".join(short)
-                         + " — start fewer (--speak-workers)")
+                         + " — start fewer (--speak-workers, --cpu-workers)")
     budget = (None if speak_device.type != "cuda" else
               (available["gpu"] - passed["now"]) // workers)                      # at least its peak: fitted
     return {"profile": str(profile), "speak_workers": workers, "speak_device": str(speak_device),
+            "cpu_profile": None if cpu_profile is None else str(cpu_profile), "cpu_workers": cpu_workers,
             "margin": measure["margin"], "available": available, "gpu_budget": budget}
 
 
@@ -599,6 +620,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--front-attention", choices=FRONT_ATTENTIONS, default=COPIED,
                         help="D190 (2): how a window's copies read the front they hold once (copied: bit for bit; "
                              "merged: no copy)")
+    parser.add_argument("--cpu-batches", type=int, default=MultiSettings.cpu_batches,
+                        help="D191: of every --cpu-period batches by index, the first this many on the CPU workers")
+    parser.add_argument("--cpu-period", type=int, default=MultiSettings.cpu_period, help="D191: the rule's period")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--speak-workers", type=int, default=1)
     parser.add_argument("--speak-device",
@@ -610,7 +634,7 @@ def settings_from(args: argparse.Namespace, start: dict[str, Any]) -> MultiSetti
     return MultiSettings(args.rounds, {kind: getattr(args, f"windows_{kind}") for kind in KINDS}, args.spans_s,
                          args.c_min, args.batch_rows, args.continuations, args.seed, args.prior_lr, args.traffic_lr,
                          args.weight_decay, args.update_groups, args.data_sentences, args.select_per_airport, start,
-                         args.branching, args.front_attention)
+                         args.branching, args.front_attention, args.cpu_batches, args.cpu_period)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -619,7 +643,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, required=True, help="the campaign's directory (new, or a resume)")
     parser.add_argument("--profile", type=Path,
                         help="stage D's profile (multi_profile) of these inputs and settings, which the speaking workers "
-                             "are sized from: with --speak-workers above 1")
+                             "are sized from: with speaking workers (--speak-workers above 1, or --cpu-workers)")
+    parser.add_argument("--cpu-workers", type=int, default=0,
+                        help="D191: speaking workers on the CPU besides, for the batches --cpu-batches gives the CPU")
+    parser.add_argument("--cpu-profile", type=Path,
+                        help="D191: the profile of a CPU worker (multi_profile --speak-device cpu) of these inputs and "
+                             "settings: with --cpu-workers")
     parser.add_argument("--restart-round", action="store_true",
                         help="D185: a resume moves the round left half done aside and speaks it whole (default: its "
                              "done batches kept; on changed code, keep them only after a behaviour check)")
@@ -627,11 +656,15 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.speak_workers < 1:
         parser.error("--speak-workers is at least 1")
-    refused = speak_device_refused(args.speak_device, args.speak_workers, args.device)
+    refused = speak_device_refused(args.speak_device, args.speak_workers + args.cpu_workers, args.device)
     if refused is not None:
         parser.error(refused)
-    if (args.speak_workers > 1) != (args.profile is not None):
-        parser.error("--profile goes with --speak-workers above 1 (the workers are sized from it)")
+    speaking = args.speak_workers > 1 or args.cpu_workers > 0
+    if speaking != (args.profile is not None):
+        parser.error("--profile goes with speaking workers (--speak-workers above 1, or --cpu-workers; they are sized "
+                     "from it)")
+    if (args.cpu_workers > 0) != (args.cpu_profile is not None):
+        parser.error("--cpu-profile goes with --cpu-workers (the CPU workers are sized from it)")
     source = args.start_campaign if args.start_campaign.is_absolute() else REPO_ROOT / args.start_campaign
     try:
         start = start_of(source, args.start_round, formal=not args.smoke)            # D164: the start's setting
@@ -643,6 +676,10 @@ def main(argv: list[str] | None = None) -> int:
         p if p.is_absolute() else REPO_ROOT / p for p in (args.prior, args.instructions, args.executor, args.windows,
                                                           args.procedure_root, args.out))
     settings = settings_from(args, start)
+    refused = cpu_workers_refused(args.cpu_workers, settings.cpu_batches,
+                                  torch.device(args.speak_device or args.device))           # D191
+    if refused is not None:
+        parser.error(refused)
     git = git_state()
     if git["dirty"] and not args.smoke:
         parser.error("a campaign that is not a smoke runs on a clean checkout")
@@ -651,7 +688,7 @@ def main(argv: list[str] | None = None) -> int:
     checked_edges(edges_reference)                                                 # D104
     device = torch.device(args.device)
     context = open_context(prior_dir, instructions, executor, edges_reference,
-                           torch.device("cpu") if args.speak_workers > 1 else device, procedure_root,
+                           torch.device("cpu") if speaking else device, procedure_root,
                            formal=not args.smoke)
     stage = stage_d()
     stage.start(context, settings)                  # refused by name before the workers and campaign.json (D164)
@@ -659,13 +696,15 @@ def main(argv: list[str] | None = None) -> int:
               "windows": str(census), "procedure_root": str(procedure_root), "settings": asdict(settings),
               "smoke": args.smoke}
     speakers = None
-    if args.speak_workers > 1:                      # O15 from the profile, before any process uses the GPU
-        profile = args.profile if args.profile.is_absolute() else REPO_ROOT / args.profile
+    if speaking:                                    # O15 from the profiles, before any process uses the GPU
+        profile, cpu_profile = (None if p is None else p if p.is_absolute() else REPO_ROOT / p
+                                for p in (args.profile, args.cpu_profile))
         speak_device = torch.device(args.speak_device or args.device)
-        fit = profiled_fit(profile, settings, inputs, args.speak_workers, device, speak_device)
+        fit = profiled_fit(profile, settings, inputs, args.speak_workers, device, speak_device, cpu_profile,
+                           args.cpu_workers)
         print(json.dumps({"profiled_fit": fit}), flush=True)
         speakers = Speakers(context, settings, args.speak_workers, speak_device, stage=stage,
-                            gpu_budget=fit["gpu_budget"])
+                            gpu_budget=fit["gpu_budget"], cpu_workers=args.cpu_workers)
     context = replace(context, device=device, base=context.base.to(device).eval())
     try:
         open_campaign(out, inputs, git, opened["checks"], schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER,

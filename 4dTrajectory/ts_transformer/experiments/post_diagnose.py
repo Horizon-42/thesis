@@ -54,8 +54,8 @@ import torch
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
 from ts_transformer.experiments.post_ceiling import CEILING_SCHEMA, START, in_window_order
 from ts_transformer.experiments.post_train import (
-    CAMPAIGN_SCHEMA, Speakers, batches, counted_ends, done_rounds, inputs_here, open_context, read_batch, round_model,
-    selection_windows, settings_of, window_record,
+    CAMPAIGN_SCHEMA, Speakers, batches, counted_ends, cpu_workers_refused, done_rounds, inputs_here, open_context,
+    read_batch, round_model, selection_windows, settings_of, window_record,
 )
 from ts_transformer.experiments.post_window_loop import LOST_SEPARATION, WindowResult, checked_edges
 from ts_transformer.inference.runway_schedule import Separation
@@ -308,6 +308,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ceiling", type=Path, help="a D161 readout of the campaign: its start, its draws of the round")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--speak-workers", type=int, default=1, help="processes that read the batches (Speakers)")
+    parser.add_argument("--cpu-workers", type=int, default=0,
+                        help="multi-aircraft control D191: workers on the CPU besides, for the batches the campaign's "
+                             "rule gives the CPU (a campaign read with its rule)")
     parser.add_argument("--smoke", action="store_true", help="SMOKE: a tree with changes too; no result")
     args = parser.parse_args(argv)
     campaign, out, intent_path = (p if p.is_absolute() else REPO_ROOT / p for p in (args.campaign, args.out, args.intent))
@@ -336,11 +339,16 @@ def main(argv: list[str] | None = None) -> int:
     edges_reference = Path(inputs["windows"]) / "conformance" / "edges.npz"
     checked_edges(edges_reference)                                                 # D104
     device = torch.device(args.device)
+    refused = cpu_workers_refused(args.cpu_workers, settings.cpu_batches, device)    # D191: read by the campaign's rule
+    if refused is not None:
+        parser.error(refused)
+    speaking = args.speak_workers > 1 or args.cpu_workers > 0
     # with workers, the context is opened on the CPU and they are forked before this process uses the GPU
     context = open_context(Path(inputs["prior"]), instructions, executor, edges_reference,
-                           torch.device("cpu") if args.speak_workers > 1 else device, Path(inputs["procedure_root"]),
+                           torch.device("cpu") if speaking else device, Path(inputs["procedure_root"]),
                            formal=not args.smoke, data=False, splits=(SPLIT,))   # D132
-    speakers = Speakers(context, settings, args.speak_workers, device) if args.speak_workers > 1 else None
+    speakers = (Speakers(context, settings, args.speak_workers, device, cpu_workers=args.cpu_workers) if speaking
+                else None)
     context = replace(context, device=device, base=context.base.to(device).eval())
     windows = selection_windows(context, settings, SPLIT)
     places = batches(windows, settings.batch_windows)

@@ -256,9 +256,9 @@ def test_the_runner_hands_the_method_s_stage_to_the_workers_and_the_campaign(tmp
     handed = {}
 
     class Workers:
-        workers = 2
+        workers, cpu_workers = 2, 0
 
-        def __init__(self, context, settings, workers, device, *, stage):
+        def __init__(self, context, settings, workers, device, *, stage, cpu_workers):
             handed["speakers"] = stage
             handed["speak_device"] = device
 
@@ -274,7 +274,8 @@ def test_the_runner_hands_the_method_s_stage_to_the_workers_and_the_campaign(tmp
     monkeypatch.setattr(post_train, "Speakers", Workers)
     monkeypatch.setattr(post_train, "campaign_model", lambda *a: (None, None))
     monkeypatch.setattr(post_train, "require_workers_fit", lambda *a: {"speak_workers": 2, "measured": None, "pass": None,
-                                                                      "available": None})
+                                                                      "available": None, "cpu_workers": 0,
+                                                                      "cpu_measured": None})
     monkeypatch.setattr(post_train, "run_campaign", lambda out, settings, context, speakers, *, stage:
                         handed.update(campaign=stage, method=settings.method))
     argv = ["--prior", str(tmp_path / "p"), "--instructions", str(tmp_path / "i"), "--executor", str(tmp_path / "e"),
