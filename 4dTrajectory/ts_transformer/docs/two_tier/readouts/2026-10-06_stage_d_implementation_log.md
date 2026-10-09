@@ -30,6 +30,7 @@ they start with `4dTrajectory/` or `.claude/`.
 | MC1's census on real data (notes 三) | dev-multi-control | A sample of 20 anchors measured; the full census stopped at the user's word ("sample, … finish it as soon as possible"); a stated sample of 500 anchors an airport and split running in 6 processes (§9) |
 | The full ts suite on dev-multi-control (fccbab8d) | dev-multi-control | 1,963 passed, 1 skipped (8 workers, 13.2 min, 2026-10-07) |
 | dev-multi-control into dev-two-tier | dev-two-tier | Merged at the user's word ("合进去", 2026-10-07): b967d2b1, no conflict, no code differs from the tested branch |
+| MC11 · D181 items 55, 58–60, 56 (notes/stage_d.md 一, 2026-10-09) | dev-multi-control | Built, reviewed, committed (92341758, 37526695, a8df27f7); 58–60 bit for bit on real windows (§16); not merged |
 
 ### 0.1 Handover: where the next implementer of stage D starts (2026-10-07)
 
@@ -525,3 +526,30 @@ that unblocks an ordered run is merged, not asked):
   point is a join-0 aircraft's first predicted step). Merged `e4bbafac`; resumed 11:20 (unit `mc6-run-112034`).
 Round 0's speed so far: about 1.3 min a batch with 2 workers (about 219 batches): about 5 h a round, not the 3 h
 estimated from the 10-07 profile's batches.
+
+## 16 MC11: the speed of a round, code (notes/stage_d.md 一; D181; 2026-10-09)
+
+Beside MC6 (its run worktree untouched, the GPU its workers'), on `dev-multi-control` after dev-two-tier (`c976f4f8`)
+was fast-forwarded in; only the changed modules' tests, few processes (rule 13).
+
+| Commit | Item | Review |
+|---|---|---|
+| 92341758 | 55: `select_per_airport` leaves `multi_train.PROFILED_SETTINGS` (the test: a profile read by a campaign of another select size) | small change, no agent |
+| 37526695 | 58: `Speaker.permitted(indices)`, `SpeakingLoop.sentences(split, flights)`, `WindowLoop.samples(split, rows)`; `branch_round` builds the varied aircraft's samples only, of the first pass and of the copies (the padding counted over every aircraft, as before). 59: `WindowLoop._of_row` cached on its tick (`_Tick.of_row`), for the speed-word mask and the tokens. 60: `Speakers` collects and freezes (`gc.freeze`) before the fork, unfreezes on `close` | no S1; S2 fixed (the padding rule untested: the rows asked now leave out the row said most); second round none. S3: a failure between the freeze and the pool leaves the parent frozen (memory only); objects of the parent that become cyclic garbage wait for `close` |
+| a8df27f7 | 56: `experiments/multi_speed.py` (`ts-multi-speed-v1`), one batch of a stage D campaign's draw by `stage_d().speak_batch` with timers at its parts (first pass, second pass, continuations, samples; inside each the speaker's and the executor's steps, between two synchronisations; the GPU's peak reset at each part); cProfile on the CPU only, inside one part; tests on a smoke batch (`tests/test_multi_speed.py`) | no S1/S2. S3: the test's sum of parts cannot fail (`other_s` is the remainder); the smoke reaches no `step` of the second pass; `--cprofile` of a part never entered fails after the measure; `--batch` not range-checked; `other` also holds the rules, rewards and the second pass's halt, and the continuations' window-loop time holds `WindowLoop.copy` (requests item 65) |
+
+**The check of 58–60 (D181, root `CLAUDE.md`: a behaviour check on fixed inputs).** A one-off script (beside two
+checkouts, not a runner: the old code has none) run by `c976f4f8` in a detached worktree (removed after, its data links
+unlinked first) and by the new code, the CPU with one thread, the formal artefact: stage C's `post_seg60_20261007`
+round 5 on its round-0 draw's batch 0 (64 windows: 13 spoken again, 76 groups); MC6's start on MC6's round-0 draw — a
+300 s batch whole (batch 0: 32 windows, 64 aircraft; 10 spoken again, 39 groups) and 4 windows of the first 1200 s
+batch (batch 86: 24 aircraft; 2 spoken again, 16 groups); MC6's readout, 4 select windows of each span (12). Each
+first-pass end (words, states, reward, loss, crossing …), each group (its point, varied aircraft, every sentence's rows,
+records, tokens, reward, until) and each readout window (ends, losses by pair, steps, timing) digested
+(`test_post_generalised._Digest`): **all identical**, no window that differed in its second pass. Time, as information
+(one CPU, beside MC6): 590 s old, 530 s new — stage C's batch 137 → 114 s, the 300 s batch 224 → 190 s, the 4 windows
+of 1200 s 210 → 208 s, the readout 19 → 18 s. The changed modules' tests: 163 passed (3 processes, 9.9 min).
+
+**Next (notes 二, each on the user's word):** MC6 to resume on 58–60 at a round's boundary — round 0 had 25 of about
+219 batches at 12:03 (about 1.7 min a batch), so its end is about 17:30–18:00; stopping inside a round moves it aside
+whole (D157). Item 56's measure of one 1200 s batch on the GPU once the GPU is free; item 57 only on its evidence.

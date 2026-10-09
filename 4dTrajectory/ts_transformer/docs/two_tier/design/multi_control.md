@@ -67,18 +67,21 @@ the evidence is in §9.
 ### 0.3 Implementation
 
 Stage D's implementer keeps this table and its log, `readouts/2026-10-06_stage_d_implementation_log.md` (outline §5
-rule 10); its readings and requests go to `requests_from_d_to_designer.md`. MC0–MC4's code merged into `dev-two-tier`
-(b967d2b1, 2026-10-07); MC0's checks on real data passed; MC1's census (a stated sample) running.
+rule 10); its readings and requests go to `requests_from_d_to_designer.md`. State, 2026-10-09: MC0–MC5 built, reviewed
+and merged into `dev-two-tier` (last `db0ac00a`, with the two bug fixes of MC6's round 0 in `a79c1517` and `e4bbafac`);
+MC6 runs; MC11's code (D181) is on `dev-multi-control`, not merged.
 
 | Milestone | State |
 |---|---|
-| MC0 | Built, reviewed, committed (9c98a8d6, d7bf55f5, 3a9b7153, 80fe774c, 648b6591, 5e456406, a1ea664f); D73's checks on the formal artefact passed and D149's real-window check passed, 200 of 200 windows bit for bit (2026-10-07) |
-| MC1 | Built, reviewed, committed (e6f0e564); its cost measured on a sample (about 6–7 h in one process); the full census running (2026-10-07) |
-| MC2, MC3 | Built, reviewed, committed (fd720c75): stage D's rule of who answers, its token part, its credit |
-| MC4 | The round's stage committed (054727db); the user's items 6 and 7 built (ac919f9c); C15 and C16 merged in (fc962015); the one start function (D164) and the runner `multi_train` committed (2b370d37); the O18 readouts and `multi_validation` committed (fccbab8d); the windows of several spans, one L a batch (D146) and D166 item 19 committed (6cc49ad1); the smoke and its resume passed (2026-10-07) |
-| MC5 | D179 / D180 built (48c21e50, reviewed, two rounds): `multi_profile` measures one worker on each span's first and largest batch and the pass on the workers' device (`--speak-device`), the margin 1.3 recorded (`ts-multi-profile-v2`); `profiled_fit` with the margin and the device; on `dev-multi-control`, not yet merged; the measure on the CPU and the GPU after the merge (log §14). The whole-round profile of 2026-10-08 was stopped at the user's word (`outputs/POOLED/multi/profile_20261008.stopped-20261008T204116Z`, a v1 record, refused by the new fit) |
-| The census's step loop as one generator (frontend D177 (12)) | `multi.census.judged_steps` (`JudgedStep`, `StepLoss`), `window_losses` on it, bit for bit as before; committed `897e433f` (reviewed, two rounds), merged into `dev-two-tier` (`9ca282dd`, the user's word); fronter's export then reads it (log §13) |
-| MC6–MC10 | Not started |
+| MC0 | Committed 9c98a8d6, d7bf55f5, 3a9b7153, 80fe774c, 648b6591, 5e456406, a1ea664f; D73's checks on the formal artefact and D149's real-window check (200 of 200 windows bit for bit) passed (log §2–§4, §9) |
+| MC1 | Committed e6f0e564; the census read on a stated sample, 500 anchors an airport and split (log §5, §10) |
+| MC2, MC3 | Committed fd720c75 (log §7) |
+| MC4 | Committed 054727db, ac919f9c, 2b370d37, fccbab8d, 6cc49ad1; the smoke and its resume passed (log §7, §8, §11) |
+| MC5 | The memory measure (D179, D180): committed 48c21e50; measured once for MC6's settings, the GPU's profile `outputs/POOLED/multi/profile_mc6_gpu32_20261009` (log §14, §15) |
+| Frontend D177 (12), D178 (6) | `multi.census.judged_steps` 897e433f, `loop_positions` a332466a (log §13, §14) |
+| MC6 | Running since 2026-10-09: start `post_seg60_20261007` round 5, `outputs/POOLED/multi/multi_train_20261009`, run worktree `.claude/worktrees/run-mc6` at `e4bbafac`, systemd unit `mc6-run-112034`, 2 GPU workers; round 0 restarted twice on two fixed bugs; results in the log from §15 |
+| MC11 (D181) | On `dev-multi-control`: 55 (92341758), 58–60 (37526695, bit for bit on real windows), 56 `multi_speed` (a8df27f7); not merged; 56's measure waits for the GPU (log §16) |
+| MC7–MC10 | Not started |
 
 ### 0.4 Plan
 

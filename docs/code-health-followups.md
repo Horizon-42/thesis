@@ -145,6 +145,7 @@ added three entries (the rows after the performance index's).
 | Readout headers mix configuration, data and code version in one file under one format version (10-03) | partly | the window readout split (multi-aircraft design 9.9, branch `dev-step9-one-commanded` `1e3bd470`; shared `experiments/code_version.py`); the other readouts open, see the entry | no: readouts only |
 | Two ATC constants in `instructions/spec.py` that nothing reads (2026-10-04) | open | delete `ATC_SPEED_COMPLIANCE_MPS` and `ATC_MIN_DESCENT_RATE_MPS` | no: nothing reads them |
 | Two runway ends on one centreline halve the landing screen to float noise (2026-10-05) | open | compare the across-course spacing with a tolerance in `landing_cross_limit_m` and its harvest original, together | yes: the candidates' landing screens (a rebuild); none of the five airports has such a pair today (not checked on every end) |
+| `post_profile`'s `executor_step` part reads 0.0 s (2026-10-09) | open | the part's match finds no `autopilot/start.py` `step` in the stats; C8 is finished and runs no more, so no code change (multi-aircraft control D181) | no: a finished readout's report only |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
 the executor `autopilot/` and its replay, `prior_train` / `prior_select` / `prior_free_generation`, the land-by-reward
@@ -775,3 +776,14 @@ crossing of either. The harvest's `_runway_bracket_cross_limit`, which it mirror
 real airport has no two candidate ends on one centreline with one course, so no flight is judged otherwise today; the
 fix (a spacing tolerance, in both places at once, since they are mirrors) changes no real geometry but belongs with the
 harvest's owner.
+
+## `post_profile`'s `executor_step` part reads 0.0 s (2026-10-09)
+
+**Verified** (stage D's request 56, multi-aircraft control D181): both C8 profiles
+(`4dTrajectory/outputs/POOLED/post/c8_20261006/profile_32/profile.json`, `profile_256/profile.json`) record
+`"executor_step": 0.0` although the executor flies every cycle of every window; `post_profile.PARTS["executor_step"]`
+names `("autopilot/start.py", "step")` and `part_times` takes the largest cumulative time of the matching stats entries,
+0.0 when none matches; `Loop.step` carries no decorator. The named parts sum to 10 of the batch's 55 s (`profile_32`) and 43 of 113 s (`profile_256`).
+**Judgement**: the cause is not traced (the match's file or name as cProfile records it). C8 is finished and its
+profile runs no more, so the code stays as it is (D181); its numbers read without that part. Stage D's speed is measured
+by `experiments/multi_speed.py` (D181 (56)), which times the executor between two synchronisations instead.
