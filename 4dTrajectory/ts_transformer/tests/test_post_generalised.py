@@ -5,56 +5,17 @@ stage C's code before the change: `BEFORE_GENERALISATION`, the digests that code
 
 from __future__ import annotations
 
-import hashlib
-from dataclasses import astuple, replace
+from dataclasses import replace
 
 import numpy as np
 import torch
 
 from ts_transformer.experiments.prior_speaking_loop import flight_numbers
+from ts_transformer.experiments.window_behaviour import Digest as _Digest
 from ts_transformer.post.branches import samples
 from ts_transformer.post.scene import moved_start_window
 from ts_transformer.tests.test_post_branches import _ahead, _round
 from ts_transformer.tests.test_post_window_loop import CPU, _window_loop, _with_module, setup  # noqa: F401
-
-
-class _Digest:
-    """A sha256 of output data (outline D139 item 5), fed arrays and values in order."""
-
-    def __init__(self) -> None:
-        self.hash = hashlib.sha256()
-
-    def add(self, *values) -> None:
-        for value in values:
-            if isinstance(value, torch.Tensor):
-                value = value.detach().cpu().numpy()
-            if isinstance(value, np.ndarray):
-                self.hash.update(str(value.dtype).encode() + str(value.shape).encode())
-                self.hash.update(np.ascontiguousarray(value).tobytes())
-            else:
-                self.hash.update(repr(value).encode())
-
-    def rows(self, rows) -> None:
-        for name in ("time_s", "own", "candidates", "runway_in_force", "go_around", "heading_in_force",
-                     "words_in_force", "since", "targets"):
-            self.add(getattr(rows, name))
-
-    def permitted(self, permitted) -> None:
-        self.add(*permitted.masks, permitted.time_s, permitted.own, permitted.temperature)
-
-    def sentence(self, rows, permitted, tokens) -> None:
-        self.rows(rows)
-        self.permitted(permitted)
-        self.add(len(tokens), *tokens)
-
-    def result(self, result) -> None:
-        self.add(result.index, result.kind, result.outcome, None if result.loss is None else astuple(result.loss),
-                 result.loss_step, result.other, result.reward, result.go_arounds, result.words, result.states,
-                 result.speed_mask_rows, result.faulty_steps, result.loss_reads_fault)
-
-    def samples(self, batch) -> None:
-        self.add(*batch.rows, *batch.permitted.masks, batch.permitted.time_s, batch.permitted.own,
-                 batch.traffic.tokens, batch.traffic.present, batch.advantage, batch.counted)
 
 
 def stage_c_scenario(s) -> dict[str, str]:

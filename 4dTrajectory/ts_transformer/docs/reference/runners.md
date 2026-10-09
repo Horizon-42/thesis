@@ -1769,3 +1769,20 @@ export takes a list (`--windows`, D176 (3), frontend F5). Tests: `tests/test_win
     python run_ts.py window_list --diagnose 4dTrajectory/outputs/POOLED/post/<diagnose id> on \
         --ceiling 4dTrajectory/outputs/POOLED/post/<ceiling id> start --outcomes lost_separation \
         --out 4dTrajectory/outputs/POOLED/post/<list id> [--all]
+
+### R68 · `run_ts.py window_behaviour` — the window loop's behaviour on fixed inputs, stages C and D (multi-aircraft control D181, D183, D186; post-training D185)
+
+2026-10-09. The check that code before and after a change behaves the same (root `CLAUDE.md`: never by an equal commit),
+which D181's one-off script did for items 58–60. From a campaign of stage C (its branch method; the landed and value
+methods are refused by name) or D (`--campaign`, by its schema; its inputs' checks first), on the CPU with one thread: the model of `--model-round` (default the start), round
+`--draw-round`'s draw (default 0) — of each span its first batch, at most `--windows` of its windows, spoken by the
+stage's own batch speaker (groups written to a scratch directory, not kept) — and the first `--readout-per-span`
+(default 4) selection windows of each span read by the stage's reader in its batches. Writes `behaviour.json`
+(`ts-window-behaviour-v1`) into a new directory: digests (sha256) of each first-pass end, each branch group, the windows
+spoken again and differed, and each readout window's read; the commit as information. `--against` another record:
+the parts that differ named, exit status 1 when any does; refused for records of other inputs. Run the same command
+on a checkout of the code before (a detached worktree) and after. Stage C's seg60 round 5 and stage D's MC6 start took
+about 5 + 10 min. Tests: `tests/test_window_behaviour.py`.
+
+    python run_ts.py window_behaviour --campaign 4dTrajectory/outputs/POOLED/multi/multi_train_20261009 \
+        --out <a new directory> [--model-round N] [--windows W] [--against <another behaviour.json>]
