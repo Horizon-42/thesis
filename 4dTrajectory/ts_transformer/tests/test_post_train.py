@@ -671,6 +671,43 @@ def test_a_round_stopped_after_some_batches_resumes_by_its_batches(setup, tmp_pa
         path.write_text(kept)
 
 
+def test_a_round_resumed_through_the_speaking_workers_is_the_round_spoken_whole(setup, tmp_path, monkeypatch):
+    """C27 (D185, post-training §8): a round stopped after its first batch in one process and resumed through two
+    speaking workers (`Speakers`) reads the done batch back and has the workers speak the other: the groups files'
+    bytes and the round's record are those of the round spoken whole; the done batch's record is not written again."""
+    s = setup
+    context = _context(s)
+    settings = _settings(continuations=2)
+    model, _ = start_model(context, settings)
+    windows = [_ahead(s["windows"][0])] * 2
+    monkeypatch.setattr(post_train, "draw_round", lambda context, per_kind, rng: (windows, {}))   # the workers' draw
+    whole, stopped = tmp_path / "whole", tmp_path / "stopped"
+    whole.mkdir()
+    stopped.mkdir()
+    record = speak_round(model, context, windows, settings, 0, whole)
+    real = post_train.speak_batch
+
+    def stopping(model, context, windows, places, settings, round_, directory, k):
+        if k == 1:
+            raise RuntimeError("stopped")
+        return real(model, context, windows, places, settings, round_, directory, k)
+
+    monkeypatch.setattr(post_train, "speak_batch", stopping)
+    with pytest.raises(RuntimeError, match="stopped"):
+        speak_round(model, context, windows, settings, 0, stopped)
+    monkeypatch.setattr(post_train, "speak_batch", real)              # the workers fork with the real one
+    done = (stopped / "record_0.json").read_bytes()
+    assert not (stopped / "record_1.json").exists()
+    speakers = Speakers(context, settings, 2, CPU)
+    try:
+        assert speak_round(model, context, windows, settings, 0, stopped, speakers) == record
+    finally:
+        speakers.close()
+    assert (stopped / "record_0.json").read_bytes() == done and (stopped / "record_1.json").exists()
+    for name in ("groups_0.pt", "groups_1.pt"):
+        assert (stopped / name).read_bytes() == (whole / name).read_bytes()
+
+
 def test_a_resume_keeps_the_round_left_half_done_unless_it_restarts_it(tmp_path):
     """D185: a resume keeps a round directory without its checkpoint (its done batches); ``restart_round`` moves it aside
     and records it."""
