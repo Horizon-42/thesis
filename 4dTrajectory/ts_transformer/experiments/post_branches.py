@@ -209,6 +209,8 @@ def branch_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop,
             if said < 0 or (said == 0 and join > 0):             # nothing said to it before the point
                 continue
             ours, theirs = second.speaking.states(b_second), first.speaking.states(b_first)
+            if said == 0 and len(ours) == len(second.speaking.observed[b_second]):
+                continue                    # ended at its first predicted step before a row flown: nothing to compare
             # an aircraft the executor ended before the point: its whole flight, the same length in both passes
             rows = min((last[k] - join) * second.every + 1, len(theirs))
             ended = rows < (last[k] - join) * second.every + 1

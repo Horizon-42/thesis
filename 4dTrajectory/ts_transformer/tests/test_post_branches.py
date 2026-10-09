@@ -185,3 +185,18 @@ def test_with_segments_each_row_of_a_first_sentence_is_in_one_group_and_a_contin
     with pytest.raises(ValueError, match="whole number"):
         branch_points(FIRST, LENGTH, DELTA, every_s=6.0)
 
+
+
+def test_an_aircraft_ended_at_its_first_predicted_step_before_a_row_flown_has_its_observed_rows():
+    """Stage D's branch copy (MC6, 2026-10-09): in a loop of later joins there is no observe phase, so an aircraft the
+    copy ends at its first predicted step has flown no row; its states are its observed rows, two-dimensional."""
+    import numpy as np
+
+    from ts_transformer.experiments.prior_speaking_loop import SpeakingLoop
+
+    loop = object.__new__(SpeakingLoop)
+    loop.observed = np.arange(2 * 3 * 6, dtype=float).reshape(2, 3, 6)
+    loop._flown = [[], [np.ones(6), np.ones(6) * 2]]
+    loop.alive, loop.ended = np.array([False, False]), np.array([True, True])
+    assert np.array_equal(loop.states(0), loop.observed[0])
+    assert loop.states(1).shape == (5, 6) and np.array_equal(loop.states(1)[3:], [[1.0] * 6, [2.0] * 6])

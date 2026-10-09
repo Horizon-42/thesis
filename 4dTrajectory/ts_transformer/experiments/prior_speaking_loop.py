@@ -343,7 +343,9 @@ class SpeakingLoop:
         if not self.alive[flight] and not self.ended[flight]:            # done by the executor: to its end
             done = int(self.loop.executor.done_cycle[flight])
             flown = flown[: int(np.ceil((done + 1) / self.loop.row_cycles)) + 1]
-        return np.concatenate((self.observed[flight], np.array(flown)))
+        # an aircraft ended at its first predicted step before a row flown (a loop of later joins has no observe
+        # phase to write that row) has its observed rows only
+        return np.concatenate((self.observed[flight], np.array(flown).reshape(-1, self.observed.shape[2])))
 
     def generated(self, flights: Sequence[int] | None = None) -> list[Generated]:
         """The sentences of ``flights`` (places in ``order``; default every flight), each done by the executor
