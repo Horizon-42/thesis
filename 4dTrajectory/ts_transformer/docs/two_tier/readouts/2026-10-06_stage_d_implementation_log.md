@@ -660,3 +660,8 @@ windows "the same behaviour", prior_behaviour identical; the profile at §18's s
 0.78, 2.07 / 1.77, 1.80 / 1.53 GiB (§18: 0.39 / 0.32, 0.63 / 0.41, 1.46 / 0.66); a worker's GPU peak 2.21 GiB (§18:
 1.6): 2 workers fit, 3 do not (8.7 GiB against 6.8) — requests item 80; the full ts suite at 9c2161fa: 2092 passed,
 1 skipped.
+The worker's memory by part (9c2161fa, one process on the GPU, expandable segments; at each batch's step of the most
+allocated): batches 0 / 23 / 86 allocated 0.63 / 1.44 / 1.24 GiB, of which the joint loop's cache 0.40 / 1.10 / 0.96
+(history 37 / 26 / 42 %, written but not present 37 / 60 / 44 %, a step's room 26 / 14 / 14 %) and its executor and
+words 0.02 / 0.12 / 0.10; a rebuild's peak 0.79 / 1.77 / 1.53; the copies of one point identical up to where they part
+(their history and the padding before it): one front instead of K frees 0.24 / 0.76 / 0.75 GiB — requests item 80.
