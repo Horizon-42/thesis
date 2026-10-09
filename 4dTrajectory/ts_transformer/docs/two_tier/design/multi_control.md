@@ -408,9 +408,9 @@ their names. A later change of the shared code runs the same check (D181's items
 
 ### 6.2 The vocabulary's and the prior's public interfaces (D150)
 
-Stage D does not change the code of `instructions/`, `autopilot/` or `prior/` for itself (as outline D95): each change
-is written in that stage's public interface first and built by stage D's implementer (outline §5 rule 1), with that
-stage's checks.
+A change that stage D needs of `instructions/`, `autopilot/` or `prior/` is written in that stage's public interface
+and built by stage D's implementer with that stage's checks; a small defect of their code is fixed directly (outline
+D184), its names written into the interface after.
 
 | # | Interface | The change | Its test |
 |---|---|---|---|
