@@ -489,10 +489,14 @@ def _all_permitted(words, candidates, column, rng=None):
     return {c: rng.random(n) < 0.5 for c, n in sizes.items()}
 
 
-def test_the_column_mask_is_every_completion_through_apply_on_every_row_of_a_small_vocabulary():
+MASKS = (grammar.column_mask, grammar.column_mask_fast)        # the readable reference and its fast mode (D186 (2))
+
+
+@pytest.mark.parametrize("column_mask", MASKS)
+def test_the_column_mask_is_every_completion_through_apply_on_every_row_of_a_small_vocabulary(column_mask):
     """D62: on a small vocabulary, every state in force (and none: the first step), every word of the earlier columns,
     three heights, every column: the mask is the definition — some completion of the later columns passes `apply` —
-    with every later word permitted and with random permitted words."""
+    with every later word permitted and with random permitted words; the readable mask and its fast mode alike."""
     import itertools
 
     words, candidates = Words(_small_spec()), 2
@@ -506,9 +510,9 @@ def test_the_column_mask_is_every_completion_through_apply_on_every_row_of_a_sma
             for height in (100.0, 620.0, 1250.0):
                 for draw in (None, rng):
                     permitted = _all_permitted(words, candidates, column, draw)
-                    mask = grammar.column_mask([state] * len(prefixes), np.array(prefixes).reshape(len(prefixes), column),
-                                               column, np.full(len(prefixes), height), [candidates] * len(prefixes),
-                                               words, {c: np.tile(p, (len(prefixes), 1)) for c, p in permitted.items()})
+                    mask = column_mask([state] * len(prefixes), np.array(prefixes).reshape(len(prefixes), column),
+                                       column, np.full(len(prefixes), height), [candidates] * len(prefixes),
+                                       words, {c: np.tile(p, (len(prefixes), 1)) for c, p in permitted.items()})
                     for k, prefix in enumerate(prefixes):
                         expected = _completions_pass(state, list(prefix), column, height, words, candidates, permitted)
                         assert mask[k].tolist() == expected, (column, state, height, prefix)
@@ -516,7 +520,8 @@ def test_the_column_mask_is_every_completion_through_apply_on_every_row_of_a_sma
     assert checked > 20_000
 
 
-def test_the_column_mask_is_every_completion_through_apply_on_random_rows_of_the_chosen_vocabulary():
+@pytest.mark.parametrize("column_mask", MASKS)
+def test_the_column_mask_is_every_completion_through_apply_on_random_rows_of_the_chosen_vocabulary(column_mask):
     """D62 on the spec of D59 (`instruction_spec`'s grid and classes): random states, earlier words and heights, a batch
     of aircraft with different numbers of candidates; with every later word permitted where the completions are few
     enough to try them all, and with a few random permitted words in every column."""
@@ -539,7 +544,7 @@ def test_the_column_mask_is_every_completion_through_apply_on_random_rows_of_the
             permitted = {c: (rng.random((batch, len(grammar.column_words(c, words, most)))) < 4.0 / len(
                 grammar.column_words(c, words, most))) if few else np.ones((batch, len(grammar.column_words(c, words, most))),
                                                                           bool) for c in range(column + 1, 5)}
-            mask = grammar.column_mask(in_force, prefix, column, height, candidates, words, permitted)
+            mask = column_mask(in_force, prefix, column, height, candidates, words, permitted)
             assert mask.shape == (batch, len(grammar.column_words(column, words, most)))
             for j in range(batch):
                 mine = {c: p[j][: len(grammar.column_words(c, words, candidates[j]))] for c, p in permitted.items()}
@@ -548,6 +553,33 @@ def test_the_column_mask_is_every_completion_through_apply_on_random_rows_of_the
                 own = len(grammar.column_words(column, words, candidates[j]))
                 assert mask[j, :own].tolist() == expected, (column, few, j)
                 assert not mask[j, own:].any()                 # a candidate the airport does not have
+
+
+def test_the_fast_column_mask_is_the_readable_one_bit_for_bit():
+    """D186 (2): on the chosen vocabulary, random batches of 24 aircraft (states in force or none, earlier words,
+    heights, different numbers of candidates, permitted words from none to all): the fast mode's answer is the
+    readable mask's, every column; its refusals are the readable one's."""
+    words = Words(spec())
+    rng = np.random.default_rng(5)
+    for trial in range(300):
+        batch, column = 24, trial % 5
+        candidates = [int(rng.integers(1, 6)) for _ in range(batch)]
+        most = max(candidates)
+        in_force = [None if rng.random() < 0.2 else grammar.InForce(
+            int(rng.integers(0, n)), bool(rng.random() < 0.3), int(rng.integers(0, words.n_heading)),
+            int(rng.integers(0, words.altitude_no_level_off + 1)), int(rng.integers(0, words.n_descent + 2)),
+            int(rng.integers(0, words.speed_unspecified + 1))) for n in candidates]
+        prefix = np.array([[int(rng.choice(grammar.column_words(c, words, n))) for c in range(column)]
+                           for n in candidates]).reshape(batch, column)
+        height = rng.uniform(0.0, 3000.0, batch)
+        share = rng.random()
+        permitted = {c: rng.random((batch, len(grammar.column_words(c, words, most)))) < share
+                     for c in range(column + 1, 5)}
+        args = (in_force, prefix, column, height, candidates, words, permitted)
+        assert np.array_equal(grammar.column_mask_fast(*args), grammar.column_mask(*args)), trial
+    for mask in MASKS:                                    # the same refusals
+        with pytest.raises(ValueError, match="later columns"):
+            mask([None], np.zeros((1, 2), dtype=np.int64), 2, np.zeros(1), [1], words, {1: np.ones((1, 3), bool)})
 
 
 def test_a_level_below_is_permitted_under_a_level_angle_and_then_only_a_descent_class():

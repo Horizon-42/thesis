@@ -312,3 +312,65 @@ def column_mask(in_force: Sequence[InForce | None], said: np.ndarray, column: in
     if reduced(column):
         return np.concatenate([passes[:, :1], np.repeat(passes[:, 1:], len(asked) - 1, axis=1)], axis=1)
     return passes
+
+
+def column_mask_fast(in_force: Sequence[InForce | None], said: np.ndarray, column: int, height_m: np.ndarray,
+                     n_candidates: Sequence[int], words: Words, permitted: Mapping[int, np.ndarray] | None = None
+                     ) -> np.ndarray:
+    """`column_mask`'s answer, bit for bit, faster (multi-aircraft control D186 (2); outline D138: `column_mask` stays
+    the readable reference). A heading or a speed word enters the rules only through rule 1 (the first step says a
+    word in every column), so a later heading or speed column leaves the product of completions: it is one factor of
+    each aircraft — some permitted word of it, a said one at the first step — and the rules are evaluated over the
+    other later columns only, with a said word standing in for it."""
+    batch = len(in_force)
+    said = np.asarray(said, dtype=np.int64).reshape(batch, column)
+    if column > ALTITUDE:
+        _require_altitudes(said[:, ALTITUDE], words)
+    later = list(range(column + 1, len(COLUMNS)))
+    permitted = dict(permitted or {})
+    if set(permitted) - set(later):
+        raise ValueError(f"permitted words are for the later columns {later}, got {sorted(permitted)}")
+    most = int(max(n_candidates))
+    first = np.array([f is None for f in in_force])
+    product = [c for c in later if c not in (HEADING, SPEED)]
+    width = 2 + len(product)                                   # the batch, the column asked, then each column multiplied
+    axis = {c: 2 + k for k, c in enumerate(product)}
+
+    def along(values: np.ndarray, dim: int) -> np.ndarray:
+        shape = [1] * width
+        shape[0], shape[dim] = values.shape[0], values.shape[1]
+        return values.reshape(shape)
+
+    def per_aircraft(values: Any, dtype: Any) -> np.ndarray:
+        return np.asarray(values, dtype=dtype).reshape((batch,) + (1,) * (width - 1))
+
+    asked = column_words(column, words, most)
+    reduced = column in (HEADING, SPEED)
+    values = np.array([[UNCHANGED, 0]]) if reduced else asked[None, :]
+    row: dict[int, np.ndarray] = {column: along(np.repeat(values, batch, axis=0), 1)}
+    for c in range(column):
+        row[c] = per_aircraft(said[:, c], np.int64)
+    allowed = np.ones((batch,) + (1,) * (width - 1), dtype=bool)
+    factor = np.ones(batch, dtype=bool)                        # the later heading and speed columns (docstring)
+    for c in later:
+        full = column_words(c, words, most)
+        given = np.asarray(permitted.get(c, np.ones((batch, len(full)), dtype=bool)), dtype=bool)
+        if given.shape != (batch, len(full)):
+            raise ValueError(f"the permitted words of column {COLUMNS[c]} are [{batch}, {len(full)}], got {given.shape}")
+        if c in axis:
+            row[c] = along(np.tile(full, (batch, 1)), axis[c])
+            allowed = allowed & along(given, axis[c])
+        else:
+            some_said = given[:, 1:].any(axis=1)
+            factor &= np.where(first, some_said, given[:, 0] | some_said)
+            row[c] = per_aircraft(np.zeros(batch), np.int64)  # a said word: rule 1 is the factor's
+    before = [InForce(UNCHANGED, False, UNCHANGED, UNCHANGED, UNCHANGED, UNCHANGED) if f is None else f for f in in_force]
+    code = _rules(_MANY, words, per_aircraft(first, bool),
+                  per_aircraft([f.runway for f in before], np.int64), per_aircraft([f.go_around for f in before], bool),
+                  per_aircraft([f.altitude for f in before], np.int64), per_aircraft([f.angle for f in before], np.int64),
+                  *(row[c] for c in range(len(COLUMNS))), per_aircraft(height_m, np.float64),
+                  per_aircraft(list(n_candidates), np.int64))[0]
+    passes = ((code == 0) & allowed).any(axis=tuple(range(2, width))) & factor[:, None]
+    if reduced:
+        return np.concatenate([passes[:, :1], np.repeat(passes[:, 1:], len(asked) - 1, axis=1)], axis=1)
+    return passes

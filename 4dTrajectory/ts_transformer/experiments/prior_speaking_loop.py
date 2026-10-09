@@ -89,7 +89,8 @@ class SpeakingLoop:
     """The closed loop of the flights ``order`` of ``loop`` (module docstring). ``sentences``, ``observed`` (each
     flight's observed rows before its first predicted step as the start gave them back, `STATE_COLUMNS`) and
     ``flights`` (their records in the split's signals: airport, entry time, key) by their place in the signals; ``landings`` each flight's,
-    in ``order`` (D105); ``finals`` each airport's (the procedure masks); ``masks`` their mode (`Speaker`, B14)."""
+    in ``order`` (D105); ``finals`` each airport's (the procedure masks); ``masks`` the mode of a row's masks and state
+    inputs (`Speaker`, B14; `LoopRows`, multi-aircraft control D186 (3))."""
 
     def __init__(self, model: Prior, loop: Loop, order: Sequence[int], sentences: Mapping[int, ClosedLoopSentence],
                  observed: Mapping[int, np.ndarray], flights: Mapping[int, Mapping[str, Any]], geometries: Mapping[str, AirportGeometry],
@@ -114,7 +115,7 @@ class SpeakingLoop:
                                 np.array([utc_s(f["entry_time_utc"]) for f in self.flights]),
                                 np.array([r.first_row for r in rows]), self.start, variant=variant,
                                 interval_s=interval_s, step_s=words.spec.step_s, device=device,
-                                join_ticks=self.join_ticks)
+                                join_ticks=self.join_ticks, mode=masks)
         shape = (self.start * self.every, len(STATE_COLUMNS))
         wrong = [i for i in self.order if np.shape(observed[i]) != shape]
         if wrong:
