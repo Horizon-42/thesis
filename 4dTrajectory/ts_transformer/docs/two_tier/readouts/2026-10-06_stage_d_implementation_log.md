@@ -499,3 +499,29 @@ that test; the export unchanged). `test_multi_train`, `test_multi_windows`, `tes
 - Next (notes 二): after the user's merge, the measure on the CPU and on the GPU (1200 s at 24 and at 48 rows), from a
   run worktree in a systemd unit, then the report and MC6's proposal to the user.
 
+
+## 15 MC6 launched (2026-10-09)
+
+**The measure (D179, D180), once for MC6's settings:** on the CPU (`outputs/POOLED/multi/profile_mc6_20261009`, kept as
+the record): a CPU worker peaks at 4.3 GiB of host memory (×1.3: 3 fit) and speaks a 300 / 600 / 1200 s batch in 178 /
+351 / 521 s — slower than on the GPU and too few workers: the CPU route loses (requests item 52 did not pay off for stage
+D). On the GPU: `--batch-rows 64 48 48` (`profile_mc6_gpu_20261009`): the 1200 s span at 48 rows peaks at 3.66 GiB and
+takes 398 s (at 24 rows 0.65–0.78 GiB, 46–52 s in the 10-07 profile) — item 53 backfired; `64 48 24`
+(`profile_mc6_gpu24_20261009`) and `64 32 24` (`profile_mc6_gpu32_20261009`, the one MC6 reads): a worker peaks at
+about 2.4–2.6 GiB whatever the rows (set by the longest windows); two workers fitted only once the user closed Chrome
+(its GPU process held 1.1 GiB): the fit then 7.1 GiB free, each worker's budget 3.45 GiB.
+**MC6** (`outputs/POOLED/multi/multi_train_20261009`, intent 2757a4ee): start `post_seg60_20261007` round 5, seed 2035,
+8 rounds, 1,000 real + 1,000 compressed windows, spans 300 / 600 / 1200 s, c_min 0.8, batch rows 64 / 32 / 24, K 8,
+lr 1e-5 / 1e-4, 100 select anchors an airport, 2 GPU workers, from the run worktree `run-mc6`, systemd units. Round 0
+stopped twice on bugs that only a real GPU and stage D's joins reach, both fixed and merged at once (the user: a fix
+that unblocks an ordered run is merged, not asked):
+- `888e70ee`: `post_train._cap_gpu` (D172) gave torch's `set_per_process_memory_fraction` a bare "cuda"; it takes an
+  index (the tests had stubbed it). Checked on the GPU. Small change.
+- the empty flown rows (batch 108): in a loop of later joins there is no observe phase, so a join-0 aircraft whose last
+  branch point is its first predicted step is ended by the branch copy before its first flown row is written, and
+  `SpeakingLoop.states` failed; `states` now gives its observed rows, `branch_round` skips its comparison (nothing said,
+  the start shared). Stage C cannot reach it. Checked on the real batch (it speaks, differed empty, its group kept).
+  Reviewed: no S1; S2 — the skip has no synthetic test (open item: a stage D `branch_round` fixture whose last branch
+  point is a join-0 aircraft's first predicted step). Merged `e4bbafac`; resumed 11:20 (unit `mc6-run-112034`).
+Round 0's speed so far: about 1.3 min a batch with 2 workers (about 219 batches): about 5 h a round, not the 3 h
+estimated from the 10-07 profile's batches.
