@@ -4,7 +4,7 @@
 2026-10-09，Claude 写，用户转发。
 
 ```
-你 requests 的 63–67 条处理完了：
+你 requests 的 63–68 条处理完了：
 - 63–65（MC11 的读法）按你建的接受，记在 D181 里；prior §7 item 3、post_training §9 item 8 补了名字。
 - 66（用户提的往回找决定点）写成 multi_control D182，里程碑 MC12（§11），§2.3 加了一段。用户的选择（2026-10-09）：
   - 做成 campaign 设置 MultiSettings.branching：grid（D143，默认，旧行为）| backward；
@@ -23,8 +23,7 @@
   - 奖励不变（D141）：不加间隔裕度项，被保留的组里续句不提前结束；
   - 已知限制：功劳集中在"最晚还能改变事件"的词上，可能学成临到头复飞。所以读数要按跨度给出每架飞机的复飞率
     和每个组的点离事件多远。
-路径相对 4dTrajectory/ts_transformer/。MC6 在 run-mc6 里跑：不动那个运行工作树，只写代码、只跑改动文件的测试、
-少开进程（rule 13），不占 GPU。
+路径相对 4dTrajectory/ts_transformer/。MC6 已被用户在第 0 轮停掉（2026-10-09）；下一个 campaign 由用户定。改代码时只跑改动文件的测试、少开进程。
 
 一、代码（在 dev-multi-control 上，先把 dev-two-tier 合进来）
 0. 先做 D183（你的第 67 条，评估后接受）：说话器缓存只留已写的行加一段。
@@ -35,6 +34,17 @@
    这是阶段 B 的代码，接口不变，由你建。测试：三处各一个（克隆一次、副本的空间、按段扩容），以及逐位核对。
    审核走 agent（范围是 diff）。
    它对 MC12 尤其有用：试探点的续句只飞到事件后 60 s，不该带着到窗口结束的空间。
+
+D185（你的第 68 条，用户 2026-10-09 定）：一轮按批续跑，里程碑 post_training C27，你在共用的 post_train 里建，C 和 D 都适用。
+   - 每批先写组文件，最后写记录文件（record_<k>.json），都先用临时名、写完再改名；有记录才算这一批完成。
+   - 续跑时保留没有 checkpoint 的那一轮：完成的批读回，其余的重说；只有组文件没有记录的，重说。
+   - 抽样或设置不同就按名字拒绝；剩下的批要在另一类设备上说，也拒绝。
+   - runner 不比较代码：每次启动只记提交号，仅作信息。
+   - 代码变了再续跑，由操作者二选一：
+     - --restart-round：整轮挪开重说；
+     - 先做几分钟的行为核对（每个跨度几个窗口，新旧代码各跑一遍），再保留完成的批。已完成的批多于约 10 批时才值得。
+   - 测试按 post_training §8 C27。
+   顺序：D183 → D185 → MC12。
 
 MC12：
 1. MultiSettings.branching（默认 grid）；续句的搜索放在 multi/ 里，复用共用的 WindowLoop.copy、finish、samples。
@@ -71,5 +81,5 @@ D183 就按这条做。fronter 导出里那两处镜像（frontend D178 (6)）�
 
 另外，上一条 note 里让你改写 multi_control §0.3（还写着 MC1 运行中、MC5 未合并、MC6 未开始），没做的话一起做。
 你只能写各文档 §0.3 的状态行、multi_control §0.3、你的日志和 code-health-followups。
-requests_from_d_to_designer.md 整份重写：63–67 条已处理，删掉；新的读法另起。
+requests_from_d_to_designer.md 整份重写：63–68 条已处理，删掉；新的读法另起。
 ```
