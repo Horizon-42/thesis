@@ -11,7 +11,10 @@ A. 快速版本取代旧版本，旧模式删除（outline D187 改写；之前�
    - 删掉遮罩和每行输入的两种模式，只留按批的那一种：
      prior/procedure 的逐架计算和每个进程一次的 require_same_masks（连同它的 check_rows、CHECKED、_unchecked）；
      Speaker 里可读 column_mask 的那条路径；LoopRows 的逐架路径。masks / mode 参数和 MASK_MODES 一起删（D184，不留兼容层）。
-   - column_mask_fast 改名 column_mask（只剩一个，不再叫 fast）；原来可读的 column_mask 挪进测试，当穷举比较的参照（它按 apply 定义，D62）。
+   - column_mask_fast 改名 column_mask（只剩一个，不再叫 fast）；原来的 column_mask 删掉，不挪进测试。
+   - 留下的写法要自己读得懂（用户 2026-10-09）：名字说清算的是什么；说明里写清算的是什么、为什么等于原来的定义
+     （column_mask 写它依赖的文法性质，见 D）；删掉模式后剩下的分支、参数名、注释里不再提"两种模式"。
+     为了好读需要整理结构就整理，结果逐位不变；审核时 agent 也看这一点。
    - prior_behaviour 不再比两种模式；它的输出要和改之前逐位相同，campaign 开头记下的记录照样对得上。
    - 改的名字写进报告。若发现哪个已记录的产物或设置里写着模式名，先停下报告。
    - 提交前核对一次：window_behaviour 对 B 之后的记录，C 和 D 的窗口逐位相同；prior_behaviour 相同；标注器 conformance；各自的测试。
@@ -26,7 +29,8 @@ C. C27 补一个测试（post_training §8 C27 已补一句）：经过说话 wo
    组文件的字节和轮的记录跟整轮一次说完的相同。只改测试，小改动。
 D. column_mask 依赖的文法性质（vocabulary §6 item 2 已写明）：
    - grammar 的模块说明写明 column_mask 按批算，依赖的性质是：航向词和速度词只经规则 1 进入规则；
-   - 穷举测试拿按 apply 定义的参照比较，说明里写明它守的就是这条性质：以后改规则 1–6 把它改坏了，测试会失败，column_mask 要一起改。
+   - 穷举测试的参照直接用 apply 算：后面各列每种词的组合逐个用 apply 检查，有一种通过就算允许（D62 的定义），不用旧代码；
+     说明里写明它守的就是这条性质：以后改规则 1–6 把它改坏了，测试会失败，column_mask 要一起改。
    - 小改动，可以和 A 一起提交。
 
 顺序：先把手上的 MC12 做完提交，然后 B → A → C、D。
