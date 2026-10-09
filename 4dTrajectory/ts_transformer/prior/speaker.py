@@ -326,32 +326,49 @@ class Speaker:
         h, tokens, past = self.model.extend(row, self.past, extra)
         g = h
         said = np.zeros((count, 0), dtype=np.int64)
-        permitted_row, forbidden_row, drawn_row = [], [], np.zeros((count, len(COLUMNS)))
-        others = torch.as_tensor(~said_now, device=h.device)[:, None]
+        permitted_row, forbidden_row, drawn_row, empty = [], [], [], []
         for column in range(len(COLUMNS)):
             logits = self.model.column_logits(column, g, tokens, row.valid, row.first)[:, 0]
-            allowed = self._allowed(column, said, at, caller, procedure)
+            if column == RUNWAY:
+                allowed = self._runway_allowed(at, caller, procedure)
+            else:
+                if column == HEADING:
+                    # the runway word drawn: the procedure's and the caller's masks of every later column are the row's,
+                    # computed once (multi-aircraft control D189 (2)), under the runway and G it leaves to each aircraft
+                    # said (an aircraft not said keeps its own: every class is permitted to it)
+                    runway, go_around = self._runway_after(np.where(said_now, said[:, RUNWAY], UNCHANGED))
+                    held = self._procedure_masks(runway, go_around, at, procedure)
+                    others = {c: self._others(c, held, caller) for c in range(HEADING, len(COLUMNS))}
+                allowed = self._allowed(column, said, at, others)
             if allowed[said_now, logits.shape[-1]:].any():
                 raise ValueError(f"column {COLUMNS[column]}: a mask permits a word the model has no class for")
             # an aircraft not said draws a word that no one keeps: every class of the model permitted to it
-            permitted = torch.as_tensor(allowed[:, : logits.shape[-1]], device=logits.device) | others
-            masked = logits.masked_fill(~permitted, float("-inf"))
-            if torch.isneginf(masked).all(dim=-1).any():
-                raise ValueError(f"column {COLUMNS[column]}: an aircraft has no permitted word (D62)")
+            permitted = allowed[:, : logits.shape[-1]] | ~said_now[:, None]
+            on_device = torch.as_tensor(permitted, device=logits.device)
+            masked = logits.masked_fill(~on_device, float("-inf"))
+            empty.append(torch.isneginf(masked).all(dim=-1))
             probabilities = torch.softmax(logits, dim=-1)
-            forbidden_row.append(probabilities.masked_fill(permitted, 0.0).sum(dim=-1).cpu().numpy())
+            forbidden_row.append(probabilities.masked_fill(on_device, 0.0).sum(dim=-1))
             drawn = torch.softmax(masked / self.temperature, dim=-1)
             if column == RUNWAY:
-                go_around_drawn = drawn[:, RUNWAY_GO_AROUND_CLASS].cpu().numpy()
-                go_around_permitted = permitted[:, RUNWAY_GO_AROUND_CLASS].cpu().numpy()
+                go_around_drawn = drawn[:, RUNWAY_GO_AROUND_CLASS]
+                go_around_permitted = permitted[:, RUNWAY_GO_AROUND_CLASS]
             chosen = draw(drawn, numbers[:, column])
-            permitted_row.append(permitted.cpu().numpy())
-            drawn_row[:, column] = drawn.gather(-1, chosen)[:, 0].double().cpu().numpy()
+            permitted_row.append(permitted)
+            drawn_row.append(drawn.gather(-1, chosen)[:, 0].double())
             g = self.model.after_choice(column, g, chosen, tokens)
-            said = np.concatenate((said, class_words(column, chosen.cpu().numpy())), axis=1)
+            said = np.concatenate((said, class_words(column, chosen.cpu().numpy())), axis=1)   # the one value a column
+        # the row's records on the device brought back at once (D189 (2)), before the row is flown
+        empty = torch.stack(empty).cpu().numpy()
+        if empty.any():
+            column = int(np.flatnonzero(empty.any(axis=1))[0])
+            raise ValueError(f"column {COLUMNS[column]}: an aircraft has no permitted word (D62)")
+        forbidden_row = list(torch.stack(forbidden_row).cpu().numpy())
+        drawn_row = torch.stack(drawn_row, dim=1).cpu().numpy()
+        go_around_drawn = go_around_drawn.cpu().numpy()
         said = np.where(said_now[:, None], said, UNCHANGED)
         runway, go_around = self._runway_after(said[:, RUNWAY])
-        blocked = {c: ~procedure.permitted(c, runway, go_around, at.e_m, at.n_m, at.height_m) for c in procedure.columns}
+        blocked = {c: ~held[c] for c in procedure.columns}
         heard = [aircraft.copy() for aircraft in self._heard]
         for b in np.flatnonzero(said_now):
             heard[b].hear(said[b], float(at.height_m[b]), float(row.time_s[b, 0]))
@@ -505,29 +522,29 @@ class Speaker:
     def _go_around(self) -> np.ndarray:
         return np.array([f is not None and f.go_around for f in self.in_force])
 
-    def _allowed(self, column: int, said: np.ndarray, at: Position, caller: Mapping[int, np.ndarray],
-                 procedure: ProcedureMasks) -> np.ndarray:
-        """``[B, words]``: the words of ``column`` that every mask permits, after the row's earlier words ``said``
-        (module docstring)."""
-        if column != RUNWAY:
-            runway, go_around = self._runway_after(said[:, RUNWAY])
-            later = {c: self._others(c, runway, go_around, at, caller, procedure)
-                     for c in range(column + 1, len(COLUMNS))}
-            return (column_mask(self.in_force, said, column, at.height_m, self._n_candidates, self.words, later)
-                    & self._others(column, runway, go_around, at, caller, procedure))
-        # a runway word is permitted where some permitted heading word of the row can follow it: the grammar asked at
-        # the heading column after it, with the later columns' masks under the runway and G it leaves (exact, and one
-        # heading column's work for each runway word, not the whole row's)
+    def _allowed(self, column: int, said: np.ndarray, at: Position, others: Mapping[int, np.ndarray]) -> np.ndarray:
+        """``[B, words]``: the words of ``column`` (after the runway's) that every mask permits, after the row's earlier
+        words ``said`` (module docstring); ``others`` the procedure's and the caller's masks of this column and every
+        later one, the row's once its runway word is drawn."""
+        later = {c: others[c] for c in range(column + 1, len(COLUMNS))}
+        return (column_mask(self.in_force, said, column, at.height_m, self._n_candidates, self.words, later)
+                & others[column])
+
+    def _runway_allowed(self, at: Position, caller: Mapping[int, np.ndarray], procedure: ProcedureMasks) -> np.ndarray:
+        """``[B, words]``: the runway words every mask permits (module docstring): a runway word is permitted where some
+        permitted heading word of the row can follow it — the grammar asked at the heading column after it, with the
+        later columns' masks under the runway and G it leaves (exact, and one heading column's work for each runway
+        word, not the whole row's)."""
         count = len(self.in_force)
         runway_words = column_words(RUNWAY, self.words, int(self._n_candidates.max()))
         out = np.zeros((count, len(runway_words)), dtype=bool)
         for w, word in enumerate(runway_words):
             runway, go_around = self._runway_after(np.full(count, word))
-            later = {c: self._others(c, runway, go_around, at, caller, procedure)
-                     for c in range(HEADING + 1, len(COLUMNS))}
+            held = self._procedure_masks(runway, go_around, at, procedure)
+            later = {c: self._others(c, held, caller) for c in range(HEADING + 1, len(COLUMNS))}
             heading = column_mask(self.in_force, np.full((count, 1), word), HEADING, at.height_m, self._n_candidates,
                                   self.words, later)
-            out[:, w] = (heading & self._others(HEADING, runway, go_around, at, caller, procedure)).any(axis=1)
+            out[:, w] = (heading & self._others(HEADING, held, caller)).any(axis=1)
         if RUNWAY in caller:
             out &= caller[RUNWAY]
         return out
@@ -535,13 +552,18 @@ class Speaker:
     def _runway_after(self, word: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         return runway_after(word, self.in_force, self._n_candidates)
 
-    def _others(self, column: int, runway: np.ndarray, go_around: np.ndarray, at: Position,
-                caller: Mapping[int, np.ndarray], procedure: ProcedureMasks) -> np.ndarray:
-        """The words of ``column`` the procedure masks (``procedure``, the row's) and the caller's permit."""
+    def _procedure_masks(self, runway: np.ndarray, go_around: np.ndarray, at: Position,
+                         procedure: ProcedureMasks) -> dict[int, np.ndarray]:
+        """The words the procedure masks (``procedure``, the row's) permit in each column they rule, under ``runway``
+        and ``go_around``."""
+        return {c: procedure.permitted(c, runway, go_around, at.e_m, at.n_m, at.height_m) for c in procedure.columns}
+
+    def _others(self, column: int, held: Mapping[int, np.ndarray], caller: Mapping[int, np.ndarray]) -> np.ndarray:
+        """The words of ``column`` the procedure masks (``held``, `_procedure_masks`) and the caller's permit."""
         width = len(column_words(column, self.words, int(self._n_candidates.max())))
         out = np.ones((len(self.in_force), width), dtype=bool)
-        if column in procedure.columns:
-            out &= procedure.permitted(column, runway, go_around, at.e_m, at.n_m, at.height_m)
+        if column in held:
+            out &= held[column]
         if column in caller:
             out &= caller[column]
         return out

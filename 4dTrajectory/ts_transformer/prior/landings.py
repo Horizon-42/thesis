@@ -93,6 +93,21 @@ class LandingIndex:
         return self._built((*self.landings[:at], landing, *self.landings[at:]), self.sealed, times,
                            {**self._own, landing.flight_key: landing})
 
+    def counted(self, first_s: float, end_s: float, keep: Iterable[str]) -> LandingIndex:
+        """The landings that rows from ``first_s`` to before ``end_s`` count — from `LANDINGS_WINDOW_S` before
+        ``first_s`` to before ``end_s`` (a row counts the 30 min before it) — and the landings of the flights ``keep``
+        (each a flight's own, which `counts_before` asks for), with the same runways, days and sealed landings: at those
+        rows, the same counts (multi-aircraft control D189 (0)). Its landings were checked when this index was built."""
+        time = lambda item: item.time_s                                          # noqa: E731
+        start = bisect.bisect_left(self.landings, first_s - LANDINGS_WINDOW_S, key=time)
+        kept = {landing.flight_key: landing
+                for landing in self.landings[start: bisect.bisect_left(self.landings, end_s, key=time)]}
+        kept.update((key, self._own[key]) for key in keep)
+        landings = tuple(sorted(kept.values(), key=lambda item: (item.time_s, item.flight_key)))
+        times = {runway: np.array([landing.time_s for landing in landings if landing.runway == runway],
+                                  dtype=np.float64) for runway in self.runways}
+        return self._built(landings, self.sealed, times, {landing.flight_key: landing for landing in landings})
+
     def _built(self, landings: tuple[Landing, ...], sealed: int, times: dict[str, np.ndarray],
                own: dict[str, Landing]) -> LandingIndex:
         """An index of these runways and days with ``landings``, checked by the caller, and their lookups."""

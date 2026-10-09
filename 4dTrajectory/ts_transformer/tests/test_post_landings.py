@@ -118,22 +118,43 @@ def test_an_inserted_landing_on_a_test_day_is_left_out_and_a_flight_missing_from
 def test_each_commanded_aircraft_counts_the_window_less_the_others_own_landings(built):
     """Multi-aircraft control D147 item 1, D149 (post-training §9 item 2): in a window of several commanded aircraft,
     each one's landings are the window's less every other commanded aircraft's own, with its own at its record's time
-    (moved by its shift); a stage C window gives the window's landings."""
+    (moved by its shift); a stage C window gives the window's landings. D189 (0): of those, the landings from 30 min
+    (and one Δ) before the window's row 0 to the loop's last row (``until_s``), and its own."""
     from ts_transformer.post.landings import commanded_landings
     from ts_transformer.post.scene import Joined
 
     windows, roster, _, _ = built
     a, b, c = windows[:3]
-    assert commanded_landings(a, roster) == [window_landings(a, roster)]
+    until = a.row0_s + 1800.0
+    first = a.row0_s - DELTA - LANDINGS_WINDOW_S                         # one Δ before row 0 (rounding)
+    near = {x.flight_key for x in roster.landings if first <= x.time_s < until}
+    (alone,) = commanded_landings(a, roster, until)
+    assert {x.flight_key for x in alone.landings} == near | {roster_key(a.commanded.key, "KXXX")}
+    assert len(near) < len(roster.landings)                             # some landing of the roster is left out
     shift = -2 * DELTA
     window = replace(a, joined=(Joined(b.commanded, b.signal_index),
                                 Joined(c.commanded.shifted(shift, DELTA), c.signal_index, shift_s=shift)))
     keys = [roster_key(r.key, "KXXX") for r in window.commanded_all]
     landed = {landing.flight_key: landing for landing in roster.landings}
-    indexes = commanded_landings(window, roster)
+    indexes = commanded_landings(window, roster, until)
     assert len(indexes) == 3
     for k, index in enumerate(indexes):
         held = {landing.flight_key: landing for landing in index.landings}
-        assert set(held) == set(landed) - (set(keys) - {keys[k]})
+        assert set(held) == (near | {keys[k]}) - (set(keys) - {keys[k]})
         assert held[keys[k]].time_s == landed[keys[k]].time_s + (shift if k == 2 else 0.0)
         assert all(held[key] == landed[key] for key in held if key not in keys)
+
+
+def test_the_landings_a_loop_holds_count_what_the_roster_counts_at_every_row(built):
+    """D189 (0): at every time from the window's row 0 to before ``until_s`` (and the first predicted step the reward
+    reads), the counts of the landings held are the roster's, for every runway, less the aircraft's own."""
+    from ts_transformer.post.landings import commanded_landings
+
+    windows, roster, _, _ = built
+    for window in windows[:3]:
+        until = window.row0_s + 1800.0
+        (held,) = commanded_landings(window, roster, until)
+        whole = window_landings(window, roster)
+        own = roster_key(window.commanded.key, "KXXX")
+        times = np.arange(window.row0_s, until, 2.0)
+        assert np.array_equal(held.counts_before(times, without=own), whole.counts_before(times, without=own))

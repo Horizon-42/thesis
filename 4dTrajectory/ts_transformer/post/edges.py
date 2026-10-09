@@ -36,6 +36,8 @@ predicted step, the commanded aircraft's from the row after its first predicted 
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 from geokit import NM_M
 
@@ -46,6 +48,7 @@ from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.prior.inputs import motion
 from ts_transformer.post.runways import approach_clock_m
 from ts_transformer.post.scene import AircraftAt
+from ts_transformer.post.traffic import scene_aircraft
 
 #: The name of this set of features: a changed feature is a new name (principle 8).
 EDGES_SCHEMA = "post-edges-v1"
@@ -67,17 +70,61 @@ def _scaled(distance_m) -> np.ndarray:
     return np.arcsinh(np.asarray(distance_m, dtype=np.float64) / SCALE_M)
 
 
+class Pairs:
+    """The features of a pair that read only its runways in force and its wake categories, each computed once (multi-
+    aircraft control D189 (1)): the runways' relation (`Separation.relation` reads the two runways) and the distance the
+    rules require, scaled (`Separation.distance_nm` reads the two runways and the two categories)."""
+
+    def __init__(self, separation: Separation) -> None:
+        self.separation = separation
+        self._relations: dict[tuple[str, str], str] = {}
+        self._required: dict[tuple[str, str | None, str, str | None], float] = {}
+
+    def relation(self, a: str, b: str) -> str:
+        if (a, b) not in self._relations:
+            self._relations[(a, b)] = self.separation.relation(a, b)
+        return self._relations[(a, b)]
+
+    def required(self, leader: str, leader_category: str | None, follower: str, follower_category: str | None) -> float:
+        """The feature ``required`` of a leader and a follower (module docstring)."""
+        key = (leader, leader_category, follower, follower_category)
+        if key not in self._required:
+            self._required[key] = float(_scaled(self.separation.distance_nm(*key) * NM_M))
+        return self._required[key]
+
+
+def clocks(aircraft: AircraftAt, geometry: AirportGeometry, separation: Separation) -> np.ndarray:
+    """``[N]``: each aircraft's position on the approach clock of its R (`runways.approach_clock_m`), NaN without one in
+    force (the scene's ``along_m``, `post.traffic.traffic`)."""
+    out = np.full(len(aircraft), np.nan)
+    for k in np.flatnonzero(aircraft.runway_index >= 0):
+        out[k] = float(approach_clock_m(separation, geometry, int(aircraft.runway_index[k]), aircraft.at[k, 0],
+                                        aircraft.at[k, 1]))
+    return out
+
+
 def tokens(own: AircraftAt, others: AircraftAt, geometry: AirportGeometry, separation: Separation,
            step_s: float) -> np.ndarray:
     """``[len(others), len(TOKEN_FEATURES)]`` float32: the token of each other aircraft at one step (module docstring);
-    ``own`` the commanded aircraft (one)."""
+    ``own`` the commanded aircraft (one): `tokens_of`, the motions and approach clocks computed here."""
+    both = scene_aircraft(own, others)
+    return tokens_of(own, others, geometry, Pairs(separation), motion(both.at, both.before, both.known, step_s),
+                     clocks(both, geometry, separation))
+
+
+def tokens_of(own: AircraftAt, others: AircraftAt, geometry: AirportGeometry, pairs: Pairs, moving: Any,
+              clock_m: np.ndarray) -> np.ndarray:
+    """`tokens` from the motions (``moving``, `prior.inputs.motion`'s) and approach clocks (`clocks`) of ``own`` and
+    then ``others``, computed once for every aircraft of a window and read in this order (multi-aircraft control D189
+    (1)), and the pairs' runway features from ``pairs``; the other features one computation over the others, each
+    token's numbers those of `tokens`."""
     if len(own) != 1:
         raise ValueError(f"the tokens are read from one commanded aircraft, not {len(own)}")
     index = {name: k for k, name in enumerate(TOKEN_FEATURES)}
     out = np.zeros((len(others), len(TOKEN_FEATURES)), dtype=np.float64)
     if not len(others):
         return out.astype(np.float32)
-    mine, theirs = motion(own.at, own.before, own.known, step_s), motion(others.at, others.before, others.known, step_s)
+    mine, theirs = moving._make(value[:1] for value in moving), moving._make(value[1:] for value in moving)
     velocity_i = np.array([mine.east_mps[0], mine.north_mps[0]])
     velocity_j = np.stack((theirs.east_mps, theirs.north_mps), axis=1)
     framed = bool(mine.known[0]) and mine.ground_speed_mps[0] > 0.0
@@ -109,31 +156,30 @@ def tokens(own: AircraftAt, others: AircraftAt, geometry: AirportGeometry, separ
     directed = theirs.known & framed
     out[:, index["direction_sin"]] = np.where(directed, np.sin(angle), 0.0)
     out[:, index["direction_cos"]] = np.where(directed, np.cos(angle), 0.0)
-    _runways(out, index, own, others, geometry, separation)
+    _runways(out, index, own, others, geometry, pairs, clock_m)
     return out.astype(np.float32)
 
 
 def _runways(out: np.ndarray, index: dict[str, int], own: AircraftAt, others: AircraftAt, geometry: AirportGeometry,
-             separation: Separation) -> None:
-    """The features that read the runways in force (module docstring), into ``out``."""
+             pairs: Pairs, clock_m: np.ndarray) -> None:
+    """The features that read the runways in force (module docstring), into ``out``; ``clock_m`` own's approach clock
+    and then the others'."""
     out[:, index["clock_incomparable"]] = 1.0
     r_i = int(own.runway_index[0])
     if r_i < 0:
         return
     ident_i = geometry.candidates[r_i].ident
-    along_i = float(approach_clock_m(separation, geometry, r_i, own.at[0, 0], own.at[0, 1]))
+    along_i = clock_m[0]
     for k in np.flatnonzero(others.runway_index >= 0):
-        r_j = int(others.runway_index[k])
-        ident_j = geometry.candidates[r_j].ident
-        relation = separation.relation(ident_i, ident_j)
+        ident_j = geometry.candidates[int(others.runway_index[k])].ident
+        relation = pairs.relation(ident_i, ident_j)
         out[k, index[relation]] = 1.0
         if relation == UNRELATED:
             continue
-        along = float(approach_clock_m(separation, geometry, r_j, others.at[k, 0], others.at[k, 1])) - along_i
+        along = clock_m[1 + k] - along_i
         out[k, index["clock_incomparable"]] = 0.0
         out[k, index["clock_ahead"]] = _scaled(along)
         if along >= 0.0:            # the other aircraft leads
-            required = separation.distance_nm(ident_j, others.category[k], ident_i, own.category[0])
+            out[k, index["required"]] = pairs.required(ident_j, others.category[k], ident_i, own.category[0])
         else:
-            required = separation.distance_nm(ident_i, own.category[0], ident_j, others.category[k])
-        out[k, index["required"]] = _scaled(required * NM_M)
+            out[k, index["required"]] = pairs.required(ident_i, own.category[0], ident_j, others.category[k])

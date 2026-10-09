@@ -520,8 +520,14 @@ def test_a_commanded_leader_that_landed_is_judged_once_over_its_threshold(setup,
     owns = [AircraftAt.of([(loop.records[b].key, on_final(d), on_final(d + 150.0), True, 0, "F", False, False)])
             for b, d in ((1, 2_000.0), (2, 9_000.0))]
     recorded = AircraftAt.of([("REC", on_final(30_000.0), on_final(30_150.0), True, 0, "F", False, False)])
-    gone = post_window_loop._Tick(tick.t, [1, 2], owns, recorded, tick.aircraft, tick.scene)
+    aircraft = post_window_loop.scene_aircraft(post_window_loop._concat(owns), recorded)       # the tick of these
+    gone = post_window_loop._Tick(tick.t, [1, 2], owns, recorded, aircraft, post_window_loop.separation_traffic(
+        aircraft, g, loop.separations[g.code], loop.finals[1], loop.step_s))
     judged, scene, commanded = loop._judged(gone, [0])
+    whole = post_window_loop.separation_traffic(judged, g, loop.separations[g.code], loop.finals[1], loop.step_s)
+    for name in ("e_m", "n_m", "height_m", "along_m", "track_minus_course_deg", "right_of_course_m", "established"):
+        assert np.array_equal(getattr(scene, name), getattr(whole, name), equal_nan=name != "established")   # D189 (1)
+    assert scene.runway == whole.runway and scene.category == whole.category
     keys = [loop.records[b].key for b in (1, 2, 0)] + ["REC"]                  # the recorded aircraft last
     assert list(judged.keys) == keys and judged.last_step.tolist() == [False, False, True, False] and commanded == 3
     assert np.array_equal(judged.at[2], flown[-1, :3]) and judged.runway_index[2] == 0
@@ -548,9 +554,9 @@ def test_a_commanded_leader_that_landed_is_judged_once_over_its_threshold(setup,
 
 
 def test_a_rows_scene_is_computed_once_a_tick_and_the_samples_of_chosen_rows_are_theirs(setup, monkeypatch):
-    """D181 (59): at a tick of three aircraft flown, each row's own set and scene is computed once, for its speed-word
-    mask (the third aircraft's: the first two are silent by then) and its tokens alike (one scene a row, and the window's
-    judged one, in a row said); (58) the samples of chosen
+    """D181 (59), D189 (1): at a tick of three aircraft flown, one scene is computed, the window's (for its judge, kept
+    for the next row), and each row's view, for its speed-word mask (the third aircraft's: the first two are silent by
+    then) and its tokens alike, is that scene reordered; (58) the samples of chosen
     rows (repeats permitted) are those rows' samples of every row, bit for bit, padded to the rows of the row said
     most of all."""
     from ts_transformer.tests.test_post_generalised import _Digest
@@ -571,7 +577,7 @@ def test_a_rows_scene_is_computed_once_a_tick_and_the_samples_of_chosen_rows_are
     real, scenes = post_window_loop.separation_traffic, []
     monkeypatch.setattr(post_window_loop, "separation_traffic", lambda *a: (scenes.append(a), real(*a))[1])
     step()
-    assert len(scenes) == len(JOINS) + 1
+    assert len(scenes) == 1
     monkeypatch.setattr(post_window_loop, "separation_traffic", real)
     loop.finish(numbers)
     every, chosen = loop.samples("train"), [2, 1, 2]     # without row 0, said the most: padded to its rows
@@ -581,3 +587,96 @@ def test_a_rows_scene_is_computed_once_a_tick_and_the_samples_of_chosen_rows_are
         c.sentence(*every[b])
         assert a.hash.digest() == c.hash.digest()
     assert len(every[0][0].time_s) > max(len(every[b][0].time_s) for b in (1, 2))      # the padding is tested
+
+
+def test_each_rows_view_is_its_window_reordered_and_reads_as_the_scene_functions_read_it(setup):
+    """D189 (1): at ticks of three commanded aircraft flown with a recorded one, each row's view of its window — its
+    set (itself, the recorded aircraft, the other commanded ones), its scene, its speeds along the course and its tokens
+    — is the window's computed once and reordered, and equal bit for bit to the scene functions and the tokens called
+    for that row alone (the reference: the functions themselves, no code kept beside them)."""
+    from ts_transformer.post.edges import tokens
+    from ts_transformer.post.scene import AircraftAt
+    from ts_transformer.post.speed_mask import along_course_speeds
+    from ts_transformer.post.traffic import scene_aircraft, traffic
+    from ts_transformer.prior.inputs import motion
+
+    s = setup
+    _, loop_of = _multi(s)
+    loop = loop_of(_with_module(s["base"]))
+    numbers = _numbers(len(JOINS))
+    g = s["geometry"]
+    separation, finals = loop.separations[g.code], loop.finals[0]
+    checked = 0
+    while loop.speaking.alive.any() and loop.speaking.t < JOINS[2] + 12:
+        roles = loop.speaking.roles()
+        loop.step(np.stack([n.random(len(COLUMNS)) if r == SAID else np.zeros(len(COLUMNS))
+                            for n, r in zip(numbers, roles)]))
+        tick = loop._ticks(loop.speaking.t)[0]
+        if tick is None or len(tick.rows) < 2:
+            continue
+        recorded = AircraftAt.of([("REC", tuple(tick.owns[0].at[0] + [900.0, 900.0, 300.0]),
+                                   tuple(tick.owns[0].before[0] + [900.0, 900.0, 300.0]), True, -1, "F", False, False)])
+        aircraft = scene_aircraft(post_window_loop._concat(tick.owns), recorded)
+        moving = motion(aircraft.at, aircraft.before, aircraft.known, loop.step_s)
+        scene = traffic(aircraft, g, separation, finals, loop.step_s)
+        tick = post_window_loop._Tick(tick.t, tick.rows, tick.owns, recorded, aircraft, scene, moving,
+                                      along_course_speeds(moving.ground_speed_mps, scene))
+        for k, b in enumerate(tick.rows):
+            view = loop._of_row(tick, b)
+            others = [o for c, o in zip(tick.rows, tick.owns) if c != b]
+            other = scene_aircraft(recorded, post_window_loop._concat(others))
+            own = scene_aircraft(tick.owns[k], other)
+            alone = traffic(own, g, separation, finals, loop.step_s)
+            assert all(np.array_equal(getattr(view.aircraft, f), getattr(own, f))
+                       for f in ("at", "before", "known", "runway_index", "last_step", "go_around"))
+            assert view.aircraft.keys == own.keys and view.placed == [None] + [c for c in tick.rows if c != b]
+            for name in ("e_m", "n_m", "height_m", "along_m", "track_minus_course_deg", "right_of_course_m",
+                         "established"):
+                assert np.array_equal(getattr(view.scene, name), getattr(alone, name), equal_nan=name != "established")
+            assert view.scene.runway == alone.runway and view.scene.category == alone.category
+            speeds = along_course_speeds(motion(own.at, own.before, own.known, loop.step_s).ground_speed_mps, alone)
+            assert np.array_equal(view.speeds, speeds, equal_nan=True)
+            assert np.array_equal(post_window_loop.tokens_of(view.own, view.other, g, loop.pairs[g.code], view.moving,
+                                                             view.scene.along_m),
+                                  tokens(tick.owns[k], other, g, separation, loop.step_s))
+            checked += 1
+    assert checked >= 6
+
+
+def test_every_count_a_loop_reads_lies_where_its_landings_were_cut(setup, monkeypatch):
+    """D189 (0): flown to its end, every time at which a loop counts an aircraft's landings (its rows' inputs, the
+    reward's present direction) lies in the span its landings were cut to (`post.landings.commanded_landings`: from one
+    Δ before its window's row 0 to the loop's last row, ``reach``; the 30 min before the first kept too), so every
+    count is the roster's."""
+    from ts_transformer.prior.landings import LandingIndex
+
+    spans, reads = {}, []
+    real_commanded, real_with, real_counts = (post_window_loop.commanded_landings, LandingIndex.with_landing,
+                                              LandingIndex.counts_before)
+
+    def commanded(window, roster, until_s):
+        out = real_commanded(window, roster, until_s)
+        for index in out:                                            # the index kept: its id is not taken again
+            spans[id(index)] = (window.row0_s - window.scene.interval_s, until_s, index)
+        return out
+
+    def with_landing(self, landing):
+        out = real_with(self, landing)
+        spans[id(out)] = (*spans[id(self)][:2], out)
+        return out
+
+    def counts_before(self, time_s, *, without):
+        reads.append((id(self), np.array(time_s, dtype=np.float64)))
+        return real_counts(self, time_s, without=without)
+
+    monkeypatch.setattr(post_window_loop, "commanded_landings", commanded)
+    monkeypatch.setattr(LandingIndex, "with_landing", with_landing)
+    monkeypatch.setattr(LandingIndex, "counts_before", counts_before)
+    s = setup
+    _, loop_of = _multi(s, joins=(0, 30, 60))
+    loop = loop_of(_with_module(s["base"]))
+    loop.run(_numbers(3))
+    assert reads and {key for key, _ in reads} <= set(spans)
+    for key, times in reads:
+        first, end, _ = spans[key]
+        assert ((times >= first) & (times < end)).all(), (first, end, times.min(), times.max())

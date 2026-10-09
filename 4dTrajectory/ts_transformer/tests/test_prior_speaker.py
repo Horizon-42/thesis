@@ -331,12 +331,13 @@ def test_the_runway_column_asks_the_masks_under_each_runway_word(words):
     altitude = np.zeros((1, 2 + words.n_altitude_levels), dtype=bool)
     altitude[0, [1 + v for v in between]] = True
     caller = {ALTITUDE: altitude}
-    mask = speaker._allowed(RUNWAY, np.zeros((1, 0), dtype=np.int64), at, caller, speaker.procedure)[0]
+    mask = speaker._runway_allowed(at, caller, speaker.procedure)[0]
     runway_words = column_words(RUNWAY, words, 2)
     assert mask[list(runway_words).index(1)] and not mask[list(runway_words).index(UNCHANGED)]
     for w, word in enumerate(runway_words):
         runway, go_around = speaker._runway_after(np.array([word]))
-        others = {c: speaker._others(c, runway, go_around, at, caller, speaker.procedure)[0] for c in range(1, len(COLUMNS))}
+        held = speaker._procedure_masks(runway, go_around, at, speaker.procedure)
+        others = {c: speaker._others(c, held, caller)[0] for c in range(1, len(COLUMNS))}
         options = [column_words(c, words, 2)[others[c]] for c in range(1, len(COLUMNS))]
         found = False
         for rest in product(*options):
