@@ -110,6 +110,7 @@ commits, the tests and the readings are in the implementation log.
 | The validation readout of the chosen round | Done 2026-10-08: the user chose `post_seg60_20261007` round 5 (D7); val read once: landed 88.9 %, mean reward 0.880 (log §30; the experiment log) |
 | The validation readout of the chosen round | Built and reviewed on synthetic artefacts (`post_validation`, `0c95a821`, log §23; D132 `483b81d7`) |
 | C27 (D185) | Built by stage D's implementer on `dev-multi-control`: 33e24bbe (a round resumed by its batches, `--restart-round`), the resume through the speaking workers tested (646ffb3a); not merged (stage D's log §17) |
+| Multi-aircraft control D190 (2) | Built by stage D's implementer on `dev-multi-control`, 7893d787; not merged: a window's copies hold the speaker's rows to where they part once; `Settings.front_attention` (`--front-attention`, `copied` the default, bit for bit: window_behaviour on post_seg60 r5 the same behaviour; `merged`: the same words and states on its first batch, 608 continuations) (stage D's log §20) |
 | C12 | After C10 |
 
 ### 0.4 Plan
