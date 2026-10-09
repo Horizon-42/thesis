@@ -38,6 +38,32 @@ def _multi_settings(spans_s=(1.0,), **changed):
     return MultiSettings(**{**values, **changed})
 
 
+@pytest.mark.parametrize("branching", ["grid", "backward"])
+@pytest.mark.parametrize("attention", ["copied", "merged"])
+def test_a_batch_is_spoken_with_its_campaigns_front_attention(monkeypatch, branching, attention):
+    """D190 (2): stage D's batch gives its window loops its loop options and the campaign's
+    `MultiSettings.front_attention`, its branch points D143's or found backward."""
+    from ts_transformer.tests.test_post_train import _Spoken
+
+    seen = {}
+
+    def spoken(*args, **kwargs):
+        seen.update(kwargs["loop_options"])
+        raise _Spoken
+
+    monkeypatch.setattr(multi_train, "branch_round", spoken)
+    monkeypatch.setattr(multi_train, "backward_round", spoken)
+    monkeypatch.setattr(multi_train, "loop_options", lambda context: {"answering": "the stage's"})
+    context = SimpleNamespace(splits={"train": {"sentences": {}, "flights": {}, "faults": {}}},
+                              start_loop=lambda split, batch: None, geometries={}, rosters={}, finals={}, words=None,
+                              interval_s=INSTRUCTION_STEP_S, variant="full", edges_reference=None,
+                              device=torch.device("cpu"))
+    settings = _multi_settings(front_attention=attention, branching=branching)
+    with pytest.raises(_Spoken):
+        multi_train.speak_batch(None, context, [], [], settings, 0, None, 0)
+    assert seen == {"answering": "the stage's", "attention": attention}
+
+
 def _stream_context(built):
     """What the draw and the select windows read of a context, on the synthetic stream (its train split read as the
     select days too)."""

@@ -509,9 +509,22 @@ def test_a_copy_continued_with_the_same_inputs_and_numbers_says_what_the_origina
     assert np.array_equal(speaker.permitted().masks[RUNWAY], twin.permitted().masks[RUNWAY])
 
 
+def whole(past):
+    """Each line's rows written as a past without a front holds them: its front's (`Past.front`), then its own
+    (multi-aircraft control D190 (2)) — keys, values ``[B, heads, rows, head]`` and present ``[B, rows]``."""
+    own = past.rows - past.start
+    if past.front is None:
+        return past.keys[:, :, :own], past.values[:, :, :own], past.present[:, :own]
+    front = past.front
+    return (torch.cat((front.keys[front.of], past.keys[:, :, :own]), dim=2),
+            torch.cat((front.values[front.of], past.values[:, :, :own]), dim=2),
+            torch.cat((front.present[front.of], past.present[:, :own]), dim=1))
+
+
 def test_a_copy_keeps_its_rows_and_one_step_of_room_in_its_own_storage(words, monkeypatch):
     """D183 (1), (2): a copy's cache is its own storage, allocated once (no clone, no growth: the rows selected into
-    it), holding the rows written and one step of room (`CACHE_STEP_ROWS`), whatever the room of the speaker copied."""
+    it), holding the rows written and one step of room (`CACHE_STEP_ROWS`), whatever the room of the speaker copied;
+    multi-aircraft control D190 (2): the copies of one aircraft hold its rows written once, as their front."""
     from ts_transformer.prior.model import CACHE_STEP_ROWS
 
     model, rows = setup(words, seed=4, count=4, rows=50)
@@ -522,7 +535,7 @@ def test_a_copy_keeps_its_rows_and_one_step_of_room_in_its_own_storage(words, mo
     for r in range(first, first + 10):
         speaker.speak(rows.between(r, r + 1), spread(4, r), drawn[r - first])
     written = speaker.past[0].rows
-    assert written == first + 10 and speaker.past[0].keys.shape[2] == 400
+    assert written == first + 10 and speaker.past[0].keys.shape[2] == 400 and speaker.past[0].front is None
     clones, grown = [], []
     real = torch.Tensor.clone
     monkeypatch.setattr(torch.Tensor, "clone", lambda self, *a, **k: clones.append(1) or real(self, *a, **k))
@@ -534,12 +547,14 @@ def test_a_copy_keeps_its_rows_and_one_step_of_room_in_its_own_storage(words, mo
     monkeypatch.undo()
     assert clones == [] and grown == []                # its storage allocated once, the rows selected into it
     for p, q in zip(speaker.past, picked.past):
-        assert q.rows == written and q.keys.shape[2] == q.values.shape[2] == q.present.shape[1] == written + CACHE_STEP_ROWS
-        assert torch.equal(q.keys[:, :, :written], p.keys[[2, 2, 0], :, :written])
-        assert torch.equal(q.present[:, :written], p.present[[2, 2, 0], :written]) and not q.present[:, written:].any()
+        assert q.rows == q.start == written and q.front.keys.shape[0] == 2           # aircraft 2's copies: one front
+        assert q.keys.shape[2] == q.values.shape[2] == q.present.shape[1] == CACHE_STEP_ROWS
+        keys, values, present = whole(q)
+        assert torch.equal(keys, p.keys[[2, 2, 0], :, :written]) and torch.equal(values, p.values[[2, 2, 0], :, :written])
+        assert torch.equal(present, p.present[[2, 2, 0], :written]) and not q.present.any()
         before = p.keys.clone()
-        q.keys.add_(1.0)
-        q.present.zero_()
+        q.front.keys.add_(1.0)
+        q.front.present.zero_()
         assert torch.equal(p.keys, before) and p.present[:, :written].any()        # its own storage
 
 

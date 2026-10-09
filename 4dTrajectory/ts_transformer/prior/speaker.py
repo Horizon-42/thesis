@@ -53,7 +53,7 @@ from ts_transformer.instructions.grammar import InForce, column_mask, column_wor
 from ts_transformer.instructions.words import COLUMNS, HEADING, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words
 from ts_transformer.prior.batch import RUNWAY_FIXED_CLASSES, RUNWAY_GO_AROUND_CLASS, RowTensors
 from ts_transformer.prior.inputs import Heard
-from ts_transformer.prior.model import CACHE_STEP_ROWS, Past, Prior, require_eval
+from ts_transformer.prior.model import CACHE_STEP_ROWS, COPIED, FRONT_ATTENTIONS, Past, Prior, require_eval
 from ts_transformer.prior.procedure import Final, ProcedureMasks
 
 
@@ -196,12 +196,15 @@ class Speaker:
     vocabulary D80 for the start)."""
 
     def __init__(self, model: Prior, words: Words, finals: Sequence[Sequence[Final]], *, capacity: int,
-                 temperature: float = 1.0) -> None:
+                 temperature: float = 1.0, attention: str = COPIED) -> None:
         """``finals``: each aircraft's airport's finals, one for each candidate in the pointer's order (the procedure
         masks it speaks under, §4, kept fresh for this batch: their state is this batch's); ``capacity``: the rows the
-        cache has room for at first (it grows as a sentence needs, `model.Past.grown`)."""
+        cache has room for at first (it grows as a sentence needs, `model.Past.grown`); ``attention``: how its copies
+        read the front of the cache they hold once (`model.FRONT_ATTENTIONS`; multi-aircraft control D190 (2))."""
         if not temperature > 0.0:
             raise ValueError(f"temperature {temperature}: it must be positive")
+        if attention not in FRONT_ATTENTIONS:
+            raise ValueError(f"attention {attention!r} is none of {FRONT_ATTENTIONS}")
         require_eval(model, "the speaker")
         for finals_b in finals:
             geometry = finals_b[0].geometry
@@ -210,7 +213,7 @@ class Speaker:
         self.model, self.words = model, words
         self.procedure = ProcedureMasks(finals, words)
         self._n_candidates = np.array([len(f) for f in finals], dtype=np.int64)
-        self.temperature = temperature
+        self.temperature, self.attention = temperature, attention
         self.past = model.no_past(len(finals), capacity)
         # each aircraft's words in force (`inputs.Heard`, the training sentences' own walk): a loop reads the inputs of
         # the next row from it (`heard`, a copy: the speaker's own changes only as it says a row)
@@ -426,16 +429,20 @@ class Speaker:
     def copy(self, indices: Sequence[int], device: torch.device | None = None) -> Speaker:
         """A speaker of the aircraft ``indices`` of this one (repeats permitted), in that order (D96 item 5): their cache,
         the state of their procedure masks, their words heard, their go-arounds, their roles and their records. Continued with the
-        same inputs and numbers, a copy of every aircraft says what this speaker says, bit for bit. ``device``: the
-        cache's (this one's when not given; multi-aircraft control D182: a copy held in the host's memory)."""
+        same inputs and numbers, a copy of every aircraft says what this speaker says (bit for bit; with copies of one
+        aircraft that read their front `MERGED`, to the last bits of the attention, multi-aircraft control D190 (2)).
+        ``device``: the cache's (this one's when not given; multi-aircraft control D182: a copy held in the host's
+        memory). The cache holds the rows written and one step of room (D183), the copies of an aircraft their rows to
+        here once (`model.Past.together`)."""
         indices = list(indices)
         out = object.__new__(Speaker)
-        out.model, out.words, out.temperature = self.model, self.words, self.temperature
+        out.model, out.words = self.model, self.words
+        out.temperature, out.attention = self.temperature, self.attention
         out.procedure = self.procedure.select(indices)
         out._n_candidates = self._n_candidates[indices].copy()
-        # the rows written and one step of room, allocated once (D183)
         index = torch.as_tensor(indices, device=self.past[0].keys.device)
-        out.past = [p.taken(index, CACHE_STEP_ROWS, device) for p in self.past]
+        target = self.past[0].keys.device if device is None else torch.device(device)
+        out.past = [Past.together([(p, index, 0)], CACHE_STEP_ROWS, target, self.attention) for p in self.past]
         out._heard = [self._heard[i].copy() for i in indices]
         out.forbidden = {c: [row[indices] for row in rows] for c, rows in self.forbidden.items()}
         out.go_around_probability = [row[indices] for row in self.go_around_probability]
@@ -460,23 +467,23 @@ class Speaker:
         rows since. Each aircraft keeps what `copy` keeps, its cache with ``room`` rows past the rows written (multi-aircraft
         control D190 (1): a joint loop's, the steps to its next rebuild; None where they are not known: one step of
         D183, as `copy`), its records of the rows said moved with its rows (a row its speaker did not say: said by none,
-        nothing permitted).
-        Continued with the same inputs and numbers, an aircraft says what it says in its own speaker. The parts' model,
-        words and temperature are one speaker's. ``spent``: a speaker among the parts that nothing reads after (the one
-        this speaker replaces), its cache freed a layer at a time as it is copied, so that the device holds the two
-        speakers' caches whole at no time."""
+        nothing permitted). Continued with the same inputs and numbers, an aircraft says what it says in its own speaker
+        (as `copy` says). The parts' model, words, temperature and attention are one speaker's. ``spent``: a speaker
+        among the parts that nothing reads after (the one this speaker replaces), its cache freed a layer at a time as
+        it is copied, so that the device holds the two speakers' caches whole at no time."""
         first = parts[0][0]
         index = [np.asarray(list(aircraft), dtype=np.int64) for _, aircraft, _ in parts]
         shifts = [shift for _, _, shift in parts]
         out = object.__new__(Speaker)
-        out.model, out.words, out.temperature = first.model, first.words, first.temperature
+        out.model, out.words = first.model, first.words
+        out.temperature, out.attention = first.temperature, first.attention
         out.procedure = ProcedureMasks.together([(s.procedure, i) for (s, _, _), i in zip(parts, index)])
         out._n_candidates = np.concatenate([s._n_candidates[i] for (s, _, _), i in zip(parts, index)])
         out.past = []
         for layer in range(len(first.past)):
             out.past.append(Past.together([(s.past[layer], torch.as_tensor(i, device=s.past[layer].keys.device), shift)
                                            for (s, _, shift), i in zip(parts, index)],
-                                         CACHE_STEP_ROWS if room is None else room, device))
+                                         CACHE_STEP_ROWS if room is None else room, device, first.attention))
             if spent is not None:
                 spent.past[layer] = None                  # copied: the spent speaker's layer freed
         out._heard = [s._heard[b].copy() for (s, _, _), i in zip(parts, index) for b in i]

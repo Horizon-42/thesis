@@ -24,6 +24,7 @@ from ts_transformer.post.landings import roster_key
 from ts_transformer.post.reward import LANDED
 from ts_transformer.post.scene import Joined
 from ts_transformer.prior.landings import Landing, LandingIndex
+from ts_transformer.prior.model import CACHE_STEP_ROWS, COPIED, MERGED
 from ts_transformer.prior.speaker import ABSENT, MOST_GO_AROUNDS, SAID
 from ts_transformer.tests import test_start
 from ts_transformer.tests.test_post_window_loop import CPU, DELTA, _with_module, setup  # noqa: F401
@@ -208,6 +209,54 @@ def test_a_copy_of_a_window_of_several_aircraft_says_and_flies_what_it_does(setu
         a, b = copied[k], original[k % 3]
         assert np.array_equal(a.words, b.words) and a.outcome == b.outcome and a.loss_step == b.loss_step
         assert np.allclose(a.states, b.states, rtol=0.0, atol=STATE_BOUND_M)
+
+
+@pytest.mark.parametrize("attention", [COPIED, MERGED])
+def test_a_windows_copies_hold_their_front_once_and_say_and_fly_what_each_taken_alone_does(setup, attention):
+    """Multi-aircraft control D190 (2): K copies of the window taken together hold the speaker's rows written so far
+    once (a front for each of its aircraft; of their own rows only the room), and flown on, each on numbers of its own
+    (they part at once), say and fly what the same copies each taken alone do: `COPIED` the same words and states bit
+    for bit, `MERGED` the same words (no draw near a boundary here) and the states within the executor's bound. Each
+    writes its own rows: the front stays as it was."""
+    s = setup
+    _, loop_of = _multi(s)
+    loop = loop_of(_with_module(s["base"]), attention=attention)
+    numbers = _numbers(len(JOINS))
+    while loop.speaking.t < JOINS[2] + 3:
+        loop.step(np.stack([n.random(len(COLUMNS)) if said else np.zeros(len(COLUMNS))
+                            for n, said in zip(numbers, loop.speaking.said_now())]))
+    k = 3
+    shared, alone = loop.copy([0] * k), [loop.copy([0]) for _ in range(k)]
+    fronts = []
+    for p in shared.speaking.speaker.past:
+        assert p.start == p.rows and p.front.keys.shape[0] == len(JOINS) and p.keys.shape[2] == CACHE_STEP_ROWS
+        fronts.append(p.front.keys.clone())
+    assert all(a.speaking.speaker.past[0].front is None for a in alone)
+
+    def held(past):                                                      # the bytes of keys and values a cache holds
+        tensors = [p.keys for p in past] + [p.values for p in past] + \
+            [x for p in past if p.front is not None for x in (p.front.keys, p.front.values)]
+        return sum(x.numel() * x.element_size() for x in tensors)
+
+    rows, row = loop.speaking.speaker.past[0].rows, held(alone[0].speaking.speaker.past) // (
+        len(JOINS) * (loop.speaking.speaker.past[0].rows + CACHE_STEP_ROWS))
+    assert held(shared.speaking.speaker.past) == (len(JOINS) * rows + k * len(JOINS) * CACHE_STEP_ROWS) * row
+    assert sum(held(a.speaking.speaker.past) for a in alone) == k * len(JOINS) * (rows + CACHE_STEP_ROWS) * row
+
+    def streams(j):
+        return [flight_numbers(8 + j, 0, m) for m in range(len(JOINS))]
+
+    together = shared.finish([n for j in range(k) for n in streams(j)])
+    assert all(torch.equal(p.front.keys, f) for p, f in zip(shared.speaking.speaker.past, fronts))
+    for j, copy in enumerate(alone):
+        for x, y in zip(together[j * len(JOINS):(j + 1) * len(JOINS)], copy.finish(streams(j))):
+            assert np.array_equal(x.words, y.words) and x.outcome == y.outcome and x.loss_step == y.loss_step
+            if attention == COPIED:
+                assert np.array_equal(x.states, y.states)
+            else:
+                assert np.allclose(x.states, y.states, rtol=0.0, atol=STATE_BOUND_M)
+    assert any(len({together[j * len(JOINS) + m].words.tobytes() for j in range(k)}) > 1
+               for m in range(len(JOINS)))                                # the copies parted
 
 
 def test_windows_of_loops_at_different_ticks_flown_together_say_and_fly_what_each_does_alone(setup):

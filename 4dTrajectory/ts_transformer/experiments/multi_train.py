@@ -30,7 +30,8 @@ parts (`stage_d`):
   varied aircraft's event (`post_branches.backward_round`, `multi.backward`), the record holding besides each group's
   span and depth (``group_depths_s``), the searches and those that found a decision point, and the continuations flown
   only to the event + 60 s and those flown to their window's end. The readout's ``go_arounds`` and ``aircraft`` of each
-  span give the go-arounds per aircraft that D182 asks to watch.
+  span give the go-arounds per aircraft that D182 asks to watch. ``--front-attention`` (`MultiSettings.front_attention`,
+  D190 (2); `copied` the default): how a window's copies read the front of the speaker's cache they hold once.
 - **The selection readout** (§5 item 2, `selection_windows`, `read_batch`, `selection_readout`): at most
   ``select_per_airport`` real windows of each span of each airport of the select days, their anchors in an order drawn
   once with the seed (D146's rule), the first pass only, each aircraft with its own numbers (the same every round). By
@@ -96,7 +97,7 @@ from ts_transformer.multi.windows import COMPRESSED, KINDS, REAL_KIND, Anchors, 
 from ts_transformer.post.branches import CONTINUATIONS
 from ts_transformer.post.scene import Window
 from ts_transformer.post.traffic_attention import add_token_part, parameter_groups
-from ts_transformer.prior.model import Prior
+from ts_transformer.prior.model import COPIED, FRONT_ATTENTIONS, Prior
 from ts_transformer.prior.procedure import PROCEDURE_MASKS
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
@@ -114,7 +115,7 @@ MEASURE_MARGIN = 1.3
 #: rounds, seed, learning rates, a start of the same traffic shape, and the select set, which the measure does not read,
 #: D179, D181 (55)) change the words spoken, not the shapes — a worker past its share stops by name.
 PROFILED_SETTINGS = ("per_kind", "spans_s", "c_min", "batch_rows", "continuations", "update_groups", "data_sentences",
-                     "branching")
+                     "branching", "front_attention")
 #: The inputs a campaign shares with its profile.
 PROFILED_INPUTS = ("prior", "instructions", "executor", "windows", "procedure_root")
 
@@ -144,6 +145,10 @@ class MultiSettings:
     #: where a round's branch points are (D182, MC12): `GRID`, D143's (the default: the behaviour before D182; a record
     #: without the setting reads as it), or `BACKWARD`, found back from each varied aircraft's event (`multi.backward`)
     branching: str = GRID
+    #: how a window's copies (a branch point's continuations) read the front of the speaker's cache they hold once
+    #: (D190 (2), the user's choice; `FRONT_ATTENTIONS`): `COPIED`, the default (bit for bit the behaviour before it; a
+    #: record without the setting reads as it), or `MERGED` (no copy; a sum's last bits may move)
+    front_attention: str = COPIED
 
     def __post_init__(self) -> None:
         if set(self.per_kind) != set(KINDS) or min(self.per_kind.values()) < 0 or not any(self.per_kind.values()):
@@ -162,6 +167,8 @@ class MultiSettings:
             raise ValueError(f"a start is its campaign, round and checkpoint_sha256, not {sorted(self.start)}")
         if self.branching not in BRANCHINGS:
             raise ValueError(f"branching {self.branching!r} is none of {BRANCHINGS}")
+        if self.front_attention not in FRONT_ATTENTIONS:
+            raise ValueError(f"front_attention {self.front_attention!r} is none of {FRONT_ATTENTIONS}")
 
 
 def span_key(span_s: float) -> str:
@@ -265,7 +272,7 @@ def speak_batch(model: Prior, context: Context, windows: Sequence[Window], place
     common = dict(interval_s=context.interval_s, variant=context.variant, edges_reference=context.edges_reference,
                   faults=train["faults"], device=context.device, split="train", continuations=settings.continuations,
                   rules=Rules(**credit.rules(settings.seed, round_, context.interval_s)),
-                  loop_options=loop_options(context))
+                  loop_options={**loop_options(context), "attention": settings.front_attention})
     data = (model, context.start_loop("train", batch), batch, places, train["sentences"], train["flights"],
             context.geometries, context.rosters, context.finals, context.words)
     found = (backward_round(*data, **common) if settings.branching == BACKWARD else
@@ -589,6 +596,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--select-per-airport", type=int, required=True)
     parser.add_argument("--branching", choices=BRANCHINGS, default=GRID,
                         help="D182: the branch points, D143's grid (default) or found back from each event")
+    parser.add_argument("--front-attention", choices=FRONT_ATTENTIONS, default=COPIED,
+                        help="D190 (2): how a window's copies read the front they hold once (copied: bit for bit; "
+                             "merged: no copy)")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--speak-workers", type=int, default=1)
     parser.add_argument("--speak-device",
@@ -600,7 +610,7 @@ def settings_from(args: argparse.Namespace, start: dict[str, Any]) -> MultiSetti
     return MultiSettings(args.rounds, {kind: getattr(args, f"windows_{kind}") for kind in KINDS}, args.spans_s,
                          args.c_min, args.batch_rows, args.continuations, args.seed, args.prior_lr, args.traffic_lr,
                          args.weight_decay, args.update_groups, args.data_sentences, args.select_per_airport, start,
-                         args.branching)
+                         args.branching, args.front_attention)
 
 
 def main(argv: list[str] | None = None) -> int:

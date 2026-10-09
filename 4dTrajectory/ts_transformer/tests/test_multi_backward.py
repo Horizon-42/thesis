@@ -364,7 +364,8 @@ def test_a_joint_loops_cache_has_room_for_the_steps_to_its_next_rebuild(setup, m
     def together(parts, device, room, spent=None):
         out = real_together(parts, device, room, spent)
         past = out.speaking.speaker.past[0]
-        built.append({"loop": out, "room": room, "capacity": past.keys.shape[2] - past.rows, "steps": 0, "grown": 0})
+        built.append({"loop": out, "room": room, "capacity": past.keys.shape[2] - (past.rows - past.start), "steps": 0,
+                      "grown": 0})
         return out
 
     def step(self, numbers):

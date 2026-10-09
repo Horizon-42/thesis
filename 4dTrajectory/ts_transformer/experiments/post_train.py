@@ -30,7 +30,9 @@ EACH ROUND r:
    round's record. `Settings.epochs` passes over the round's groups (D169; 1, the default: one pass), each in its own
    order, every pass's ratio against the model at the round's start; each pass's means in the round's record.
    P55: `Settings.segment_only` counts a group's advantage only up to the next branch point, and
-   `Settings.branch_every_s` sets the branch points' interval (D37's 120 s by default).
+   `Settings.branch_every_s` sets the branch points' interval (D37's 120 s by default). `Settings.front_attention`
+   (multi-aircraft control D190 (2); `copied` the default): how a window's copies read the front of the speaker's cache
+   they hold once.
 5. **The selection readout** (`selection_readout`): a fixed set of real windows of the select days (drawn once with the
    seed, D113 applied; the same numbers every round), the first pass only, by airport: the rewards, the outcomes (a loss
    of separation among them), the rows the speed-word mask acted (D101), the steps reading a faulty point and the losses
@@ -136,7 +138,7 @@ from ts_transformer.post.traffic import opens_inside_loss
 from ts_transformer.post.traffic_attention import Traffic, TrafficConfig, add_traffic_attention, parameter_groups
 from ts_transformer.prior.batch import RowTensors, collate
 from ts_transformer.prior.checkpoint import OpenedPrior, open_prior, validation_claim
-from ts_transformer.prior.model import Prior
+from ts_transformer.prior.model import COPIED, FRONT_ATTENTIONS, Prior
 from ts_transformer.prior.procedure import PROCEDURE_MASKS, airport_finals
 from ts_transformer.prior.source import ArtefactSource
 from ts_transformer.prior.speaker import MOST_GO_AROUNDS
@@ -208,6 +210,11 @@ class Settings:
     #: before them: no centring, V in every pass)
     advantage_centering: bool = False
     value_epochs: int | None = None
+    #: multi-aircraft control D190 (2) (the user, 2026-10-09): how a window's copies (a branch point's continuations)
+    #: read the front of the speaker's cache they hold once (`FRONT_ATTENTIONS`): `COPIED`, copied back a layer at a
+    #: time, bit for bit the code before it; `MERGED`, read once for them all (a sum's last bits may move). Added as
+    #: ``clip_norm`` (its default the code's behaviour before it).
+    front_attention: str = COPIED
 
     def __post_init__(self) -> None:
         if set(self.per_kind) != set(KINDS) or min(self.per_kind.values()) < 0 or not any(self.per_kind.values()):
@@ -240,6 +247,8 @@ class Settings:
             raise ValueError(f"epochs {self.epochs}: at least one pass a round")
         if self.clip_norm is not None and not self.clip_norm > 0:
             raise ValueError(f"clip_norm {self.clip_norm} is positive, or None (not clipped)")
+        if self.front_attention not in FRONT_ATTENTIONS:
+            raise ValueError(f"front_attention {self.front_attention!r} is none of {FRONT_ATTENTIONS}")
 
 
 @dataclass
@@ -519,7 +528,8 @@ def speak_batch(model: Prior, context: Context, windows: Sequence[Window], place
                          interval_s=context.interval_s, variant=context.variant,
                          edges_reference=context.edges_reference, faults=train["faults"], device=context.device,
                          seed=settings.seed, round_=round_, split="train", continuations=settings.continuations,
-                         rules=stage_c_rules(settings.seed, round_, context.interval_s, settings.branch_every_s))
+                         rules=stage_c_rules(settings.seed, round_, context.interval_s, settings.branch_every_s),
+                         loop_options={"attention": settings.front_attention})
     informative = [g for g in found.groups if g.informative]
     save_batch_file(informative, directory / f"groups_{k}.pt")
     return {"groups": len(found.groups), "informative_groups": len(informative),
@@ -1678,7 +1688,7 @@ def inputs_here(inputs: Mapping[str, Any]) -> dict[str, Any]:
 #: The settings added after campaigns were recorded, each with its default: the code's behaviour before it (the user's
 #: standing permission, 2026-10-07): a record without one reads as its default, and no record is edited.
 SETTINGS_ADDED = ("clip_norm", "epochs", "segment_only", "branch_every_s", "value_lr", "value_warmup",
-                  "advantage_centering", "value_epochs")
+                  "advantage_centering", "value_epochs", "front_attention")
 
 
 def _but_rounds(inputs: Mapping[str, Any]) -> dict[str, Any]:
@@ -1945,6 +1955,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="D173: the round's mean advantage taken off each counted row (with --method value)")
     parser.add_argument("--value-epochs", type=int,
                         help="D173: V's passes a round, the first ones (default: every pass; with --method value)")
+    parser.add_argument("--front-attention", choices=FRONT_ATTENTIONS, default=Settings.front_attention,
+                        help="D190 (2): how a window's copies read the front they hold once (copied: bit for bit; "
+                             "merged: no copy)")
     parser.add_argument("--start-campaign", type=Path,
                         help="start from a round of this campaign (with --start-round); the base when left out")
     parser.add_argument("--start-round", type=int, help="the round of --start-campaign whose weights the campaign starts from")
@@ -1980,7 +1993,7 @@ def main(argv: list[str] | None = None) -> int:
                             args.weight_decay, args.update_groups, args.data_sentences, args.select_per_airport,
                             args.traffic_hidden, args.traffic_heads, start, args.method, args.select_seed,
                             args.clip_norm, args.epochs, args.segment_only, args.branch_every_s, args.value_lr,
-                            args.value_warmup, args.advantage_centering, args.value_epochs)
+                            args.value_warmup, args.advantage_centering, args.value_epochs, args.front_attention)
     except ValueError as refused:                   # a setting refused by name (`Settings`), before anything opens
         parser.error(str(refused))
     git = git_state()

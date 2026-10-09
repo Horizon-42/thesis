@@ -33,6 +33,29 @@ from ts_transformer.tests.test_post_window_loop import CPU, DELTA, setup  # noqa
 PER_KIND = {REAL: 1, INSERTED: 1, LEADER_MOVED: 1, MOVED_START: 1}
 
 
+class _Spoken(Exception):
+    """Raised by a stub round once it has what it was given."""
+
+
+@pytest.mark.parametrize("attention", ["copied", "merged"])
+def test_a_batch_is_spoken_with_its_campaigns_front_attention(monkeypatch, attention):
+    """Multi-aircraft control D190 (2): stage C's batch gives its window loops the campaign's `Settings.front_attention`
+    (how a window's copies read the front they hold once)."""
+    seen = {}
+
+    def spoken(*args, **kwargs):
+        seen.update(kwargs["loop_options"])
+        raise _Spoken
+
+    monkeypatch.setattr(post_train, "branch_round", spoken)
+    context = SimpleNamespace(splits={"train": {"sentences": {}, "flights": {}, "faults": {}}},
+                              start_loop=lambda split, batch: None, geometries={}, rosters={}, finals={}, words=None,
+                              interval_s=DELTA, variant="full", edges_reference=None, device=CPU)
+    with pytest.raises(_Spoken):
+        post_train.speak_batch(None, context, [], [], _settings(front_attention=attention), 0, None, 0)
+    assert seen == {"attention": attention}
+
+
 def _settings(**changed):
     values = dict(rounds=2, per_kind=PER_KIND, batch_windows=2, continuations=2, seed=1337, prior_lr=1e-4,
                   traffic_lr=1e-3, weight_decay=0.0, update_groups=1, data_sentences=1, select_per_airport=1,

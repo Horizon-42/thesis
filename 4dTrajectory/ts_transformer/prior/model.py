@@ -32,6 +32,14 @@ column and "go-around" in the runway column (§4: the grammar's first step; the 
 step keeps each layer's rotated keys and values (`Past`, allocated once for every row it will hold, written in place)
 and encodes only the new rows — the same arithmetic as encoding every row again (`encode` is `extend` from nothing),
 to rounding of the attention's summation order.
+
+**Copies hold their front once** (multi-aircraft control D190 (2)). The copies of a line that a speaker takes (a
+branch point's continuations) are the same up to where they part, and so are the rows the cache keeps of them: those
+rows are held once, as a front of the lines (`Front`), and each line holds its rows from there on. Where the front ends
+is chosen whenever lines are taken (`Past.together`), as few rows as hold the cache smallest. A line reads its front
+copied back to it for one layer at a time (`COPIED`: the same tensors as a line held whole, bit for bit) or, as a
+campaign sets it, read once for all its lines and merged with its own rows' (`MERGED`: no copy, the last bits of the
+attention's sums may move), `Past.attend`.
 """
 
 from __future__ import annotations
@@ -40,6 +48,7 @@ import math
 from dataclasses import asdict, dataclass, fields
 from typing import Any, Callable, NamedTuple, Sequence
 
+import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional
@@ -56,6 +65,12 @@ ROPE_BASE = 10_000.0
 #: The room a speaker's cache grows by, in rows, and the room a copy keeps past its rows written (multi-aircraft
 #: control D183: 256 s at Δ = 4 s; the attention reads only the rows written, so the room changes no number).
 CACHE_STEP_ROWS = 64
+#: How a line reads a front it holds with other lines (`Past`; multi-aircraft control D190 (2), the user's choice as a
+#: campaign sets it): `COPIED`, the front copied to each of its lines for one layer's attention at a time (bit for bit
+#: a line that holds its rows whole); `MERGED`, the front read once for all its lines and the line's own rows apart,
+#: their scores normalised together (no copy; the last bits of a sum may move).
+COPIED, MERGED = "copied", "merged"
+FRONT_ATTENTIONS = (COPIED, MERGED)
 
 
 @dataclass(frozen=True)
@@ -111,11 +126,32 @@ def rotate(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tenso
     return torch.cat((first * cos - second * sin, first * sin + second * cos), dim=-1)
 
 
-class Past(NamedTuple):
-    """A layer's rotated time-attention keys and values (``[B, heads, capacity, head]``) and which rows are present
-    (``[B, capacity]``), of which the first ``rows`` are encoded.
+class Front(NamedTuple):
+    """The rows a `Past` holds once for several of its lines (multi-aircraft control D190 (2)): each front's rows
+    (``keys``, ``values`` ``[F, heads, start, head]``, ``present`` ``[F, start]``), each line's front (``of`` ``[B]``),
+    and the fronts in runs of fronts that are each a front of n lines (``runs``: each run's first front, its n and the
+    lines of its fronts, front after front, n each), by which a `MERGED` attention reads them."""
 
-    Written in place: one `Past` is one line of rows. Two extends from the same `Past` share its storage (a branch
+    keys: torch.Tensor
+    values: torch.Tensor
+    present: torch.Tensor
+    of: torch.Tensor
+    runs: tuple[tuple[int, int, torch.Tensor], ...]
+
+
+class Past(NamedTuple):
+    """A layer's rotated time-attention keys and values of a batch of lines and which of their rows are present, of
+    which the first ``rows`` are encoded.
+
+    **A front held once** (multi-aircraft control D190 (2)). The copies of a line (a branch point's continuations) are
+    the same up to where they part, and so are the rows the speaker keeps of them. A line's first `start` rows are its
+    front's (``front``, held once for every line of that front; None: no row is, `start` 0), its rows from `start` on
+    its own (``keys``, ``values`` ``[B, heads, room, head]``, ``present`` ``[B, room]``: its row ``start + j`` at ``j``).
+    Which lines are the same up to which row is ``kin`` and ``kin_rows`` (``[B]`` each: a line's kin and the rows it is
+    the same as its kin to), which `together` reads to choose the front. A line reads its front as ``attention`` says
+    (`FRONT_ATTENTIONS`, `attend`).
+
+    Written in place: one `Past` is one batch of lines. Two extends from the same `Past` share its storage (a branch
     overwrites its sibling's rows: copy the tensors to branch), and a gradient cannot flow back through an extend
     that a later one wrote over (the speaker extends without gradients; training encodes a sentence whole)."""
 
@@ -123,66 +159,203 @@ class Past(NamedTuple):
     values: torch.Tensor
     present: torch.Tensor
     rows: int
+    front: Front | None
+    kin: np.ndarray
+    kin_rows: np.ndarray
+    attention: str
+
+    @property
+    def start(self) -> int:
+        """The rows of each line's front."""
+        return 0 if self.front is None else self.front.keys.shape[2]
 
     def grown(self, capacity: int) -> Past:
-        """The same rows with room for ``capacity`` (new storage: a line that outgrows its room is moved, never cut)."""
+        """The same rows with room for ``capacity`` of a line's own (new storage: a line that outgrows its room is
+        moved, never cut; its front stays as it is)."""
         extra = capacity - self.keys.shape[2]
         pad = self.keys.new_zeros((*self.keys.shape[:2], extra, self.keys.shape[3]))
-        return Past(torch.cat((self.keys, pad), dim=2), torch.cat((self.values, pad), dim=2),
-                    torch.cat((self.present, self.present.new_zeros((self.present.shape[0], extra))), dim=1), self.rows)
+        return self._replace(keys=torch.cat((self.keys, pad), dim=2), values=torch.cat((self.values, pad), dim=2),
+                             present=torch.cat((self.present, self.present.new_zeros((self.present.shape[0], extra))),
+                                               dim=1))
 
-    def taken(self, index: torch.Tensor, room: int, device: torch.device | None = None) -> Past:
-        """The lines ``index`` (``[K]``, repeats permitted) of this past in new storage of their rows written and
-        ``room`` rows more, allocated once (D183 (2)): the rows selected into its front by `torch.index_select`, no
-        intermediate copy; on another ``device`` (this one's when not given) the selection is made where the rows are
-        and moved into it."""
-        target = self.keys.device if device is None else torch.device(device)
-        rows = self.rows
-        keys = self.keys.new_zeros((len(index), self.keys.shape[1], rows + room, self.keys.shape[3]), device=target)
-        values = torch.zeros_like(keys)
-        present = self.present.new_zeros((len(index), rows + room), device=target)
-        for into, source in ((keys, self.keys), (values, self.values)):
-            if target == source.device:
-                torch.index_select(source[:, :, :rows], 0, index, out=into[:, :, :rows])
+    def attend(self, q: torch.Tensor, dropout_p: float) -> torch.Tensor:
+        """The time attention ``[B, heads, R, head]`` of the queries ``q`` of the last R rows written: each row reads
+        its line's rows present up to itself, and itself. A line with no front reads its own rows in one attention.
+        Over a front (D190 (2)), `COPIED`: the front copied to each of its lines for this layer alone, each line read
+        in one attention as a line that holds its rows whole is read (the same tensors, bit for bit); `MERGED`: each
+        front read once for all its lines (`Front.runs`) and each line's own rows apart, their scores normalised
+        together and their values summed (no copy; the order of a sum differs, its last bits may)."""
+        count = q.shape[2]
+        start, written = self.start, self.rows - self.start
+        steps = torch.arange(start, self.rows, device=q.device)
+        queries = steps[-count:, None]
+        own = (steps[None, :] <= queries) & (self.present[:, None, :written] | (steps[None, :] == queries))
+        keys, values = self.keys[:, :, :written], self.values[:, :, :written]
+        if self.front is None:
+            return functional.scaled_dot_product_attention(q, keys, values, attn_mask=own[:, None],
+                                                           dropout_p=dropout_p)
+        if dropout_p:
+            raise ValueError("a front held once is read without dropout (the speaker reads in eval mode)")
+        front = self.front
+        # a front's rows all come before the rows said: each reads those present
+        allowed = torch.cat((front.present.index_select(0, front.of)[:, None, :].expand(-1, count, -1), own), dim=2)
+        if self.attention == COPIED:
+            whole = []
+            for held, mine in ((front.keys, keys), (front.values, values)):
+                line = held.new_empty((len(front.of), held.shape[1], self.rows, held.shape[3]))
+                torch.index_select(held, 0, front.of, out=line[:, :, :start])
+                line[:, :, start:] = mine
+                whole.append(line)
+            return functional.scaled_dot_product_attention(q, *whole, attn_mask=allowed[:, None])
+        batch, heads, _, head = q.shape
+
+        def by_front(x: torch.Tensor, n: int, lines: torch.Tensor) -> torch.Tensor:
+            """``x`` [B, heads, R, w] of a run's lines as [its fronts, heads, n R, w]: a front's lines one after another."""
+            fronts = len(lines) // n
+            return x.index_select(0, lines).view(fronts, n, heads, count, -1).transpose(1, 2).reshape(
+                fronts, heads, n * count, -1)
+
+        def by_line(x: torch.Tensor, n: int) -> torch.Tensor:
+            """`by_front` undone: [fronts, heads, n R, w] → [the run's lines, heads, R, w]."""
+            fronts = x.shape[0]
+            return x.view(fronts, heads, n, count, -1).transpose(1, 2).reshape(fronts * n, heads, count, -1)
+
+        scores = q.new_empty((batch, heads, count, self.rows))
+        for first, n, lines in front.runs:
+            held = front.keys[first:first + len(lines) // n]
+            scores[:, :, :, :start].index_copy_(0, lines, by_line(by_front(q, n, lines) @ held.transpose(-1, -2),
+                                                                  n))
+        scores[:, :, :, start:] = q @ keys.transpose(-1, -2)
+        weights = torch.softmax((scores * head ** -0.5).masked_fill(~allowed[:, None], float("-inf")), dim=-1)
+        out = weights[:, :, :, start:] @ values
+        for first, n, lines in front.runs:
+            held = front.values[first:first + len(lines) // n]
+            out.index_add_(0, lines, by_line(by_front(weights[:, :, :, :start], n, lines) @ held, n))
+        return out
+
+    def _read(self, lines: torch.Tensor, first: int, last: int, keys: torch.Tensor, values: torch.Tensor,
+              present: torch.Tensor) -> None:
+        """Rows [first, last) of the lines ``lines`` (on this past's device) written into ``keys``, ``values`` and
+        ``present`` (views of their rows, of these lines in order): from the front where they are in it, selected
+        into them by `torch.index_select` (D183 (2): no copy between) where they are on this past's device."""
+        start = self.start
+        pieces = []
+        if first >= last:
+            return
+        if first < start:
+            pieces.append((self.front.keys, self.front.values, self.front.present, self.front.of.index_select(0, lines),
+                           first, min(last, start), 0))
+        if last > start:
+            pieces.append((self.keys, self.values, self.present, lines, max(first, start) - start, last - start,
+                           max(start - first, 0)))
+        for held_keys, held_values, held_present, index, a, b, at in pieces:
+            into = slice(at, at + b - a)
+            for held, out in ((held_keys, keys[:, :, into]), (held_values, values[:, :, into])):
+                if out.device == held.device:
+                    torch.index_select(held[:, :, a:b], 0, index, out=out)
+                else:
+                    out.copy_(torch.index_select(held[:, :, a:b], 0, index))
+            if present.device == held_present.device:
+                torch.index_select(held_present[:, a:b], 0, index, out=present[:, into])
             else:
-                into[:, :, :rows] = source[index, :, :rows]
-        if target == self.present.device:
-            torch.index_select(self.present[:, :rows], 0, index, out=present[:, :rows])
-        else:
-            present[:, :rows] = self.present[index, :rows]
-        return Past(keys, values, present, rows)
+                present[:, into] = torch.index_select(held_present[:, a:b], 0, index)
 
     @staticmethod
-    def together(parts: Sequence[tuple[Past, torch.Tensor, int]], room: int, device: torch.device) -> Past:
-        """Lines of several pasts as one past (multi-aircraft control D188), in new storage of the rows written and
-        ``room`` rows more on ``device``: ``parts`` each a past, its lines (``[K]``, repeats permitted, on its device)
-        and the rows it moves later by (below 0: its first rows, which none of its lines has present, are left out), so
-        that every part's rows written end at one row. A line reads the same: its rows present are the same rows at the
-        same times (the rotation is by a row's time, not its place), the rows moved in before them not present."""
+    def together(parts: Sequence[tuple[Past, torch.Tensor, int]], room: int, device: torch.device,
+                 attention: str) -> Past:
+        """Lines of several pasts as one past (multi-aircraft control D188), in new storage on ``device``: ``parts`` each
+        a past, its lines (``[K]``, repeats permitted, on its device) and the rows it moves later by (below 0: its first
+        rows, which none of its lines has present, are left out), so that every part's rows written end at one row. A
+        line reads the same: its rows present are the same rows at the same times (the rotation is by a row's time, not
+        its place), the rows moved in before them not present.
+
+        **The front** (D190 (2)). A line taken more than once and its copies are a kin, the same to every row written;
+        lines of one kin of a part taken once each stay a kin, to its rows moved. The front's rows are as many as hold
+        the past smallest: a front of S rows is held once for each kin of two lines or more that are the same to S rows
+        or more, and once for each other line; every line holds its rows from S on and ``room`` more. Its lines read
+        their front as ``attention`` says (`FRONT_ATTENTIONS`)."""
+        if attention not in FRONT_ATTENTIONS:
+            raise ValueError(f"attention {attention!r} is none of {FRONT_ATTENTIONS}")
         ends = {past.rows + shift for past, _, shift in parts}
         if len(ends) != 1:
             raise ValueError(f"the parts' rows, moved, end at the rows {sorted(ends)}, not one")
         (rows,) = ends
-        like = parts[0][0].keys
-        batch = sum(len(index) for _, index, _ in parts)
-        keys = like.new_zeros((batch, like.shape[1], rows + room, like.shape[3]), device=device)
-        values = torch.zeros_like(keys)
-        present = torch.zeros((batch, rows + room), dtype=torch.bool, device=device)
-        at = 0
+        # each line's kin (a label unique over the parts) and the rows it is the same as its kin to
+        label, same, offset = [], [], 0
         for past, index, shift in parts:
-            kept, into = slice(max(-shift, 0), past.rows), slice(max(shift, 0), rows)
+            lines = index.cpu().numpy()
+            copies = np.bincount(lines, minlength=len(past.kin))[lines] > 1
+            label.append(np.where(copies, offset + lines, offset + len(past.kin) + past.kin[lines]))
+            same.append(np.where(copies, rows, np.clip(past.kin_rows[lines] + shift, 0, rows)))
+            offset += 2 * len(past.kin)
+        kins, kin, members = np.unique(np.concatenate(label), return_inverse=True, return_counts=True)
+        kin_rows = np.concatenate(same).astype(np.int64)
+        kin_same = np.zeros(len(kins), dtype=np.int64)
+        kin_same[kin] = kin_rows
+        batch = len(kin)
+
+        def held(s: int) -> int:                         # the rows held with a front of s rows, room aside
+            fronts = int(np.where((members > 1) & (kin_same >= s), 1, members).sum())
+            return fronts * s + batch * (rows - s)
+
+        start = min(sorted({0, *kin_same[members > 1].tolist()}), key=held)
+        like = parts[0][0].keys
+        heads, head = like.shape[1], like.shape[3]
+        keys = like.new_zeros((batch, heads, rows - start + room, head), device=device)
+        values = torch.zeros_like(keys)
+        present = torch.zeros((batch, rows - start + room), dtype=torch.bool, device=device)
+        part_of = np.concatenate([np.full(len(index), p) for p, (_, index, _) in enumerate(parts)])
+        line_of = np.concatenate([index.cpu().numpy() for _, index, _ in parts])
+        at = 0
+        for past, index, shift in parts:                 # each line's own rows
             lines = slice(at, at + len(index))
-            keys[lines, :, into] = torch.index_select(past.keys[:, :, kept], 0, index).to(device)
-            values[lines, :, into] = torch.index_select(past.values[:, :, kept], 0, index).to(device)
-            present[lines, into] = torch.index_select(past.present[:, kept], 0, index).to(device)
+            first = max(start, shift)
+            past._read(index, first - shift, rows - shift, keys[lines, :, first - start:rows - start],
+                       values[lines, :, first - start:rows - start], present[lines, first - start:rows - start])
             at += len(index)
-        return Past(keys, values, present, rows)
+        front = None
+        if start:
+            # a front for each kin that shares one, and for each other line; the fronts of as many lines in a run
+            unit = np.where(((members > 1) & (kin_same >= start))[kin], kin, len(kins) + np.arange(batch))
+            _, of, lines_of = np.unique(unit, return_inverse=True, return_counts=True)
+            order = np.argsort(-lines_of, kind="stable")              # the fronts by their lines, most first
+            place = np.empty_like(order)
+            place[order] = np.arange(len(order))
+            of = place[of]
+            counts = lines_of[order]
+            by_front = np.argsort(of, kind="stable")                 # the lines, front after front
+            first_line = by_front[np.concatenate(([0], np.cumsum(counts)[:-1]))]
+            front_keys = like.new_zeros((len(order), heads, start, head), device=device)
+            front_values = torch.zeros_like(front_keys)
+            front_present = torch.zeros((len(order), start), dtype=torch.bool, device=device)
+            for p, (past, _, shift) in enumerate(parts):
+                mine = np.flatnonzero(part_of[first_line] == p)
+                if not len(mine):
+                    continue
+                index = torch.as_tensor(line_of[first_line[mine]], device=past.keys.device)
+                into = torch.as_tensor(mine, device=device)
+                first = max(0, shift)
+                k = like.new_zeros((len(mine), heads, start, head), device=device)
+                v, pr = torch.zeros_like(k), torch.zeros((len(mine), start), dtype=torch.bool, device=device)
+                past._read(index, first - shift, start - shift, k[:, :, first:], v[:, :, first:], pr[:, first:])
+                front_keys.index_copy_(0, into, k)
+                front_values.index_copy_(0, into, v)
+                front_present.index_copy_(0, into, pr)
+            runs, f, at = [], 0, 0
+            for n in sorted(set(counts.tolist()), reverse=True):
+                fronts = int((counts == n).sum())
+                runs.append((f, n, torch.as_tensor(by_front[at:at + fronts * n], device=device)))
+                f, at = f + fronts, at + fronts * n
+            front = Front(front_keys, front_values, front_present, torch.as_tensor(of, device=device), tuple(runs))
+        return Past(keys, values, present, rows, front, kin.astype(np.int64), kin_rows, attention)
 
     @classmethod
     def nothing(cls, batch: int, heads: int, head: int, capacity: int, like: torch.Tensor) -> Past:
-        """No rows yet, room for ``capacity`` (``like``: a tensor of the device and dtype)."""
+        """No rows yet, room for ``capacity`` (``like``: a tensor of the device and dtype); no line its kin's but its
+        own, no front."""
         return cls(like.new_zeros((batch, heads, capacity, head)), like.new_zeros((batch, heads, capacity, head)),
-                   torch.zeros((batch, capacity), dtype=torch.bool, device=like.device), 0)
+                   torch.zeros((batch, capacity), dtype=torch.bool, device=like.device), 0, None,
+                   np.arange(batch, dtype=np.int64), np.zeros(batch, dtype=np.int64), COPIED)
 
 
 class Layer(nn.Module):
@@ -208,7 +381,7 @@ class Layer(nn.Module):
         place: ``(the rows out, the past with them)``."""
         batch, rows, d = x.shape
         head = d // self.heads
-        start, end = past.rows, past.rows + rows
+        start, end = past.rows - past.start, past.rows - past.start + rows       # in each line's own rows
         room = past.keys.shape[2]
         if end > room:                               # a line longer than its room: grown by steps (D183)
             past = past.grown(room + CACHE_STEP_ROWS * math.ceil((end - room) / CACHE_STEP_ROWS))
@@ -219,13 +392,8 @@ class Layer(nn.Module):
         q, k = rotate(q, cos, sin), rotate(k, cos, sin)
         past.keys[:, :, start:end], past.values[:, :, start:end] = k, v
         past.present[:, start:end] = present
-        past = past._replace(rows=end)
-        steps = torch.arange(end, device=x.device)
-        queries = steps[start:, None]
-        allowed = (steps[None, :] <= queries) & (past.present[:, None, :end] | (steps[None, :] == queries))
-        y = functional.scaled_dot_product_attention(q, past.keys[:, :, :end], past.values[:, :, :end],
-                                                    attn_mask=allowed[:, None],
-                                                    dropout_p=self.attention_dropout if self.training else 0.0)
+        past = past._replace(rows=past.rows + rows)
+        y = past.attend(q, self.attention_dropout if self.training else 0.0)
         x = x + self.dropout(self.time_out(y.transpose(1, 2).reshape(batch, rows, d)))
         if self.added is not None:
             x = x + self.added(x, extra)

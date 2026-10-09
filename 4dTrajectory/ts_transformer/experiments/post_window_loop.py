@@ -77,7 +77,7 @@ from ts_transformer.post.traffic import traffic as separation_traffic
 from ts_transformer.post.traffic_attention import traffic_of
 from ts_transformer.prior.inputs import motion
 from ts_transformer.prior.landings import Landing, LandingIndex
-from ts_transformer.prior.model import Prior
+from ts_transformer.prior.model import COPIED, Prior
 from ts_transformer.prior.procedure import Final
 from ts_transformer.prior.speaker import MOST_GO_AROUNDS
 
@@ -186,9 +186,10 @@ class WindowLoop:
                  edges_reference: Path, faults: Mapping[str, Mapping[str, frozenset[int]]],
                  observed: Mapping[int, np.ndarray], device: torch.device, answering: Answering = responsible,
                  token_part: TokenPartOf | None = None, part_width: int = 0,
-                 value_reader: ValueReaderOf | None = None) -> None:
+                 value_reader: ValueReaderOf | None = None, attention: str = COPIED) -> None:
         """``value_reader``: what a value network reads at each row beside the model (D171; `values`), never in the
-        model's tokens; None: nothing read."""
+        model's tokens; None: nothing read. ``attention``: how a window's copies read the front of the speaker's cache
+        they hold once (`SpeakingLoop`; multi-aircraft control D190 (2))."""
         checked_edges(edges_reference)
         if loop.most_go_arounds != MOST_GO_AROUNDS:
             raise ValueError(f"the loop was started for {loop.most_go_arounds} go-arounds a flight, not {MOST_GO_AROUNDS} "
@@ -235,7 +236,8 @@ class WindowLoop:
                 i = self.order[b]
                 moved_flights[i] = {**flights[i], "entry_time_utc": _utc_text(utc_s(flights[i]["entry_time_utc"]) + shift)}
         self.speaking = SpeakingLoop(model, loop, order, sentences, observed, moved_flights, geometries, row_landings,
-                                     finals, words, interval_s=interval_s, variant=variant, device=device)
+                                     finals, words, interval_s=interval_s, variant=variant, device=device,
+                                     attention=attention)
         self.step_s = words.spec.step_s
         self.every = self.speaking.every
         self.geometries = [self.windows[w].scene.geometry for w in self.window_of]
