@@ -8,7 +8,8 @@ census's sample: 18; D172: 46–48; D179, D180: 49–53; D181, O20: 54–62), it
 (written into the interfaces).
 
 State: 2026-10-09: items 54–62 decided (D181, O20) and deleted. MC11's code (D181 items 55, 58–60, 56) is built on
-`dev-multi-control`; items 63–65 are readings of it for the designer.
+`dev-multi-control`; items 63–65 are readings of it for the designer. Item 66 is the user's proposal of 2026-10-09 (a
+new rule of branch training), written here at the user's word.
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -173,3 +174,46 @@ State: 2026-10-09: items 54–62 decided (D181, O20) and deleted. MC11's code (D
     loops and its groups written are `other`. The first part holds the device's warm-up (a few seconds on the GPU, as a
     worker's first batch); the timers' synchronisations slow the GPU a little, as in `model_speed` (D136). Proposal:
     keep, stated in the report.
+
+## A new rule of branch training: the decision point found backward (the user's proposal, 2026-10-09)
+
+66. **Branch backward from each loss, coarse then fine, and stop at the decision point.** The user's proposal, the
+    readings the user chose marked. It changes D143's branch points, not D141's W, D142's streams or the windows (D146).
+    - *Today* (D143, `multi/credit.points`): a window below its count is spoken again; each varied aircraft is branched
+      at its first predicted step and every `BRANCH_EVERY_S` (120 s) of the window's grid before its event, K = 8
+      continuations at each point, each flown to the window's end. Points far before the loss give groups whose K
+      continuations end alike (all land or all lose): no information (O21).
+    - *The rule.* A window whose first pass lands every aircraft gives no sample (as today). Otherwise, for each loss
+      of separation of the first pass, the earliest first, and for each varied aircraft of that loss (D143's: the one
+      that answers and the commanded aircraft it lost separation with): branch points from the loss's tick backward
+      in steps of 32 s (on the window's grid of Δ rows), tried one at a time, the latest first. At each point, K
+      continuations as today (the prefix copied: `WindowLoop.copy`; the varied aircraft on its continuation numbers, the
+      others on their streams, D142). **The search stops at the first point (going back) where at least one
+      continuation avoids that loss** (the user's reading (a), 2026-10-09): the decision point. Then **one 16 s point**
+      between it and the next later point tried (coarse then fine, the user 2026-10-09): the decision point to 16 s at
+      the cost of one more point. A loss that no point avoids stops at a bound (the varied aircraft's first predicted
+      step, or at most N points: the user's to set). Each failure is searched from the first pass's record; the order
+      (the earliest first) only orders the work.
+    - *Open for the designer (proposals):* "avoids that loss" = the same pair keeps its separation up to the original
+      loss's tick, and the varied aircraft is in no loss in that span. Which points give groups: those tried
+      (the ones before the decision point, where all K lose, are uninformative and may be dropped from the pass).
+    - *Rewards* (the user asked whether they can be improved; proposals, the user decides): (1) a group's continuations
+      compared with each other (the group's mean as the baseline), the question being "does this word at this point avoid
+      that loss"; (2) a continuation that loses the same separation again is ended there, its outcome decided — a saving
+      of time, the reward's meaning unchanged; one that avoids it is flown to the end (a later go-around or loss still
+      counts); (3) optional: a continuous term of the separation's margin (the closest distance over the minimum), so a
+      group whose K all lose is still graded — an auxiliary term only (risk: flying at the minimum), its weight the
+      user's; (4) not proposed: a local reward alone (the loss avoided, the landing ignored): a go-around or a delay
+      would "avoid" a loss.
+    - *Cost.* The search is serial within a window (a point's K results decide the next), parallel over a batch's
+      windows (every window's current point at once). When the decision point is near the loss (G1: most losses 10–20 km
+      out, decided a minute or two before), far fewer continuations than today's every-120 s points flown to the end;
+      when no point avoids it, more points than today, so the bound matters.
+    - *Memory.* Going backward needs the loop's state at each candidate point, saved on a forward second pass. At any
+      point the K continuations' peak is today's (it does not depend on the step). The saved states: as many as the
+      span over the step, each a copy of the speaker's cache to its tick — kept in the host's memory and moved to the
+      device when their point is tried, so the GPU holds one; coarse then fine keeps their number at the 32 s one. A
+      tree of shared prefixes (O20's item 62) would make them nearly free, but it is not proposed before item 56's
+      measure shows that the cache sets the peak.
+    - *Storage.* A group's first sentence and its continuations share their rows up to the point; stored as a tree (a
+      node holds the rows after its parent), the groups' files shrink; the loss still reads whole sentences.
