@@ -10,7 +10,8 @@ census's sample: 18; D172: 46–48; D179, D180: 49–53; D181, O20: 54–62; D18
 
 State: 2026-10-11 (01:15): arm A (`multi_train_majority_20261010`, D192, 2 rounds) runs; it stopped once in round 0
 on a defect of S6 with join ticks, fixed (14e53df6, merged) and resumed with its done batches kept (item 104). D194
-(2), (3) built on `dev-speed` (ce886c4a, 9bdbe6c5; reviewed, the second round clean), not merged; they go into arm B.
+(2), (3) built on `dev-speed` (ce886c4a, 9bdbe6c5; reviewed, the second round clean), merged (ca53c517); arm A's round 1
+runs them (the check on fixed inputs equal), and arm B will.
 89 is a measure kept from D190; 99–103 are of the night before; 104–107 are new.
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
@@ -233,7 +234,8 @@ The code says the details; read the two commits.
     (`test_multi_backward.py`: the rule; `_failed` against `_trials` on one state for each kind of event; on the
     synthetic window the same answers with and without the stop). `continuations_to_event` keeps counting each
     continuation of a point tried, also one that stopped before the event + 60 s.
-107. **D194 (4): arm B with 8 CPU workers** (a launch setting; no code). The profiles of D192 (`profile_d192_gpu`,
-    `profile_d192_cpu`) fit 3 GPU + 8 CPU workers; A runs with 6. A batch's device is its rule's (`--cpu-batches 7
-    --cpu-period 10`, by index), so the number of workers changes no group. Expected: about 10 % faster speaking (a
-    CPU worker slowed from 0.61 to 0.53 batches a minute from 4 to 6 workers; 8 of the 20 cores are performance cores).
+107. **D194 (4) dropped: more CPU workers do not fit** (measured 2026-10-11 01:23–01:25, no code). The profiles of
+    D192 fit 6 CPU workers beside the 3 on the GPU, not 7 or 8: with the campaign's process open (its context, about
+    3 GiB) the host had 24.1 GiB; 8 needed 26.1 GiB, and with 7 a batch at the profile's host peak (2.77 GiB with its
+    margin) had 2.14 GiB at the last level. The earlier count (3 + 8 fit) used the host free before the campaign's
+    process opened. Arms A (from round 1) and B run 6.
