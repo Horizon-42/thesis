@@ -9,7 +9,8 @@ census's sample: 18; D172: 46–48; D179, D180: 49–53; D181, O20: 54–62; D18
 7), item 20 (built: item 40) and the names of MC0–MC4 (written into the interfaces).
 
 State: 2026-10-10 (night): D193 (3) and (4) built on `dev-multi-s6` (9d6886ec, 22fd1031), not merged; D193 (1)'s
-check done; the traffic-only arm done; D192 built on the user's word (172bc07d); nothing runs (stage D's log §22). 89
+check done; the traffic-only arm done; D192 built on the user's word (172bc07d) and profiled; all merged (19d90d45);
+nothing runs (stage D's log §22). 89
 is a measure kept from D190; 99–103 are new.
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)

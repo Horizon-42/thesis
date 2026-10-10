@@ -801,3 +801,13 @@ D182's B would be another point; the decision point as the majority point; none 
 every branching; window_behaviour on MC6's windows against the S6 check's reference: the same behaviour (backward bit
 for bit). Review: no S1/S2. Not run on real windows with `majority`: no campaign without the user's word.
 The full ts suite at 172bc07d: 2,137 passed, 1 skipped.
+
+**D192's profiles and the merge** (the user's word of 2026-10-10 23:00, "可以 测量 然后合并"). MC6's settings with
+`--branching majority`, from a run worktree at 172bc07d, one after the other: `outputs/POOLED/multi/profile_d192_gpu_20261010`
+(3 GPU workers, 3.0 min) and `…/profile_d192_cpu_20261010` (4 CPU workers, 3.4 min); both fit (none short). Batches
+0 / 23 / 86: on the GPU 53.7 / 64.9 / 55.2 s, the GPU's reserved peak 0.47 / 0.87 / 0.45 GB (backward at 7893d787,
+`profile_d190_merged_20261010`, before S6: 55.5 / 63.5 / 59.9 s, 0.60 / 1.28 / 0.84 GB); on the CPU 56.8 / 81.3 / 61.0 s.
+Groups 14 / 15 / 6 (backward 12 / 12 / 5): the searches that found a decision point 8 of 11, 7 of 10, 4 of 5, of them
+with a majority point 5, 4, 2 (depths 96–192, 32–224, 32–96 s); the GPU and the CPU spoke the same groups. Merged:
+dev-multi-s6 into dev-two-tier, 19d90d45 (no conflicts; the code that of 172bc07d); the worktrees multi-s6 and
+run-profile5 removed, the branch deleted.

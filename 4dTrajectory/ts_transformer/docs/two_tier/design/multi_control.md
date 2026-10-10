@@ -78,7 +78,7 @@ the evidence is in §9.
 Stage D's implementer keeps this table and its log, `readouts/2026-10-06_stage_d_implementation_log.md` (outline §5
 rule 10); its readings and requests go to `requests_from_d_to_designer.md`. State, 2026-10-10 (night): everything up
 to D191, R69, R70 and D193 (1) (2) merged into `dev-two-tier` (88b5d671); MC6's second launch stopped by the user in
-round 5; its two arms (lr × 3, traffic only) done; D193 (3) (4) and D192 built on `dev-multi-s6`, not merged; nothing runs
+round 5; its two arms (lr × 3, traffic only) done; D193 (3) (4) and D192 merged (19d90d45), D192 profiled; nothing runs
 (log §22).
 
 | Milestone | State |
@@ -100,9 +100,9 @@ round 5; its two arms (lr × 3, traffic only) done; D193 (3) (4) and D192 built 
 | MC11 (D191) | Merged (88b5d671): 5b4cd739 (workers on the GPU and the CPU, each batch's device by a rule; the default bit for bit), e2b69736 (a GPU batch past its worker's share spoken again after the others at fewer at once, the user's word); a CPU worker's profile `outputs/POOLED/multi/profile_d191_cpu_20261010`; the full suite 2,113 passed (log §21) |
 | MC11 (R69, R70) | Merged (88b5d671): `multi_compare` 35a6e072, `pass_gradients` a23a49d7, a2f51add; read on MC6's round 5 (log §22) |
 | MC11 (D193 (1) (2)) | Merged (88b5d671): S1 2961b99a, S2 88a3990e (bit for bit); S1's check on the GPU on MC6's batches 0 / 23 / 86: the same groups, words and ends, states within 2.2e-8 m; batch 86 on the GPU 53.9 → 48.8 s with the executor on the CPU (log §22) |
-| MC11 (D193 (3)) | On `dev-multi-s6`: 9d6886ec; window_behaviour on stage C's and D's windows and prior_behaviour the same bit for bit; batch 86 on the CPU 68.1 → 51.0 s, on the GPU 62.1 → 53.9 s; each flight's own permitted record (requests item 99) (log §22) |
-| MC11 (D193 (4)) | On `dev-multi-s6`: 22fd1031; a CPU batch past its host share spoken again at the CPU's levels (log §22) |
-| MC12 (D192) | On `dev-multi-s6`: 172bc07d, `--branching majority`; backward the same behaviour on MC6's windows; not run on real windows (log §22, requests item 103) |
+| MC11 (D193 (3)) | Merged (19d90d45): 9d6886ec, stage C's digests repinned 6c5269af; window_behaviour on stage C's and D's windows and prior_behaviour the same bit for bit; batch 86 on the CPU 68.1 → 51.0 s, on the GPU 62.1 → 53.9 s; each flight's own permitted record (requests item 99) (log §22) |
+| MC11 (D193 (4)) | Merged (19d90d45): 22fd1031; a CPU batch past its host share spoken again at the CPU's levels (log §22) |
+| MC12 (D192) | Merged (19d90d45): 172bc07d, `--branching majority`; backward the same behaviour on MC6's windows; profiled at MC6's settings, `outputs/POOLED/multi/profile_d192_{gpu,cpu}_20261010` (3 GPU, 4 CPU workers fit); no campaign (log §22, requests item 103) |
 | MC8–MC10 | Not started |
 
 ### 0.4 Plan
