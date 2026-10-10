@@ -1,8 +1,9 @@
 """Stage D, MC12: branch points found backward from each event (multi-aircraft control D182; `multi/backward.py`,
 `experiments.post_branches.backward_round`): the event, the candidate points and the judgement of a continuation; the
 search's points, its stop, the fine point, point B (and B at the decision point: one group) and its bound on trials
-whose first avoiding point is known; on the synthetic window, the points tried and chosen, the continuations of a point
-not chosen flown only to the event + 60 s, a group's W of D141; the copies held on another device; the setting."""
+whose first avoiding point is known; the majority point in B's place (D192); on the synthetic window, the points tried
+and chosen, the continuations of a point not chosen flown only to the event + 60 s, a group's W of D141; the copies held
+on another device; the setting."""
 
 from __future__ import annotations
 
@@ -65,9 +66,9 @@ def test_a_continuation_avoids_its_event():
     assert not avoids(end, answered="B", partner_answered_v=False, ended=None, go_around=False)    # its loss, still flown
 
 
-def _searched(candidates, judged):
+def _searched(candidates, judged, majority=None):
     """`search`'s steps on ``candidates``, a point tried answered by ``judged(point)``; its requests in order."""
-    calls, steps, answer = [], search(candidates, FINE), None
+    calls, steps, answer = [], search(candidates, FINE, majority), None
     while True:
         try:
             kind, p = steps.send(answer)
@@ -117,6 +118,41 @@ def test_an_event_no_point_avoids_gives_no_group_and_b_stays_within_the_bound():
     assert (found.decision, found.b) == (52, None) and found.tried == (92, 84, 76, 68, 60, 52, 56, 44, 36)
 
 
+def _avoiding(n, go_around=False):
+    """Eight trials of a point, the first ``n`` avoiding (with a go-around if ``go_around``)."""
+    return [Trial(j < n, go_around and j < n) for j in range(8)]
+
+
+def test_the_majority_point_is_the_first_point_behind_the_decision_point_where_5_of_8_avoid():
+    """D192 on trials whose avoiding counts are known: the decision point has 1 of 8; the next point back 4; the one
+    after 5, all with a go-around (counted: no go-around condition) — the majority point; the fine point avoids. On the
+    same trials D182 chooses the point of 4 (B: avoiding with no go-around)."""
+    candidates = [100 - STEP * j for j in range(1, 9)]               # 92, 84, …, 36
+    counts = {92: 0, 84: 0, 76: 1, 80: 2, 68: 4, 60: 5}
+    found, calls = _searched(candidates, lambda p: _avoiding(counts[p], go_around=p in (76, 60)), majority=5)
+    assert (found.decision, found.fine, found.b, found.majority) == (76, 80, None, 60)
+    assert found.groups == (76, 80, 60) and found.kinds == (backward.DECISION, backward.FINE, backward.MAJORITY_POINT)
+    assert found.tried == (92, 84, 76, 80, 68, 60)
+    assert calls[-2:] == [("trial", 60), ("chosen", 60)]
+    point_b, _ = _searched(candidates, lambda p: _avoiding(counts[p], go_around=p in (76, 60)))
+    assert point_b.b == 68 and point_b.majority is None                          # D182's B on the same trials
+
+
+def test_a_decision_point_where_5_of_8_avoid_is_the_majority_point_and_one_group():
+    candidates = [100 - STEP * j for j in range(1, 9)]
+    found, calls = _searched(candidates, lambda p: _avoiding(8 if p <= 84 else 0, go_around=True), majority=5)
+    assert (found.decision, found.fine, found.majority) == (84, None, 84)
+    assert found.groups == (84,) and found.kinds == (backward.DECISION,)
+    assert found.tried == (92, 84, 88) and [c for c in calls if c[0] == "chosen"] == [("chosen", 84)]
+
+
+def test_no_majority_point_within_the_bound_leaves_the_decision_points_groups():
+    candidates = [100 - STEP * j for j in range(1, 9)]
+    found, _ = _searched(candidates, lambda p: _avoiding(4 if p <= 88 else 0), majority=5)
+    assert (found.decision, found.fine, found.majority, found.groups) == (84, 88, None, (84, 88))
+    assert found.tried == (92, 84, 88, 76, 68, 60, 52, 44, 36)               # every point back, not past the bound
+
+
 def _backward(s, model, rules, continuations=2):
     (window,) = s["windows"]
     return backward_round(model, lambda flights: s["moved_loop"](start_move_of(window)), [window], [0],
@@ -144,8 +180,8 @@ def test_a_round_found_backward_on_a_window_whose_first_avoiding_point_is_known(
 
     real_results = WindowLoop.results
 
-    def results(self):
-        out = real_results(self)
+    def results(self, rows=None):
+        out = real_results(self, rows)
         finished.append(out)
         return out
 
@@ -324,10 +360,11 @@ def test_the_branching_setting_defaults_to_the_grid_and_a_resume_compares_it(tmp
                                        "smoke": True}, {"head": "y", "dirty": False}, {}, **options)
 
 
-def test_stage_ds_batch_record_holds_the_searches_with_backward_only(setup, tmp_path, monkeypatch):
+def test_stage_ds_batch_record_holds_the_searches_found_backward_only(setup, tmp_path, monkeypatch):
     """MC12: a batch of stage D spoken backward records each group's span and depth, the searches and the
-    continuations flown to the event + 60 s and to the end; with the grid its record is the one before D182 (the same
-    keys); window_behaviour (R68) captures either round."""
+    continuations flown to the event + 60 s and to the end; with the majority point (D192) besides each group's kind
+    and each majority point's span and depth; with the grid its record is the one before D182 (the same keys);
+    window_behaviour (R68) captures every round."""
     from dataclasses import replace
 
     from ts_transformer.experiments import multi_train, window_behaviour
@@ -352,7 +389,7 @@ def test_stage_ds_batch_record_holds_the_searches_with_backward_only(setup, tmp_
         with window_behaviour.captured_rounds() as found:
             records[branching] = stage.speak_batch(model, context, windows, [0], chosen, 0, tmp_path / branching, 0)
         (spoken,) = found
-        assert isinstance(spoken, post_branches.BackwardRound) == (branching == backward.BACKWARD)
+        assert isinstance(spoken, post_branches.BackwardRound) == (branching != backward.GRID)
     plain = {"groups", "informative_groups", "spoken_again", "differed", "reward_sum", "faulty_steps",
              "losses_reading_fault", "outcomes"}
     assert set(records[backward.GRID]) == plain
@@ -363,6 +400,12 @@ def test_stage_ds_batch_record_holds_the_searches_with_backward_only(setup, tmp_
     assert searched["searches"] == 1 and len(searched["group_depths_s"]) == searched["groups"]
     assert all(span == 1.0 for span, _ in searched["group_depths_s"])
     assert searched["continuations_to_end"] == 2 * searched["groups"]
+    majority = records[backward.MAJORITY]
+    assert set(majority) == set(searched) | {"group_kinds", "majority_depths_s"}
+    assert len(majority["group_kinds"]) == majority["groups"]
+    assert majority["group_kinds"].count(backward.DECISION) == majority["searches_found"] == searched["searches_found"]
+    assert len(majority["majority_depths_s"]) <= majority["searches_found"]
+    assert all(span == 1.0 for span, _ in majority["majority_depths_s"])
     assert post_branches.branch_round is multi_train.branch_round and multi_train.backward_round is backward_round
 
 
@@ -458,3 +501,79 @@ def test_a_joint_loops_cache_has_room_for_the_steps_to_its_next_rebuild(setup, m
         if b["room"] is not None:
             assert b["steps"] <= b["room"] and b["grown"] == 0
     assert any(b["room"] is not None and b["steps"] == b["room"] for b in built)     # a rebuild by the schedule
+
+
+def test_a_row_no_longer_flown_leaves_a_joint_loop_and_keeps_its_end(setup):
+    """Multi-aircraft control D193 (3), S6. A join keeps in the speaker and the executor only the rows still flown. A row
+    that has ended leaves them, and the loop keeps its record. Flown on with the same numbers, the joined loop says the
+    words of the loop it came from and flies its states within the executor's bound (D181 (57)). Each row gets the same
+    end and the same sentence (its inputs, its permitted words and its tokens); a row that left gets them from its
+    record. A copy of a row that left has its record too."""
+    import copy as copying
+
+    from ts_transformer.autopilot.conformance import STATE_BOUND_M
+    from ts_transformer.tests.test_post_window_multi import _multi, _numbers
+
+    s = setup
+    _, loop_of = _multi(s, joins=(0, 10, 20))                 # its second row ends first, at a loss
+    loop = loop_of(_with_module(s["base"]))
+    numbers = _numbers(3)
+    while loop.speaking.alive.all():                     # flown until a row ends while the others fly
+        loop.step(post_branches._draws(loop, numbers))
+    gone = ~loop.speaking.alive
+    assert gone.any() and loop.speaking.alive.any()
+    joint = WindowLoop.together([(loop, [0])], CPU, None)
+    assert np.array_equal(joint.speaking.held, ~gone) and sorted(joint.speaking.left) == np.flatnonzero(gone).tolist()
+    assert len(joint.speaking.speaker.in_force) == int((~gone).sum())           # the speaker holds the others only
+    copied = joint.copy([0])
+    assert np.array_equal(copied.speaking.held, joint.speaking.held)
+    twin = [copying.deepcopy(n) for n in numbers]           # the same streams, copied before either is drawn
+    ours, theirs = loop.finish(numbers), joint.finish(twin)
+    for a, b in zip(ours, theirs):
+        assert np.array_equal(a.words, b.words) and (a.outcome, a.reward, a.loss_step) == (b.outcome, b.reward,
+                                                                                          b.loss_step)
+        assert a.states.shape == b.states.shape and np.allclose(a.states, b.states, rtol=0.0, atol=STATE_BOUND_M)
+    for (x, px, tx), (y, py, ty) in zip(loop.samples("train"), joint.samples("train")):
+        assert np.array_equal(x.targets, y.targets) and np.array_equal(x.time_s, y.time_s)
+        assert np.allclose(x.own, y.own, rtol=0.0, atol=1e-6)
+        assert all(np.array_equal(a, b) for a, b in zip(px.masks, py.masks)) and np.array_equal(px.time_s, py.time_s)
+        assert len(tx) == len(ty) and all(np.allclose(a, b, rtol=0.0, atol=1e-6) for a, b in zip(tx, ty))
+    left = int(np.flatnonzero(gone)[0])
+    assert copied.speaking.left[left] is joint.speaking.left[left]                # a copy keeps the record
+
+
+def test_a_join_of_loops_with_rows_that_left_keeps_their_records(setup):
+    """S6: a joint loop joined again, with itself twice (a source with rows that left, and a source used twice), says
+    and flies what the loop it came from does and gives each row the same end and sentence. A loop whose rows have all
+    ended, joined, holds no speaker or executor and gives each row its end and sentence from its records, as does a copy
+    of it."""
+    import copy as copying
+
+    from ts_transformer.autopilot.conformance import STATE_BOUND_M
+    from ts_transformer.tests.test_post_window_multi import _multi, _numbers
+
+    s = setup
+    _, loop_of = _multi(s, joins=(0, 10, 20))                 # its second row ends first, at a loss
+    loop = loop_of(_with_module(s["base"]))
+    numbers = _numbers(3)
+    while loop.speaking.alive.all():
+        loop.step(post_branches._draws(loop, numbers))
+    joint = WindowLoop.together([(loop, [0])], CPU, None)
+    again = WindowLoop.together([(joint, [0]), (joint, [0])], CPU, None)
+    assert len(again.speaking.left) == 2 * len(joint.speaking.left)
+    assert all(again.speaking.left[b] is joint.speaking.left[b] for b in joint.speaking.left)
+    twin = [copying.deepcopy(n) for n in numbers + numbers]
+    ours, theirs = loop.finish(numbers), again.finish(twin)
+    for a, b in zip(ours + ours, theirs):
+        assert np.array_equal(a.words, b.words) and (a.outcome, a.reward) == (b.outcome, b.reward)
+        assert np.allclose(a.states, b.states, rtol=0.0, atol=STATE_BOUND_M)
+    for (x, px, _), (y, py, _) in zip(loop.samples("train") * 2, again.samples("train")):
+        assert np.array_equal(x.targets, y.targets) and np.array_equal(px.time_s, py.time_s)
+    ended = WindowLoop.together([(loop, [0])], CPU, None)                 # every row ended: none held
+    assert ended.speaking.speaker is None and ended.speaking.loop is None and not ended.speaking.held.any()
+    for other in (ended, ended.copy([0])):
+        for a, b in zip(loop.results(), other.results()):
+            assert np.array_equal(a.words, b.words) and np.array_equal(a.states, b.states) and a.reward == b.reward
+        for (x, px, tx), (y, py, ty) in zip(loop.samples("train"), other.samples("train")):
+            assert np.array_equal(x.own, y.own) and all(np.array_equal(a, b) for a, b in zip(px.masks, py.masks))
+            assert all(np.array_equal(a, b) for a, b in zip(tx, ty))

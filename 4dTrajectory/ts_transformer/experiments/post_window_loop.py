@@ -277,11 +277,6 @@ class WindowLoop:
         self._values: list[list[tuple[np.ndarray, float]]] = [[] for _ in self.order]
         self._pending: list[tuple[np.ndarray, float] | None] = [None] * len(self.order)
 
-    @property
-    def landings(self) -> list[LandingIndex]:
-        """Each row's landings as the loop counts them now (those added in the loop with them, D147)."""
-        return self.speaking.rows_of.landings
-
     # ---- the aircraft of a row
     def _own(self, b: int) -> AircraftAt:
         """Row ``b``'s commanded aircraft at the loop's tick: its state there and at the 2 s row before (observed before
@@ -293,7 +288,7 @@ class WindowLoop:
             at, before, known = speaking.observed[b, r], speaking.observed[b, max(r - 1, 0)], r > 0
         else:
             at, before, known = speaking.current[b], speaking.before[b], True
-        in_force = speaking.speaker.in_force[b]
+        in_force = speaking.in_force(b)
         runway, go_around = (in_force.runway, in_force.go_around) if in_force is not None else (-1, False)
         record = self.records[b]
         return AircraftAt.of([(record.key, tuple(at[:3]), tuple(before[:3]), known, runway, record.category, False,
@@ -346,12 +341,13 @@ class WindowLoop:
         return out
 
     def _traffic(self, t: int, ticks: Sequence[_Tick | None], joined: np.ndarray) -> tuple[Any, list[np.ndarray]]:
-        """The traffic module's input of the row at the loop's tick ``t`` and each row's tokens (`_keep` records them
-        for the loss once the row is kept): a row that has not joined has none; a row no longer flown (its rows are said
-        with the batch, not its sentence's) reads its window's recorded aircraft, as stage C's ended window does."""
+        """The traffic module's input of the row at the loop's tick ``t`` and the tokens of each row the speaker holds,
+        in its order (`_keep` records them for the loss once the row is kept): a row that has not joined has none; a
+        row no longer flown (its rows are said with the batch until it leaves, not its sentence's) reads its window's
+        recorded aircraft, as stage C's ended window does. A row that left has no tokens (S6)."""
         alone = self._alone(t, ticks, joined)
         rows: list[np.ndarray] = []
-        for b in range(len(self.order)):
+        for b in self.speaking.inside:
             tick = ticks[self.window_of[b]]
             if not joined[b]:
                 rows.append(np.zeros((0, len(TOKEN_FEATURES) + self.part_width), dtype=np.float32))
@@ -377,15 +373,15 @@ class WindowLoop:
 
     def _alone(self, t: int, ticks: Sequence[_Tick | None], joined: np.ndarray
                ) -> dict[int, tuple[AircraftAt, AircraftAt, np.ndarray]]:
-        """The joined rows that are not flown at the loop's tick ``t``, by row: the aircraft of the row, the recorded
-        aircraft of its window, and the tokens of the recorded aircraft as the row reads them. A row that is not flown
-        reads only the recorded aircraft of its window, as stage C's ended window does. The rows of one window share
-        these aircraft, so `each_tokens` calculates their tokens in one call (multi-aircraft control S2). Each row gets
-        the tokens of `tokens`, bit for bit."""
+        """The joined rows that are not flown at the loop's tick ``t`` and have not left the loop (S6), by row: the
+        aircraft of the row, the recorded aircraft of its window, and the tokens of the recorded aircraft as the row
+        reads them. A row that is not flown reads only the recorded aircraft of its window, as stage C's ended window
+        does. The rows of one window share these aircraft, so `each_tokens` calculates their tokens in one call
+        (multi-aircraft control S2). Each row gets the tokens of `tokens`, bit for bit."""
         out = {}
         for w, members in enumerate(self.members):
             tick = ticks[w]
-            lone = [b for b in members if joined[b] and (tick is None or b not in tick.rows)]
+            lone = [b for b in members if joined[b] and self.speaking.held[b] and (tick is None or b not in tick.rows)]
             if not lone:
                 continue
             recorded = self.windows[w].others_at(t - int(self.origins[w]))
@@ -396,9 +392,10 @@ class WindowLoop:
         return out
 
     def _keep(self, rows: Sequence[np.ndarray], joined: np.ndarray, applies: np.ndarray | None = None) -> None:
-        """A row kept (``joined``: the rows that had joined at it): each joined row's tokens of it recorded, and the rows
-        whose speed-word mask acted there counted."""
-        for b, row in enumerate(rows):
+        """A row kept (``rows``: the tokens of the rows the speaker holds, `_traffic`; ``joined``: the rows that had
+        joined at it): each joined row's tokens of it recorded, and the rows whose speed-word mask acted there
+        counted."""
+        for b, row in zip(self.speaking.inside, rows):
             if joined[b]:
                 self._tokens[b].append(row)
                 if self.value_reader is not None:
@@ -513,7 +510,7 @@ class WindowLoop:
             others = [c for c in self.members[self.window_of[b]] if c != b]
             if not others:
                 continue
-            outcome = self.speaking.loop.outcome(b)
+            outcome = self.speaking.outcome(b)
             if outcome.outcome != LANDED:
                 continue
             out.append(int(b))
@@ -537,7 +534,7 @@ class WindowLoop:
         over = []
         for b in landed:
             states = self.speaking.states(b)
-            runway = int(self.speaking.loop.outcome(b).crossing["runway_index"])
+            runway = int(self.speaking.outcome(b).crossing["runway_index"])
             over.append(AircraftAt.of([(self.records[b].key, tuple(states[-1, :3]), tuple(states[-2, :3]), True, runway,
                                         self.records[b].category, True, False)]))
         b, n = tick.rows[0], len(tick.rows)
@@ -660,13 +657,13 @@ class WindowLoop:
 
     def samples(self, split: str, rows: Sequence[int] | None = None) -> list[tuple[Any, Any, list[np.ndarray]]]:
         """Each row's sentence for the loss (post-training C7): its rows with the words said as targets
-        (`SpeakingLoop.sentences`), the speaker's records of them and its tokens at each of those rows; of the rows
-        ``rows`` only (in that order; every row when not given), the others never built (multi-aircraft control D181
-        (58): a branch's copies are read for their varied aircraft only)."""
+        (`SpeakingLoop.sentences`), its own records of them (`SpeakingLoop.permitted`) and its tokens at each of those
+        rows; of the rows ``rows`` only (in that order; every row when not given), the others never built
+        (multi-aircraft control D181 (58): a branch's copies are read for their varied aircraft only)."""
         rows = list(range(len(self.order))) if rows is None else list(rows)
-        permitted = self.speaking.permitted(rows)
-        return [(sentence, permitted.select([k]), self._tokens[b][: len(sentence.time_s)])
-                for k, (b, sentence) in enumerate(zip(rows, self.speaking.sentences(split, rows)))]
+        return [(sentence, permitted, self._tokens[b][: len(sentence.time_s)])
+                for b, sentence, permitted in zip(rows, self.speaking.sentences(split, rows),
+                                                  self.speaking.permitted(rows))]
 
     def values(self, split: str) -> list[tuple[list[np.ndarray], np.ndarray]]:
         """Each row's value readings (D171, ``value_reader``) at the rows of its sentence for the loss (`samples`):
@@ -696,21 +693,23 @@ class WindowLoop:
                                 for n, said in zip(numbers, said_now)]))
         return self.results()
 
-    def results(self) -> list[WindowResult]:
-        """Each row's end (`WindowResult`), every window ended."""
-        if self.speaking.alive.any():
+    def results(self, rows: Sequence[int] | None = None) -> list[WindowResult]:
+        """Each row's end (`WindowResult`), of the rows ``rows`` (in that order; every row when not given), each ended.
+        A row's end is its own: it does not change with the other rows of the loop (multi-aircraft control S6)."""
+        rows = list(range(len(self.order))) if rows is None else list(rows)
+        if self.speaking.alive[rows].any():
             raise ValueError("windows are still flown")
-        done = [b for b in range(len(self.order)) if self.loss[b] is None]
+        done = [b for b in rows if self.loss[b] is None]
         generated = dict(zip(done, self.speaking.generated(done))) if done else {}
         out = []
-        for b, index in enumerate(self.order):
-            w = int(self.window_of[b])
+        for b in rows:
+            index, w = self.order[b], int(self.window_of[b])
             window = self.windows[w]
             crossing = None
             if self.loss[b] is not None:
                 outcome, landed, go_arounds = LOST_SEPARATION, None, None
                 if not self.speaking.ended[b]:                 # a silent aircraft the executor ended
-                    judged = self.speaking.loop.outcome(b)
+                    judged = self.speaking.outcome(b)
                     crossing = judged.crossing if judged.outcome == LANDED else None
             else:
                 g = generated[b]
@@ -719,7 +718,8 @@ class WindowLoop:
                 crossing = g.crossing if outcome == LANDED else None
             said = self.speaking.said(b)
             go_arounds = int((said[:, RUNWAY] == RUNWAY_GO_AROUND).sum()) if go_arounds is None else go_arounds
-            present = present_runways(self.landings[b], self.geometries[b], self.records[b].first_step_s, self.keys[b])
+            present = present_runways(self.speaking.landings(b), self.geometries[b], self.records[b].first_step_s,
+                                      self.keys[b])
             out.append(WindowResult(
                 index=index, kind=window.kind, outcome=outcome, loss=self.loss[b], loss_step=self.loss_step[b],
                 other=self.other[b], reward=reward(outcome, landed, go_arounds, present, self.loss[b] is not None),

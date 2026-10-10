@@ -173,7 +173,9 @@ def test_stage_cs_campaign_is_the_campaign_before_the_skeleton_bit_for_bit(setup
 
 
 #: `stage_c_scenario`'s digests, written by stage C's code before its generalisation (dev-two-tier-v4 c7a0b6b0, the CPU,
-#: one thread).
+#: one thread). "round real" written again by d5cc5d6a with each flight's own permitted record alone (S6, multi-aircraft
+#: control D193 (3), requests_from_d item 99): its sentences' records are no longer padded to the most rows of those
+#: asked; the other digests stay.
 BEFORE_GENERALISATION = {
     "module": "8ef2cf46f1b72b4b62813330bf8f53bb59819a99862dc087c036e978031b4122",
     "window real": "62e8e4e86314c20be46d9a70988b9cefbfb9a7cc9939bc6a7994c73a2a3b4026",
@@ -181,12 +183,13 @@ BEFORE_GENERALISATION = {
     "window B": "afe5951db940afbdd830714c5485771f9046e14c5d22bf852e4efd37deaba271",
     "round A": "1e7dadf27004b47b1582c4c4ea801a35cb775db75ce9224c1c8b25134ac77ed5",
     "samples A": "96c0207aaba55f9089327068ca64239f1db9df538865040ed679c45e32b08ab9",
-    "round real": "cf8eacd236f3e55403ef464f884ab231a60e4166de8f6dabac17ed200f518172",
+    "round real": "02b295dc011920f8c54cd0e1b709e258267db93116822b15ccdd4855f13b86cc",
 }
 
 
-#: `stage_c_batch_scenario`'s digest, written by the same code.
-BATCH_BEFORE_GENERALISATION = "8cc8c87b8df623836a2968fef9d58d59aef4b8245042cc6179874b2e06e45a0d"
+#: `stage_c_batch_scenario`'s digest, written by the same code, and again as "round real" (S6: its two rows' records each
+#: their own).
+BATCH_BEFORE_GENERALISATION = "b35bfbebc8b58a0bb98ecc8ca7118f41f1bc124791926de4f046995a406195a7"
 
 
 def test_a_stage_c_batch_whose_first_window_ended_is_the_code_before_its_generalisation_bit_for_bit(setup, monkeypatch):

@@ -2,7 +2,8 @@
 aircraft's words can still change its event. The loop's work (the second pass's copies, the continuations flown) is the
 shared branch round's (`experiments.post_branches.backward_round`); this module decides.
 
-- **The setting** (`MultiSettings.branching`): `GRID` (D143's points, the behaviour before D182) or `BACKWARD`.
+- **The setting** (`MultiSettings.branching`): `GRID` (D143's points, the behaviour before D182), `BACKWARD` or
+  `MAJORITY` (D192: the search with the majority point in place of point B).
 - **The event** of a varied aircraft v (`event`): D143's — the tick of v's own end or of the earliest loss that it is
   in — and for an aircraft that landed after a go-around, its first go-around if earlier. Its kind: `LOSS` (with the
   other aircraft of that loss), `GO_AROUND`, or `END` (v's outcome).
@@ -16,7 +17,10 @@ shared branch round's (`experiments.post_branches.backward_round`); this module 
   point (from the decision point back, within the same points) where a continuation avoids the event with no go-around
   said by v from the point to the judged tick, a group — B is the decision point when one of its avoiding
   continuations says none, and then one group. Every other point tried gives none; an event that no point avoids gives
-  none. The search is a generator of its steps, so that a caller steps the searches of a batch together (D188): it asks
+  none. With `MAJORITY` (D192) the majority point takes B's place: the first point (from the decision point back,
+  within the same points) where at least ``majority`` continuations avoid the event, go-arounds counted as avoiding, a
+  group; the decision point when it has that many, and then one group; none when no point has. The search is a
+  generator of its steps, so that a caller steps the searches of a batch together (D188): it asks
   for a point's continuations flown to the judged tick and judged (`TRY`), and says which point tried is chosen, to be
   flown on to its window's end (`CHOOSE`).
 """
@@ -29,14 +33,17 @@ from typing import Generator, Sequence
 from ts_transformer.multi.credit import Aircraft
 from ts_transformer.multi.credit import event as d143_event
 
-#: `MultiSettings.branching`: D143's points (the default, the behaviour before D182) or the backward search.
-GRID, BACKWARD = "grid", "backward"
-BRANCHINGS = (GRID, BACKWARD)
+#: `MultiSettings.branching`: D143's points (the default, the behaviour before D182), the backward search with point B
+#: (D182) or with the majority point (D192).
+GRID, BACKWARD, MAJORITY = "grid", "backward", "majority"
+BRANCHINGS = (GRID, BACKWARD, MAJORITY)
 #: The search's steps (D182): back from the event every 32 s, at most 8 points; one point 16 s after the decision point;
 #: each continuation tried judged at 60 s after the event.
 COARSE_S, FINE_S, POINTS, AFTER_S = 32.0, 16.0, 8, 60.0
 #: The kinds of an event (module docstring).
 LOSS, GO_AROUND, END = "loss", "go_around", "end"
+#: The kinds of a search's groups (`Found.kinds`): the decision point, the fine point, point B, the majority point.
+DECISION, FINE, B, MAJORITY_POINT = "decision", "fine", "b", "majority"
 #: What a search asks of its caller (`search`): a point's continuations tried, or the point last tried chosen.
 TRY, CHOOSE = "try", "choose"
 
@@ -64,17 +71,29 @@ class Trial:
 @dataclass(frozen=True)
 class Found:
     """A search's points (ticks): the decision point, the fine point and point B that give groups (None: no group; B is
-    None when it is the decision point), and every point tried, in order."""
+    None when it is the decision point), every point tried, in order, and the majority point (`MAJORITY` only; None:
+    none; the decision point when it is the majority point, and then no group of its own)."""
 
     decision: int | None
     fine: int | None
     b: int | None
     tried: tuple[int, ...]
+    majority: int | None = None
 
     @property
     def groups(self) -> tuple[int, ...]:
         """The points that give groups, in the order they are chosen."""
-        return tuple(p for p in (self.decision, self.fine, self.b) if p is not None)
+        return tuple(p for _, p in self._chosen())
+
+    @property
+    def kinds(self) -> tuple[str, ...]:
+        """The kind of each point of `groups`, in the same order."""
+        return tuple(kind for kind, _ in self._chosen())
+
+    def _chosen(self) -> list[tuple[str, int]]:
+        behind = self.majority if self.majority != self.decision else None
+        return [(kind, p) for kind, p in ((DECISION, self.decision), (FINE, self.fine), (B, self.b),
+                                          (MAJORITY_POINT, behind)) if p is not None]
 
 
 def ticks_of(seconds: float, interval_s: float) -> int:
@@ -126,12 +145,20 @@ def avoids(happened: Event, *, answered: str | None, partner_answered_v: bool, e
     return ended != happened.outcome
 
 
-def search(candidates: Sequence[int], fine_ticks: int
+def search(candidates: Sequence[int], fine_ticks: int, majority: int | None = None
            ) -> Generator[tuple[str, int], Sequence[Trial] | None, Found]:
     """The search of one varied aircraft (module docstring) over its ``candidates`` (the latest first), step by step:
     it yields ``(TRY, p)``, and the caller flies point p's continuations to the judged tick and sends their trials back;
     it yields ``(CHOOSE, p)`` for the point it tried last, and the caller flies that point's continuations on to their
-    window's end, makes its group and sends nothing; it returns what it found."""
+    window's end, makes its group and sends nothing; it returns what it found. ``majority``: the avoiding continuations
+    that make the majority point (D192), which then takes point B's place; None: point B (D182)."""
+
+    def behind(trials: Sequence[Trial]) -> bool:
+        """Whether a point's ``trials`` make it point B, or the majority point."""
+        if majority is None:
+            return any(t.avoids and not t.go_around for t in trials)
+        return sum(t.avoids for t in trials) >= majority
+
     tried: list[int] = []
     decision = fine = b = None
     for k, p in enumerate(candidates):
@@ -143,7 +170,7 @@ def search(candidates: Sequence[int], fine_ticks: int
             break
     if decision is None:
         return Found(None, None, None, tuple(tried))
-    at_decision = any(t.avoids and not t.go_around for t in trials)
+    at_decision = behind(trials)
     point = decision + fine_ticks
     tried.append(point)
     if any(t.avoids for t in (yield TRY, point)):
@@ -152,8 +179,10 @@ def search(candidates: Sequence[int], fine_ticks: int
     if not at_decision:
         for p in candidates[k + 1:]:
             tried.append(p)
-            if any(t.avoids and not t.go_around for t in (yield TRY, p)):
+            if behind((yield TRY, p)):
                 b = p
                 yield CHOOSE, p
                 break
-    return Found(decision, fine, b, tuple(tried))
+    if majority is None:
+        return Found(decision, fine, b, tuple(tried))
+    return Found(decision, fine, None, tuple(tried), majority=decision if at_decision else b)

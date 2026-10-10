@@ -87,17 +87,20 @@ from __future__ import annotations
 
 import argparse
 import copy
+import ctypes
 import gc
 import json
 import multiprocessing
 import os
 import pickle
+import signal
 import subprocess
 import tempfile
 import threading
 import time
 from collections import Counter
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Sequence
@@ -715,8 +718,22 @@ def _require_stage(speakers: Speakers | None, stage: Stage) -> None:
 
 #: How often a worker's own host memory is sampled while it speaks the measured batch (O15, `_PeakSampler`), s.
 PEAK_SAMPLE_S = 0.2
+#: How often a CPU worker's host cap reads its memory (D193 (4), `_host_capped`), s: one read of ``smaps_rollup`` took
+#: 12–53 ms in a worker of 2.4 GB at a load of 35 (2026-10-10), 1–5 % of a core at this period. The block can grow
+#: for this long past the cap before it stops.
+HOST_CAP_SAMPLE_S = 1.0
 #: What a speaker process holds (`Speakers`): set before the fork, so each worker inherits the campaign's context.
 _SPEAKER: dict[str, Any] = {}
+
+
+class HostMemoryError(MemoryError):
+    """A CPU worker's batch past its host share (multi-aircraft control D193 (4), `_PeakSampler`'s cap)."""
+
+
+#: A batch past its worker's share: CUDA's out of memory under the GPU's, `HostMemoryError` under the host's.
+PAST_SHARE = (torch.OutOfMemoryError, HostMemoryError)
+#: The host cap in force in this process (`_PeakSampler`): its bytes, and whether its sampler may still signal.
+_HOST_CAP: dict[str, Any] = {"cap": None, "armed": False}
 
 
 class Speakers:
@@ -743,18 +760,24 @@ class Speakers:
     under its budget, ``gpu_budget``) is spoken again once every other batch of the round or the readout is spoken,
     with fewer at once and more memory each (``deferred``: each level's batches at once and their budget; a batch past
     one level's budget goes to the next): the batches that need the most memory are spoken with fewer beside them. A
-    batch's words depend only on its own inputs and its device's kind, so the round is the same."""
+    batch's words depend only on its own inputs and its device's kind, so the round is the same. A CPU batch past its
+    worker's host share (``host_budget``; `HostMemoryError`, D193 (4)) goes to the CPU's levels (``cpu_deferred``) in
+    the same way, still on the CPU; the GPU's levels are spoken first, then the CPU's."""
 
     def __init__(self, context: Context, settings: Settings, workers: int, device: torch.device,
                  stage: Stage = STAGE_C, gpu_budget: int | None = None, cpu_workers: int = 0,
-                 deferred: Sequence[tuple[int, int]] = ()) -> None:
+                 deferred: Sequence[tuple[int, int]] = (), host_budget: int | None = None,
+                 cpu_deferred: Sequence[tuple[int, int]] = ()) -> None:
         """``gpu_budget``: each worker's GPU memory, bytes (its CUDA context and what its allocator holds; stage D's,
         from its profile, `multi_train.profiled_fit`): a worker's allocator is capped at it less its context, measured
         at its first task, so a worker past it stops by name (CUDA's out of memory) and takes nothing of the others';
         None: no cap (stage C's campaign). ``cpu_workers``: workers on the CPU besides, for the batches the rule
         (``settings``' ``cpu_batches`` of every ``cpu_period``) gives the CPU (D191; refused as `cpu_workers_refused`).
         ``deferred``: the levels a batch past its share is spoken again at (class docstring), each its batches at once
-        and their GPU budget, fewer and more; none: an out of memory fails the round (as a worker with no cap)."""
+        and their GPU budget, fewer and more; none: an out of memory fails the round (as a worker with no cap).
+        ``host_budget``: each CPU worker's host memory, bytes (its own, `_own_memory`; stage D's, from the profiles): a
+        batch past it stops by name before the host swaps (`_PeakSampler`'s cap); None: no cap. ``cpu_deferred``: the
+        CPU's levels, each its batches at once and their host budget (D193 (4))."""
         if workers < 1 or workers + cpu_workers < 2:
             raise ValueError(f"{workers} worker(s) and {cpu_workers} on the CPU: speakers are 2 or more processes (one "
                              f"speaks without them)")
@@ -771,24 +794,28 @@ class Speakers:
         gc.freeze()
         #: each device's workers by its kind, each forked with its own device (what `_SPEAKER` holds at its fork)
         self.pools: dict[str, ProcessPoolExecutor] = {}
-        for kind, count, budget in ((device.type, workers, gpu_budget), ("cpu", cpu_workers, None)):
+        for kind, count, budget, host in ((device.type, workers, gpu_budget, None),
+                                          ("cpu", cpu_workers, None, host_budget)):
             if not count:
                 continue
             _SPEAKER.clear()
             _SPEAKER.update(context=context, settings=settings, device=device if kind == device.type else
-                            torch.device("cpu"), stage=stage, gpu_budget=budget)
+                            torch.device("cpu"), stage=stage, gpu_budget=budget, host_budget=host)
             self.pools[kind] = ProcessPoolExecutor(count, mp_context=multiprocessing.get_context("fork"),
                                                    initializer=_initialise_speaker)
             list(self.pools[kind].map(_started, range(count)))   # every worker forked now, before the GPU is used
         self.workers, self.cpu_workers = workers, cpu_workers
         self.device = device
         self.cpu_batches, self.cpu_period = settings.cpu_batches, settings.cpu_period
-        self.deferred = [tuple(level) for level in deferred]
+        #: each device's levels by its kind (the class docstring); CPU workers never speak beside a CPU speak device
+        self.deferred = {device.type: [tuple(level) for level in deferred]}
+        if cpu_workers:
+            self.deferred["cpu"] = [tuple(level) for level in cpu_deferred]
         self.readings = 0
 
-    def _pool(self, k: int) -> ProcessPoolExecutor:
-        """The workers of the device that batch ``k`` of a round is spoken on (`batch_device`)."""
-        return self.pools[batch_device(k, self.cpu_batches, self.cpu_period, self.device.type)]
+    def _kind(self, k: int) -> str:
+        """The kind of the device that batch ``k`` of a round is spoken on (`batch_device`)."""
+        return batch_device(k, self.cpu_batches, self.cpu_period, self.device.type)
 
     def speak(self, model: Prior, windows: Sequence[Window], places: Sequence[Sequence[int]], round_: int,
               directory: Path, batches: Sequence[int], launch: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -798,10 +825,11 @@ class Speakers:
         torch.save(model.state_dict(), state)
 
         def submit(k: int, budget: int | None = None) -> Any:
-            return self._pool(k).submit(_speak, round_, str(state), str(directory), k, list(places[k]),
-                                        [self.stage.record(windows[i]) for i in places[k]], dict(launch), budget)
+            return self.pools[self._kind(k)].submit(_speak, round_, str(state), str(directory), k, list(places[k]),
+                                                    [self.stage.record(windows[i]) for i in places[k]], dict(launch),
+                                                    budget)
 
-        return self._results(state, list(batches), submit)
+        return self._results(state, list(batches), submit, self._kind)
 
     def read(self, model: Prior, windows: Sequence[Window], places: Sequence[Sequence[int]], split: str,
              draw: int = 0) -> list[list[WindowResult]]:
@@ -818,7 +846,7 @@ class Speakers:
                 return pool.submit(_read, self.readings, str(state), split, list(places[k]),
                                    [self.stage.record(windows[i]) for i in places[k]], draw, budget)
 
-            return self._results(state, list(range(len(places))), submit)
+            return self._results(state, list(range(len(places))), submit, lambda k: self.device.type)
 
     def measure(self, round_: int, directory: Path, model: Prior, kind: str | None = None) -> dict[str, Any]:
         """O15: one worker's memory at the formal size — the measured batches of round ``round_`` (`measured_batches`: stage
@@ -835,42 +863,47 @@ class Speakers:
         finally:
             state.unlink()
 
-    def _results(self, state: Path, keys: list[int], submit: Callable[..., Any]) -> list[Any]:
-        """Each batch's result (``keys``, submitted by ``submit``), in order: a batch whose GPU worker ran out of its
-        share spoken again after the others at the levels of `deferred` (class docstring), each level's batches in
-        order, at most its number at once; past the last level, its out of memory fails the round. On a failure the
-        tasks not started are cancelled; the model file ``state`` goes once every running task has ended."""
+    def _results(self, state: Path, keys: list[int], submit: Callable[..., Any], kind_of: Callable[[int], str]
+                 ) -> list[Any]:
+        """Each batch's result (``keys``, submitted by ``submit``; ``kind_of`` gives its device's kind), in order: a
+        batch past its worker's share (`PAST_SHARE`) spoken again after the others at its device's levels of
+        `deferred` (class docstring), each level's batches in order, at most its number at once; past the last level,
+        its error fails the round. On a failure the tasks not started are cancelled; the model file ``state`` goes once
+        every running task has ended."""
         futures = [submit(k) for k in keys]
         submitted = list(futures)
         try:
             out: dict[int, Any] = {}
-            pending = []
+            pending: dict[str, list[int]] = {}
             for k, future in zip(keys, futures):
                 try:
                     out[k] = future.result()
-                except torch.OutOfMemoryError:
-                    if not self.deferred:
+                except PAST_SHARE:
+                    if not self.deferred[kind_of(k)]:
                         raise
-                    pending.append(k)
-            for at_once, budget in self.deferred:           # the peaks last, fewer at once (D191)
-                if not pending:
-                    break
-                queue, running, pending = sorted(pending), {}, []
-                while queue or running:
-                    while queue and len(running) < at_once:
-                        k = queue.pop(0)
-                        future = submit(k, budget)
-                        submitted.append(future)
-                        running[future] = k
-                    done, _ = wait(running, return_when=FIRST_COMPLETED)
-                    for future in sorted(done, key=running.get):
-                        k = running.pop(future)
-                        try:
-                            out[k] = future.result()
-                        except torch.OutOfMemoryError:
-                            pending.append(k)
-            if pending:
-                raise torch.OutOfMemoryError(f"batches {sorted(pending)}: past the last level's budget (D191)")
+                    pending.setdefault(kind_of(k), []).append(k)
+            for kind in sorted(pending, key=lambda kind: kind == "cpu"):       # the peaks last (D191), the GPU's first
+                past = pending[kind]
+                for at_once, budget in self.deferred[kind]:                    # fewer at once
+                    if not past:
+                        break
+                    queue, running, past = sorted(past), {}, []
+                    while queue or running:
+                        while queue and len(running) < at_once:
+                            k = queue.pop(0)
+                            future = submit(k, budget)
+                            submitted.append(future)
+                            running[future] = k
+                        done, _ = wait(running, return_when=FIRST_COMPLETED)
+                        for future in sorted(done, key=running.get):
+                            k = running.pop(future)
+                            try:
+                                out[k] = future.result()
+                            except PAST_SHARE as error:
+                                past.append(k)
+                                failed = error
+                if past:
+                    raise type(failed)(f"batches {sorted(past)}: past the last level's budget (D191)")
             return [out[k] for k in keys]
         except BaseException:
             for future in submitted:
@@ -894,13 +927,22 @@ SPEAKER_ALLOCATOR = "expandable_segments:True"
 
 
 def _initialise_speaker() -> None:
-    """A worker's torch on one thread, its compiler too (module docstring of `Speakers`), and its CUDA allocator
-    (`SPEAKER_ALLOCATOR`), set before it first uses the GPU."""
+    """A worker's torch on one thread, its compiler too (module docstring of `Speakers`), its CUDA allocator
+    (`SPEAKER_ALLOCATOR`), set before it first uses the GPU, and its handler of the host cap's signal
+    (`_past_host_share`)."""
     import torch._inductor.config as inductor
 
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = SPEAKER_ALLOCATOR
     torch.set_num_threads(1)
     inductor.compile_threads = 1
+    signal.signal(signal.SIGUSR1, _past_host_share)
+
+
+def _past_host_share(signum: int, frame: Any) -> None:
+    """The handler of the host cap's signal (`_PeakSampler`): `HostMemoryError` in the main thread, where the batch
+    is."""
+    raise HostMemoryError(f"a CPU worker's batch past its host share of {_HOST_CAP['cap'] / 2**30:.2f} GiB "
+                          f"(D193 (4))")
 
 
 def _started(_: int) -> int:
@@ -922,17 +964,29 @@ def _worker_context() -> tuple[Context, Settings, Stage]:
 def _freed(context: Context, budget: int | None) -> None:
     """After a task: a worker's GPU cache freed (its batch's tensors gone: an out of memory is raised again without
     the batch's frames, `_speak`) and its share capped again where the task had a budget of its own (``budget``: the
-    share; None: unchanged)."""
+    share; None: unchanged). A CPU worker with a host share gives the heap's free pages back to the host, so that the
+    next batch's cap reads only what the worker holds (D193 (4); glibc's ``malloc_trim``)."""
     if context.device.type == "cuda":
         torch.cuda.empty_cache()
+    elif _SPEAKER["host_budget"] is not None:
+        ctypes.CDLL(None).malloc_trim(0)
     _budget(context, budget)
 
 
 def _budget(context: Context, budget: int | None) -> None:
-    """A worker's allocator capped at ``budget`` for a task (`_cap_gpu`; D191's batch spoken again alone), or left as it
-    is (None)."""
-    if budget is not None:
+    """A GPU worker's allocator capped at ``budget`` for a task (`_cap_gpu`; D191's batch spoken again alone), or left
+    as it is (None). A CPU worker's budget is its host cap (`_host_capped`)."""
+    if budget is not None and context.device.type == "cuda":
         _cap_gpu(context.device, budget)
+
+
+def _host_capped(context: Context, budget: int | None) -> Any:
+    """The host cap of a CPU worker's task (D193 (4), `_PeakSampler` with a cap): ``budget`` for a batch spoken again
+    at a level, else the worker's share (`Speakers`' ``host_budget``); no cap on a GPU worker or without a share."""
+    cap = _SPEAKER["host_budget"] if budget is None else budget
+    if context.device.type != "cpu" or cap is None:
+        return nullcontext()
+    return _PeakSampler(_own_memory()["swapped"], cap, HOST_CAP_SAMPLE_S)
 
 
 def _cap_gpu(device: torch.device, budget: int) -> None:
@@ -965,12 +1019,14 @@ def _speak(round_: int, state: str, directory: str, k: int, places: list[int], r
         raise ValueError(f"round {round_}, batch {k}: the worker drew other windows than the campaign")
     _budget(context, budget)
     try:
-        return spoken_batch(stage, held["model"], context, windows, places, settings, round_, Path(directory), k, launch)
-    except torch.OutOfMemoryError as error:
-        short = str(error)          # the batch's frames, and its tensors, let go with this block: the cache freed below
+        with _host_capped(context, budget):
+            return spoken_batch(stage, held["model"], context, windows, places, settings, round_, Path(directory), k,
+                                launch)
+    except PAST_SHARE as error:
+        past = type(error), str(error)      # the batch's frames, and its tensors, let go with this block: freed below
     finally:
         _freed(context, None if budget is None else held["gpu_budget"])
-    raise torch.OutOfMemoryError(short)
+    raise past[0](past[1])
 
 
 def _read(reading: int, state: str, split: str, places: list[int], records: list[dict[str, Any]], draw: int,
@@ -992,12 +1048,13 @@ def _read(reading: int, state: str, split: str, places: list[int], records: list
         held.update(reading=reading, reader=model.eval())
     _budget(context, budget)
     try:
-        return stage.read_batch(held["reader"], context, windows, places, settings, split, draw)
-    except torch.OutOfMemoryError as error:
-        short = str(error)          # as `_speak`'s
+        with _host_capped(context, budget):
+            return stage.read_batch(held["reader"], context, windows, places, settings, split, draw)
+    except PAST_SHARE as error:
+        past = type(error), str(error)      # as `_speak`'s
     finally:
         _freed(context, None if budget is None else held["gpu_budget"])
-    raise torch.OutOfMemoryError(short)
+    raise past[0](past[1])
 
 
 def _measure(round_: int, state: str, directory: str) -> dict[str, Any]:
@@ -1073,34 +1130,56 @@ def _own_memory() -> dict[str, int]:
 
 class _PeakSampler:
     """The most of this process's own host memory while a block runs (`_own_memory`: its private resident pages and its
-    share of the swap less ``swapped_at_start``), sampled every `PEAK_SAMPLE_S` by a thread and once at the end; a
+    share of the swap less ``swapped_at_start``), sampled every ``every_s`` by a thread and once at the end; a
     failure of the thread is raised at the end. The kernel's peak (``ru_maxrss``) is not used: a forked process
-    inherits its parent's, and it counts the pages it shares."""
+    inherits its parent's, and it counts the pages it shares.
 
-    def __init__(self, swapped_at_start: int) -> None:
+    With a ``cap`` (a CPU worker's host share, D193 (4)), the block stops with `HostMemoryError` once a sample is past
+    it: at the start, raised here; later, the thread signals the main thread once and stops, and its handler
+    (`_past_host_share`, set by `_initialise_speaker`) raises the error where the block is, after the C call in progress
+    (one torch operation). The block stops before the host swaps, unless it grows by more than the host's free memory in
+    one period ``every_s`` (an estimate)."""
+
+    def __init__(self, swapped_at_start: int, cap: int | None = None, every_s: float = PEAK_SAMPLE_S) -> None:
         self.swapped_at_start = swapped_at_start
+        self.cap = cap
+        self.every_s = every_s
         self.peak = 0
         self._failed: BaseException | None = None
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
 
-    def _sample(self) -> None:
+    def _sample(self) -> bool:
+        """One sample; True once it has signalled the main thread past the cap."""
         own = _own_memory()
-        self.peak = max(self.peak, own["resident"] + own["swapped"] - self.swapped_at_start)
+        now = own["resident"] + own["swapped"] - self.swapped_at_start
+        self.peak = max(self.peak, now)
+        if self.cap is not None and _HOST_CAP["armed"] and now > self.cap:     # one signal; the main thread raises it
+            _HOST_CAP["armed"] = False
+            signal.pthread_kill(threading.main_thread().ident, signal.SIGUSR1)
+            return True
+        return False
 
     def _run(self) -> None:
         try:
-            while not self._stop.wait(PEAK_SAMPLE_S):
-                self._sample()
+            while not self._stop.wait(self.every_s):
+                if self._sample():
+                    return
         except BaseException as error:                  # raised in the measuring thread at the end
             self._failed = error
 
     def __enter__(self) -> _PeakSampler:
         self._sample()
+        if self.cap is not None:
+            if self.peak > self.cap:
+                raise HostMemoryError(f"a CPU worker past its host share of {self.cap / 2**30:.2f} GiB before its "
+                                      f"batch (D193 (4))")
+            _HOST_CAP.update(cap=self.cap, armed=True)
         self._thread.start()
         return self
 
     def __exit__(self, *exc: Any) -> None:
+        _HOST_CAP["armed"] = False              # a signal sent before this is raised in the join below
         self._stop.set()
         self._thread.join()
         if self._failed is not None:

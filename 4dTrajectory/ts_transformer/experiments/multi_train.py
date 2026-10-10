@@ -29,8 +29,10 @@ parts (`stage_d`):
   (`MultiSettings.branching`, D182, MC12; `grid` the default, D143's points): the branch points found back from each
   varied aircraft's event (`post_branches.backward_round`, `multi.backward`), the record holding besides each group's
   span and depth (``group_depths_s``), the searches and those that found a decision point, and the continuations flown
-  only to the event + 60 s and those flown to their window's end. The readout's ``go_arounds`` and ``aircraft`` of each
-  span give the go-arounds per aircraft that D182 asks to watch. ``--front-attention`` (`MultiSettings.front_attention`,
+  only to the event + 60 s and those flown to their window's end. ``--branching majority`` (D192): the same search with
+  the majority point in place of point B (`multi.backward`), its record holding besides each group's kind
+  (``group_kinds``) and each majority point's span and depth (``majority_depths_s``). The readout's ``go_arounds`` and
+  ``aircraft`` of each span give the go-arounds per aircraft that D182 asks to watch. ``--front-attention`` (`MultiSettings.front_attention`,
   D190 (2); `copied` the default): how a window's copies read the front of the speaker's cache they hold once.
 - **The selection readout** (§5 item 2, `selection_windows`, `read_batch`, `selection_readout`): at most
   ``select_per_airport`` real windows of each span of each airport of the select days, their anchors in an order drawn
@@ -90,7 +92,7 @@ from ts_transformer.experiments.post_train import (
 )
 from ts_transformer.experiments.post_window_loop import LANDED, LOST_SEPARATION, WindowLoop, checked_edges
 from ts_transformer.multi import credit
-from ts_transformer.multi.backward import BACKWARD, BRANCHINGS, GRID
+from ts_transformer.multi.backward import BRANCHINGS, GRID, MAJORITY
 from ts_transformer.multi.census import WindowCount, loop_positions, window_losses
 from ts_transformer.multi.separation import PAIRS, Answering
 from ts_transformer.multi.timing import (
@@ -150,7 +152,8 @@ class MultiSettings:
     #: ``checkpoint_sha256`` (`post_train.start_of`)
     start: dict[str, Any]
     #: where a round's branch points are (D182, MC12): `GRID`, D143's (the default: the behaviour before D182; a record
-    #: without the setting reads as it), or `BACKWARD`, found back from each varied aircraft's event (`multi.backward`)
+    #: without the setting reads as it), or `BACKWARD` / `MAJORITY`, found back from each varied aircraft's event with
+    #: point B (D182) or the majority point (D192) (`multi.backward`)
     branching: str = GRID
     #: how a window's copies (a branch point's continuations) read the front of the speaker's cache they hold once
     #: (D190 (2), the user's choice; `FRONT_ATTENTIONS`): `COPIED`, the default (bit for bit the behaviour before it; a
@@ -284,7 +287,8 @@ def speak_batch(model: Prior, context: Context, windows: Sequence[Window], place
     backward_round`), its informative groups written to ``groups_<k>.pt``, and its record (`post_train.speak_round`'s
     sums, of every commanded aircraft; backward, besides: each group's span and depth, the searches and those that found
     a decision point, the continuations flown to the event + 60 s only and those flown to their window's end, and the
-    search's seconds, steps and rows)."""
+    search's seconds, steps and rows; majority, besides: each group's kind and each majority point's span and depth).
+    The majority point needs more than half of the ``continuations`` avoiding (D192: 5 of 8)."""
     train = context.splits["train"]
     batch = [windows[p] for p in places]
     common = dict(interval_s=context.interval_s, variant=context.variant, edges_reference=context.edges_reference,
@@ -293,8 +297,9 @@ def speak_batch(model: Prior, context: Context, windows: Sequence[Window], place
                   loop_options={**loop_options(context), "attention": settings.front_attention})
     data = (model, context.start_loop("train", batch), batch, places, train["sentences"], train["flights"],
             context.geometries, context.rosters, context.finals, context.words)
-    found = (backward_round(*data, **common) if settings.branching == BACKWARD else
-             branch_round(*data, seed=settings.seed, round_=round_, **common))
+    majority = settings.continuations // 2 + 1 if settings.branching == MAJORITY else None
+    found = (branch_round(*data, seed=settings.seed, round_=round_, **common) if settings.branching == GRID else
+             backward_round(*data, **common, majority=majority))
     informative = [g for g in found.groups if g.informative]
     save_batch_file(informative, directory / f"groups_{k}.pt")
     anchors = {w.signal_index for w in batch}              # a window's count is in each of its aircraft's ends
@@ -302,6 +307,9 @@ def speak_batch(model: Prior, context: Context, windows: Sequence[Window], place
         "group_depths_s": [[batch[0].span_s, depth] for depth in found.depths_s], "searches": found.searches,
         "searches_found": found.found, "continuations_to_event": found.to_event, "continuations_to_end": found.to_end,
         "search_s": found.search_s, "search_steps": found.search_steps, "search_rows": found.search_rows}
+    if settings.branching == MAJORITY:
+        searched |= {"group_kinds": found.kinds,
+                     "majority_depths_s": [[batch[0].span_s, depth] for depth in found.majority_depths_s]}
     return {"groups": len(found.groups), "informative_groups": len(informative),
             "spoken_again": len(found.spoken_again), "differed": list(found.differed),
             "reward_sum": sum(r.reward for r in found.first),
@@ -523,15 +531,22 @@ def profiled_fit(profile: Path, settings: MultiSettings, inputs: dict[str, Any],
     share is spoken again after the others at fewer at once (D191, the user, 2026-10-10: the batches past their share
     go last, and more workers; `Speakers`' ``deferred``): at half the workers, a quarter, … one, each batch's budget
     the GPU less this process's hold and what each idle GPU worker holds, shared by the batches at once. So the GPU
-    refuses only workers that could not hold what they hold between batches; D179's margin is the host's and the
-    pass's (a host or a pass short of memory has no second try)."""
+    refuses only workers that could not hold what they hold between batches; D179's margin is the pass's and the GPU
+    workers' host part (a pass short of memory has no second try). The CPU workers in the same way (D193 (4)): each
+    has the host's part left by the GPU workers' (at their peak with its margin) in equal shares (`Speakers`'
+    ``host_budget``), a CPU batch past its share goes to the CPU's levels (``cpu_deferred``), and the fit counts a CPU
+    worker at what it holds between batches, refused only where the last level cannot hold the CPU profile's host peak
+    with its margin."""
     measure = _profiled(profile, settings, inputs, device, speak_device)
     cpu = _profiled(cpu_profile, settings, inputs, device, torch.device("cpu")) if cpu_workers else None
     measured, passed = (with_margin(measure[k], measure["margin"]) for k in ("measured", "pass"))
     gpu = measure["measured"]["gpu"]
     if gpu is not None:                     # a batch past its share goes to the levels (D191): a worker's floor its hold
         measured = {**measured, "gpu": {**gpu, "peak": gpu["now"]}}
-    cpu_measured = with_margin(cpu["measured"], cpu["margin"]) if cpu is not None else None
+    cpu_measured = None
+    if cpu is not None:                     # a CPU batch past its share goes to the levels (D193 (4)): its floor its hold
+        host = cpu["measured"]["host"]
+        cpu_measured = {**cpu["measured"], "host": {**host, "peak": host["now"]}}
     available = available_memory(device)
     short = workers_fit(workers, measured, passed, available, held_now=False, cpu_workers=cpu_workers,
                         cpu_measured=cpu_measured)
@@ -540,22 +555,38 @@ def profiled_fit(profile: Path, settings: MultiSettings, inputs: dict[str, Any],
                          + " — start fewer (--speak-workers, --cpu-workers)")
     budget, deferred = None, []
     if speak_device.type == "cuda":
-        shared = available["gpu"] - passed["now"]                       # the workers' part of the GPU while they speak
-        budget = shared // workers
-        hold = gpu["now"] + measure["measured"]["held"]["reader_model"]           # an idle worker's
-        at_once = workers // 2
-        while at_once >= 1:
-            deferred.append([at_once, (shared - (workers - at_once) * hold) // at_once])
-            at_once = at_once // 2 if at_once > 1 else 0
-        alone = deferred[-1][1] if deferred else budget
-        peak = int(gpu["peak"] * measure["margin"]) + measure["measured"]["held"]["reader_model"]
-        if alone < peak:
-            raise SystemExit(f"the speaking workers do not fit (O15, from the profile): a batch at the profile's GPU "
-                             f"peak ({peak / 2**30:.2f} GiB with its margin) has {alone / 2**30:.2f} GiB at the last "
-                             f"level — start fewer (--speak-workers)")
+        reader = measure["measured"]["held"]["reader_model"]
+        budget, deferred = _levels(available["gpu"] - passed["now"], workers, gpu["now"] + reader,
+                                   int(gpu["peak"] * measure["margin"]) + reader, "GPU", "--speak-workers")
+    host_budget, cpu_deferred = None, []
+    if cpu is not None:
+        held = cpu["measured"]["held"]
+        besides = held["reader_model"] + held["series"]                         # a CPU worker's, beside its batch
+        gpu_host = workers * (measured["host"]["peak"] + measure["measured"]["held"]["series"])
+        host_budget, cpu_deferred = _levels(available["host"] - gpu_host, cpu_workers, host["now"] + besides,
+                                            int(host["peak"] * cpu["margin"]) + besides, "host", "--cpu-workers")
     return {"profile": str(profile), "speak_workers": workers, "speak_device": str(speak_device),
             "cpu_profile": None if cpu_profile is None else str(cpu_profile), "cpu_workers": cpu_workers,
-            "margin": measure["margin"], "available": available, "gpu_budget": budget, "deferred": deferred}
+            "margin": measure["margin"], "available": available, "gpu_budget": budget, "deferred": deferred,
+            "host_budget": host_budget, "cpu_deferred": cpu_deferred}
+
+
+def _levels(shared: int, workers: int, hold: int, peak: int, memory: str, option: str) -> tuple[int, list[list[int]]]:
+    """``workers`` workers' share of ``shared`` bytes, and the levels a batch past its share is spoken again at (D191):
+    half the workers at once, a quarter, … one, each batch's budget ``shared`` less what each idle worker holds
+    (``hold``), in equal parts. Refused by name where the last level cannot hold a batch at ``peak`` (the profile's
+    peak with its margin and what a worker holds beside its batch; ``memory`` names it, ``option`` the workers)."""
+    levels = []
+    at_once = workers // 2
+    while at_once >= 1:
+        levels.append([at_once, (shared - (workers - at_once) * hold) // at_once])
+        at_once = at_once // 2 if at_once > 1 else 0
+    alone = levels[-1][1] if levels else shared // workers
+    if alone < peak:
+        raise SystemExit(f"the speaking workers do not fit (O15, from the profile): a batch at the profile's {memory} "
+                         f"peak ({peak / 2**30:.2f} GiB with its margin) has {alone / 2**30:.2f} GiB at the last "
+                         f"level — start fewer ({option})")
+    return shared // workers, levels
 
 
 def require_finished(campaign: Path) -> None:
@@ -647,7 +678,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--data-sentences", type=int, required=True, help="the data term's sentences of an update")
     parser.add_argument("--select-per-airport", type=int, required=True)
     parser.add_argument("--branching", choices=BRANCHINGS, default=GRID,
-                        help="D182: the branch points, D143's grid (default) or found back from each event")
+                        help="D182, D192: the branch points, D143's grid (default) or found back from each event "
+                             "with point B (backward) or the majority point (majority)")
     parser.add_argument("--front-attention", choices=FRONT_ATTENTIONS, default=COPIED,
                         help="D190 (2): how a window's copies read the front they hold once (copied: bit for bit; "
                              "merged: no copy)")
@@ -740,7 +772,8 @@ def main(argv: list[str] | None = None) -> int:
                            args.cpu_workers)
         print(json.dumps({"profiled_fit": fit}), flush=True)
         speakers = Speakers(context, settings, args.speak_workers, speak_device, stage=stage,
-                            gpu_budget=fit["gpu_budget"], cpu_workers=args.cpu_workers, deferred=fit["deferred"])
+                            gpu_budget=fit["gpu_budget"], cpu_workers=args.cpu_workers, deferred=fit["deferred"],
+                            host_budget=fit["host_budget"], cpu_deferred=fit["cpu_deferred"])
     context = replace(context, device=device, base=context.base.to(device).eval())
     try:
         open_campaign(out, inputs, git, opened["checks"], schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER,
