@@ -44,6 +44,30 @@ def _close(a, b):
     return (a is None) == (b is None) and (a is None or a == pytest.approx(b, rel=1e-6, abs=1e-9))
 
 
+def test_the_updates_consistency_reads_one_way_as_one_and_independent_ways_as_zero():
+    """`Consistency`: four updates pointing one way read pairwise and halves' cosines 1 and coherence 1; four orthogonal
+    ones read 0, 0 and 1/√4; by span (a group's slice of the flat gradient) apart from the whole; a part that reaches no
+    parameter of a span reads None there."""
+    spans = {"prior": slice(0, 4), "traffic": slice(4, 6), "all": slice(0, 6)}
+    eye = torch.eye(6, dtype=torch.float64)
+    one, apart = gradients.Consistency(spans), gradients.Consistency(spans)
+    for i in range(4):
+        same = torch.tensor([1.0, 2.0, 0.0, 0.0, 3.0, 0.0], dtype=torch.float64) * (i + 1)
+        one.add({"surrogate": same, "data": same, "whole": same})
+        apart.add({"surrogate": eye[i], "data": eye[i], "whole": eye[i]})
+    aligned, orthogonal = one.result(), apart.result()
+    for name in ("prior", "traffic", "all"):
+        assert aligned[name]["surrogate"] == {"updates": 4, "pairwise_cosine": pytest.approx(1.0),
+                                              "halves_cosine": pytest.approx(1.0), "coherence": pytest.approx(1.0)}
+    assert orthogonal["prior"]["data"] == {"updates": 4, "pairwise_cosine": 0.0, "halves_cosine": 0.0,
+                                           "coherence": pytest.approx(0.5)}
+    assert orthogonal["traffic"]["whole"] == {"updates": 0, "pairwise_cosine": None, "halves_cosine": None,
+                                              "coherence": None}            # e0..e3 reach no traffic parameter
+    parameters = [torch.nn.Parameter(torch.zeros(2, 2)), torch.nn.Parameter(torch.zeros(2))]
+    assert gradients.spans_of({"prior": range(0, 1), "traffic": range(1, 2)}, parameters) == {
+        "prior": slice(0, 4), "traffic": slice(4, 6), "all": slice(0, 6)}
+
+
 @pytest.fixture
 def world(tmp_path, monkeypatch):
     """A campaign of one round done and the next left half done (its groups on disk), the runner's world: the stage's
@@ -110,6 +134,19 @@ def test_the_read_takes_every_kth_update_at_the_model_that_spoke_the_round(world
         for name in ("prior", "traffic", "all"):
             assert sum(update["parts"][name]["share"].values()) == pytest.approx(1.0)
     assert set(held["means"]) == {"prior", "traffic", "all"}
+    for name in ("prior", "traffic", "all"):                # two updates read: the halves' cosine is their cosine
+        surrogate = held["consistency"][name]["surrogate"]
+        assert surrogate["updates"] == 2 and surrogate["halves_cosine"] == pytest.approx(surrogate["pairwise_cosine"])
+    assert held["consistency"]["traffic"]["data"]["pairwise_cosine"] is None       # the data term has no traffic
+    for name in ("prior", "traffic", "all"):        # each part's own gradients: two updates' coherence from their norms
+        for part in ("surrogate", "data", "whole"):
+            c = held["consistency"][name][part]
+            if c["updates"] < 2:
+                continue
+            n0, n1 = (u["parts"][name]["whole_norm"] if part == "whole" else u["parts"][name]["norm"][part]
+                      for u in held["updates"])
+            assert c["coherence"] == pytest.approx((n0 ** 2 + n1 ** 2 + 2 * n0 * n1 * c["halves_cosine"]) ** 0.5
+                                                   / (n0 + n1))
     assert held["means"]["all"]["share"]["data"] == pytest.approx(
         np.mean([u["parts"]["all"]["share"]["data"] for u in held["updates"]]))
 

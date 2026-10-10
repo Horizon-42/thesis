@@ -12,9 +12,13 @@ advantages), of the pull to the base (times `post.loss.KL_WEIGHT`) and of the da
 `post.loss.update_gradients`: each part's norm and its share of the update's direction, ⟨g_part, g⟩ / |g|² with g the
 sum of the parts (the shares add up to 1), and the cosine of each pair. Under AdamW a parameter's step is about its
 learning rate whatever its gradient's size: the shares say which part points the update, the learning rate how far it
-goes. The means over the updates read, by group.
+goes. The means over the updates read, by group. And whether the updates read point one way (the user, 2026-10-10:
+after a 3× learning rate did worse, is the reward's direction noise?), for the surrogate, the data term (a reference:
+one objective on every batch) and their sum with the pull, by group and over all (`Consistency`): the mean pairwise
+cosine of the updates' gradients, the cosine of the sums of the updates of even and odd place, and the coherence
+|Σ g_i| / Σ |g_i| (1 when every update points one way, about 1/√n when they are independent).
 
-Writes one JSON (``ts-pass-gradients-v1``) and prints the means. From a clean checkout unless ``--smoke``; the
+Writes one JSON (``ts-pass-gradients-v2``) and prints the means. From a clean checkout unless ``--smoke``; the
 closed loop's (D69) and the edge features' (D104) checks first.
 
     python run_ts.py pass_gradients --campaign 4dTrajectory/outputs/POOLED/multi/<campaign> --round <r> \\
@@ -40,11 +44,14 @@ from ts_transformer.post.traffic_attention import parameter_groups
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 #: The format of the read.
-PASS_GRADIENTS_SCHEMA = "ts-pass-gradients-v1"
+PASS_GRADIENTS_SCHEMA = "ts-pass-gradients-v2"
 #: The parts of the loss, in `post.loss.update_gradients`'s order.
 PARTS = ("surrogate", "pull", "data")
 #: Over every parameter group.
 ALL = "all"
+#: The gradients whose consistency across the updates is read: the surrogate's, the data term's and the update's whole
+#: (the pull, a hundredth of the direction, left out apart).
+CONSISTENT = ("surrogate", "data", "whole")
 
 
 def _flat(grads: Sequence[torch.Tensor | None], parameters: Sequence[torch.nn.Parameter]) -> torch.Tensor:
@@ -71,6 +78,68 @@ def measured(parts: Mapping[str, Sequence[torch.Tensor | None]], groups: Mapping
             "cosine": {f"{a}|{b}": (float(vectors[a] @ vectors[b]) / (norms[a] * norms[b]) if norms[a] * norms[b] else
                                     None) for i, a in enumerate(PARTS) for b in PARTS[i + 1:]}}
     return out
+
+
+class Consistency:
+    """Whether the updates read point one way (module docstring), streamed by part (`CONSISTENT`) and by span of the
+    flat gradient (``spans``: each group's and `ALL`'s): each update's gradient g_i goes to the sum of the updates of
+    its place's parity (H0, H1) and, as a unit vector, is dotted with the sum of the units before it (U), so that the
+    mean pairwise cosine is 2 Σ_i ĝ_i·U_{i−1} / (m(m−1)) over the m updates whose gradient there is not 0; the halves'
+    cosine is cos(H0, H1); the coherence |H0 + H1| / Σ_i |g_i|. None where a part reaches no parameter of a span (or
+    fewer than two updates do)."""
+
+    def __init__(self, spans: Mapping[str, slice]) -> None:
+        self.spans = dict(spans)
+        size = max(span.stop for span in self.spans.values())
+        self.updates = 0
+        self.halves = {part: [torch.zeros(size, dtype=torch.float64) for _ in range(2)] for part in CONSISTENT}
+        self.units = {part: {name: torch.zeros(span.stop - span.start, dtype=torch.float64)
+                             for name, span in self.spans.items()} for part in CONSISTENT}
+        self.pairs = {part: dict.fromkeys(self.spans, 0.0) for part in CONSISTENT}
+        self.norms = {part: dict.fromkeys(self.spans, 0.0) for part in CONSISTENT}
+        self.counts = {part: dict.fromkeys(self.spans, 0) for part in CONSISTENT}
+
+    def add(self, vectors: Mapping[str, torch.Tensor]) -> None:
+        """One update's flat gradients (``vectors``, each part of `CONSISTENT`)."""
+        for part in CONSISTENT:
+            g = vectors[part]
+            self.halves[part][self.updates % 2] += g
+            for name, span in self.spans.items():
+                piece = g[span]
+                norm = float(piece.norm())
+                if not norm:
+                    continue
+                unit = piece / norm
+                self.pairs[part][name] += float(unit @ self.units[part][name])
+                self.units[part][name] += unit
+                self.norms[part][name] += norm
+                self.counts[part][name] += 1
+        self.updates += 1
+
+    def result(self) -> dict[str, dict[str, dict[str, float | None]]]:
+        """By span and part: the mean pairwise cosine, the halves' cosine and the coherence (class docstring)."""
+        out: dict[str, dict[str, dict[str, float | None]]] = {}
+        for name, span in self.spans.items():
+            out[name] = {}
+            for part in CONSISTENT:
+                m = self.counts[part][name]
+                h0, h1 = (h[span] for h in self.halves[part])
+                n0, n1 = float(h0.norm()), float(h1.norm())
+                out[name][part] = {
+                    "updates": m,
+                    "pairwise_cosine": 2 * self.pairs[part][name] / (m * (m - 1)) if m >= 2 else None,
+                    "halves_cosine": float(h0 @ h1) / (n0 * n1) if n0 * n1 else None,
+                    "coherence": float((h0 + h1).norm()) / self.norms[part][name] if m else None}
+        return out
+
+
+def spans_of(groups: Mapping[str, Sequence[int]], parameters: Sequence[torch.nn.Parameter]) -> dict[str, slice]:
+    """Each group's span of the flat gradient (`_flat`'s order: ``parameters``) and `ALL`'s."""
+    starts = [0]
+    for p in parameters:
+        starts.append(starts[-1] + p.numel())
+    return {**{name: slice(starts[indices[0]], starts[indices[-1] + 1]) for name, indices in groups.items()},
+            ALL: slice(0, starts[-1])}
 
 
 def means(updates: Sequence[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -146,27 +215,34 @@ def main(argv: list[str] | None = None) -> int:
                                                                                                args.round, 1]),
                                     device, part_width=stage.part_width, segment_rows=segment_rows)
     updates = []
+    consistency = Consistency(spans_of(groups, parameters))
     for u, (pieces, data) in enumerate(pairs):
         if u % args.every:
             continue
         parts = update_gradients(model, start, context.base, pieces, data, parameters)
         updates.append({"update": u, "groups": len(pieces), "parts": measured(parts, groups, parameters)})
+        flat = {part: _flat(parts[part], parameters) for part in PARTS}
+        consistency.add({"surrogate": flat["surrogate"], "data": flat["data"], "whole": sum(flat.values())})
         print(json.dumps({"update": u, "share": updates[-1]["parts"][ALL]["share"]}), flush=True)
     if not updates:
         raise SystemExit(f"{directory}: its groups give no update (no informative group)")
-    summary = means(updates)
+    summary, across = means(updates), consistency.result()
     write_json_atomic(out, {
         "schema": PASS_GRADIENTS_SCHEMA, "written_utc": utc_now(), "campaign": str(campaign), "round": args.round,
         "model_round": model_round, "every": args.every, "updates_read": len(updates), "updates_seen": u + 1,
         "group_files": len(sorted(directory.glob("groups_*.pt"))),
         "learning_rates": {g["name"]: g["lr"] for g in named},
         "git": git, "checks": opened["checks"], "smoke": args.smoke, "device": str(device), "threads": args.threads,
-        "means": summary, "updates": updates})
+        "means": summary, "consistency": across, "updates": updates})
     for name, held in summary.items():
         print(f"{name}: share " + ", ".join(f"{part} {_shown(held['share'][part])}" for part in PARTS)
               + " | norm " + ", ".join(f"{part} {held['norm'][part]:.4g}" for part in PARTS)
               + " | cosine " + ", ".join(f"{pair} {_shown(value)}" for pair, value in held["cosine"].items()),
               flush=True)
+    for name, held in across.items():
+        print(f"{name}: across updates " + "; ".join(
+            f"{part} pairwise {_shown(c['pairwise_cosine'])} halves {_shown(c['halves_cosine'])} coherence "
+            f"{_shown(c['coherence'])}" for part, c in held.items()), flush=True)
     return 0
 
 
