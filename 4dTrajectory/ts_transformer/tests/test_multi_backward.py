@@ -1,8 +1,9 @@
 """Stage D, MC12: branch points found backward from each event (multi-aircraft control D182; `multi/backward.py`,
 `experiments.post_branches.backward_round`): the event, the candidate points and the judgement of a continuation; the
 search's points, its stop, the fine point, point B (and B at the decision point: one group) and its bound on trials
-whose first avoiding point is known; on the synthetic window, the points tried and chosen, the continuations of a point
-not chosen flown only to the event + 60 s, a group's W of D141; the copies held on another device; the setting."""
+whose first avoiding point is known; the majority point in B's place (D192); on the synthetic window, the points tried
+and chosen, the continuations of a point not chosen flown only to the event + 60 s, a group's W of D141; the copies held
+on another device; the setting."""
 
 from __future__ import annotations
 
@@ -65,9 +66,9 @@ def test_a_continuation_avoids_its_event():
     assert not avoids(end, answered="B", partner_answered_v=False, ended=None, go_around=False)    # its loss, still flown
 
 
-def _searched(candidates, judged):
+def _searched(candidates, judged, majority=None):
     """`search`'s steps on ``candidates``, a point tried answered by ``judged(point)``; its requests in order."""
-    calls, steps, answer = [], search(candidates, FINE), None
+    calls, steps, answer = [], search(candidates, FINE, majority), None
     while True:
         try:
             kind, p = steps.send(answer)
@@ -115,6 +116,41 @@ def test_an_event_no_point_avoids_gives_no_group_and_b_stays_within_the_bound():
     assert found.groups == () and found.tried == tuple(candidates) and not [c for c in calls if c[0] == "chosen"]
     found, _ = _searched(candidates, lambda p: [Trial(p <= 52, True)])          # avoids only with a go-around
     assert (found.decision, found.b) == (52, None) and found.tried == (92, 84, 76, 68, 60, 52, 56, 44, 36)
+
+
+def _avoiding(n, go_around=False):
+    """Eight trials of a point, the first ``n`` avoiding (with a go-around if ``go_around``)."""
+    return [Trial(j < n, go_around and j < n) for j in range(8)]
+
+
+def test_the_majority_point_is_the_first_point_behind_the_decision_point_where_5_of_8_avoid():
+    """D192 on trials whose avoiding counts are known: the decision point has 1 of 8; the next point back 4; the one
+    after 5, all with a go-around (counted: no go-around condition) — the majority point; the fine point avoids. On the
+    same trials D182 chooses the point of 4 (B: avoiding with no go-around)."""
+    candidates = [100 - STEP * j for j in range(1, 9)]               # 92, 84, …, 36
+    counts = {92: 0, 84: 0, 76: 1, 80: 2, 68: 4, 60: 5}
+    found, calls = _searched(candidates, lambda p: _avoiding(counts[p], go_around=p in (76, 60)), majority=5)
+    assert (found.decision, found.fine, found.b, found.majority) == (76, 80, None, 60)
+    assert found.groups == (76, 80, 60) and found.kinds == (backward.DECISION, backward.FINE, backward.MAJORITY_POINT)
+    assert found.tried == (92, 84, 76, 80, 68, 60)
+    assert calls[-2:] == [("trial", 60), ("chosen", 60)]
+    point_b, _ = _searched(candidates, lambda p: _avoiding(counts[p], go_around=p in (76, 60)))
+    assert point_b.b == 68 and point_b.majority is None                          # D182's B on the same trials
+
+
+def test_a_decision_point_where_5_of_8_avoid_is_the_majority_point_and_one_group():
+    candidates = [100 - STEP * j for j in range(1, 9)]
+    found, calls = _searched(candidates, lambda p: _avoiding(8 if p <= 84 else 0, go_around=True), majority=5)
+    assert (found.decision, found.fine, found.majority) == (84, None, 84)
+    assert found.groups == (84,) and found.kinds == (backward.DECISION,)
+    assert found.tried == (92, 84, 88) and [c for c in calls if c[0] == "chosen"] == [("chosen", 84)]
+
+
+def test_no_majority_point_within_the_bound_leaves_the_decision_points_groups():
+    candidates = [100 - STEP * j for j in range(1, 9)]
+    found, _ = _searched(candidates, lambda p: _avoiding(4 if p <= 88 else 0), majority=5)
+    assert (found.decision, found.fine, found.majority, found.groups) == (84, 88, None, (84, 88))
+    assert found.tried == (92, 84, 88, 76, 68, 60, 52, 44, 36)               # every point back, not past the bound
 
 
 def _backward(s, model, rules, continuations=2):
@@ -324,10 +360,11 @@ def test_the_branching_setting_defaults_to_the_grid_and_a_resume_compares_it(tmp
                                        "smoke": True}, {"head": "y", "dirty": False}, {}, **options)
 
 
-def test_stage_ds_batch_record_holds_the_searches_with_backward_only(setup, tmp_path, monkeypatch):
+def test_stage_ds_batch_record_holds_the_searches_found_backward_only(setup, tmp_path, monkeypatch):
     """MC12: a batch of stage D spoken backward records each group's span and depth, the searches and the
-    continuations flown to the event + 60 s and to the end; with the grid its record is the one before D182 (the same
-    keys); window_behaviour (R68) captures either round."""
+    continuations flown to the event + 60 s and to the end; with the majority point (D192) besides each group's kind
+    and each majority point's span and depth; with the grid its record is the one before D182 (the same keys);
+    window_behaviour (R68) captures every round."""
     from dataclasses import replace
 
     from ts_transformer.experiments import multi_train, window_behaviour
@@ -352,7 +389,7 @@ def test_stage_ds_batch_record_holds_the_searches_with_backward_only(setup, tmp_
         with window_behaviour.captured_rounds() as found:
             records[branching] = stage.speak_batch(model, context, windows, [0], chosen, 0, tmp_path / branching, 0)
         (spoken,) = found
-        assert isinstance(spoken, post_branches.BackwardRound) == (branching == backward.BACKWARD)
+        assert isinstance(spoken, post_branches.BackwardRound) == (branching != backward.GRID)
     plain = {"groups", "informative_groups", "spoken_again", "differed", "reward_sum", "faulty_steps",
              "losses_reading_fault", "outcomes"}
     assert set(records[backward.GRID]) == plain
@@ -363,6 +400,12 @@ def test_stage_ds_batch_record_holds_the_searches_with_backward_only(setup, tmp_
     assert searched["searches"] == 1 and len(searched["group_depths_s"]) == searched["groups"]
     assert all(span == 1.0 for span, _ in searched["group_depths_s"])
     assert searched["continuations_to_end"] == 2 * searched["groups"]
+    majority = records[backward.MAJORITY]
+    assert set(majority) == set(searched) | {"group_kinds", "majority_depths_s"}
+    assert len(majority["group_kinds"]) == majority["groups"]
+    assert majority["group_kinds"].count(backward.DECISION) == majority["searches_found"] == searched["searches_found"]
+    assert len(majority["majority_depths_s"]) <= majority["searches_found"]
+    assert all(span == 1.0 for span, _ in majority["majority_depths_s"])
     assert post_branches.branch_round is multi_train.branch_round and multi_train.backward_round is backward_round
 
 

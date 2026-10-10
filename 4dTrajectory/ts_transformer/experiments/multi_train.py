@@ -29,8 +29,10 @@ parts (`stage_d`):
   (`MultiSettings.branching`, D182, MC12; `grid` the default, D143's points): the branch points found back from each
   varied aircraft's event (`post_branches.backward_round`, `multi.backward`), the record holding besides each group's
   span and depth (``group_depths_s``), the searches and those that found a decision point, and the continuations flown
-  only to the event + 60 s and those flown to their window's end. The readout's ``go_arounds`` and ``aircraft`` of each
-  span give the go-arounds per aircraft that D182 asks to watch. ``--front-attention`` (`MultiSettings.front_attention`,
+  only to the event + 60 s and those flown to their window's end. ``--branching majority`` (D192): the same search with
+  the majority point in place of point B (`multi.backward`), its record holding besides each group's kind
+  (``group_kinds``) and each majority point's span and depth (``majority_depths_s``). The readout's ``go_arounds`` and
+  ``aircraft`` of each span give the go-arounds per aircraft that D182 asks to watch. ``--front-attention`` (`MultiSettings.front_attention`,
   D190 (2); `copied` the default): how a window's copies read the front of the speaker's cache they hold once.
 - **The selection readout** (§5 item 2, `selection_windows`, `read_batch`, `selection_readout`): at most
   ``select_per_airport`` real windows of each span of each airport of the select days, their anchors in an order drawn
@@ -90,7 +92,7 @@ from ts_transformer.experiments.post_train import (
 )
 from ts_transformer.experiments.post_window_loop import LANDED, LOST_SEPARATION, WindowLoop, checked_edges
 from ts_transformer.multi import credit
-from ts_transformer.multi.backward import BACKWARD, BRANCHINGS, GRID
+from ts_transformer.multi.backward import BRANCHINGS, GRID, MAJORITY
 from ts_transformer.multi.census import WindowCount, loop_positions, window_losses
 from ts_transformer.multi.separation import PAIRS, Answering
 from ts_transformer.multi.timing import (
@@ -150,7 +152,8 @@ class MultiSettings:
     #: ``checkpoint_sha256`` (`post_train.start_of`)
     start: dict[str, Any]
     #: where a round's branch points are (D182, MC12): `GRID`, D143's (the default: the behaviour before D182; a record
-    #: without the setting reads as it), or `BACKWARD`, found back from each varied aircraft's event (`multi.backward`)
+    #: without the setting reads as it), or `BACKWARD` / `MAJORITY`, found back from each varied aircraft's event with
+    #: point B (D182) or the majority point (D192) (`multi.backward`)
     branching: str = GRID
     #: how a window's copies (a branch point's continuations) read the front of the speaker's cache they hold once
     #: (D190 (2), the user's choice; `FRONT_ATTENTIONS`): `COPIED`, the default (bit for bit the behaviour before it; a
@@ -284,7 +287,8 @@ def speak_batch(model: Prior, context: Context, windows: Sequence[Window], place
     backward_round`), its informative groups written to ``groups_<k>.pt``, and its record (`post_train.speak_round`'s
     sums, of every commanded aircraft; backward, besides: each group's span and depth, the searches and those that found
     a decision point, the continuations flown to the event + 60 s only and those flown to their window's end, and the
-    search's seconds, steps and rows)."""
+    search's seconds, steps and rows; majority, besides: each group's kind and each majority point's span and depth).
+    The majority point needs more than half of the ``continuations`` avoiding (D192: 5 of 8)."""
     train = context.splits["train"]
     batch = [windows[p] for p in places]
     common = dict(interval_s=context.interval_s, variant=context.variant, edges_reference=context.edges_reference,
@@ -293,8 +297,9 @@ def speak_batch(model: Prior, context: Context, windows: Sequence[Window], place
                   loop_options={**loop_options(context), "attention": settings.front_attention})
     data = (model, context.start_loop("train", batch), batch, places, train["sentences"], train["flights"],
             context.geometries, context.rosters, context.finals, context.words)
-    found = (backward_round(*data, **common) if settings.branching == BACKWARD else
-             branch_round(*data, seed=settings.seed, round_=round_, **common))
+    majority = settings.continuations // 2 + 1 if settings.branching == MAJORITY else None
+    found = (branch_round(*data, seed=settings.seed, round_=round_, **common) if settings.branching == GRID else
+             backward_round(*data, **common, majority=majority))
     informative = [g for g in found.groups if g.informative]
     save_batch_file(informative, directory / f"groups_{k}.pt")
     anchors = {w.signal_index for w in batch}              # a window's count is in each of its aircraft's ends
@@ -302,6 +307,9 @@ def speak_batch(model: Prior, context: Context, windows: Sequence[Window], place
         "group_depths_s": [[batch[0].span_s, depth] for depth in found.depths_s], "searches": found.searches,
         "searches_found": found.found, "continuations_to_event": found.to_event, "continuations_to_end": found.to_end,
         "search_s": found.search_s, "search_steps": found.search_steps, "search_rows": found.search_rows}
+    if settings.branching == MAJORITY:
+        searched |= {"group_kinds": found.kinds,
+                     "majority_depths_s": [[batch[0].span_s, depth] for depth in found.majority_depths_s]}
     return {"groups": len(found.groups), "informative_groups": len(informative),
             "spoken_again": len(found.spoken_again), "differed": list(found.differed),
             "reward_sum": sum(r.reward for r in found.first),
@@ -670,7 +678,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--data-sentences", type=int, required=True, help="the data term's sentences of an update")
     parser.add_argument("--select-per-airport", type=int, required=True)
     parser.add_argument("--branching", choices=BRANCHINGS, default=GRID,
-                        help="D182: the branch points, D143's grid (default) or found back from each event")
+                        help="D182, D192: the branch points, D143's grid (default) or found back from each event "
+                             "with point B (backward) or the majority point (majority)")
     parser.add_argument("--front-attention", choices=FRONT_ATTENTIONS, default=COPIED,
                         help="D190 (2): how a window's copies read the front they hold once (copied: bit for bit; "
                              "merged: no copy)")

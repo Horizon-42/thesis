@@ -269,7 +269,9 @@ class BackwardRound(BranchRound):
     searches made (one a varied aircraft with a candidate point) and those that found a decision point, the
     continuations flown only to the event + 60 s and those flown to their window's end; and, as information on what
     the search costs (its points stepped together in one loop, D188): its seconds, the loop's steps and the rows they
-    flew (each step's rows held in the loop, summed: S6)."""
+    flew (each step's rows held in the loop, summed: S6); each group's kind (`multi.backward.Found.kinds`, in the
+    groups' order), and the depth of each majority point found (D192; one a search that found one, in the searches'
+    order)."""
 
     depths_s: list[float]
     searches: int
@@ -279,13 +281,16 @@ class BackwardRound(BranchRound):
     search_s: float
     search_steps: int
     search_rows: int
+    kinds: list[str]
+    majority_depths_s: list[float]
 
 
 @dataclass
 class _Search:
     """One varied aircraft's search in a backward batch (`backward_round`): its window spoken again (``k`` its place in
     ``again``, ``w`` in the batch), the aircraft ``v``, its event and judged tick, the search's steps
-    (`multi.backward.search`), the part flown for the point it tries, and its groups in the order chosen."""
+    (`multi.backward.search`), the part flown for the point it tries, its groups in the order chosen, and what it
+    found once done."""
 
     k: int
     w: int
@@ -295,6 +300,7 @@ class _Search:
     steps: Generator[tuple[str, int], Sequence[backward.Trial] | None, backward.Found]
     trying: _Part | None = None
     groups: list[tuple[Group, float] | None] = field(default_factory=list)
+    found: backward.Found | None = None
 
 
 @dataclass
@@ -319,13 +325,14 @@ def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loo
                    interval_s: float, variant: str, edges_reference: Path,
                    faults: Mapping[str, Mapping[str, frozenset[int]]], device: torch.device, split: str,
                    continuations: int, rules: Rules, loop_options: Mapping[str, Any] | None = None,
-                   host: torch.device = torch.device("cpu")) -> BackwardRound:
+                   host: torch.device = torch.device("cpu"), majority: int | None = None) -> BackwardRound:
     """One batch ``windows`` of a round of stage D with its branch points found backward (multi-aircraft control D182;
     `multi.backward`): the first pass and the windows spoken again as `branch_round`'s (``rules``: stage D's,
     `multi.credit.rules`); each varied aircraft's event and candidate points (`multi.backward.event`, `points`); the
     second pass copies each window spoken again at its candidate points and holds the copies on ``host`` (D94's check as
     `branch_round`'s, up to each window's latest point). Then every varied aircraft of a window that did not differ is
-    searched (`multi.backward.search`), the searches stepped together on ``device`` (D188):
+    searched (`multi.backward.search`; ``majority``: its majority point in place of point B, D192), the searches
+    stepped together on ``device`` (D188):
 
     - **One loop.** The joint loop holds every search's current point: its ``continuations`` copies of the point's held
       window, v on numbers of its own, the other aircraft on their first-sentence numbers from the point. A step says
@@ -350,7 +357,7 @@ def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loo
     ends = [[results[b] for b in rows] for rows in first.members]
     again = [w for w in everything if rules.again(ends[w])]
     if not again:
-        return BackwardRound(results, [], [], [], [], 0, 0, 0, 0, 0.0, 0, 0)
+        return BackwardRound(results, [], [], [], [], 0, 0, 0, 0, 0.0, 0, 0, [], [])
     #: each window spoken again (its place in ``again``): its varied aircraft, their events and candidate points
     plans: dict[int, list[tuple[int, backward.Event, list[int]]]] = {}
     for k, w in enumerate(again):
@@ -393,7 +400,7 @@ def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loo
     first_samples = dict(zip(read, first.samples(split, read)))
     fine_ticks = backward.ticks_of(backward.FINE_S, interval_s)
     searches = [_Search(k, w, v, happened, backward.judged_until(happened, interval_s),
-                        backward.search(points, fine_ticks))
+                        backward.search(points, fine_ticks, majority))
                 for k, w in enumerate(again) if places[w] not in differed
                 for v, happened, points in plans[k] if points]
     left = {k: sum(s.k == k for s in searches) for k in range(len(again))}
@@ -419,6 +426,7 @@ def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loo
             try:
                 kind, point = s.steps.send(answer)
             except StopIteration as stop:
+                s.found = stop.value
                 counted["found"] += stop.value.decision is not None
                 left[s.k] -= 1
                 if not left[s.k]:                         # the window's searches are done: its copies freed
@@ -531,9 +539,11 @@ def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loo
     search_s = time.perf_counter() - began
     del held
     groups = [g for s in searches for g in s.groups]
+    majorities = [(s.happened.tick - s.found.majority) * interval_s for s in searches if s.found.majority is not None]
     return BackwardRound(results, [g for g, _ in groups], [places[w] for w in again], differed,
                          [depth for _, depth in groups], len(searches), counted["found"], counted["to_event"],
-                         counted["to_end"], search_s, counted["steps"], counted["rows"])
+                         counted["to_end"], search_s, counted["steps"], counted["rows"],
+                         [kind for s in searches for kind in s.found.kinds], majorities)
 
 
 def _trials(loop: WindowLoop, own: Sequence[int], v: int, happened: backward.Event, point: int) -> list[backward.Trial]:
