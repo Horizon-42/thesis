@@ -811,3 +811,12 @@ Groups 14 / 15 / 6 (backward 12 / 12 / 5): the searches that found a decision po
 with a majority point 5, 4, 2 (depths 96–192, 32–224, 32–96 s); the GPU and the CPU spoke the same groups. Merged:
 dev-multi-s6 into dev-two-tier, 19d90d45 (no conflicts; the code that of 172bc07d); the worktrees multi-s6 and
 run-profile5 removed, the branch deleted.
+
+**Arm A and R2** (the user's words of 2026-10-10 23:20: data weight 0.25, two arms of 2 rounds each). Arm A,
+`outputs/POOLED/multi/multi_train_majority_20261010`, launched 23:22 from `.claude/worktrees/run-majority` at c60f59c6
+(systemd unit `majority-a`): MC6's start and settings, `--branching majority`, 3 GPU + 6 CPU workers (the profiles'
+fit: 6 CPU workers hold every batch at its peak with the margin; the GPU's throughput did not grow past 3 workers in
+MC6's rounds), 7 of every 10 batches on the CPU, the executor on the CPU (S1). R2 on `dev-data-weight`, f81b5a13:
+`MultiSettings.data_weight` (`--data-weight`, default `DATA_WEIGHT`), `update_step` / `update_gradients` /
+`train_pass` take it, `pass_gradients` reads at the campaign's weight; review: one S2 (no test of `train_pass`
+handing it on) fixed, second round clean. Arm B (the same at 0.25) after A, the full suite and the merge.
