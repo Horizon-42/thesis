@@ -105,18 +105,28 @@ def clocks(aircraft: AircraftAt, geometry: AirportGeometry, separation: Separati
 
 def tokens(own: AircraftAt, others: AircraftAt, geometry: AirportGeometry, separation: Separation,
            step_s: float) -> np.ndarray:
-    """``[len(others), len(TOKEN_FEATURES)]`` float32: the token of each other aircraft at one step (module docstring);
-    ``own`` the commanded aircraft (one): `window_tokens` of the two, the motions and approach clocks computed here."""
+    """``[len(others), len(TOKEN_FEATURES)]`` float32: the token of each other aircraft at one step (module docstring).
+    ``own`` is the commanded aircraft (one)."""
     if len(own) != 1:
         raise ValueError(f"the tokens are read from one commanded aircraft, not {len(own)}")
-    both = scene_aircraft(own, others)
-    (out,) = window_tokens(both, 1, geometry, Pairs(separation), motion(both.at, both.before, both.known, step_s),
-                           clocks(both, geometry, separation))
+    (out,) = each_tokens(own, others, geometry, Pairs(separation), step_s)
     return out
 
 
+def each_tokens(owns: AircraftAt, others: AircraftAt, geometry: AirportGeometry, pairs: Pairs,
+                step_s: float) -> list[np.ndarray]:
+    """The tokens of ``others`` as each aircraft of ``owns`` reads them alone, at one step: for each own aircraft,
+    `tokens` of it and ``others``, bit for bit (multi-aircraft control S2). The own aircraft do not read each other.
+    The motions and approach clocks are calculated one time for all the aircraft."""
+    count = len(owns)
+    both = scene_aircraft(owns, others)
+    views = np.tile(np.arange(count, len(both), dtype=np.int64), (count, 1))
+    return window_tokens(both, count, geometry, pairs, motion(both.at, both.before, both.known, step_s),
+                         clocks(both, geometry, pairs.separation), views=views)
+
+
 def window_tokens(aircraft: AircraftAt, commanded: int, geometry: AirportGeometry, pairs: Pairs, moving: Any,
-                  clock_m: np.ndarray) -> list[np.ndarray]:
+                  clock_m: np.ndarray, views: np.ndarray | None = None) -> list[np.ndarray]:
     """The tokens of every pair of a window at one step (multi-aircraft control D189 (3)): of each of the first
     ``commanded`` aircraft of ``aircraft`` (a window's set: its commanded aircraft, then its recorded ones), the token
     of every other aircraft in its view's order (the recorded ones, then the other commanded ones), ``[len(aircraft) -
@@ -124,14 +134,16 @@ def window_tokens(aircraft: AircraftAt, commanded: int, geometry: AirportGeometr
     clocks (`clocks`), computed once for the window, and the pairs' runway features from ``pairs``. Each feature is
     computed over every pair at once, elementwise, but the two products of a pair's offset with the commanded
     aircraft's frame, one matrix product for each commanded aircraft (a stacked product could round another way): each
-    token's numbers are those of the aircraft alone."""
+    token's numbers are those of the aircraft alone. ``views``: ``[commanded, m]``, the other aircraft that each
+    commanded aircraft reads, in order (`each_tokens`). None: the view above."""
     count = len(aircraft)
     index = {name: k for k, name in enumerate(TOKEN_FEATURES)}
     # each commanded aircraft's other aircraft, in its view's order
-    others = np.array([[*range(commanded, count), *(c for c in range(commanded) if c != i)] for i in range(commanded)],
-                      dtype=np.int64).reshape(commanded, count - 1)
-    out = np.zeros((commanded, count - 1, len(TOKEN_FEATURES)), dtype=np.float64)
-    if count == 1:
+    others = (np.array([[*range(commanded, count), *(c for c in range(commanded) if c != i)]
+                        for i in range(commanded)], dtype=np.int64).reshape(commanded, count - 1)
+              if views is None else views)
+    out = np.zeros((commanded, others.shape[1], len(TOKEN_FEATURES)), dtype=np.float64)
+    if not others.shape[1]:
         return list(out.astype(np.float32))
     velocity = np.stack((moving.east_mps, moving.north_mps), axis=1)
     ground = moving.ground_speed_mps

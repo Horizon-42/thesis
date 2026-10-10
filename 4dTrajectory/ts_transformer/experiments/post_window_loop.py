@@ -65,7 +65,7 @@ from ts_transformer.instructions.grammar import column_words
 from ts_transformer.instructions.labeller.interval import OBSERVATION_S
 from ts_transformer.instructions.words import COLUMNS, RUNWAY, RUNWAY_GO_AROUND, SPEED, UNCHANGED, Words
 from ts_transformer.post.conformance import Checked, require_conforming_edges
-from ts_transformer.post.edges import TOKEN_FEATURES, Pairs, tokens, window_tokens
+from ts_transformer.post.edges import TOKEN_FEATURES, Pairs, each_tokens, window_tokens
 from ts_transformer.post.fault_census import STEPS_BEFORE_EVENT, reads_fault
 from ts_transformer.post.landings import commanded_landings, roster_key
 from ts_transformer.post.reward import LANDED, present_runways, reward
@@ -349,6 +349,7 @@ class WindowLoop:
         """The traffic module's input of the row at the loop's tick ``t`` and each row's tokens (`_keep` records them
         for the loss once the row is kept): a row that has not joined has none; a row no longer flown (its rows are said
         with the batch, not its sentence's) reads its window's recorded aircraft, as stage C's ended window does."""
+        alone = self._alone(t, ticks, joined)
         rows: list[np.ndarray] = []
         for b in range(len(self.order)):
             tick = ticks[self.window_of[b]]
@@ -357,10 +358,9 @@ class WindowLoop:
                 continue
             w = int(self.window_of[b])
             g = self.geometries[b]
-            if tick is None or b not in tick.rows:
-                recorded = self.windows[w].others_at(t - int(self.origins[w]))
-                own, other, placed = self._own(b), recorded, [None] * len(recorded)
-                row = tokens(own, other, g, self.separations[g.code], self.step_s)
+            if b in alone:
+                own, other, row = alone[b]
+                placed = [None] * len(other)
             else:                       # the window's tokens, every pair of it at once (D189 (3))
                 view = self._of_row(tick, b)
                 own, other, placed = view.own, view.other, view.placed
@@ -374,6 +374,26 @@ class WindowLoop:
                 row = np.concatenate((row, np.asarray(self.token_part(self, b, placed), dtype=np.float32)), axis=1)
             rows.append(row)
         return traffic_of([[row] for row in rows], self.device, self.part_width), rows
+
+    def _alone(self, t: int, ticks: Sequence[_Tick | None], joined: np.ndarray
+               ) -> dict[int, tuple[AircraftAt, AircraftAt, np.ndarray]]:
+        """The joined rows that are not flown at the loop's tick ``t``, by row: the aircraft of the row, the recorded
+        aircraft of its window, and the tokens of the recorded aircraft as the row reads them. A row that is not flown
+        reads only the recorded aircraft of its window, as stage C's ended window does. The rows of one window share
+        these aircraft, so `each_tokens` calculates their tokens in one call (multi-aircraft control S2). Each row gets
+        the tokens of `tokens`, bit for bit."""
+        out = {}
+        for w, members in enumerate(self.members):
+            tick = ticks[w]
+            lone = [b for b in members if joined[b] and (tick is None or b not in tick.rows)]
+            if not lone:
+                continue
+            recorded = self.windows[w].others_at(t - int(self.origins[w]))
+            owns = [self._own(b) for b in lone]
+            g = self.windows[w].scene.geometry
+            found = each_tokens(_concat(owns), recorded, g, self.pairs[g.code], self.step_s)
+            out.update({b: (own, recorded, row) for b, own, row in zip(lone, owns, found)})
+        return out
 
     def _keep(self, rows: Sequence[np.ndarray], joined: np.ndarray, applies: np.ndarray | None = None) -> None:
         """A row kept (``joined``: the rows that had joined at it): each joined row's tokens of it recorded, and the rows
