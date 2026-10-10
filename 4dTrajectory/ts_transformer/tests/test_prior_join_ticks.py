@@ -115,7 +115,7 @@ def _digest(loop: SpeakingLoop) -> str:
                      "words_in_force", "since", "targets"):
             out.update(np.ascontiguousarray(getattr(rows, name)).tobytes())
     out.update(np.stack(loop.speaker.drawn_probability).tobytes())
-    permitted = loop.permitted()
+    permitted = loop.speaker.permitted()             # the speaker's whole record, as it was pinned
     for mask in permitted.masks:
         out.update(mask.tobytes())
     out.update(permitted.time_s.tobytes())
@@ -170,7 +170,6 @@ def test_a_flight_that_joins_at_its_tick_says_and_flies_what_it_says_alone(tmp_p
     together = _fly(speaking(JOIN_TICKS), _sources(KEYS[:4]))
     drawn = np.stack(together.speaker.drawn_probability, axis=1)       # [B, rows of the batch]
     said_rows = np.stack(together.speaker.said_rows, axis=1)
-    records = together.permitted()
     for b, key in enumerate(KEYS[:4]):
         alone = _fly(speaking(None, (key,)), _sources((key,)))
         assert np.array_equal(together.said(b), alone.said(0))
@@ -181,10 +180,10 @@ def test_a_flight_that_joins_at_its_tick_says_and_flies_what_it_says_alone(tmp_p
         its_drawn = np.stack(alone.speaker.drawn_probability, axis=1)[0]
         rows = len(its_drawn)
         np.testing.assert_allclose(drawn[b, said_rows[b]][:rows], its_drawn, rtol=1e-5, atol=1e-7)
-        mine, its = records.select([b]), alone.permitted()
-        assert np.array_equal(mine.time_s[0, :rows], its.time_s[0])
+        mine, its = together.permitted([b])[0], alone.permitted([0])[0]       # each the flight's own record (S6)
+        assert np.array_equal(mine.time_s, its.time_s)
         for a, c in zip(mine.masks, its.masks):
-            assert np.array_equal(a[0, :rows, : c.shape[2]], c[0])
+            assert np.array_equal(a, c)
         (sentence,), (single,) = together.sentences("train")[b: b + 1], alone.sentences("train")
         assert sentence.rows == single.rows and np.array_equal(sentence.time_s, single.time_s)
         np.testing.assert_allclose(sentence.own, single.own, rtol=0.0, atol=1e-6)
@@ -319,7 +318,7 @@ def test_a_silent_flight_says_unchanged_with_probability_one_and_flies_its_words
     assert (drawn[silent_from:] == 1.0).all()
     sentence = loop.sentences("train")[1]
     with torch.no_grad():
-        log_p = masked_log_probability(model, collate([sentence], CPU), loop.permitted().select([1]))
+        log_p = masked_log_probability(model, collate([sentence], CPU), loop.permitted([1])[0])
     start = loop.start
     assert float(log_p[0, start + silent_from:].abs().max()) == 0.0
     alone = _fly(speaking(None, (KEYS[0],)), _sources((KEYS[0],)))

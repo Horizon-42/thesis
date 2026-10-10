@@ -170,17 +170,17 @@ def test_a_landing_in_the_loop_counts_for_the_other_aircraft_of_its_window_from_
     loop = loop_of(_with_module(s["base"]))
     crossing = {"at_row": 37.5, "runway_index": 0, "cross_m": 0.0, "height_m": 15.0}
     monkeypatch.setattr(loop.speaking.loop, "outcome", lambda b: SimpleNamespace(outcome=LANDED, crossing=crossing))
-    before = [index.digest() for index in loop.landings]
+    before = [loop.speaking.landings(b).digest() for b in range(len(loop.order))]
     assert loop._landed(np.array([True, False, False])) == [0]           # the rows judged landed, for the judge
     time_s = loop.records[0].first_step_s + 37.5 * loop.speaking.loop.params.cycle_s
     for b in (1, 2):
-        added = [x for x in loop.landings[b].landings if x.flight_key == loop.keys[0]]
+        added = [x for x in loop.speaking.landings(b).landings if x.flight_key == loop.keys[0]]
         assert added == [Landing(time_s, s["geometry"].candidates[0].ident, loop.keys[0])]
-    assert loop.landings[0].digest() == before[0]
+    assert loop.speaking.landings(0).digest() == before[0]
     loop.silent[1] = True
-    after = [index.digest() for index in loop.landings]
+    after = [loop.speaking.landings(b).digest() for b in range(len(loop.order))]
     assert loop._landed(np.array([False, True, False])) == [1]    # a silent aircraft's landing adds nothing, but is judged
-    assert [index.digest() for index in loop.landings] == after
+    assert [loop.speaking.landings(b).digest() for b in range(len(loop.order))] == after
     monkeypatch.setattr(loop.speaking.loop, "outcome", lambda b: SimpleNamespace(outcome="timeout", crossing=None))
     assert loop._landed(np.array([False, False, True])) == []
 
@@ -358,8 +358,8 @@ def test_a_compressed_windows_moved_aircraft_reads_its_inputs_at_its_moved_time(
     plain, moved = plain_of(_with_module(s["base"])), moved_of(_with_module(s["base"]))
     entry = moved.speaking.rows_of.entry_utc_s
     assert entry[1] == plain.speaking.rows_of.entry_utc_s[1]        # its moved entry: where the plain copy enters
-    own = [x for x in moved.landings[1].landings if x.flight_key == moved.keys[1]]
-    plain_own = [x for x in plain.landings[1].landings if x.flight_key == plain.keys[1]]
+    own = [x for x in moved.speaking.landings(1).landings if x.flight_key == moved.keys[1]]
+    plain_own = [x for x in plain.speaking.landings(1).landings if x.flight_key == plain.keys[1]]
     assert len(own) == 1 and own[0].time_s == plain_own[0].time_s   # its own landing at its moved time
     a, b = plain.run(_numbers(len(JOINS))), moved.run(_numbers(len(JOINS)))
     for x, y in zip(a, b):

@@ -144,8 +144,8 @@ def test_a_round_found_backward_on_a_window_whose_first_avoiding_point_is_known(
 
     real_results = WindowLoop.results
 
-    def results(self):
-        out = real_results(self)
+    def results(self, rows=None):
+        out = real_results(self, rows)
         finished.append(out)
         return out
 
@@ -458,3 +458,79 @@ def test_a_joint_loops_cache_has_room_for_the_steps_to_its_next_rebuild(setup, m
         if b["room"] is not None:
             assert b["steps"] <= b["room"] and b["grown"] == 0
     assert any(b["room"] is not None and b["steps"] == b["room"] for b in built)     # a rebuild by the schedule
+
+
+def test_a_row_no_longer_flown_leaves_a_joint_loop_and_keeps_its_end(setup):
+    """Multi-aircraft control D193 (3), S6. A join keeps in the speaker and the executor only the rows still flown. A row
+    that has ended leaves them, and the loop keeps its record. Flown on with the same numbers, the joined loop says the
+    words of the loop it came from and flies its states within the executor's bound (D181 (57)). Each row gets the same
+    end and the same sentence (its inputs, its permitted words and its tokens); a row that left gets them from its
+    record. A copy of a row that left has its record too."""
+    import copy as copying
+
+    from ts_transformer.autopilot.conformance import STATE_BOUND_M
+    from ts_transformer.tests.test_post_window_multi import _multi, _numbers
+
+    s = setup
+    _, loop_of = _multi(s, joins=(0, 10, 20))                 # its second row ends first, at a loss
+    loop = loop_of(_with_module(s["base"]))
+    numbers = _numbers(3)
+    while loop.speaking.alive.all():                     # flown until a row ends while the others fly
+        loop.step(post_branches._draws(loop, numbers))
+    gone = ~loop.speaking.alive
+    assert gone.any() and loop.speaking.alive.any()
+    joint = WindowLoop.together([(loop, [0])], CPU, None)
+    assert np.array_equal(joint.speaking.held, ~gone) and sorted(joint.speaking.left) == np.flatnonzero(gone).tolist()
+    assert len(joint.speaking.speaker.in_force) == int((~gone).sum())           # the speaker holds the others only
+    copied = joint.copy([0])
+    assert np.array_equal(copied.speaking.held, joint.speaking.held)
+    twin = [copying.deepcopy(n) for n in numbers]           # the same streams, copied before either is drawn
+    ours, theirs = loop.finish(numbers), joint.finish(twin)
+    for a, b in zip(ours, theirs):
+        assert np.array_equal(a.words, b.words) and (a.outcome, a.reward, a.loss_step) == (b.outcome, b.reward,
+                                                                                          b.loss_step)
+        assert a.states.shape == b.states.shape and np.allclose(a.states, b.states, rtol=0.0, atol=STATE_BOUND_M)
+    for (x, px, tx), (y, py, ty) in zip(loop.samples("train"), joint.samples("train")):
+        assert np.array_equal(x.targets, y.targets) and np.array_equal(x.time_s, y.time_s)
+        assert np.allclose(x.own, y.own, rtol=0.0, atol=1e-6)
+        assert all(np.array_equal(a, b) for a, b in zip(px.masks, py.masks)) and np.array_equal(px.time_s, py.time_s)
+        assert len(tx) == len(ty) and all(np.allclose(a, b, rtol=0.0, atol=1e-6) for a, b in zip(tx, ty))
+    left = int(np.flatnonzero(gone)[0])
+    assert copied.speaking.left[left] is joint.speaking.left[left]                # a copy keeps the record
+
+
+def test_a_join_of_loops_with_rows_that_left_keeps_their_records(setup):
+    """S6: a joint loop joined again, with itself twice (a source with rows that left, and a source used twice), says
+    and flies what the loop it came from does and gives each row the same end and sentence. A loop whose rows have all
+    ended, joined, holds no speaker or executor and gives each row its end and sentence from its records, as does a copy
+    of it."""
+    import copy as copying
+
+    from ts_transformer.autopilot.conformance import STATE_BOUND_M
+    from ts_transformer.tests.test_post_window_multi import _multi, _numbers
+
+    s = setup
+    _, loop_of = _multi(s, joins=(0, 10, 20))                 # its second row ends first, at a loss
+    loop = loop_of(_with_module(s["base"]))
+    numbers = _numbers(3)
+    while loop.speaking.alive.all():
+        loop.step(post_branches._draws(loop, numbers))
+    joint = WindowLoop.together([(loop, [0])], CPU, None)
+    again = WindowLoop.together([(joint, [0]), (joint, [0])], CPU, None)
+    assert len(again.speaking.left) == 2 * len(joint.speaking.left)
+    assert all(again.speaking.left[b] is joint.speaking.left[b] for b in joint.speaking.left)
+    twin = [copying.deepcopy(n) for n in numbers + numbers]
+    ours, theirs = loop.finish(numbers), again.finish(twin)
+    for a, b in zip(ours + ours, theirs):
+        assert np.array_equal(a.words, b.words) and (a.outcome, a.reward) == (b.outcome, b.reward)
+        assert np.allclose(a.states, b.states, rtol=0.0, atol=STATE_BOUND_M)
+    for (x, px, _), (y, py, _) in zip(loop.samples("train") * 2, again.samples("train")):
+        assert np.array_equal(x.targets, y.targets) and np.array_equal(px.time_s, py.time_s)
+    ended = WindowLoop.together([(loop, [0])], CPU, None)                 # every row ended: none held
+    assert ended.speaking.speaker is None and ended.speaking.loop is None and not ended.speaking.held.any()
+    for other in (ended, ended.copy([0])):
+        for a, b in zip(loop.results(), other.results()):
+            assert np.array_equal(a.words, b.words) and np.array_equal(a.states, b.states) and a.reward == b.reward
+        for (x, px, tx), (y, py, ty) in zip(loop.samples("train"), other.samples("train")):
+            assert np.array_equal(x.own, y.own) and all(np.array_equal(a, b) for a, b in zip(px.masks, py.masks))
+            assert all(np.array_equal(a, b) for a, b in zip(tx, ty))

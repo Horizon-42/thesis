@@ -91,14 +91,16 @@ class TokenPart:
         return out
 
     def table(self, loop: Any) -> np.ndarray:
-        """``[B, width]`` each row's part as another aircraft at the loop's present tick (module docstring)."""
+        """``[B, width]`` each row's part as another aircraft at the loop's present tick (module docstring). A row that
+        left the loop (S6) is no other aircraft of a row flown: its part is zeros, never read."""
         t = int(loop.speaking.t)
         if self._table is None or self._table[0] is not loop or self._table[1] != t:
-            parts = []
-            for b, heard in enumerate(loop.speaking.speaker.heard):
+            speaking = loop.speaking
+            table = np.zeros((len(loop.order), self.width), dtype=np.float32)
+            for b, heard in zip(speaking.inside, speaking.speaker.heard if speaking.speaker is not None else []):
                 # at the time of its last word (the heading and the levels do not depend on it): its times since a
                 # word, not read here, are then not negative
                 _, _, heading, levels, _ = heard.inputs(float(heard.said_s.max()))
-                parts.append(commanded_part(bool(loop.silent[b]), heading, levels, self.words))
-            self._table = (loop, t, np.stack(parts) if parts else np.zeros((0, self.width), dtype=np.float32))
+                table[b] = commanded_part(bool(loop.silent[b]), heading, levels, self.words)
+            self._table = (loop, t, table)
         return self._table[2]

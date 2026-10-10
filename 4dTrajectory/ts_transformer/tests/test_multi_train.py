@@ -623,7 +623,7 @@ def test_the_loops_crossing_time_is_the_timing_readouts(setup, monkeypatch):
     crossing = {"at_row": 37.5, "runway_index": 0, "cross_m": 0.0, "height_m": 15.0}
     monkeypatch.setattr(loop.speaking.loop, "outcome", lambda b: SimpleNamespace(outcome=LANDED, crossing=crossing))
     loop._landed(np.array([True, False, False]))
-    (added,) = [x for x in loop.landings[1].landings if x.flight_key == loop.keys[0]]
+    (added,) = [x for x in loop.speaking.landings(1).landings if x.flight_key == loop.keys[0]]
     (item,) = timing.landed(loop.records[:1], [crossing], loop.speaking.loop.params.cycle_s)
     assert item.loop_s == added.time_s
 

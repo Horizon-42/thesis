@@ -441,18 +441,18 @@ def test_the_rows_a_loop_said_and_its_records_give_the_probabilities_the_speaker
         for loop, _ in loops:
             (sentence,) = loop.sentences("train")
             assert sentence.rows == start + len(loop.speaker.drawn_probability)
-            log_p = masked_log_probability(model, collate([sentence], CPU), loop.permitted())
+            log_p = masked_log_probability(model, collate([sentence], CPU), loop.permitted([0])[0])
             drawn = torch.as_tensor(np.stack(loop.speaker.drawn_probability, axis=1), dtype=torch.float32)
             torch.testing.assert_close(log_p[:, start:].exp(), drawn, rtol=1e-4, atol=1e-6)
         batch = collate([loop.sentences("train")[0] for loop, _ in loops], CPU)
-        joined = Permitted.join([loop.permitted() for loop, _ in loops])
+        joined = Permitted.join([loop.permitted([0])[0] for loop, _ in loops])
         assert joined.time_s.shape == (2, max(lengths)) and np.isnan(joined.time_s[np.argmin(lengths), -1])
         log_p = masked_log_probability(model, batch, joined)
         for b, (loop, _) in enumerate(loops):
             drawn = torch.as_tensor(np.stack(loop.speaker.drawn_probability, axis=1)[0], dtype=torch.float32)
             torch.testing.assert_close(log_p[b, start: start + lengths[b]].exp(), drawn, rtol=1e-4, atol=1e-6)
     with pytest.raises(ValueError, match="temperatures"):
-        Permitted.join([loops[0][0].permitted(), dataclasses.replace(loops[1][0].permitted(), temperature=0.5)])
+        Permitted.join([loops[0][0].permitted([0])[0], dataclasses.replace(loops[1][0].permitted([0])[0], temperature=0.5)])
 
 
 # ---- what free generation must not read (vocabulary D90, D82; prior D23, D63)

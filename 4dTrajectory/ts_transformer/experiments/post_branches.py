@@ -109,8 +109,8 @@ def same_prefix(a: np.ndarray, b: np.ndarray, rows: int, bound_m: float) -> bool
 
 def _draws(loop: WindowLoop, numbers: Sequence[np.random.Generator]) -> np.ndarray:
     """The next row's numbers of every row of ``loop``: five from each row's own source where it is said (the same
-    draws as it says its rows alone)."""
-    said_now = loop.speaking.said_now()
+    draws as it says its rows alone). A row that left the loop draws none (S6): nothing reads its source after."""
+    said_now = loop.speaking.said_now() & loop.speaking.held
     return np.stack([n.random(len(COLUMNS)) if said else np.zeros(len(COLUMNS)) for n, said in zip(numbers, said_now)])
 
 
@@ -269,7 +269,7 @@ class BackwardRound(BranchRound):
     searches made (one a varied aircraft with a candidate point) and those that found a decision point, the
     continuations flown only to the event + 60 s and those flown to their window's end; and, as information on what
     the search costs (its points stepped together in one loop, D188): its seconds, the loop's steps and the rows they
-    flew (each step's rows summed)."""
+    flew (each step's rows held in the loop, summed: S6)."""
 
     depths_s: list[float]
     searches: int
@@ -442,15 +442,16 @@ def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loo
             return
 
     def group(part: _Part, joint: WindowLoop, own: Sequence[int]) -> tuple[Group, float]:
-        """The group of a point chosen whose windows ``own`` (in the joint loop) have ended, and its depth: its windows
-        taken out of the joint loop, so that its records are those of its continuations alone."""
+        """The group of a point chosen whose windows ``own`` (in the joint loop) have ended, and its depth: read from
+        the joint loop, each row's end and sentence its own (`WindowLoop.results`, `samples`; S6)."""
         s = part.search
-        taken = joint.copy(own)
-        ended = taken.results()
-        rows_v = [rows[s.v] for rows in taken.members]
-        made = dict(zip(rows_v, taken.samples(split, rows_v)))
-        kept = tuple(Sentence(*made[b], rules.reward([ended[c] for c in rows]),
-                              _until(taken, b, len(windows[s.w].joined))) for rows, b in zip(taken.members, rows_v))
+        members = [joint.members[w] for w in own]
+        rows = [b for rows_w in members for b in rows_w]
+        ended = dict(zip(rows, joint.results(rows)))
+        rows_v = [rows_w[s.v] for rows_w in members]
+        made = dict(zip(rows_v, joint.samples(split, rows_v)))
+        kept = tuple(Sentence(*made[b], rules.reward([ended[c] for c in rows_w]),
+                              _until(joint, b, len(windows[s.w].joined))) for rows_w, b in zip(members, rows_v))
         b_first = first.members[s.w][s.v]
         join = int(first.speaking.join_ticks[b_first])
         sentence, permitted, tokens = first_samples[b_first]
@@ -526,7 +527,7 @@ def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loo
         joint.step(_draws(joint, [n for part in flying for n in part.streams]))
         room = None if room is None else room - 1
         counted["steps"] += 1
-        counted["rows"] += len(joint.order)
+        counted["rows"] += int(joint.speaking.held.sum())
     search_s = time.perf_counter() - began
     del held
     groups = [g for s in searches for g in s.groups]
@@ -548,7 +549,7 @@ def _trials(loop: WindowLoop, own: Sequence[int], v: int, happened: backward.Eve
         if loop.loss[b] is not None:
             ended: str | None = LOST_SEPARATION
         elif not loop.speaking.alive[b] and not loop.speaking.ended[b]:
-            ended = loop.speaking.loop.outcome(b).outcome
+            ended = loop.speaking.outcome(b).outcome
         else:
             ended = None
         partner = any(loop.loss[c] is not None and loop.other[c] == key and loop.records[c].key == happened.partner

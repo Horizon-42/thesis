@@ -232,5 +232,6 @@ def test_an_aircraft_ended_at_its_first_predicted_step_before_a_row_flown_has_it
     loop.observed = np.arange(2 * 3 * 6, dtype=float).reshape(2, 3, 6)
     loop._flown = [[], [np.ones(6), np.ones(6) * 2]]
     loop.alive, loop.ended = np.array([False, False]), np.array([True, True])
+    loop.left = {}                                        # neither has left the loop (S6)
     assert np.array_equal(loop.states(0), loop.observed[0])
     assert loop.states(1).shape == (5, 6) and np.array_equal(loop.states(1)[3:], [[1.0] * 6, [2.0] * 6])
