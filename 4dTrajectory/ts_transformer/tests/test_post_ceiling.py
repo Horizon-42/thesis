@@ -72,6 +72,32 @@ def test_each_model_reads_every_window_n_times_and_draw_0_is_the_round_s_readout
     assert set(summary["curves"]) == {"start", "0"} and set(summary["never_landed_pairs"]) == {"start&0"}
 
 
+def test_speak_workers_read_every_round_on_the_speak_device_whatever_rule_spoke_it(campaign, tmp_path, monkeypatch):
+    """D191: a campaign whose rule speaks batches on the CPU is read by workers on the speak device alone, the rule
+    left off (its readout was read so), and draw 0 is still the round's readout."""
+    out, _ = campaign
+    record = json.loads((out / "campaign.json").read_text())
+    record["inputs"]["settings"].update(cpu_batches=1, cpu_period=2)
+    (out / "campaign.json").write_text(json.dumps(record))
+    handed = {}
+
+    class Workers:
+        def __init__(self, context, settings, workers, device):
+            handed.update(rule=(settings.cpu_batches, settings.cpu_period), workers=workers, device=device.type)
+            self.context, self.settings = context, settings
+
+        def read(self, model, windows, places, split, draw=0):
+            return [ceiling.read_batch(model, self.context, windows, p, self.settings, split, draw) for p in places]
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(ceiling, "Speakers", Workers)
+    assert ceiling.main(_argv(out, tmp_path / "ceiling", "--models", "0", "--draws", "1", "--speak-workers", "2")) == 0
+    assert handed == {"rule": (0, 1), "workers": 2, "device": "cpu"}
+    assert json.loads((tmp_path / "ceiling" / "model_0.json").read_text())["draw0_checked"] is True
+
+
 def test_a_draw_0_that_is_not_the_round_s_readout_stops_the_read(campaign, tmp_path):
     out, _ = campaign
     held = json.loads((out / "round_0" / "round.json").read_text())

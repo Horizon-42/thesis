@@ -149,9 +149,10 @@ class MultiSettings:
     #: (D190 (2), the user's choice; `FRONT_ATTENTIONS`): `COPIED`, the default (bit for bit the behaviour before it; a
     #: record without the setting reads as it), or `MERGED` (no copy; a sum's last bits may move)
     front_attention: str = COPIED
-    #: D191 (the user, 2026-10-10): of every ``cpu_period`` batches of a round and of the selection readout, by index,
-    #: the first ``cpu_batches`` spoken by the CPU speaking workers (`post_train.batch_device`), the others on the speak
-    #: device; the default every batch on the speak device (the behaviour before it; a record without it reads so)
+    #: D191 (the user, 2026-10-10): of every ``cpu_period`` batches of a round, by index, the first ``cpu_batches``
+    #: spoken by the CPU speaking workers (`post_train.batch_device`), the others on the speak device, the selection
+    #: readout on the speak device alone; a resume may change it (`post_train.RESUME_MAY_CHANGE`); the default every
+    #: batch on the speak device (the behaviour before it; a record without it reads so)
     cpu_batches: int = 0
     cpu_period: int = 1
 

@@ -49,17 +49,18 @@ D69, with the labeller's and the executor's) and the edge features' reference of
 
 ONE CAMPAIGN: from a clean checkout (``--smoke``: a tree with changes too; no result); each round's commit recorded as
 information and never compared (prior D108). Its intent is written by hand (L27, read by the publisher), not checked
-here (the user, 2026-10-07). RESUMABLE: a round is done when its checkpoint is
-there (the last file it writes); a rerun with the same inputs and settings continues from the last checkpoint; a round
-left half done keeps the batches it spoke and speaks the others (D185: a batch is done when its record
-``record_<k>.json`` is there, written after its files, each under a temporary name renamed when complete; a batch with
-files and no record is spoken again; done batches of another draw, or spoken on another kind of device than the rest,
-are refused by name), or with ``--restart-round`` is moved aside as ``round_<r>.aborted-<UTC>`` (outline E8) and run
-again whole. On changed code the operator chooses: restart, or keep the done batches after a behaviour check on fixed
-inputs (`window_behaviour`, a few windows of each span with the code before and after); each batch's record holds the
-commit of its launch as information, never compared (outline D21). Other inputs are refused. A
-rerun may raise the rounds and change nothing else (D157): the campaign goes on to the new count, unless its val read
-is claimed (P47: the round would then be chosen after the val days were read). The recorded paths
+here (the user, 2026-10-07). RESUMABLE: a round is done when its checkpoint is there (the last file it writes); a rerun
+with the same inputs and settings continues from the last checkpoint; a round left half done keeps the batches it spoke
+and speaks the others (D185: a batch is done when its record ``record_<k>.json`` is there, written after its files, each
+under a temporary name renamed when complete; a batch with files and no record is spoken again; done batches of another
+draw, or spoken on another kind of device than this launch's rule gives them, are refused by name), or with
+``--restart-round`` is moved aside as ``round_<r>.aborted-<UTC>`` (outline E8) and run again whole. On changed code the
+operator chooses: restart, or keep the done batches after a behaviour check on fixed inputs (`window_behaviour`, a few
+windows of each span with the code before and after); each batch's record holds the commit of its launch as information,
+never compared (outline D21). Other inputs are refused. A rerun may raise the rounds (D157): the
+campaign goes on to the new count, unless its val read is claimed (P47: the round would then be chosen after the val
+days were read); and it may change the rule of the batches spoken on the CPU (D191, the user 2026-10-10:
+`RESUME_MAY_CHANGE`), each round's batch records holding the device that spoke them. The recorded paths
 are compared as this checkout reads them (`inputs_here`: a campaign recorded in a worktree resumes from another
 checkout), the recorded settings as the stage's settings read them (a setting added after the record, its default,
 `SETTINGS_ADDED`). Every random number of a round comes from the seed and the round (the draw, the speaking's, the data term's
@@ -215,9 +216,11 @@ class Settings:
     #: time, bit for bit the code before it; `MERGED`, read once for them all (a sum's last bits may move). Added as
     #: ``clip_norm`` (its default the code's behaviour before it).
     front_attention: str = COPIED
-    #: multi-aircraft control D191 (the user, 2026-10-10): of every ``cpu_period`` batches of a round and of the
-    #: selection readout, by index, the first ``cpu_batches`` spoken by the CPU speaking workers (`batch_device`), the
-    #: others on the speak device. Added as ``clip_norm`` (the default: every batch on the speak device).
+    #: multi-aircraft control D191 (the user, 2026-10-10): of every ``cpu_period`` batches of a round, by index, the
+    #: first ``cpu_batches`` spoken by the CPU speaking workers (`batch_device`), the others on the speak device; the
+    #: selection readout on the speak device alone, every round alike. A resume may change it, as the rounds (the
+    #: user, 2026-10-10: the next round spoken on both devices; `RESUME_MAY_CHANGE`). Added as ``clip_norm`` (the
+    #: default: every batch on the speak device).
     cpu_batches: int = 0
     cpu_period: int = 1
 
@@ -605,7 +608,7 @@ def batch_record_path(directory: Path, k: int) -> Path:
 
 
 def batch_device(k: int, cpu_batches: int, cpu_period: int, speak: str) -> str:
-    """The kind of device batch ``k`` of a round or of the selection readout is spoken on (multi-aircraft control D191):
+    """The kind of device batch ``k`` of a round is spoken on (multi-aircraft control D191):
     of every ``cpu_period`` batches by index, the first ``cpu_batches`` on the CPU, the others on the speak device's kind
     ``speak`` — a rule of the batch's place, so a round is the same whatever the workers' timing."""
     return "cpu" if k % cpu_period < cpu_batches else speak
@@ -723,9 +726,10 @@ class Speakers:
     a campaign, one worker speaks a batch at the formal size and its memory is measured (`measure`, O15).
 
     **Workers on two devices** (multi-aircraft control D191). Beside the workers on the speak device, workers on the CPU
-    (one thread each, as every worker): each batch of a round and of the selection readout goes to the workers of the
-    device the campaign's rule gives it by its place (`batch_device`), and each device's workers take its batches in
-    order, so a round is the same whatever the workers' timing.
+    (one thread each, as every worker): each batch of a round goes to the workers of the device the campaign's rule
+    gives it by its place (`batch_device`), and each device's workers take its batches in order, so a round is the same
+    whatever the workers' timing; the selection readout's batches go to the speak device's workers alone, so every
+    round's readout is read on one device whatever rule spoke the round (a resume may change it, `RESUME_MAY_CHANGE`).
 
     **The peaks last** (D191, the user's word). A batch whose GPU worker runs out of its share (CUDA's out of memory
     under its budget, ``gpu_budget``) is spoken again once every other batch of the round or the readout is spoken,
@@ -775,7 +779,7 @@ class Speakers:
         self.readings = 0
 
     def _pool(self, k: int) -> ProcessPoolExecutor:
-        """The workers of the device that batch ``k`` is spoken on (`batch_device`)."""
+        """The workers of the device that batch ``k`` of a round is spoken on (`batch_device`)."""
         return self.pools[batch_device(k, self.cpu_batches, self.cpu_period, self.device.type)]
 
     def speak(self, model: Prior, windows: Sequence[Window], places: Sequence[Sequence[int]], round_: int,
@@ -794,15 +798,17 @@ class Speakers:
     def read(self, model: Prior, windows: Sequence[Window], places: Sequence[Sequence[int]], split: str,
              draw: int = 0) -> list[list[WindowResult]]:
         """The selection readout's batches of ``split`` (``windows``, its `selection_windows`, at ``places``): each
-        batch's ends (`read_batch` of ``draw``), in batch order (C13), each read on its device by its place (D191)."""
+        batch's ends (`read_batch` of ``draw``), in batch order (C13), each read by the speak device's workers
+        (D191)."""
         self.readings += 1
         with tempfile.TemporaryDirectory(prefix="post_reading_") as scratch:
             state = Path(scratch) / "reading_model.pt"
             torch.save(model.state_dict(), state)
+            pool = self.pools[self.device.type]                   # every round's readout on one device (D191)
 
             def submit(k: int, budget: int | None = None) -> Any:
-                return self._pool(k).submit(_read, self.readings, str(state), split, list(places[k]),
-                                            [self.stage.record(windows[i]) for i in places[k]], draw, budget)
+                return pool.submit(_read, self.readings, str(state), split, list(places[k]),
+                                   [self.stage.record(windows[i]) for i in places[k]], draw, budget)
 
             return self._results(state, list(range(len(places))), submit)
 
@@ -1851,24 +1857,30 @@ SETTINGS_ADDED = ("clip_norm", "epochs", "segment_only", "branch_every_s", "valu
                   "advantage_centering", "value_epochs", "front_attention", "cpu_batches", "cpu_period")
 
 
-def _but_rounds(inputs: Mapping[str, Any]) -> dict[str, Any]:
-    """The inputs with the rounds left out (D157: the one setting a resume may change)."""
-    return {**inputs, "settings": {k: v for k, v in inputs["settings"].items() if k != "rounds"}}
+#: The settings a resume may change: the rounds (D157, raised only) and the rule of the batches spoken on the CPU
+#: (multi-aircraft control D191, the user 2026-10-10: a speed choice, each batch's record holding its device).
+RESUME_MAY_CHANGE = ("rounds", "cpu_batches", "cpu_period")
+
+
+def _but_resumable(inputs: Mapping[str, Any]) -> dict[str, Any]:
+    """The inputs with the settings a resume may change left out (`RESUME_MAY_CHANGE`)."""
+    return {**inputs, "settings": {k: v for k, v in inputs["settings"].items() if k not in RESUME_MAY_CHANGE}}
 
 
 def open_campaign(out: Path, inputs: dict[str, Any], git: dict[str, Any], checks: Any, *,
                   schema: str = CAMPAIGN_SCHEMA, reader: str = CLAIM_READER,
                   settings_type: Callable[..., Any] = Settings, restart_round: bool = False) -> dict[str, Any]:
     """``campaign.json``: a new campaign's, or a resume's. A resume is refused unless its inputs are the record's — the
-    recorded paths as this checkout reads them (`inputs_here`), the recorded settings as ``settings_type`` reads them
-    (a setting added after the record takes its default, `SETTINGS_ADDED`), the rounds left out — and its rounds at least the
-    record's; more rounds raise the record's count (D157), its paths kept as recorded, and are refused once the
-    campaign's val read is claimed (`post_validation`, P47), spent or not. Each resume adds its entry: the
-    time, the commit, the checks, the paths it read, the rounds before and after it and whether it restarted the round
-    left half done. A round left half done (its directory without its checkpoint) keeps the batches it spoke (D185,
-    `done_batches`), or with ``restart_round`` is moved aside as ``round_<r>.aborted-<UTC>``. A stage's own campaign gives its
-    format (``schema``), the reader of its val read's claim (``reader``) and its settings (``settings_type``); stage C's
-    by default (post-training §9 item 11)."""
+    recorded paths as this checkout reads them (`inputs_here`), the recorded settings as ``settings_type`` reads them (a
+    setting added after the record takes its default, `SETTINGS_ADDED`), the settings a resume may change left out
+    (`RESUME_MAY_CHANGE`) — and its rounds at least the record's; more rounds raise the record's count (D157), its paths
+    kept as recorded, and are refused once the campaign's val read is claimed (`post_validation`, P47), spent or not; a
+    changed rule of the CPU's batches (D191) is the record's from then on. Each resume adds its entry: the time, the
+    commit, the checks, the paths it read, the rounds and the rule before and after it and whether it restarted the
+    round left half done. A round left half done (its directory without its checkpoint) keeps the batches it spoke
+    (D185, `done_batches`), or with ``restart_round`` is moved aside as ``round_<r>.aborted-<UTC>``. A stage's own
+    campaign gives its format (``schema``), the reader of its val read's claim (``reader``) and its settings
+    (``settings_type``); stage C's by default (post-training §9 item 11)."""
     path = out / "campaign.json"
     if path.exists():
         record = json.loads(path.read_text(encoding="utf-8"))
@@ -1876,7 +1888,7 @@ def open_campaign(out: Path, inputs: dict[str, Any], git: dict[str, Any], checks
             raise SystemExit(f"{out}: a {record['schema']} campaign, not {schema}")
         recorded, asked = inputs_here(record["inputs"]), inputs_here(inputs)
         recorded = {**recorded, "settings": asdict(settings_type(**recorded["settings"]))}
-        if _but_rounds(recorded) != _but_rounds(asked):
+        if _but_resumable(recorded) != _but_resumable(asked):
             raise SystemExit(f"{out}: a campaign of other inputs or settings; a resume takes the same, its rounds or more")
         before, after = recorded["settings"]["rounds"], asked["settings"]["rounds"]
         if after < before:
@@ -1891,9 +1903,13 @@ def open_campaign(out: Path, inputs: dict[str, Any], git: dict[str, Any], checks
             left.rename(aborted)
             record["aborted"].append(aborted.name)
         record["inputs"]["settings"]["rounds"] = after
+        rule = [[held["settings"][name] for name in ("cpu_batches", "cpu_period")] for held in (recorded, asked)]
+        if rule[0] != rule[1]:                       # a record without the rule left as it was while it holds (D191)
+            record["inputs"]["settings"].update(cpu_batches=rule[1][0], cpu_period=rule[1][1])
         record["resumed"].append({"utc": utc_now(), "git": git, "checks": checks,
                                   "inputs": {key: asked[key] for key in INPUT_PATHS},
-                                  "rounds": {"before": before, "after": after}, "restart_round": restart_round})
+                                  "rounds": {"before": before, "after": after},
+                                  "rule": {"before": rule[0], "after": rule[1]}, "restart_round": restart_round})
         write_json_atomic(path, record)
         return record
     if out.exists():

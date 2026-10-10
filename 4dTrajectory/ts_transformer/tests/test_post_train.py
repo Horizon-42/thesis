@@ -565,8 +565,9 @@ def test_the_rule_and_its_cpu_workers_are_refused_by_name_where_they_do_not_go_t
 
 
 def test_each_devices_workers_take_its_batches_in_order(tmp_path):
-    """D191: with workers on two devices, each batch of a round and of the selection readout goes to the workers of the
-    device the rule gives it, each device's in the batches' order; the results come back in batch order."""
+    """D191: with workers on two devices, each batch of a round goes to the workers of the device the rule gives it,
+    each device's in the batches' order, and every batch of the selection readout to the speak device's (every round's
+    readout on one device, whatever rule spoke the round); the results come back in batch order."""
     from concurrent.futures import Future
 
     class Pool:
@@ -588,8 +589,8 @@ def test_each_devices_workers_take_its_batches_in_order(tmp_path):
     model = torch.nn.Linear(1, 1)
     assert speakers.speak(model, windows, places, 0, tmp_path, list(range(7)), {}) == list(range(7))
     assert speakers.pools["cpu"].places == [0, 1, 5, 6] and speakers.pools["cuda"].places == [2, 3, 4]
-    assert speakers.read(model, windows, places, "select") == list(range(7))       # the readout's by the same rule
-    assert speakers.pools["cpu"].places == [0, 1, 5, 6] * 2 and speakers.pools["cuda"].places == [2, 3, 4] * 2
+    assert speakers.read(model, windows, places, "select") == list(range(7))       # the readout's on the speak device
+    assert speakers.pools["cpu"].places == [0, 1, 5, 6] and speakers.pools["cuda"].places == [2, 3, 4, *range(7)]
 
 
 def _held_device(_):
@@ -1191,6 +1192,33 @@ def test_a_resume_may_raise_the_rounds_and_change_nothing_else(tmp_path):
         open_campaign(out, _inputs(replace(settings, rounds=4), tmp_path), git, {})
     assert (out / "campaign.json").read_text() == written
     assert open_campaign(out, _inputs(settings, tmp_path), git, {})["resumed"][0]["rounds"] == {"before": 3, "after": 3}
+
+
+def test_a_resume_may_change_the_rule_of_the_cpus_batches_and_records_it(tmp_path):
+    """D191 (the user, 2026-10-10: the next round spoken on both devices): a resume may change the rule as the rounds,
+    the record's from then on and each entry holding it before and after; a record without the rule (before D191) is
+    left without it while the rule holds; any other setting changed with it is still refused."""
+    git = {"head": "x", "dirty": False}
+    out = tmp_path / "campaign"
+    open_campaign(out, _inputs(_settings(), tmp_path), git, {})
+    record = json.loads((out / "campaign.json").read_text())
+    for added in ("cpu_batches", "cpu_period"):                             # a record from before D191
+        del record["inputs"]["settings"][added]
+    (out / "campaign.json").write_text(json.dumps(record))
+    held = open_campaign(out, _inputs(_settings(), tmp_path), git, {})
+    assert "cpu_batches" not in held["inputs"]["settings"] and held["resumed"][-1]["rule"] == {"before": [0, 1],
+                                                                                              "after": [0, 1]}
+    mixed = open_campaign(out, _inputs(_settings(cpu_batches=6, cpu_period=13), tmp_path), git, {})
+    assert (mixed["inputs"]["settings"]["cpu_batches"], mixed["inputs"]["settings"]["cpu_period"]) == (6, 13)
+    assert mixed["resumed"][-1]["rule"] == {"before": [0, 1], "after": [6, 13]}
+    assert post_train.settings_of(json.loads((out / "campaign.json").read_text())) == _settings(cpu_batches=6,
+                                                                                                 cpu_period=13)
+    back = open_campaign(out, _inputs(_settings(), tmp_path), git, {})
+    assert back["resumed"][-1]["rule"] == {"before": [6, 13], "after": [0, 1]}
+    written = (out / "campaign.json").read_text()
+    with pytest.raises(SystemExit, match="other inputs or settings"):
+        open_campaign(out, _inputs(_settings(cpu_batches=1, cpu_period=2, seed=1), tmp_path), git, {})
+    assert (out / "campaign.json").read_text() == written
 
 
 def test_a_setting_added_after_a_record_reads_as_its_default_and_a_resume_compares_it(tmp_path):
