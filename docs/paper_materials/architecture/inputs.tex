@@ -1,0 +1,62 @@
+% Inputs of the prior (source: 4dTrajectory/ts_transformer/docs/two_tier/design/prior.md §2, §9; code prior/inputs.py).
+% Requires: \usepackage{amsmath,booktabs,tabularx,array}
+% Paper names -> code names: aircraft kinematic state = own state (own, OWN_FEATURES, state_inputs);
+%                            runway vector           = candidate vector (candidates, CANDIDATE_FEATURES).
+% Code names of the components, in order.
+%   kinematic state: height_above_elevation, ground_speed, vertical_rate, no_motion
+%   runway vector:   before_threshold, right_of_final, height_above_threshold, motion_minus_course_sin,
+%                    motion_minus_course_cos, height_above_glidepath, landings_30min
+
+\begin{table}[t]
+\centering
+\caption{Aircraft kinematic state $\mathbf{s}_t$ of the prior at row $t$. The state describes the aircraft alone: it
+contains no position, no direction and no runway.}
+\label{tab:kinematic-state}
+\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\textwidth}{@{}c l >{\raggedright\arraybackslash}X l@{}}
+\toprule
+\# & Component & Definition & Scale \\
+\midrule
+1 & Height above airport & $h_t - E$ & $1\,\mathrm{km}$ \\
+2 & Ground speed         & $v_t = \sqrt{(e_t-e_t^-)^2+(n_t-n_t^-)^2}\,/\,\delta$ & $100\,\mathrm{m/s}$ \\
+3 & Vertical rate        & $w_t = (h_t-h_t^-)\,/\,\delta$ & $10\,\mathrm{m/s}$ \\
+4 & No-motion flag       & $m_t = 1$ at the first row of an aircraft (no state before it), else $0$ & --- \\
+\bottomrule
+\end{tabularx}
+\par\smallskip
+{\footnotesize $(e_t, n_t, h_t)$: position in the airport frame, east and north in m, height above mean sea level;
+$(e_t^-, n_t^-, h_t^-)$: the position $\delta = 2\,\mathrm{s}$ before row $t$; $E$: elevation of the airport.
+At the first row, $v_t = w_t = 0$. The height is taken above the airport because the altitude words of the
+vocabulary are above the airport.\par}
+\end{table}
+
+\begin{table}[t]
+\centering
+\caption{Runway vector $\mathbf{r}_{t,k}$ of candidate runway $k$ at row $t$: the aircraft in the frame of the
+runway, its height above the published glidepath, and the recent traffic on the runway. The prior reads one runway
+vector for each of the $K$ runway ends of the airport, with shared weights and no runway constants.}
+\label{tab:runway-vector}
+\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\textwidth}{@{}c l >{\raggedright\arraybackslash}X l@{}}
+\toprule
+\# & Component & Definition & Scale \\
+\midrule
+1 & Distance before threshold      & $d_{t,k} = -\Delta\mathbf{p}_{t,k}\cdot\mathbf{u}_k$ & $\operatorname{asinh}(\cdot\,/\,1\,\mathrm{km})$ \\
+2 & Offset right of final          & $y_{t,k} = \Delta p_e\cos\psi_k - \Delta p_n\sin\psi_k$ & $\operatorname{asinh}(\cdot\,/\,1\,\mathrm{km})$ \\
+3 & Height above threshold         & $\Delta h_{t,k} = h_t - z_k$ & $1\,\mathrm{km}$ \\
+4 & Direction minus course, sine   & $\sin(\chi_t - \psi_k)$ & --- \\
+5 & Direction minus course, cosine & $\cos(\chi_t - \psi_k)$ & --- \\
+6 & Height above glidepath         & $\Delta h_{t,k} - g_k(d_{t,k})$, \quad $g_k(d) = \mathrm{TCH}_k + d\tan\gamma_k + d^2/2R_k$ & $\operatorname{asinh}(\cdot\,/\,100\,\mathrm{m})$ \\
+7 & Landings in the last 30\,min   & $L_{t,k}$ & $10$ \\
+\bottomrule
+\end{tabularx}
+\par\smallskip
+{\footnotesize $\Delta\mathbf{p}_{t,k} = (e_t - e_k,\, n_t - n_k)$: offset of the aircraft from the threshold of runway $k$;
+$\mathbf{u}_k = (\sin\psi_k, \cos\psi_k)$: unit vector along its course; $\psi_k$, $z_k$: course and threshold
+elevation; $\mathrm{TCH}_k$, $\gamma_k$: crossing height and angle of its published glidepath; $R_k$: radius of
+curvature of the earth along the course; $\chi_t = \operatorname{atan2}(e_t - e_t^-,\, n_t - n_t^-)$: direction of
+motion, set to $0$ in both direction terms where there is no motion ($m_t = 1$); $L_{t,k}$: landings on runway $k$ in
+the 30\,min before row $t$, the own landing of the flight not counted.\par}
+\end{table}
