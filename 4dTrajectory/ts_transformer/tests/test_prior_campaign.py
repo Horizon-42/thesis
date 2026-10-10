@@ -296,20 +296,22 @@ def test_the_behaviour_check_gives_one_answer_and_sees_a_change_of_the_training_
         assert changed["train_loss"] == answer["train_loss"] and changed["words"] != answer["words"]
 
 
-def test_the_behaviour_check_refuses_a_batch_mode_of_the_masks_that_says_otherwise(monkeypatch):
-    """B14: `prior_behaviour` speaks its fixed inputs with the procedure masks in both modes; a batch mode that says
-    otherwise (its edge 100 m up, its own check of the fixed rows skipped) is refused by name."""
+def test_the_behaviour_check_covers_the_procedure_masks(monkeypatch):
+    """B14, D108: `prior_behaviour` speaks its fixed inputs under the procedure masks: masks whose glidepath lower edge is
+    100 m up give another answer (the speaker's words or the speaking loop's)."""
     from ts_transformer.experiments import prior_behaviour
     from ts_transformer.instructions.words import Words
     from ts_transformer.prior import procedure
     from ts_transformer.tests.support import fixture_days, instruction_spec
     from ts_transformer.tests.test_prior_speaker import finals
 
-    edge = procedure._Gathered.edge_m
-    monkeypatch.setattr(procedure, "require_same_masks", lambda finals, words: None)
-    monkeypatch.setattr(procedure._Gathered, "edge_m", lambda self, e, n: edge(self, e, n) + 100.0)
-    with pytest.raises(ValueError, match="says otherwise with the procedure masks' batch mode"):
-        prior_behaviour.behaviour(Words(instruction_spec()), finals(), fixture_days())
+    words, days = Words(instruction_spec()), fixture_days()
+    answer = prior_behaviour.behaviour(words, finals(), days)
+    edge = procedure._FinalArrays.edge_m
+    monkeypatch.setattr(procedure._FinalArrays, "edge_m", lambda self, e, n: edge(self, e, n) + 100.0)
+    changed = prior_behaviour.behaviour(words, finals(), days)
+    assert (changed["words"], changed["speaking_loop"]) != (answer["words"], answer["speaking_loop"])
+    assert changed["train_loss"] == answer["train_loss"]
 
 
 def test_the_behaviour_check_covers_the_sentence_rows_the_selection_the_choices_and_the_settings(monkeypatch):

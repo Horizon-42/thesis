@@ -491,8 +491,10 @@ def _all_permitted(words, candidates, column, rng=None):
 
 def test_the_column_mask_is_every_completion_through_apply_on_every_row_of_a_small_vocabulary():
     """D62: on a small vocabulary, every state in force (and none: the first step), every word of the earlier columns,
-    three heights, every column: the mask is the definition — some completion of the later columns passes `apply` —
-    with every later word permitted and with random permitted words."""
+    three heights, every column: the mask is the definition — some completion of the later columns passes `apply`,
+    each completion checked by `apply` itself — with every later word permitted and with random permitted words. This
+    guards the property the mask rests on (the grammar's module docstring: a heading or speed word enters the rules only
+    through rule 1): a change of rules 1–6 that breaks it fails here, and `column_mask` must change with the rules."""
     import itertools
 
     words, candidates = Words(_small_spec()), 2
@@ -514,6 +516,9 @@ def test_the_column_mask_is_every_completion_through_apply_on_every_row_of_a_sma
                         assert mask[k].tolist() == expected, (column, state, height, prefix)
                         checked += 1
     assert checked > 20_000
+    with pytest.raises(ValueError, match="later columns"):        # permitted words of an earlier column: refused
+        grammar.column_mask([None], np.zeros((1, 2), dtype=np.int64), 2, np.zeros(1), [1], words,
+                            {1: np.ones((1, 3), bool)})
 
 
 def test_the_column_mask_is_every_completion_through_apply_on_random_rows_of_the_chosen_vocabulary():

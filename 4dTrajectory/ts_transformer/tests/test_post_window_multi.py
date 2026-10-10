@@ -24,6 +24,7 @@ from ts_transformer.post.landings import roster_key
 from ts_transformer.post.reward import LANDED
 from ts_transformer.post.scene import Joined
 from ts_transformer.prior.landings import Landing, LandingIndex
+from ts_transformer.prior.model import CACHE_STEP_ROWS, COPIED, MERGED
 from ts_transformer.prior.speaker import ABSENT, MOST_GO_AROUNDS, SAID
 from ts_transformer.tests import test_start
 from ts_transformer.tests.test_post_window_loop import CPU, DELTA, _with_module, setup  # noqa: F401
@@ -208,6 +209,102 @@ def test_a_copy_of_a_window_of_several_aircraft_says_and_flies_what_it_does(setu
         a, b = copied[k], original[k % 3]
         assert np.array_equal(a.words, b.words) and a.outcome == b.outcome and a.loss_step == b.loss_step
         assert np.allclose(a.states, b.states, rtol=0.0, atol=STATE_BOUND_M)
+
+
+@pytest.mark.parametrize("attention", [COPIED, MERGED])
+def test_a_windows_copies_hold_their_front_once_and_say_and_fly_what_each_taken_alone_does(setup, attention):
+    """Multi-aircraft control D190 (2): K copies of the window taken together hold the speaker's rows written so far
+    once (a front for each of its aircraft; of their own rows only the room), and flown on, each on numbers of its own
+    (they part at once), say and fly what the same copies each taken alone do: `COPIED` the same words and states bit
+    for bit, `MERGED` the same words (no draw near a boundary here) and the states within the executor's bound. Each
+    writes its own rows: the front stays as it was."""
+    s = setup
+    _, loop_of = _multi(s)
+    loop = loop_of(_with_module(s["base"]), attention=attention)
+    numbers = _numbers(len(JOINS))
+    while loop.speaking.t < JOINS[2] + 3:
+        loop.step(np.stack([n.random(len(COLUMNS)) if said else np.zeros(len(COLUMNS))
+                            for n, said in zip(numbers, loop.speaking.said_now())]))
+    k = 3
+    shared, alone = loop.copy([0] * k), [loop.copy([0]) for _ in range(k)]
+    fronts = []
+    for p in shared.speaking.speaker.past:
+        assert p.start == p.rows and p.front.keys.shape[0] == len(JOINS) and p.keys.shape[2] == CACHE_STEP_ROWS
+        fronts.append(p.front.keys.clone())
+    assert all(a.speaking.speaker.past[0].front is None for a in alone)
+
+    def held(past):                                                      # the bytes of keys and values a cache holds
+        tensors = [p.keys for p in past] + [p.values for p in past] + \
+            [x for p in past if p.front is not None for x in (p.front.keys, p.front.values)]
+        return sum(x.numel() * x.element_size() for x in tensors)
+
+    rows, row = loop.speaking.speaker.past[0].rows, held(alone[0].speaking.speaker.past) // (
+        len(JOINS) * (loop.speaking.speaker.past[0].rows + CACHE_STEP_ROWS))
+    assert held(shared.speaking.speaker.past) == (len(JOINS) * rows + k * len(JOINS) * CACHE_STEP_ROWS) * row
+    assert sum(held(a.speaking.speaker.past) for a in alone) == k * len(JOINS) * (rows + CACHE_STEP_ROWS) * row
+
+    def streams(j):
+        return [flight_numbers(8 + j, 0, m) for m in range(len(JOINS))]
+
+    together = shared.finish([n for j in range(k) for n in streams(j)])
+    assert all(torch.equal(p.front.keys, f) for p, f in zip(shared.speaking.speaker.past, fronts))
+    for j, copy in enumerate(alone):
+        for x, y in zip(together[j * len(JOINS):(j + 1) * len(JOINS)], copy.finish(streams(j))):
+            assert np.array_equal(x.words, y.words) and x.outcome == y.outcome and x.loss_step == y.loss_step
+            if attention == COPIED:
+                assert np.array_equal(x.states, y.states)
+            else:
+                assert np.allclose(x.states, y.states, rtol=0.0, atol=STATE_BOUND_M)
+    assert any(len({together[j * len(JOINS) + m].words.tobytes() for j in range(k)}) > 1
+               for m in range(len(JOINS)))                                # the copies parted
+
+
+def test_windows_of_loops_at_different_ticks_flown_together_say_and_fly_what_each_does_alone(setup):
+    """D188: copies of the window taken at two ticks (the last aircraft not yet joined in the first) flown together in
+    one loop, each window at its own tick (its origin the ticks it is behind), then joined again without one window and
+    once more alone (the ticks before any of its aircraft joined left out): each window says and flies what its copy
+    flown alone does, aircraft by aircraft, and reads its own ticks."""
+    s = setup
+    _, loop_of = _multi(s)
+    loop = loop_of(_with_module(s["base"]))
+    numbers = _numbers(len(JOINS))
+
+    def step(loop, streams):
+        loop.step(np.stack([n.random(len(COLUMNS)) if said else np.zeros(len(COLUMNS))
+                            for n, said in zip(streams, loop.speaking.said_now())]))
+
+    def twins(states):
+        out = [np.random.default_rng() for _ in states]
+        for twin, state in zip(out, states):
+            twin.bit_generator.state = state
+        return out
+
+    early, late = JOINS[2] - 2, JOINS[2] + 5
+    while loop.speaking.t < early:
+        step(loop, numbers)
+    a, a_numbers = loop.copy([0]), [n.bit_generator.state for n in numbers]
+    while loop.speaking.t < late:
+        step(loop, numbers)
+    b, b_numbers = loop.copy([0]), [n.bit_generator.state for n in numbers]
+    together = WindowLoop.together([(a, [0]), (b, [0, 0])], CPU, None)
+    assert together.speaking.t == late and together.origins.tolist() == [late - early, 0, 0]
+    assert together.speaking.join_ticks.tolist() == [late - early + j for j in JOINS] + list(JOINS) * 2
+    streams = twins(a_numbers) + twins(b_numbers) + twins(b_numbers)
+    for _ in range(3):
+        step(together, streams)
+    kept = [0, 2]                                         # window 1 leaves: its aircraft and numbers with it
+    together = WindowLoop.together([(together, kept)], CPU, None)
+    streams = streams[:3] + streams[6:]
+    for _ in range(4):
+        step(together, streams)
+    alone = WindowLoop.together([(together, [0])], CPU, None)  # its origin, the ticks before its aircraft joined, left out
+    assert alone.origins.tolist() == [0] and alone.speaking.t == early + 7
+    first = alone.finish(streams[:3])
+    second = together.copy([1]).finish(streams[3:])
+    for flown, reference in ((first, a.finish(twins(a_numbers))), (second, b.finish(twins(b_numbers)))):
+        for x, y in zip(flown, reference):
+            assert np.array_equal(x.words, y.words) and x.outcome == y.outcome and x.loss_step == y.loss_step
+            assert np.allclose(x.states, y.states, rtol=0.0, atol=STATE_BOUND_M)
 
 
 def test_a_callers_rule_of_who_answers_is_asked_with_the_windows_commanded_aircraft_first(setup):
@@ -472,8 +569,14 @@ def test_a_commanded_leader_that_landed_is_judged_once_over_its_threshold(setup,
     owns = [AircraftAt.of([(loop.records[b].key, on_final(d), on_final(d + 150.0), True, 0, "F", False, False)])
             for b, d in ((1, 2_000.0), (2, 9_000.0))]
     recorded = AircraftAt.of([("REC", on_final(30_000.0), on_final(30_150.0), True, 0, "F", False, False)])
-    gone = post_window_loop._Tick(tick.t, [1, 2], owns, recorded, tick.aircraft, tick.scene)
+    aircraft = post_window_loop.scene_aircraft(post_window_loop._concat(owns), recorded)       # the tick of these
+    gone = post_window_loop._Tick(tick.t, [1, 2], owns, recorded, aircraft, post_window_loop.separation_traffic(
+        aircraft, g, loop.separations[g.code], loop.finals[1], loop.step_s))
     judged, scene, commanded = loop._judged(gone, [0])
+    whole = post_window_loop.separation_traffic(judged, g, loop.separations[g.code], loop.finals[1], loop.step_s)
+    for name in ("e_m", "n_m", "height_m", "along_m", "track_minus_course_deg", "right_of_course_m", "established"):
+        assert np.array_equal(getattr(scene, name), getattr(whole, name), equal_nan=name != "established")   # D189 (1)
+    assert scene.runway == whole.runway and scene.category == whole.category
     keys = [loop.records[b].key for b in (1, 2, 0)] + ["REC"]                  # the recorded aircraft last
     assert list(judged.keys) == keys and judged.last_step.tolist() == [False, False, True, False] and commanded == 3
     assert np.array_equal(judged.at[2], flown[-1, :3]) and judged.runway_index[2] == 0
@@ -500,9 +603,9 @@ def test_a_commanded_leader_that_landed_is_judged_once_over_its_threshold(setup,
 
 
 def test_a_rows_scene_is_computed_once_a_tick_and_the_samples_of_chosen_rows_are_theirs(setup, monkeypatch):
-    """D181 (59): at a tick of three aircraft flown, each row's own set and scene is computed once, for its speed-word
-    mask (the third aircraft's: the first two are silent by then) and its tokens alike (one scene a row, and the window's
-    judged one, in a row said); (58) the samples of chosen
+    """D181 (59), D189 (1): at a tick of three aircraft flown, one scene is computed, the window's (for its judge, kept
+    for the next row), and each row's view, for its speed-word mask (the third aircraft's: the first two are silent by
+    then) and its tokens alike, is that scene reordered; (58) the samples of chosen
     rows (repeats permitted) are those rows' samples of every row, bit for bit, padded to the rows of the row said
     most of all."""
     from ts_transformer.tests.test_post_generalised import _Digest
@@ -523,7 +626,7 @@ def test_a_rows_scene_is_computed_once_a_tick_and_the_samples_of_chosen_rows_are
     real, scenes = post_window_loop.separation_traffic, []
     monkeypatch.setattr(post_window_loop, "separation_traffic", lambda *a: (scenes.append(a), real(*a))[1])
     step()
-    assert len(scenes) == len(JOINS) + 1
+    assert len(scenes) == 1
     monkeypatch.setattr(post_window_loop, "separation_traffic", real)
     loop.finish(numbers)
     every, chosen = loop.samples("train"), [2, 1, 2]     # without row 0, said the most: padded to its rows
@@ -533,3 +636,97 @@ def test_a_rows_scene_is_computed_once_a_tick_and_the_samples_of_chosen_rows_are
         c.sentence(*every[b])
         assert a.hash.digest() == c.hash.digest()
     assert len(every[0][0].time_s) > max(len(every[b][0].time_s) for b in (1, 2))      # the padding is tested
+
+
+def test_each_rows_view_is_its_window_reordered_and_reads_as_the_scene_functions_read_it(setup):
+    """D189 (1), (3): at ticks of three commanded aircraft flown with a recorded one, each row's view of its window —
+    its set (itself, the recorded aircraft, the other commanded ones), its scene and its speeds along the course — is
+    the window's computed once and reordered, and the tokens of every pair of the window computed at once are each
+    row's: equal bit for bit to the scene functions and the tokens called for that row alone (the reference: the
+    functions themselves, no code kept beside them)."""
+    from ts_transformer.post.edges import tokens
+    from ts_transformer.post.scene import AircraftAt
+    from ts_transformer.post.speed_mask import along_course_speeds
+    from ts_transformer.post.traffic import scene_aircraft, traffic
+    from ts_transformer.prior.inputs import motion
+
+    s = setup
+    _, loop_of = _multi(s)
+    loop = loop_of(_with_module(s["base"]))
+    numbers = _numbers(len(JOINS))
+    g = s["geometry"]
+    separation, finals = loop.separations[g.code], loop.finals[0]
+    checked = 0
+    while loop.speaking.alive.any() and loop.speaking.t < JOINS[2] + 12:
+        roles = loop.speaking.roles()
+        loop.step(np.stack([n.random(len(COLUMNS)) if r == SAID else np.zeros(len(COLUMNS))
+                            for n, r in zip(numbers, roles)]))
+        tick = loop._ticks(loop.speaking.t)[0]
+        if tick is None or len(tick.rows) < 2:
+            continue
+        recorded = AircraftAt.of([("REC", tuple(tick.owns[0].at[0] + [900.0, 900.0, 300.0]),
+                                   tuple(tick.owns[0].before[0] + [900.0, 900.0, 300.0]), True, -1, "F", False, False)])
+        aircraft = scene_aircraft(post_window_loop._concat(tick.owns), recorded)
+        moving = motion(aircraft.at, aircraft.before, aircraft.known, loop.step_s)
+        scene = traffic(aircraft, g, separation, finals, loop.step_s)
+        tick = post_window_loop._Tick(tick.t, tick.rows, tick.owns, recorded, aircraft, scene, moving,
+                                      along_course_speeds(moving.ground_speed_mps, scene))
+        together = post_window_loop.window_tokens(tick.aircraft, len(tick.rows), g, loop.pairs[g.code], tick.moving,
+                                                  tick.scene.along_m)
+        for k, b in enumerate(tick.rows):
+            view = loop._of_row(tick, b)
+            others = [o for c, o in zip(tick.rows, tick.owns) if c != b]
+            other = scene_aircraft(recorded, post_window_loop._concat(others))
+            own = scene_aircraft(tick.owns[k], other)
+            alone = traffic(own, g, separation, finals, loop.step_s)
+            assert all(np.array_equal(getattr(view.aircraft, f), getattr(own, f))
+                       for f in ("at", "before", "known", "runway_index", "last_step", "go_around"))
+            assert view.aircraft.keys == own.keys and view.placed == [None] + [c for c in tick.rows if c != b]
+            for name in ("e_m", "n_m", "height_m", "along_m", "track_minus_course_deg", "right_of_course_m",
+                         "established"):
+                assert np.array_equal(getattr(view.scene, name), getattr(alone, name), equal_nan=name != "established")
+            assert view.scene.runway == alone.runway and view.scene.category == alone.category
+            speeds = along_course_speeds(motion(own.at, own.before, own.known, loop.step_s).ground_speed_mps, alone)
+            assert np.array_equal(view.speeds, speeds, equal_nan=True)
+            assert np.array_equal(together[k], tokens(tick.owns[k], other, g, separation, loop.step_s))
+            checked += 1
+    assert checked >= 6
+
+
+def test_every_count_a_loop_reads_lies_where_its_landings_were_cut(setup, monkeypatch):
+    """D189 (0): flown to its end, every time at which a loop counts an aircraft's landings (its rows' inputs, the
+    reward's present direction) lies in the span its landings were cut to (`post.landings.commanded_landings`: from one
+    Δ before its window's row 0 to the loop's last row, ``reach``; the 30 min before the first kept too), so every
+    count is the roster's."""
+    from ts_transformer.prior.landings import LandingIndex
+
+    spans, reads = {}, []
+    real_commanded, real_with, real_counts = (post_window_loop.commanded_landings, LandingIndex.with_landing,
+                                              LandingIndex.counts_before)
+
+    def commanded(window, roster, until_s):
+        out = real_commanded(window, roster, until_s)
+        for index in out:                                            # the index kept: its id is not taken again
+            spans[id(index)] = (window.row0_s - window.scene.interval_s, until_s, index)
+        return out
+
+    def with_landing(self, landing):
+        out = real_with(self, landing)
+        spans[id(out)] = (*spans[id(self)][:2], out)
+        return out
+
+    def counts_before(self, time_s, *, without):
+        reads.append((id(self), np.array(time_s, dtype=np.float64)))
+        return real_counts(self, time_s, without=without)
+
+    monkeypatch.setattr(post_window_loop, "commanded_landings", commanded)
+    monkeypatch.setattr(LandingIndex, "with_landing", with_landing)
+    monkeypatch.setattr(LandingIndex, "counts_before", counts_before)
+    s = setup
+    _, loop_of = _multi(s, joins=(0, 30, 60))
+    loop = loop_of(_with_module(s["base"]))
+    loop.run(_numbers(3))
+    assert reads and {key for key, _ in reads} <= set(spans)
+    for key, times in reads:
+        first, end, _ = spans[key]
+        assert ((times >= first) & (times < end)).all(), (first, end, times.min(), times.max())

@@ -42,7 +42,9 @@ class LoopRows:
     (`inputs.own_flight_key`: its own landing, which its landings hold, left out), the UTC time of its 2 s row 0
     (``entry_utc_s``) and the 2 s row of the signals its Δ row 0 is (``first_rows``); ``start`` the first predicted
     step's Δ row of each aircraft's own rows, one for the batch; ``join_ticks`` each aircraft's join tick (module
-    docstring), every aircraft's 0 when not given."""
+    docstring), every aircraft's 0 when not given. A row's state inputs are computed for the aircraft of each airport at
+    once (`state_inputs` on several rows, one each: multi-aircraft control D186 (3)); each row's numbers are those of
+    the row alone (elementwise numpy, the same bits for one row as for many: the tests compare them)."""
 
     def __init__(self, geometries: Sequence[AirportGeometry], landings: Sequence[LandingIndex], keys: Sequence[str],
                  entry_utc_s: np.ndarray, first_rows: np.ndarray, start: int, *, variant: str,
@@ -67,6 +69,11 @@ class LoopRows:
         # each aircraft's candidates as columns of its landings (refused when its landings are not on its candidates)
         self._runways = [[index.runways.index(c.ident) for c in g.candidates]
                          for g, index in zip(self.geometries, self.landings)]
+        # the aircraft of each airport, in their order: their state inputs computed at once
+        airports: dict[int, list[int]] = {}
+        for b, geometry in enumerate(self.geometries):
+            airports.setdefault(id(geometry), []).append(b)
+        self._airports = [np.array(group) for group in airports.values()]
 
     def __call__(self, t: int, at: np.ndarray, before: np.ndarray, known: np.ndarray | bool,
                  heard: Sequence[Heard]) -> tuple[RowTensors, Position]:
@@ -78,13 +85,15 @@ class LoopRows:
         known = np.broadcast_to(np.asarray(known, dtype=bool), (count,))
         own_row = t - self.join_ticks                       # each aircraft's own Δ row
         utc = self.entry_utc_s + (self.first_rows + own_row * self.every) * self.step_s
-        own, candidates = [], []
-        for b, geometry in enumerate(self.geometries):
-            counts = self.landings[b].counts_before(utc[b: b + 1], without=self.keys[b])
-            o, c = state_inputs(at[b: b + 1, POSITION], before[b: b + 1, POSITION], known[b: b + 1],
-                                counts[:, self._runways[b]], geometry, self.variant, self.step_s)
-            own.append(o[0])
-            candidates.append(c[0])
+        counts = [self.landings[b].counts_before(utc[b: b + 1], without=self.keys[b])[:, self._runways[b]]
+                  for b in range(count)]
+        own, candidates = [None] * count, [None] * count
+        for group in self._airports:
+            o, c = state_inputs(at[group][:, POSITION], before[group][:, POSITION], known[group],
+                                np.concatenate([counts[b] for b in group]), self.geometries[group[0]], self.variant,
+                                self.step_s)
+            for k, b in enumerate(group):
+                own[b], candidates[b] = o[k], c[k]
         words = [h.inputs(float(r * self.interval_s)) for h, r in zip(heard, own_row)]
         tensors = row_tensors(own_row * self.interval_s, np.stack(own), candidates,
                               np.array([w[0] for w in words]), np.array([w[1] for w in words]),
@@ -99,12 +108,29 @@ class LoopRows:
         for b in aircraft:
             self.landings[b] = self.landings[b].with_landing(landing)
 
-    def select(self, indices: Sequence[int]) -> LoopRows:
+    def select(self, indices: Sequence[int], device: torch.device | None = None) -> LoopRows:
         """The rows of the aircraft ``indices`` (repeats permitted), in that order, with their landings as they are now
-        and their join ticks: a copy's (`Speaker.copy`)."""
+        and their join ticks: a copy's (`Speaker.copy`); its rows' tensors on ``device`` (this one's when not given)."""
         indices = list(indices)
         return LoopRows([self.geometries[i] for i in indices], [self.landings[i] for i in indices],
                         [self.keys[i] for i in indices],
                         self.entry_utc_s[indices], self.first_rows[indices], self.start, variant=self.variant,
-                        interval_s=self.interval_s, step_s=self.step_s, device=self.device,
+                        interval_s=self.interval_s, step_s=self.step_s, device=self.device if device is None else device,
                         join_ticks=self.join_ticks[indices])
+
+    @staticmethod
+    def together(parts: Sequence[tuple[LoopRows, Sequence[int], int]], device: torch.device) -> LoopRows:
+        """The rows of aircraft of several loops as one loop's (a speaking loop's flights together, multi-aircraft
+        control D188): ``parts`` each rows, its aircraft (repeats permitted) and the ticks its clock moves later by, its
+        join ticks with it; each aircraft with its landings as they are now, its own rows the same rows. On
+        ``device``."""
+        index = [list(aircraft) for _, aircraft, _ in parts]
+        first = parts[0][0]
+        ticks = np.concatenate([rows.join_ticks[i] + shift for (rows, _, shift), i in zip(parts, index)])
+        return LoopRows([rows.geometries[b] for (rows, _, _), i in zip(parts, index) for b in i],
+                        [rows.landings[b] for (rows, _, _), i in zip(parts, index) for b in i],
+                        [rows.keys[b] for (rows, _, _), i in zip(parts, index) for b in i],
+                        np.concatenate([rows.entry_utc_s[i] for (rows, _, _), i in zip(parts, index)]),
+                        np.concatenate([rows.first_rows[i] for (rows, _, _), i in zip(parts, index)]), first.start,
+                        variant=first.variant, interval_s=first.interval_s, step_s=first.step_s, device=device,
+                        join_ticks=ticks)

@@ -11,7 +11,8 @@ import torch
 from ts_transformer.instructions.words import Words
 from ts_transformer.post.edges import TOKEN_FEATURES
 from ts_transformer.post.loss import (
-    CLIP, PassStart, Samples, data_term, one_pass, passes, pull_to_base, stacked, surrogate, update_loss, update_step,
+    CLIP, PassStart, Samples, data_term, one_pass, passes, pull_to_base, stacked, surrogate, update_gradients,
+    update_loss, update_step,
 )
 from ts_transformer.post.traffic_attention import (
     Traffic, TrafficConfig, add_traffic_attention, parameter_groups, traffic_modules, traffic_of,
@@ -214,6 +215,38 @@ def test_an_update_in_pieces_is_the_whole_update():
     assert all((p.grad is None) == (g is None) and (g is None or torch.allclose(p.grad, g, atol=1e-6, rtol=1e-5))
                for p, g in zip(model.parameters(), expected))
     assert not model.training and first.traffic.embedded is None and second.traffic.embedded is None
+
+
+def test_an_updates_gradient_by_part_adds_up_to_the_update():
+    """`update_gradients`: the surrogate's, the pull's and the data term's gradients (each weighted as in the loss),
+    summed over the pieces, add up to `update_step`'s gradient to float rounding, with the same dropout; each part
+    reaches the model; no gradient is left in it."""
+    base = _base()
+    model = _trained(base)
+    rows, permitted, _, traffic = _spoken(model)
+    rng = np.random.default_rng(9)
+    data = collate([prior_sentence(rng, WORDS, candidates=2, rows=LENGTH, first_step=FIRST) for _ in range(4)], CPU)
+    advantage = torch.as_tensor(np.random.default_rng(2).normal(size=rows.asked.shape), dtype=torch.float32)
+    samples = _samples(rows, permitted, traffic, advantage)
+    start = PassStart(model)
+    with torch.no_grad():                                              # the model moved since it spoke
+        generator = torch.Generator().manual_seed(4)
+        for p in model.parameters():
+            p.add_(torch.randn(p.shape, generator=generator) * 0.05)
+    parameters = [p for group in parameter_groups(model, 1e-5, 1e-4) for p in group["params"]]
+    torch.manual_seed(3)
+    update_step(model, start, base, [samples.select([0]), samples.select([1, 2])], data)
+    expected = [None if p.grad is None else p.grad.clone() for p in parameters]
+    model.zero_grad(set_to_none=True)
+    torch.manual_seed(3)
+    parts = update_gradients(model, start, base, [samples.select([0]), samples.select([1, 2])], data, parameters)
+    assert set(parts) == {"surrogate", "pull", "data"} and all(p.grad is None for p in parameters)
+    for part, grads in parts.items():
+        assert any(g is not None and g.abs().sum() > 0 for g in grads), part
+    for p, want, *got in zip(parameters, expected, *parts.values()):
+        held = [g for g in got if g is not None]
+        assert (want is None) == (not held)
+        assert want is None or torch.allclose(sum(held), want, atol=1e-6, rtol=1e-5)
 
 
 def test_samples_refuse_rows_that_are_not_said_or_carry_nothing():

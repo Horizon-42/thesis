@@ -91,7 +91,7 @@ def aircraft_of(loop: Any, rows: Sequence[int], results: Sequence[Any]) -> list[
     (post-training §9 item 5), ``rows`` the window's rows in it, ``results`` their ends (`WindowResult`)."""
     out = []
     for b, result in zip(rows, results):
-        join = int(loop.speaking.join_ticks[b])
+        join = int(loop.joins[b])                               # its join step, in its window's ticks
         out.append(Aircraft(key=loop.records[b].key, reward=float(result.reward),
                             first_step=join + int(loop.speaking.start), end=join + int(loop.end_step(b)),
                             loss_step=result.loss_step, other=result.other))

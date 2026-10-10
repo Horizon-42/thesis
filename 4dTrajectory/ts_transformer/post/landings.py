@@ -18,6 +18,11 @@ commanded aircraft's own landing stays in the index: the function of a loop's ro
 commanded aircraft's landings (`commanded_landings`) are the window's, less every other commanded aircraft's own (its
 recorded landing is that aircraft's future), with its own at its record's time in the window (moved by its shift in a
 compressed window), which the function of a loop's row leaves out by its key. A stage C window: the window's landings.
+
+**What a loop's rows count** (multi-aircraft control D189 (0)): of those, a commanded aircraft holds only the landings
+from 30 min before its window's row 0 to the latest time a row of its loop is said (the caller's), and its own: a row
+counts the 30 min before it, so every count is the same, and a landing added in the loop (D147 item 2) copies tens of
+landings, not the airport's roster.
 """
 
 from __future__ import annotations
@@ -36,14 +41,18 @@ def roster_key(dataset_id: str, airport: str) -> str:
     return own_flight_key({"dataset_id": dataset_id, "airport": airport})
 
 
-def commanded_landings(window: Window, roster: LandingIndex) -> list[LandingIndex]:
-    """Each commanded aircraft's landings in ``window`` (module docstring), the anchor first."""
-    base = window_landings(window, roster)
+def commanded_landings(window: Window, roster: LandingIndex, until_s: float) -> list[LandingIndex]:
+    """Each commanded aircraft's landings in ``window`` (module docstring), the anchor first, of those its rows can
+    count: from 30 min before the window's row 0 to ``until_s`` (no row of its loop is said at or after it while one of
+    the loop's aircraft is flown: a loop that holds windows ended, as loops flown together can, says their rows, which
+    no sentence reads), and its own; one Δ more before row 0 (a row's time is its flight's entry time and row, the window's
+    to rounding)."""
+    airport = window.scene.geometry.code
+    own = [roster_key(record.key, airport) for record in window.commanded_all]
+    base = window_landings(window, roster).counted(window.row0_s - window.scene.interval_s, until_s, own)
     if not window.joined:
         return [base]
-    airport = window.scene.geometry.code
     landings = {landing.flight_key: landing for landing in base.landings}
-    own = [roster_key(record.key, airport) for record in window.commanded_all]
     shifts = [0.0, *(item.shift_s for item in window.joined)]
     out = []
     for key, shift in zip(own, shifts):

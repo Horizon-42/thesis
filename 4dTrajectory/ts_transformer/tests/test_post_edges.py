@@ -13,7 +13,9 @@ from ts_transformer.instructions.artefact import load_candidates
 from ts_transformer.post.conformance import (
     EDGES_REFERENCE_SCHEMA, reference_steps, require_conforming_edges, write_edge_reference,
 )
-from ts_transformer.post.edges import SCALE_M, TOKEN_FEATURES, tokens
+from ts_transformer.post.edges import SCALE_M, TOKEN_FEATURES, Pairs, clocks, each_tokens, tokens, window_tokens
+from ts_transformer.post.traffic import scene_aircraft
+from ts_transformer.prior.inputs import motion
 from ts_transformer.post.runways import airport_separation
 from ts_transformer.post.scene import AircraftAt, airport_scenes, real_windows
 from ts_transformer.tests.post_support import airport, at_step, categories, scene_artefact, straight_in, train_noon
@@ -110,6 +112,27 @@ def test_a_permutation_of_the_other_aircraft_permutes_their_tokens():
                           go_around=others.go_around[order])
     assert np.array_equal(tokens(own, others, geometry, separation, 2.0)[order],
                           tokens(own, permuted, geometry, separation, 2.0))
+
+
+def test_each_own_aircraft_reads_the_tokens_it_reads_alone_bit_for_bit():
+    """Multi-aircraft control S2. `each_tokens` gives each own aircraft the tokens of `tokens`, bit for bit. The test
+    uses several counts of aircraft, some motions unknown, some runways not in force, and no other aircraft."""
+    geometry = airport()
+    separation = airport_separation(geometry)
+    rng = np.random.default_rng(5)
+    for owns_count, others_count in ((1, 1), (2, 7), (5, 3), (9, 17), (3, 0)):
+        owns = at_step(rng, owns_count)
+        owns = replace(owns, known=rng.random(owns_count) > 0.2,
+                       runway_index=rng.integers(-1, 2, owns_count).astype(owns.runway_index.dtype))
+        others = at_step(rng, others_count, runway=1)
+        found = each_tokens(owns, others, geometry, Pairs(separation), 2.0)
+        assert len(found) == owns_count
+        for i, got in enumerate(found):
+            both = scene_aircraft(owns.take([i]), others)       # the old path of `tokens`: the default view
+            (alone,) = window_tokens(both, 1, geometry, Pairs(separation), motion(both.at, both.before, both.known, 2.0),
+                                     clocks(both, geometry, separation))
+            assert got.dtype == np.float32 and np.array_equal(got, alone)
+            assert np.array_equal(got, tokens(owns.take([i]), others, geometry, separation, 2.0))
 
 
 def test_an_unknown_motion_gives_the_flag_and_zeros():

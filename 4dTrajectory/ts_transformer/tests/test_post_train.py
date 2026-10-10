@@ -18,8 +18,8 @@ import torch
 from ts_transformer.experiments import post_train
 from ts_transformer.experiments import training_export as export
 from ts_transformer.experiments.post_train import (
-    INPUT_PATHS, KINDS, Context, Settings, Speakers, batches, done_rounds, draw_round, open_campaign, run_campaign,
-    speak_round, start_model, train_pass, update_pairs, window_record,
+    INPUT_PATHS, KINDS, Context, Settings, Speakers, batches, done_rounds, draw_round, launch_of, open_campaign,
+    run_campaign, speak_round, start_model, train_pass, update_pairs, window_record,
 )
 from ts_transformer.autopilot.start import Start, start_moved
 from ts_transformer.instructions.artefact import closed_loop_sentences
@@ -31,6 +31,29 @@ from ts_transformer.tests.test_post_branches import _ahead, _round
 from ts_transformer.tests.test_post_window_loop import CPU, DELTA, setup  # noqa: F401
 
 PER_KIND = {REAL: 1, INSERTED: 1, LEADER_MOVED: 1, MOVED_START: 1}
+
+
+class _Spoken(Exception):
+    """Raised by a stub round once it has what it was given."""
+
+
+@pytest.mark.parametrize("attention", ["copied", "merged"])
+def test_a_batch_is_spoken_with_its_campaigns_front_attention(monkeypatch, attention):
+    """Multi-aircraft control D190 (2): stage C's batch gives its window loops the campaign's `Settings.front_attention`
+    (how a window's copies read the front they hold once)."""
+    seen = {}
+
+    def spoken(*args, **kwargs):
+        seen.update(kwargs["loop_options"])
+        raise _Spoken
+
+    monkeypatch.setattr(post_train, "branch_round", spoken)
+    context = SimpleNamespace(splits={"train": {"sentences": {}, "flights": {}, "faults": {}}},
+                              start_loop=lambda split, batch: None, geometries={}, rosters={}, finals={}, words=None,
+                              interval_s=DELTA, variant="full", edges_reference=None, device=CPU)
+    with pytest.raises(_Spoken):
+        post_train.speak_batch(None, context, [], [], _settings(front_attention=attention), 0, None, 0)
+    assert seen == {"attention": attention}
 
 
 def _settings(**changed):
@@ -81,6 +104,22 @@ def test_the_context_holds_the_base_on_its_device(monkeypatch, tmp_path):
     context = post_train.open_context(tmp_path, tmp_path, tmp_path, tmp_path, torch.device("meta"), tmp_path,
                                       formal=False, data=False, splits=())
     assert next(context.base.parameters()).device.type == "meta" and not context.base.training
+
+
+def test_a_context_starts_its_loops_executor_on_its_executor_device(monkeypatch):
+    """Multi-aircraft control S1. `Context.start_loop` starts the executor on ``executor_device`` when it is given.
+    Otherwise it starts the executor on the context's device (the behaviour before S1). The start is a stub; "meta"
+    stands in for the GPU."""
+    seen = []
+    start = SimpleNamespace(moved=lambda sentences, moves, *, most_go_arounds, device, **ticks: seen.append(device))
+    window = SimpleNamespace(signal_index=0, signal_indices=[0], join_steps=lambda: [0], joined=[])
+    monkeypatch.setattr(post_train, "start_move_of", lambda window: None)
+    context = post_train.Context(instructions=None, executor=None, edges_reference=None, device=torch.device("meta"),
+                                 words=None, interval_s=4.0, base=None, base_identity={}, geometries={}, rosters={},
+                                 finals={}, splits={"train": {"sentences": {0: None}, "start": start}}, data=[])
+    context.start_loop("train", [window])([0])
+    replace(context, executor_device=torch.device("cpu")).start_loop("train", [window])([0])
+    assert [d.type for d in seen] == ["meta", "cpu"]
 
 
 def test_the_settings_take_a_count_of_every_kind_and_positive_sizes():
@@ -198,18 +237,36 @@ def test_speakers_give_the_groups_and_the_record_of_speaking_here(setup, tmp_pat
     finally:
         speakers.close()
     assert gc.get_freeze_count() == 0
-    assert sorted(p.name for p in there.iterdir()) == ["groups_0.pt", "groups_1.pt"]
+    assert sorted(p.name for p in there.iterdir()) == ["groups_0.pt", "groups_1.pt", "record_0.json", "record_1.json"]
+    assert [json.loads((there / f"record_{k}.json").read_text())["record"] for k in (0, 1)] == \
+        [json.loads((here / f"record_{k}.json").read_text())["record"] for k in (0, 1)]          # written by the workers
     assert all((here / name).read_bytes() == (there / name).read_bytes() for name in ("groups_0.pt", "groups_1.pt"))
     torch.save(model.state_dict(), tmp_path / "state.pt")
     wrong = [{**window_record(windows[0]), "row0_s": windows[0].row0_s + 4.0}]
     with pytest.raises(ValueError, match="other windows"):
-        post_train._speak(0, str(tmp_path / "state.pt"), str(tmp_path), 0, [0], wrong)
+        post_train._speak(0, str(tmp_path / "state.pt"), str(tmp_path), 0, [0], wrong, launch_of())
     with pytest.raises(ValueError, match="2 or more"):
         Speakers(context, settings, 1, CPU)
 
 
 def _digest(model) -> float:
     return float(sum(p.detach().double().sum() for p in model.parameters()))
+
+
+def test_a_speaking_worker_sets_its_cuda_allocator_before_it_uses_the_gpu(monkeypatch):
+    """D188 (2): a worker's initialiser sets the CUDA allocator of its process (`SPEAKER_ALLOCATOR`, read at its first
+    CUDA call), whatever the campaign's shell set; its torch on one thread."""
+    import torch._inductor.config as inductor
+
+    monkeypatch.delenv("PYTORCH_CUDA_ALLOC_CONF", raising=False)
+    monkeypatch.setattr(inductor, "compile_threads", inductor.compile_threads)
+    threads = torch.get_num_threads()
+    try:
+        post_train._initialise_speaker()
+        assert os.environ["PYTORCH_CUDA_ALLOC_CONF"] == post_train.SPEAKER_ALLOCATOR == "expandable_segments:True"
+        assert torch.get_num_threads() == 1 and inductor.compile_threads == 1
+    finally:
+        torch.set_num_threads(threads)
 
 
 def test_each_speaker_speaks_with_the_round_s_model_and_a_dead_one_fails_the_round(setup, tmp_path, monkeypatch):
@@ -239,13 +296,13 @@ def test_each_speaker_speaks_with_the_round_s_model_and_a_dead_one_fails_the_rou
             with torch.no_grad():
                 for p in model.parameters():
                     p.add_(shift)
-            parts = speakers.speak(model, windows, places, round_, tmp_path)
+            parts = speakers.speak(model, windows, places, round_, tmp_path, range(len(places)), launch_of())
             assert [(x["round"], x["k"]) for x in parts] == [(round_, 0), (round_, 1)]
             assert all(abs(x["digest"] - _digest(model)) < 1e-6 for x in parts)
             assert [x["windows"] for x in parts] == [[window_record(windows[i]) for i in p] for p in places]
             assert not (tmp_path / "speaking_model.pt").exists()
         with pytest.raises(BrokenProcessPool):
-            speakers.speak(model, windows, places, 9, tmp_path)
+            speakers.speak(model, windows, places, 9, tmp_path, range(len(places)), launch_of())
         assert not (tmp_path / "speaking_model.pt").exists()
     finally:
         speakers.close()
@@ -295,7 +352,9 @@ def test_a_round_started_through_start_is_the_round_started_by_the_one_call_form
     assert (speak_round(model, context, windows, settings, 0, here)
             == speak_round(model, reference, windows, settings, 0, there))
     assert sorted(p.name for p in here.iterdir()) == sorted(p.name for p in there.iterdir())
-    assert all((here / p.name).read_bytes() == p.read_bytes() for p in there.iterdir())
+    assert all((here / p.name).read_bytes() == p.read_bytes() for p in there.glob("*.pt"))
+    assert all(json.loads((here / p.name).read_text())["record"] == json.loads(p.read_text())["record"]
+               for p in there.glob("record_*.json"))           # D185: each batch's record (its launch's time apart)
     _same_ends(post_train.read_batch(model, context, windows, [0], settings, "train"),
                post_train.read_batch(model, reference, windows, [0], settings, "train"))
     assert moved.start_move != NO_START_MOVE
@@ -340,7 +399,7 @@ def test_the_selection_readout_through_two_workers_is_the_one_process_readout(se
                 == post_train.selection_readout(model, context, select, settings))
         wrong = [{**window_record(select[0]), "row0_s": real.row0_s + 4.0}]
         with pytest.raises(ValueError, match="other readout windows"):
-            speakers.pool.submit(post_train._read, 99, str(tmp_path / "x.pt"), "select", [0], wrong, 0).result()
+            speakers.pools["cpu"].submit(post_train._read, 99, str(tmp_path / "x.pt"), "select", [0], wrong, 0).result()
     finally:
         speakers.close()
 
@@ -493,7 +552,221 @@ def _measure(workers):
     """A measure as `require_workers_fit` returns it (on the CPU: the host only)."""
     return {"speak_workers": workers, "pass": None, "available": {"host": 64 << 30, "gpu": None},
             "measured": {"host": {"peak": 1 << 30, "now": 1 << 29}, "gpu": None,
-                         "held": {"reader_model": 1 << 20, "series": 1 << 20, "round_flights": 1}}}
+                         "held": {"reader_model": 1 << 20, "series": 1 << 20, "round_flights": 1}},
+            "cpu_workers": 0, "cpu_measured": None}
+
+
+def test_each_batch_is_spoken_on_the_device_its_place_gives_the_same_every_time():
+    """Multi-aircraft control D191: of every period of batches by index, its first ones on the CPU and the others on the
+    speak device; the rule gives the same devices every time; its default puts every batch on the speak device."""
+    rule = [post_train.batch_device(k, 2, 5, "cuda") for k in range(12)]
+    assert rule == ["cpu", "cpu", "cuda", "cuda", "cuda"] * 2 + ["cpu", "cpu"]
+    assert rule == [post_train.batch_device(k, 2, 5, "cuda") for k in range(12)]
+    assert {post_train.batch_device(k, _settings().cpu_batches, _settings().cpu_period, "cuda")
+            for k in range(12)} == {"cuda"}
+
+
+def test_the_rule_and_its_cpu_workers_are_refused_by_name_where_they_do_not_go_together():
+    """D191: the CPU's batches need CPU workers and CPU workers need batches, beside workers on another device; a period
+    of 1 or more, at most its batches on the CPU."""
+    cuda, cpu = torch.device("cuda"), torch.device("cpu")
+    assert post_train.cpu_workers_refused(0, 0, cuda) is None and post_train.cpu_workers_refused(2, 2, cuda) is None
+    assert "needs --cpu-workers" in post_train.cpu_workers_refused(0, 2, cuda)
+    assert "--cpu-workers needs --cpu-batches" in post_train.cpu_workers_refused(2, 0, cuda)
+    assert "the speak device is the CPU" in post_train.cpu_workers_refused(2, 2, cpu)
+    assert post_train.cpu_workers_refused(0, 2, cpu) is None                      # every batch on the CPU already
+    for batches, period in ((3, 2), (0, 0), (-1, 2)):
+        with pytest.raises(ValueError, match=f"cpu_batches {batches} of every cpu_period {period}"):
+            _settings(cpu_batches=batches, cpu_period=period)
+
+
+def test_each_devices_workers_take_its_batches_in_order(tmp_path):
+    """D191: with workers on two devices, each batch of a round goes to the workers of the device the rule gives it,
+    each device's in the batches' order, and every batch of the selection readout to the speak device's (every round's
+    readout on one device, whatever rule spoke the round); the results come back in batch order."""
+    from concurrent.futures import Future
+
+    class Pool:
+        def __init__(self):
+            self.places = []
+
+        def submit(self, task, *args):
+            places = args[4] if task is post_train._speak else args[3]
+            self.places.append(places[0])
+            done = Future()
+            done.set_result(places[0])
+            return done
+
+    speakers = object.__new__(Speakers)
+    speakers.pools = {"cuda": Pool(), "cpu": Pool()}
+    speakers.device, speakers.cpu_batches, speakers.cpu_period = torch.device("cuda"), 2, 5
+    speakers.stage, speakers.readings, speakers.deferred = SimpleNamespace(record=lambda w: w), 0, []
+    windows, places = list(range(7)), [[k] for k in range(7)]
+    model = torch.nn.Linear(1, 1)
+    assert speakers.speak(model, windows, places, 0, tmp_path, list(range(7)), {}) == list(range(7))
+    assert speakers.pools["cpu"].places == [0, 1, 5, 6] and speakers.pools["cuda"].places == [2, 3, 4]
+    assert speakers.read(model, windows, places, "select") == list(range(7))       # the readout's on the speak device
+    assert speakers.pools["cpu"].places == [0, 1, 5, 6] and speakers.pools["cuda"].places == [2, 3, 4, *range(7)]
+
+
+def _held_device(_):
+    """What a speaking worker was forked with (`Speakers`): its device's kind and its GPU budget."""
+    return post_train._SPEAKER["device"].type, post_train._SPEAKER["gpu_budget"]
+
+
+def test_each_pool_of_workers_is_forked_with_its_own_device_and_budget(tmp_path):
+    """D191: beside the workers on the speak device (its GPU budget theirs), the CPU workers are forked with the CPU and
+    no budget (no worker touches the GPU here); a rule that speaks batches on the CPU beside another device refuses a
+    round spoken without speakers, before any change."""
+    context = SimpleNamespace(device=CPU)
+    speakers = Speakers(context, _settings(cpu_batches=1, cpu_period=2), 1, torch.device("cuda"), gpu_budget=123,
+                        cpu_workers=1)
+    try:
+        assert speakers.pools["cuda"].submit(_held_device, 0).result() == ("cuda", 123)
+        assert speakers.pools["cpu"].submit(_held_device, 0).result() == ("cpu", None)
+    finally:
+        speakers.close()
+    stage = SimpleNamespace(batches=lambda windows, settings: [[0], [1]])
+    with pytest.raises(ValueError, match="needs CPU speaking workers"):
+        speak_round(None, SimpleNamespace(device=torch.device("cuda")), [0, 1], _settings(cpu_batches=1, cpu_period=2),
+                    0, tmp_path, stage=stage)
+
+
+def test_the_runner_forks_cpu_workers_beside_one_worker_on_the_speak_device(tmp_path, monkeypatch, capsys):
+    """D191 through the runner: ``--cpu-workers`` with ``--cpu-batches`` beside one worker on the speak device opens the
+    context on the CPU, gives `Speakers` the CPU workers and keeps the rule as the campaign's settings; the CPU's
+    batches without CPU workers are refused by name before anything opens."""
+    handed, opened = {}, []
+
+    class Workers:
+        workers, cpu_workers = 1, 2
+
+        def __init__(self, context, settings, workers, device, *, stage, cpu_workers):
+            handed.update(workers=workers, device=device.type, cpu_workers=cpu_workers,
+                          rule=(settings.cpu_batches, settings.cpu_period))
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(post_train, "git_state", lambda: {"head": "x", "dirty": False})
+    monkeypatch.setattr(post_train, "require_conforming_closed_loop", lambda *a: (None, {"checks": {}}, None))
+    monkeypatch.setattr(post_train, "checked_edges", lambda path: None)
+    base = SimpleNamespace(to=lambda device: base, eval=lambda: base)          # no CUDA touched in the test process
+    monkeypatch.setattr(post_train, "open_context", lambda *a, **k: (opened.append(a[4].type),
+                                                                     SimpleNamespace(base=base, device=a[4],
+                                                                                     interval_s=4.0))[1])
+    monkeypatch.setattr(post_train, "replace", lambda c, **k: c)
+    monkeypatch.setattr(post_train, "Speakers", Workers)
+    monkeypatch.setattr(post_train, "campaign_model", lambda *a: (None, None))
+    monkeypatch.setattr(post_train, "require_workers_fit", lambda *a: {**_measure(1), "cpu_workers": 2})
+    monkeypatch.setattr(post_train, "run_campaign", lambda *a, **k: None)
+    argv = ["--prior", str(tmp_path / "p"), "--instructions", str(tmp_path / "i"), "--executor", str(tmp_path / "e"),
+            "--windows", str(tmp_path / "w"), "--out", str(tmp_path / "campaign"), "--rounds", "1",
+            "--batch-windows", "1", "--seed", "2024", "--prior-lr", "1e-4", "--traffic-lr", "1e-3",
+            "--weight-decay", "0", "--update-groups", "1", "--data-sentences", "1", "--select-per-airport", "1",
+            "--traffic-hidden", "16", "--traffic-heads", "4", "--method", "branch", "--select-seed", "1337",
+            "--device", "cuda", "--cpu-batches", "1", "--cpu-period", "2"]
+    argv += [x for kind in KINDS for x in (f"--windows-{kind.lower()}", "1")]
+    assert post_train.main(argv + ["--cpu-workers", "2"]) == 0
+    assert opened == ["cpu"] and handed == {"workers": 1, "device": "cuda", "cpu_workers": 2, "rule": (1, 2)}
+    recorded = json.loads((tmp_path / "campaign" / "campaign.json").read_text())["inputs"]["settings"]
+    assert (recorded["cpu_batches"], recorded["cpu_period"]) == (1, 2)
+    with pytest.raises(SystemExit):
+        post_train.main(argv)                                       # the CPU's batches and no CPU workers
+    assert "--cpu-batches above 0 needs --cpu-workers" in capsys.readouterr().err and opened == ["cpu"]
+
+
+def test_a_batch_past_its_workers_share_is_spoken_again_after_the_others_at_fewer_at_once(tmp_path):
+    """D191 (the user, 2026-10-10: the peaks last): a batch whose GPU worker runs out of its share is spoken again once
+    the others are spoken, at each level in turn (fewer at once, more memory), at most a level's number at once, each
+    level's batches in batch order; the results in batch order; past the last level, or with no level, the out of
+    memory fails the round."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    gib = 1 << 30
+    fails = {1: (None,), 3: (None, 2 * gib), 4: (None,), 5: (None,)}  # the budgets each batch runs out of
+
+    class Pool:
+        """Six workers on threads: each task held a moment, the most running at once counted by budget."""
+
+        def __init__(self):
+            self.threads, self.lock = ThreadPoolExecutor(6), threading.Lock()
+            self.asked, self.running, self.most = [], 0, {}
+
+        def submit(self, task, *args):
+            k, budget = args[3], args[-1]
+            self.asked.append((k, budget))
+
+            def run():
+                with self.lock:
+                    self.running += 1
+                    self.most[budget] = max(self.most.get(budget, 0), self.running)
+                threading.Event().wait(0.05)
+                with self.lock:
+                    self.running -= 1
+                if budget in fails.get(k, ()):
+                    raise torch.OutOfMemoryError("past its share")
+                return k
+
+            return self.threads.submit(run)
+
+    speakers = object.__new__(Speakers)
+    speakers.pools, speakers.device = {"cuda": Pool()}, torch.device("cuda")
+    speakers.cpu_batches, speakers.cpu_period = 0, 1
+    speakers.deferred = [(2, 2 * gib), (1, 4 * gib)]
+    speakers.stage, speakers.readings = SimpleNamespace(record=lambda w: w), 0
+    windows, places = list(range(6)), [[k] for k in range(6)]
+    assert speakers.speak(torch.nn.Linear(1, 1), windows, places, 0, tmp_path, list(range(6)), {}) == list(range(6))
+    pool = speakers.pools["cuda"]
+    assert pool.asked[:6] == [(k, None) for k in range(6)]
+    assert [k for k, budget in pool.asked if budget == 2 * gib] == [1, 3, 4, 5] and pool.most[2 * gib] == 2
+    assert [k for k, budget in pool.asked if budget == 4 * gib] == [3] and pool.most[4 * gib] == 1
+    fails[3] = (None, 2 * gib, 4 * gib)                                 # past the last level
+    with pytest.raises(torch.OutOfMemoryError, match=r"batches \[3\]: past the last level"):
+        speakers.speak(torch.nn.Linear(1, 1), windows, places, 0, tmp_path, list(range(6)), {})
+    speakers.deferred = []
+    with pytest.raises(torch.OutOfMemoryError, match="past its share"):
+        speakers.speak(torch.nn.Linear(1, 1), windows, places, 0, tmp_path, list(range(6)), {})
+
+
+def test_a_resume_reads_back_each_batch_spoken_on_its_rules_device_and_refuses_another(tmp_path):
+    """D191 (D185's resume): each done batch's device is the one the rule gives it, refused by name otherwise."""
+    from ts_transformer.io_utils import write_json_atomic
+
+    stage = SimpleNamespace(record=lambda w: w)
+    windows, places = list(range(4)), [[k] for k in range(4)]
+
+    def device_of(k):
+        return post_train.batch_device(k, 1, 2, "cuda")                           # 0 and 2 on the CPU
+
+    for k, device in ((0, "cpu"), (1, "cuda")):
+        write_json_atomic(post_train.batch_record_path(tmp_path, k),
+                          {"batch": k, "record": {"k": k}, "windows": [k], "launch": {}, "device": device})
+    assert post_train.done_batches(tmp_path, windows, places, stage, device_of) == {0: {"k": 0}, 1: {"k": 1}}
+    write_json_atomic(post_train.batch_record_path(tmp_path, 2),
+                      {"batch": 2, "record": {"k": 2}, "windows": [2], "launch": {}, "device": "cuda"})
+    with pytest.raises(SystemExit, match="batch 2 spoken on cuda, its round's rule speaks it on cpu"):
+        post_train.done_batches(tmp_path, windows, places, stage, device_of)
+
+
+def test_cpu_workers_count_in_the_host_budget_alone():
+    """D191: the host's budget holds every worker's host memory — the workers on the speak device and the CPU workers
+    (a CPU worker's whole peak, the readout's model on the host) —, the GPU's the workers on it and the pass."""
+    gib = 1 << 30
+    held = {"reader_model": gib // 4, "series": gib // 2, "round_flights": 100}
+    measured = {"host": {"peak": 2 * gib, "now": 1 * gib}, "gpu": {"peak": 1 * gib, "now": gib // 4}, "held": held}
+    on_cpu = {"host": {"peak": 3 * gib // 2, "now": 1 * gib}, "gpu": None, "held": held}
+    passed = {"peak": 3 * gib, "now": gib // 2, "groups": 4}
+    # host: 3 × (2 + 0.5) + 2 × (1.5 + 0.25 + 0.5) = 12 ≤ 10 + 1 + 1 (each measured worker holds its own now)
+    fits = dict(held_now=True, cpu_workers=2, cpu_measured=on_cpu)
+    assert post_train.workers_fit(3, measured, passed, {"host": 10 * gib, "gpu": int(3.75 * gib)}, **fits) == []
+    short = post_train.workers_fit(3, measured, passed, {"host": int(9.9 * gib), "gpu": int(3.75 * gib)}, **fits)
+    assert len(short) == 1 and short[0].startswith("host: 3 workers speaking and 2 on the CPU need 12.0 GiB")
+    # the GPU's as without them
+    assert ([line.split(":")[0] for line in post_train.workers_fit(3, measured, passed, {"host": 10 * gib,
+                                                                                        "gpu": int(3.7 * gib)}, **fits)]
+            == ["gpu"])
 
 
 def test_a_recorded_measure_is_read_on_its_devices_for_as_many_workers_as_it_was_checked_for(monkeypatch):
@@ -509,12 +782,20 @@ def test_a_recorded_measure_is_read_on_its_devices_for_as_many_workers_as_it_was
     assert post_train.recorded_fit({}, 2, cpu, cpu) is None                       # a record from before D167
     assert post_train.recorded_fit(record, 4, cpu, cpu) is None                    # the newest admitted 3
     fit = post_train.recorded_fit(record, 3, cpu, cpu)
-    assert fit == {"measure": 2, "measured": False, "speak_workers": 3, "available": {"host": 8 << 30, "gpu": None}}
+    assert fit == {"measure": 2, "measured": False, "speak_workers": 3, "cpu_workers": 0,
+                   "available": {"host": 8 << 30, "gpu": None}}
     assert post_train.recorded_fit(record, 2, cuda, cpu)["measure"] == 1
     assert post_train.recorded_fit(record, 2, cuda, cuda) is None                  # no measure on these devices
     monkeypatch.setattr(post_train, "available_memory", lambda device: {"host": 2 << 30, "gpu": None})
     with pytest.raises(SystemExit, match=r"do not fit \(O15, the measure recorded newest\): host: 3 workers"):
         post_train.recorded_fit(record, 3, cpu, cpu)
+    # D191: CPU workers read a measure that holds one of theirs, for as many (one from before D191: it measures)
+    assert post_train.recorded_fit(record, 2, cuda, cpu, cpu_workers=1) is None
+    monkeypatch.setattr(post_train, "available_memory", lambda device: {"host": 8 << 30, "gpu": None})
+    with_cpu = {"measures": [{**_measure(2), "utc": "mixed", "round": 0, "device": "cuda", "speak_device": "cuda",
+                              "cpu_workers": 2, "cpu_measured": _measure(2)["measured"]}]}
+    assert post_train.recorded_fit(with_cpu, 2, cuda, cuda, cpu_workers=2)["cpu_workers"] == 2
+    assert post_train.recorded_fit(with_cpu, 2, cuda, cuda, cpu_workers=3) is None
 
 
 def test_a_launch_measures_once_and_a_resume_reads_the_recorded_measure(tmp_path, monkeypatch):
@@ -524,8 +805,8 @@ def test_a_launch_measures_once_and_a_resume_reads_the_recorded_measure(tmp_path
     measured = []
 
     class Workers:
-        def __init__(self, context, settings, workers, device, *, stage):
-            self.workers = workers
+        def __init__(self, context, settings, workers, device, *, stage, cpu_workers):
+            self.workers, self.cpu_workers = workers, cpu_workers
 
         def close(self):
             pass
@@ -547,13 +828,13 @@ def test_a_launch_measures_once_and_a_resume_reads_the_recorded_measure(tmp_path
     monkeypatch.setattr(post_train, "run_campaign", lambda *a, **k: None)
     out = tmp_path / "campaign"
 
-    def launch(rounds, workers):
+    def launch(rounds, workers, *more):
         argv = ["--prior", str(tmp_path / "p"), "--instructions", str(tmp_path / "i"), "--executor",
                 str(tmp_path / "e"), "--windows", str(tmp_path / "w"), "--out", str(out), "--rounds", str(rounds),
                 "--batch-windows", "1", "--seed", "1", "--prior-lr", "1e-4", "--traffic-lr", "1e-3",
                 "--weight-decay", "0", "--update-groups", "1", "--data-sentences", "1", "--select-per-airport", "1",
                 "--traffic-hidden", "16", "--traffic-heads", "4", "--method", "branch", "--select-seed", "1",
-                "--device", "cpu", *(["--speak-workers", str(workers)] if workers > 1 else [])]
+                "--device", "cpu", *(["--speak-workers", str(workers)] if workers > 1 else []), *more]
         assert post_train.main(argv + [x for kind in KINDS for x in (f"--windows-{kind.lower()}", "1")]) == 0
         return json.loads((out / "campaign.json").read_text())
 
@@ -563,7 +844,7 @@ def test_a_launch_measures_once_and_a_resume_reads_the_recorded_measure(tmp_path
     again = launch(2, 2)                                                          # fewer workers: the record read
     assert order[-2:] == ["read", "moved"]                     # the free memory read before the GPU is used
     assert measured == [3] and again["resumed"][-1]["fit"] == {
-        "measure": 0, "measured": False, "speak_workers": 2, "available": {"host": 64 << 30, "gpu": None}}
+        "measure": 0, "measured": False, "speak_workers": 2, "cpu_workers": 0, "available": {"host": 64 << 30, "gpu": None}}
     more = launch(2, 4)                                                           # more than it admitted
     assert measured == [3, 4] and len(more["measures"]) == 2 and more["resumed"][-1]["fit"]["measure"] == 1
     assert launch(2, 1)["resumed"][-1]["fit"] is None                             # no workers
@@ -572,6 +853,9 @@ def test_a_launch_measures_once_and_a_resume_reads_the_recorded_measure(tmp_path
     (out / "campaign.json").write_text(json.dumps(record))
     older = launch(2, 2)
     assert measured == [3, 4, 2] and len(older["measures"]) == 1 and older["resumed"][-1]["fit"]["measured"] is True
+    (out / "round_0").mkdir()                                     # D185: a round left half done, restarted by name
+    restarted = launch(2, 1, "--restart-round")
+    assert restarted["resumed"][-1]["restart_round"] is True and len(restarted["aborted"]) == 1
 
 
 def short_round(monkeypatch, s):
@@ -609,6 +893,115 @@ def test_a_campaign_round_end_to_end(setup, tmp_path, monkeypatch):
     assert identity["rounds"] == [record["windows"]]
 
 
+def test_a_round_stopped_after_some_batches_resumes_by_its_batches(setup, tmp_path, monkeypatch):
+    """C27, D185: a round's speaking stopped after its first batch (the second's groups written, its record not, and a
+    file left under a temporary name) and spoken again gives the record and the groups files of the round spoken whole,
+    byte for byte; the done batch is read back, not spoken; the batch without its record is spoken again; the
+    temporary file is never read (removed). Refused by name: a done batch of another draw, or spoken on another kind of
+    device than the rest."""
+    s = setup
+    context = _context(s)
+    settings = _settings(continuations=2)
+    model, _ = start_model(context, settings)
+    windows = [_ahead(s["windows"][0])] * 2
+    assert len(batches(windows, settings.batch_windows)) == 2
+    whole, stopped = tmp_path / "whole", tmp_path / "stopped"
+    whole.mkdir()
+    stopped.mkdir()
+    record = speak_round(model, context, windows, settings, 0, whole)
+    assert sorted(p.name for p in whole.iterdir()) == ["groups_0.pt", "groups_1.pt", "record_0.json", "record_1.json"]
+    direct = tmp_path / "groups_0.pt"                          # the bytes of a file written in place
+    torch.save(torch.load(whole / "groups_0.pt", weights_only=False), direct)
+    assert direct.read_bytes() == (whole / "groups_0.pt").read_bytes()
+    held = json.loads((whole / "record_1.json").read_text())
+    assert held["batch"] == 1 and held["device"] == "cpu" and held["windows"] == [post_train.window_record(windows[1])]
+    assert set(held["launch"]) == {"utc", "commit", "dirty"}
+    real = post_train.speak_batch
+    spoken, stop = [], [True]
+
+    def stopping(model, context, windows, places, settings, round_, directory, k):
+        spoken.append(k)
+        out = real(model, context, windows, places, settings, round_, directory, k)
+        if k == 1 and stop:                                       # the first launch only
+            stop.clear()
+            (directory / "groups_1.tmp").write_bytes(b"half written")
+            raise RuntimeError("stopped")
+        return out
+
+    monkeypatch.setattr(post_train, "speak_batch", stopping)
+    with pytest.raises(RuntimeError, match="stopped"):
+        speak_round(model, context, windows, settings, 0, stopped)
+    assert (stopped / "groups_1.pt").exists() and not (stopped / "record_1.json").exists()
+    spoken.clear()
+    assert speak_round(model, context, windows, settings, 0, stopped) == record
+    assert spoken == [1] and not list(stopped.glob("*.tmp"))
+    for name in ("groups_0.pt", "groups_1.pt"):
+        assert (stopped / name).read_bytes() == (whole / name).read_bytes()
+    spoken.clear()
+    assert speak_round(model, context, windows, settings, 0, stopped) == record and spoken == []   # all read back
+    for change, message in (({"windows": [{"other": 1}]}, "another draw"), ({"device": "cuda"}, "its round's rule")):
+        path = stopped / "record_0.json"
+        kept = path.read_text()
+        path.write_text(json.dumps({**json.loads(kept), **change}))
+        with pytest.raises(SystemExit, match=message):
+            speak_round(model, context, windows, settings, 0, stopped)
+        path.write_text(kept)
+
+
+def test_a_round_resumed_through_the_speaking_workers_is_the_round_spoken_whole(setup, tmp_path, monkeypatch):
+    """C27 (D185, post-training §8): a round stopped after its first batch in one process and resumed through two
+    speaking workers (`Speakers`) reads the done batch back and has the workers speak the other: the groups files'
+    bytes and the round's record are those of the round spoken whole; the done batch's record is not written again."""
+    s = setup
+    context = _context(s)
+    settings = _settings(continuations=2)
+    model, _ = start_model(context, settings)
+    windows = [_ahead(s["windows"][0])] * 2
+    monkeypatch.setattr(post_train, "draw_round", lambda context, per_kind, rng: (windows, {}))   # the workers' draw
+    whole, stopped = tmp_path / "whole", tmp_path / "stopped"
+    whole.mkdir()
+    stopped.mkdir()
+    record = speak_round(model, context, windows, settings, 0, whole)
+    real = post_train.speak_batch
+
+    def stopping(model, context, windows, places, settings, round_, directory, k):
+        if k == 1:
+            raise RuntimeError("stopped")
+        return real(model, context, windows, places, settings, round_, directory, k)
+
+    monkeypatch.setattr(post_train, "speak_batch", stopping)
+    with pytest.raises(RuntimeError, match="stopped"):
+        speak_round(model, context, windows, settings, 0, stopped)
+    monkeypatch.setattr(post_train, "speak_batch", real)              # the workers fork with the real one
+    done = (stopped / "record_0.json").read_bytes()
+    assert not (stopped / "record_1.json").exists()
+    speakers = Speakers(context, settings, 2, CPU)
+    try:
+        assert speak_round(model, context, windows, settings, 0, stopped, speakers) == record
+    finally:
+        speakers.close()
+    assert (stopped / "record_0.json").read_bytes() == done and (stopped / "record_1.json").exists()
+    for name in ("groups_0.pt", "groups_1.pt"):
+        assert (stopped / name).read_bytes() == (whole / name).read_bytes()
+
+
+def test_a_resume_keeps_the_round_left_half_done_unless_it_restarts_it(tmp_path):
+    """D185: a resume keeps a round directory without its checkpoint (its done batches); ``restart_round`` moves it aside
+    and records it."""
+    settings = _settings(rounds=1)
+    inputs = _inputs(settings, tmp_path)
+    out = tmp_path / "campaign"
+    open_campaign(out, inputs, {"head": "x", "dirty": False}, {})
+    (out / "round_0").mkdir()
+    (out / "round_0" / "record_0.json").write_text("{}")
+    kept = open_campaign(out, inputs, {"head": "y", "dirty": False}, {})
+    assert kept["aborted"] == [] and (out / "round_0" / "record_0.json").exists()
+    assert kept["resumed"][-1]["restart_round"] is False
+    moved = open_campaign(out, inputs, {"head": "y", "dirty": False}, {}, restart_round=True)
+    assert len(moved["aborted"]) == 1 and not (out / "round_0").exists()
+    assert (out / moved["aborted"][0] / "record_0.json").exists() and moved["resumed"][-1]["restart_round"] is True
+
+
 def test_a_resumed_campaign_is_the_campaign_run_through(setup, tmp_path, monkeypatch):
     """The resume's mechanics, with the speaking and the readout replaced (each round writes the same informative
     groups, so every round updates the model, its data term with dropout): a round broken off is moved aside and run
@@ -621,7 +1014,7 @@ def test_a_resumed_campaign_is_the_campaign_run_through(setup, tmp_path, monkeyp
     (group,) = _round(s, model, [_ahead(s["windows"][0])]).groups
     rewarded = replace(group, continuations=(replace(group.continuations[0], reward=1.0), group.continuations[1]))
 
-    def speak(model, context, windows, settings, round_, directory, speakers, *, stage):
+    def speak(model, context, windows, settings, round_, directory, speakers, *, stage, launch):
         torch.save([rewarded, rewarded], directory / "groups_0.pt")
         return {"windows": len(windows)}
 
@@ -650,8 +1043,9 @@ def test_a_resumed_campaign_is_the_campaign_run_through(setup, tmp_path, monkeyp
         run_campaign(broken, settings, context)
     assert done_rounds(broken) == 1 and (broken / "round_1").exists()
     monkeypatch.setattr(post_train, "train_pass", real)
-    reopened = open_campaign(broken, inputs, {"head": "y", "dirty": False}, {})
+    reopened = open_campaign(broken, inputs, {"head": "y", "dirty": False}, {}, restart_round=True)
     assert len(reopened["aborted"]) == 1 and (broken / reopened["aborted"][0]).is_dir()
+    assert reopened["resumed"][0]["restart_round"]
     assert reopened["resumed"][0]["git"] == {"head": "y", "dirty": False}
     run_campaign(broken, settings, context)
     resumed = torch.load(broken / "round_1" / "checkpoint.pt", weights_only=False)
@@ -689,7 +1083,7 @@ def test_a_campaign_raised_to_more_rounds_is_the_campaign_of_that_count_from_its
     (group,) = _round(s, model, [_ahead(s["windows"][0])]).groups
     rewarded = replace(group, continuations=(replace(group.continuations[0], reward=1.0), group.continuations[1]))
 
-    def speak(model, context, windows, settings, round_, directory, speakers, *, stage):
+    def speak(model, context, windows, settings, round_, directory, speakers, *, stage, launch):
         torch.save([rewarded, rewarded], directory / "groups_0.pt")
         return {"windows": len(windows), "weights": _digest(model)}
 
@@ -733,7 +1127,7 @@ def test_a_campaign_starts_from_a_round_of_another_campaign_with_a_new_optimizer
     model, _ = start_model(context, settings)
     (group,) = _round(s, model, [_ahead(s["windows"][0])]).groups
     rewarded = replace(group, continuations=(replace(group.continuations[0], reward=1.0), group.continuations[1]))
-    monkeypatch.setattr(post_train, "speak_round", lambda model, context, windows, settings, round_, directory, speakers, *, stage: (
+    monkeypatch.setattr(post_train, "speak_round", lambda model, context, windows, settings, round_, directory, speakers, *, stage, launch: (
         torch.save([rewarded, rewarded], directory / "groups_0.pt"), {"windows": 1, "weights": _digest(model)})[1])
     monkeypatch.setattr(post_train, "selection_readout", lambda model, *a, **k: {"KXXX": {"reward_mean": _digest(model)}})
     source, out = tmp_path / "source", tmp_path / "from_round_0"
@@ -814,6 +1208,33 @@ def test_a_resume_may_raise_the_rounds_and_change_nothing_else(tmp_path):
         open_campaign(out, _inputs(replace(settings, rounds=4), tmp_path), git, {})
     assert (out / "campaign.json").read_text() == written
     assert open_campaign(out, _inputs(settings, tmp_path), git, {})["resumed"][0]["rounds"] == {"before": 3, "after": 3}
+
+
+def test_a_resume_may_change_the_rule_of_the_cpus_batches_and_records_it(tmp_path):
+    """D191 (the user, 2026-10-10: the next round spoken on both devices): a resume may change the rule as the rounds,
+    the record's from then on and each entry holding it before and after; a record without the rule (before D191) is
+    left without it while the rule holds; any other setting changed with it is still refused."""
+    git = {"head": "x", "dirty": False}
+    out = tmp_path / "campaign"
+    open_campaign(out, _inputs(_settings(), tmp_path), git, {})
+    record = json.loads((out / "campaign.json").read_text())
+    for added in ("cpu_batches", "cpu_period"):                             # a record from before D191
+        del record["inputs"]["settings"][added]
+    (out / "campaign.json").write_text(json.dumps(record))
+    held = open_campaign(out, _inputs(_settings(), tmp_path), git, {})
+    assert "cpu_batches" not in held["inputs"]["settings"] and held["resumed"][-1]["rule"] == {"before": [0, 1],
+                                                                                              "after": [0, 1]}
+    mixed = open_campaign(out, _inputs(_settings(cpu_batches=6, cpu_period=13), tmp_path), git, {})
+    assert (mixed["inputs"]["settings"]["cpu_batches"], mixed["inputs"]["settings"]["cpu_period"]) == (6, 13)
+    assert mixed["resumed"][-1]["rule"] == {"before": [0, 1], "after": [6, 13]}
+    assert post_train.settings_of(json.loads((out / "campaign.json").read_text())) == _settings(cpu_batches=6,
+                                                                                                 cpu_period=13)
+    back = open_campaign(out, _inputs(_settings(), tmp_path), git, {})
+    assert back["resumed"][-1]["rule"] == {"before": [6, 13], "after": [0, 1]}
+    written = (out / "campaign.json").read_text()
+    with pytest.raises(SystemExit, match="other inputs or settings"):
+        open_campaign(out, _inputs(_settings(cpu_batches=1, cpu_period=2, seed=1), tmp_path), git, {})
+    assert (out / "campaign.json").read_text() == written
 
 
 def test_a_setting_added_after_a_record_reads_as_its_default_and_a_resume_compares_it(tmp_path):
@@ -1073,8 +1494,8 @@ def test_a_stage_gives_the_campaigns_round_its_parts_and_stage_cs_is_the_campaig
         run_campaign(out, settings, _context(s), stage=stage)
         states.append(torch.load(out / "round_0" / "checkpoint.pt", weights_only=False))
     # the speaking and the readout run the stage's own batch speaker and reader (the campaign hands them the stage)
-    assert called == ["start", "selection", "companion", "draw", "speak", "batches", "speak_batch", "train", "readout",
-                      "batches", "read_batch", "record", "close_round", "identity"]
+    assert called == ["start", "selection", "companion", "draw", "speak", "batches", "speak_batch", "record", "train",
+                      "readout", "batches", "read_batch", "record", "close_round", "identity"]     # D185: the batch's record
     assert states[0]["model"].keys() == states[1]["model"].keys()
     assert all(torch.equal(states[0]["model"][k], states[1]["model"][k]) for k in states[0]["model"])
     assert states[0]["identity"] == states[1]["identity"]
@@ -1132,7 +1553,8 @@ def test_the_speaking_workers_run_the_stages_parts(setup, tmp_path):
     measured = tmp_path / "measured"
     measured.mkdir()
     try:
-        assert [(x["k"], x["windows"]) for x in speakers.speak(model, windows, places, 0, tmp_path)] == [(0, 1), (1, 1)]
+        assert [(x["k"], x["windows"]) for x in speakers.speak(model, windows, places, 0, tmp_path, range(len(places)),
+                                                                                  launch_of())] == [(0, 1), (1, 1)]
         assert list(marks.glob("started_*"))                     # the speaking workers' model: the stage's
         assert speakers.read(model, windows, places, "select") == [[("read", "select", 1)]] * 2
         given, _ = start_model(context, settings)               # the round's model, not the stage's start model

@@ -247,7 +247,7 @@ def test_the_speaking_workers_give_each_sample_v_s_reading_as_one_process(setup,
         assert speak_round(model, context, windows, settings, 0, there, speakers, stage=STAGE_C_VALUE) == record
     finally:
         speakers.close()
-    names = sorted(p.name for p in there.iterdir())
+    names = sorted(p.name for p in there.glob("*.pt"))
     assert names == ["sentences_0.pt", "sentences_1.pt"]
     assert all((here / n).read_bytes() == (there / n).read_bytes() for n in names)
     (one,) = torch.load(here / "sentences_0.pt", weights_only=False)

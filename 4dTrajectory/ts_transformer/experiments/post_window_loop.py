@@ -48,24 +48,24 @@ tick 0) is flown as before, bit for bit: silent is its window's end.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping, NamedTuple, Sequence
 
 import numpy as np
 import torch
 
 from ts_transformer.autopilot.start import Loop, Move, moved_signals
 from ts_transformer.experiments.prior_speaking_loop import SpeakingLoop
-from ts_transformer.inference.separation import Loss
+from ts_transformer.inference.separation import Loss, Traffic
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import ClosedLoopSentence
 from ts_transformer.instructions.grammar import column_words
 from ts_transformer.instructions.labeller.interval import OBSERVATION_S
 from ts_transformer.instructions.words import COLUMNS, RUNWAY, RUNWAY_GO_AROUND, SPEED, UNCHANGED, Words
 from ts_transformer.post.conformance import Checked, require_conforming_edges
-from ts_transformer.post.edges import TOKEN_FEATURES, tokens
+from ts_transformer.post.edges import TOKEN_FEATURES, Pairs, each_tokens, window_tokens
 from ts_transformer.post.fault_census import STEPS_BEFORE_EVENT, reads_fault
 from ts_transformer.post.landings import commanded_landings, roster_key
 from ts_transformer.post.reward import LANDED, present_runways, reward
@@ -75,9 +75,10 @@ from ts_transformer.post.speed_mask import along_course_speeds, speed_check
 from ts_transformer.post.traffic import answered_loss, scene_aircraft, step_losses
 from ts_transformer.post.traffic import traffic as separation_traffic
 from ts_transformer.post.traffic_attention import traffic_of
+from ts_transformer.prior.inputs import motion
 from ts_transformer.prior.landings import Landing, LandingIndex
-from ts_transformer.prior.model import Prior
-from ts_transformer.prior.procedure import BATCH, Final
+from ts_transformer.prior.model import COPIED, Prior
+from ts_transformer.prior.procedure import Final
 from ts_transformer.prior.speaker import MOST_GO_AROUNDS
 
 #: The outcome of a window ended by a loss of separation that its commanded aircraft answers for (D30: reward 0).
@@ -138,8 +139,10 @@ class WindowResult:
 @dataclass
 class _Tick:
     """A window's aircraft at one tick (kept from the judge after a row flown for the next row's mask and tokens): its
-    commanded rows that have joined and are flown, their aircraft, the recorded aircraft, and the judged set and
-    scene; ``of_row`` each row's own set and scene once computed at this tick (`WindowLoop._of_row`, D181 (59))."""
+    commanded rows that have joined and are flown, their aircraft, the recorded aircraft, and the judged set (the
+    commanded aircraft, then the recorded ones), its scene, motions and speeds along the course, each aircraft's own,
+    computed once for the window (multi-aircraft control D189 (1)); ``of_row`` each row's view once taken at this tick
+    (`WindowLoop._of_row`, D181 (59))."""
 
     t: int
     rows: list[int]
@@ -147,7 +150,25 @@ class _Tick:
     recorded: AircraftAt
     aircraft: AircraftAt
     scene: Any
-    of_row: dict[int, tuple[AircraftAt, AircraftAt, list[int | None], Any, Any]] = field(default_factory=dict)
+    moving: Any = None                  # `prior.inputs.motion`'s
+    speeds: np.ndarray | None = None
+    #: each row's tokens (in ``rows``' order), every pair of the window computed at once when first read (D189 (3))
+    tokens: list[np.ndarray] | None = None
+    of_row: dict[int, _View] = field(default_factory=dict)
+
+
+class _View(NamedTuple):
+    """A commanded row's view of its window at a tick (`WindowLoop._of_row`): its aircraft, its other aircraft (the
+    recorded ones, then its window's other commanded ones), their rows (None for a recorded one), and the set (itself
+    first), its scene, motions and speeds along the course, the window's reordered."""
+
+    own: AircraftAt
+    other: AircraftAt
+    placed: list[int | None]
+    aircraft: AircraftAt
+    scene: Any
+    moving: Any
+    speeds: np.ndarray
 
 
 class WindowLoop:
@@ -165,9 +186,13 @@ class WindowLoop:
                  edges_reference: Path, faults: Mapping[str, Mapping[str, frozenset[int]]],
                  observed: Mapping[int, np.ndarray], device: torch.device, answering: Answering = responsible,
                  token_part: TokenPartOf | None = None, part_width: int = 0,
-                 value_reader: ValueReaderOf | None = None) -> None:
+                 value_reader: ValueReaderOf | None = None, attention: str = COPIED,
+                 executor_device: torch.device | None = None) -> None:
         """``value_reader``: what a value network reads at each row beside the model (D171; `values`), never in the
-        model's tokens; None: nothing read."""
+        model's tokens; None: nothing read. ``attention``: how a window's copies read the front of the speaker's cache
+        they hold once (`SpeakingLoop`; multi-aircraft control D190 (2)). ``executor_device``: the device of the executor
+        (`SpeakingLoop`; multi-aircraft control S1). Stage D gives it in `multi_train.loop_options`. None: the executor
+        follows the speaker."""
         checked_edges(edges_reference)
         if loop.most_go_arounds != MOST_GO_AROUNDS:
             raise ValueError(f"the loop was started for {loop.most_go_arounds} go-arounds a flight, not {MOST_GO_AROUNDS} "
@@ -189,13 +214,23 @@ class WindowLoop:
         joins = [int(self.windows[w].join_steps()[m]) for w, m in zip(self.window_of, self.member_of)]
         if not np.array_equal(loop.join_ticks, joins):
             raise ValueError("the loop's join ticks are not the windows' join steps")
+        #: each row's join step in its window's ticks, and each window's tick 0 in the loop's clock (moved when loops
+        #: are flown together, `together`: a window's ticks are its own, the loop's tick less its origin)
+        self.joins = np.array(joins, dtype=np.int64)
+        self.origins = np.zeros(len(self.windows), dtype=np.int64)
         #: each row's record as its window replays it, and its shift (a compressed window's)
         self.records: list[Recorded] = [self.windows[w].commanded_all[m] for w, m in zip(self.window_of, self.member_of)]
         shifts = [0.0 if m == 0 else self.windows[w].joined[m - 1].shift_s
                   for w, m in zip(self.window_of, self.member_of)]
-        landings = []
-        for w, rows in enumerate(members):
-            landings.append(commanded_landings(self.windows[w], rosters[self.windows[w].scene.geometry.code]))
+        # the latest a row of the loop is said, from its window's row 0 (a batch is said together: a window's rows go on
+        # while another's are flown): an aircraft's first predicted step and its time limit with every go-around's
+        # (the executor's), the latest of any, and one Δ more (a row's time is its flight's, the window's to rounding);
+        # each commanded aircraft's landings those its rows can count (D189 (0))
+        most = loop.executor.most_s.cpu().numpy()
+        reach = max(self.records[b].first_step_s - self.windows[w].row0_s + float(most[b])
+                    for b, w in enumerate(self.window_of)) + interval_s
+        landings = [commanded_landings(window, rosters[window.scene.geometry.code], window.row0_s + reach)
+                    for window in self.windows]
         row_landings = [landings[w][m] for w, m in zip(self.window_of, self.member_of)]
         # a moved aircraft (a compressed window) reads its landings at its moved time (multi-aircraft control §6.3 item 2)
         moved_flights = dict(flights)
@@ -204,12 +239,15 @@ class WindowLoop:
                 i = self.order[b]
                 moved_flights[i] = {**flights[i], "entry_time_utc": _utc_text(utc_s(flights[i]["entry_time_utc"]) + shift)}
         self.speaking = SpeakingLoop(model, loop, order, sentences, observed, moved_flights, geometries, row_landings,
-                                     finals, words, interval_s=interval_s, variant=variant, device=device, masks=BATCH)
+                                     finals, words, interval_s=interval_s, variant=variant, device=device,
+                                     attention=attention, executor_device=executor_device)
         self.step_s = words.spec.step_s
         self.every = self.speaking.every
         self.geometries = [self.windows[w].scene.geometry for w in self.window_of]
         self.finals = [finals[g.code] for g in self.geometries]
         self.separations = {code: airport_separation(g) for code, g in geometries.items()}
+        #: each airport's pairs of runways and wake categories, their token features computed once (D189 (1))
+        self.pairs = {code: Pairs(separation) for code, separation in self.separations.items()}
         self.keys = [roster_key(flights[i]["dataset_id"], flights[i]["airport"]) for i in self.order]
         for b, i in enumerate(self.order):
             row0 = utc_s(flights[i]["entry_time_utc"]) + sentences[i].rows.first_row * self.step_s + shifts[b]
@@ -262,8 +300,8 @@ class WindowLoop:
                                go_around)])
 
     def _tick(self, w: int, t: int) -> _Tick:
-        """Window ``w``'s aircraft at tick ``t`` (the loop's present tick): its commanded rows that have joined and are
-        flown, their aircraft, its recorded aircraft, and the judged set and scene."""
+        """Window ``w``'s aircraft at its tick ``t`` (the loop's present tick in its window's ticks): its commanded rows
+        that have joined and are flown, their aircraft, its recorded aircraft, and the judged set and scene."""
         joined = self.speaking.joined()
         rows = [b for b in self.members[w] if joined[b] and self.speaking.alive[b]]
         owns = [self._own(b) for b in rows]
@@ -273,57 +311,89 @@ class WindowLoop:
         aircraft = scene_aircraft(_concat(owns), recorded)
         g = self.windows[w].scene.geometry
         scene = separation_traffic(aircraft, g, self.separations[g.code], self.finals[rows[0]], self.step_s)
-        return _Tick(t, rows, owns, recorded, aircraft, scene)
+        moving = motion(aircraft.at, aircraft.before, aircraft.known, self.step_s)
+        return _Tick(t, rows, owns, recorded, aircraft, scene, moving, along_course_speeds(moving.ground_speed_mps,
+                                                                                         scene))
 
-    def _of_row(self, tick: _Tick, b: int) -> tuple[AircraftAt, AircraftAt, list[int | None], Any, Any]:
-        """Row ``b``'s aircraft, its other aircraft (the recorded ones, then its window's other commanded ones), their
-        rows (None for a recorded one), and the set and scene its speed-word mask reads (``b`` first); computed once a
-        tick, for the mask and the tokens (D181 (59))."""
-        k = tick.rows.index(b)
-        if len(tick.rows) == 1:                              # stage C: the window's judged set is the row's own
-            return tick.owns[0], tick.recorded, [None] * len(tick.recorded), tick.aircraft, tick.scene
+    def _of_row(self, tick: _Tick, b: int) -> _View:
+        """Row ``b``'s view of its window at ``tick`` (`_View`): the window's set, scene, motions and speeds reordered
+        (``b`` first, the recorded aircraft, the other commanded ones: the order its mask and tokens read), not computed
+        again (multi-aircraft control D189 (1)): each value is its aircraft's alone, and a window's aircraft are of one
+        airport, its finals (`post.scene.Window` refuses a commanded aircraft of another); taken once a tick (D181
+        (59))."""
+        n, recorded = len(tick.rows), len(tick.recorded)
+        if n == 1:                                           # stage C: the window's judged set is the row's own
+            return _View(tick.owns[0], tick.recorded, [None] * recorded, tick.aircraft, tick.scene, tick.moving,
+                         tick.speeds)
         if b not in tick.of_row:
-            others = [c for c in tick.rows if c != b]
-            other = scene_aircraft(tick.recorded, _concat([tick.owns[tick.rows.index(c)] for c in others]))
-            aircraft = scene_aircraft(tick.owns[k], other)
-            g = self.geometries[b]
-            scene = separation_traffic(aircraft, g, self.separations[g.code], self.finals[b], self.step_s)
-            tick.of_row[b] = tick.owns[k], other, [None] * len(tick.recorded) + others, aircraft, scene
+            k = tick.rows.index(b)
+            order = [k, *range(n, n + recorded), *(c for c in range(n) if c != k)]
+            aircraft = tick.aircraft.take(order)
+            tick.of_row[b] = _View(tick.owns[k], aircraft.take(range(1, len(order))),
+                                   [None] * recorded + [c for c in tick.rows if c != b], aircraft,
+                                   tick.scene.take(order), tick.moving._make(value[order] for value in tick.moving),
+                                   tick.speeds[order])
         return tick.of_row[b]
 
     def _ticks(self, t: int) -> list[_Tick | None]:
-        """Each window's aircraft at tick ``t``, from the judge's (kept after the row flown) where it holds them; None
-        for a window without a row joined and flown."""
+        """Each window's aircraft at the loop's tick ``t``, from the judge's (kept after the row flown) where it holds
+        them; None for a window without a row joined and flown."""
         out: list[_Tick | None] = []
         for w in range(len(self.windows)):
-            kept = self._next.get(w)
-            tick = kept if kept is not None and kept.t == t else self._tick(w, t)
+            kept, own = self._next.get(w), t - int(self.origins[w])
+            tick = kept if kept is not None and kept.t == own else self._tick(w, own)
             out.append(tick if tick.rows else None)
         return out
 
     def _traffic(self, t: int, ticks: Sequence[_Tick | None], joined: np.ndarray) -> tuple[Any, list[np.ndarray]]:
-        """The traffic module's input of the row at tick ``t`` and each row's tokens (`_keep` records them for the loss
-        once the row is kept): a row that has not joined has none; a row no longer flown (its rows are said with the
-        batch, not its sentence's) reads its window's recorded aircraft, as stage C's ended window does."""
+        """The traffic module's input of the row at the loop's tick ``t`` and each row's tokens (`_keep` records them
+        for the loss once the row is kept): a row that has not joined has none; a row no longer flown (its rows are said
+        with the batch, not its sentence's) reads its window's recorded aircraft, as stage C's ended window does."""
+        alone = self._alone(t, ticks, joined)
         rows: list[np.ndarray] = []
         for b in range(len(self.order)):
             tick = ticks[self.window_of[b]]
             if not joined[b]:
                 rows.append(np.zeros((0, len(TOKEN_FEATURES) + self.part_width), dtype=np.float32))
                 continue
-            if tick is None or b not in tick.rows:
-                recorded = self.windows[self.window_of[b]].others_at(t)
-                own, other, placed = self._own(b), recorded, [None] * len(recorded)
-            else:
-                own, other, placed, _, _ = self._of_row(tick, b)
+            w = int(self.window_of[b])
             g = self.geometries[b]
-            row = tokens(own, other, g, self.separations[g.code], self.step_s)
+            if b in alone:
+                own, other, row = alone[b]
+                placed = [None] * len(other)
+            else:                       # the window's tokens, every pair of it at once (D189 (3))
+                view = self._of_row(tick, b)
+                own, other, placed = view.own, view.other, view.placed
+                if tick.tokens is None:
+                    tick.tokens = window_tokens(tick.aircraft, len(tick.rows), g, self.pairs[g.code], tick.moving,
+                                                tick.scene.along_m)
+                row = tick.tokens[tick.rows.index(b)]
             if self.value_reader is not None:
-                self._pending[b] = self.value_reader(self, b, t, own, other)
+                self._pending[b] = self.value_reader(self, b, t - int(self.origins[w]), own, other)
             if self.token_part is not None:
                 row = np.concatenate((row, np.asarray(self.token_part(self, b, placed), dtype=np.float32)), axis=1)
             rows.append(row)
         return traffic_of([[row] for row in rows], self.device, self.part_width), rows
+
+    def _alone(self, t: int, ticks: Sequence[_Tick | None], joined: np.ndarray
+               ) -> dict[int, tuple[AircraftAt, AircraftAt, np.ndarray]]:
+        """The joined rows that are not flown at the loop's tick ``t``, by row: the aircraft of the row, the recorded
+        aircraft of its window, and the tokens of the recorded aircraft as the row reads them. A row that is not flown
+        reads only the recorded aircraft of its window, as stage C's ended window does. The rows of one window share
+        these aircraft, so `each_tokens` calculates their tokens in one call (multi-aircraft control S2). Each row gets
+        the tokens of `tokens`, bit for bit."""
+        out = {}
+        for w, members in enumerate(self.members):
+            tick = ticks[w]
+            lone = [b for b in members if joined[b] and (tick is None or b not in tick.rows)]
+            if not lone:
+                continue
+            recorded = self.windows[w].others_at(t - int(self.origins[w]))
+            owns = [self._own(b) for b in lone]
+            g = self.windows[w].scene.geometry
+            found = each_tokens(_concat(owns), recorded, g, self.pairs[g.code], self.step_s)
+            out.update({b: (own, recorded, row) for b, own, row in zip(lone, owns, found)})
+        return out
 
     def _keep(self, rows: Sequence[np.ndarray], joined: np.ndarray, applies: np.ndarray | None = None) -> None:
         """A row kept (``joined``: the rows that had joined at it): each joined row's tokens of it recorded, and the rows
@@ -351,9 +421,9 @@ class WindowLoop:
         out = np.ones((len(self.order), self.speed_words), dtype=bool)
         applies = np.zeros(len(self.order), dtype=np.int64)
         for b in np.flatnonzero(self.speaking.alive & self.speaking.said_now() & ~self.silent):
-            _, _, _, aircraft, scene = self._of_row(ticks[self.window_of[b]], b)
-            check = speed_check(scene, along_course_speeds(aircraft, scene, self.step_s), self.separations[
-                self.geometries[b].code], self.words, len(self.geometries[b].candidates))
+            view = self._of_row(ticks[self.window_of[b]], b)
+            check = speed_check(view.scene, view.speeds, self.separations[self.geometries[b].code], self.words,
+                                len(self.geometries[b].candidates))
             out[b] = check.permitted
             applies[b] = check.applies
         return out, applies
@@ -379,7 +449,8 @@ class WindowLoop:
         t = self.speaking.t
         ticks, joined = self._ticks(t), self.speaking.joined()
         for w, tick in enumerate(ticks):
-            self._read(w, t, tick.recorded if tick is not None else self.windows[w].others_at(t))
+            own = t - int(self.origins[w])
+            self._read(w, own, tick.recorded if tick is not None else self.windows[w].others_at(own))
         traffic, rows = self._traffic(t, ticks, joined)
         self.speaking.observe(traffic)
         self._keep(rows, joined)
@@ -392,7 +463,7 @@ class WindowLoop:
         ticks = self._ticks(t)
         for w, tick in enumerate(ticks):
             if tick is not None:
-                self._read(w, t, tick.recorded)
+                self._read(w, t - int(self.origins[w]), tick.recorded)
         joined, said_now = self.speaking.joined(), self.speaking.said_now()
         masks, applies = self._speed_masks(ticks)
         traffic, rows = self._traffic(t, ticks, joined)
@@ -407,22 +478,23 @@ class WindowLoop:
         for w, rows_w in enumerate(self.members):
             if not self.speaking.alive[rows_w].any():
                 continue
-            tick = self._tick(w, t + 1)
+            after = t + 1 - int(self.origins[w])                # the row flown to, in the window's ticks
+            tick = self._tick(w, after)
             self._next[w] = tick
-            self._read(w, t + 1, tick.recorded)
+            self._read(w, after, tick.recorded)
             if tick.rows:
                 judged, scene, commanded = self._judged(tick, [b for b in landed if self.window_of[b] == w])
                 found = step_losses(scene, judged.last_step, self.separations[self.geometries[rows_w[0]].code])
                 for k, b in enumerate(tick.rows):
                     if self.silent[b] or not said_now[b]:       # an observed one answers for nothing (D145)
                         continue
-                    loss = next((loss for loss in found if k in self.answering(self.windows[w], t + 1, loss,
+                    loss = next((loss for loss in found if k in self.answering(self.windows[w], after, loss,
                                                                                    judged, commanded)),
                                 None) if commanded > 1 or self.answering is not responsible else \
                         answered_loss(found, 0)
                     if loss is not None:
                         partner = loss.j if loss.i == k else loss.i
-                        self.loss[b], self.loss_step[b], self.other[b] = loss, t + 1, judged.keys[partner]
+                        self.loss[b], self.loss_step[b], self.other[b] = loss, after, judged.keys[partner]
                         self.silent[b] = True
             alive = self.speaking.alive[rows_w]
             if (self.silent[rows_w] | ~alive).all():          # every commanded aircraft done or silent: its end
@@ -468,23 +540,27 @@ class WindowLoop:
             runway = int(self.speaking.loop.outcome(b).crossing["runway_index"])
             over.append(AircraftAt.of([(self.records[b].key, tuple(states[-1, :3]), tuple(states[-2, :3]), True, runway,
                                         self.records[b].category, True, False)]))
-        judged = scene_aircraft(_concat(tick.owns + over), tick.recorded)
-        b = tick.rows[0]
+        b, n = tick.rows[0], len(tick.rows)
         g = self.geometries[b]
-        return judged, separation_traffic(judged, g, self.separations[g.code], self.finals[b], self.step_s), \
-            len(tick.rows) + len(landed)
+        landing = _concat(over)                   # computed alone and put in its place (D189 (1))
+        scene = separation_traffic(landing, g, self.separations[g.code], self.finals[b], self.step_s)
+        rest = range(n, len(tick.aircraft))
+        return (scene_aircraft(_concat([tick.aircraft.take(range(n)), landing]), tick.aircraft.take(rest)),
+                Traffic.joined([tick.scene.take(range(n)), scene, tick.scene.take(rest)]), n + len(landed))
 
-    def copy(self, windows: Sequence[int]) -> WindowLoop:
+    def copy(self, windows: Sequence[int], device: torch.device | None = None) -> WindowLoop:
         """A loop of copies of the windows ``windows`` (places in ``windows``, repeats permitted; post-training D94): the
         closed loop's own copy of every row of each (`SpeakingLoop.copy`: the executor's loop, the speaker, the inputs
         and their records) and the window's own state — its scene, landings, separation judge, silent rows, speed-mask
         counts, recorded tokens and value readings (D171). Flown on with the same numbers, a copy says what its original says (D94); the loop
-        copied is unchanged."""
+        copied is unchanged. ``device``: the copy's (this loop's when not given; multi-aircraft control D182: the second
+        pass's copies held in the host's memory until their point is tried)."""
         index = list(windows)
         rows = [b for w in index for b in self.members[w]]
         out = object.__new__(WindowLoop)
-        out.speaking = self.speaking.copy(rows)
-        out.order, out.words, out.device = [self.order[b] for b in rows], self.words, self.device
+        out.speaking = self.speaking.copy(rows, device)
+        out.order, out.words = [self.order[b] for b in rows], self.words
+        out.device = self.device if device is None else torch.device(device)
         out.answering, out.token_part, out.part_width = self.answering, self.token_part, self.part_width
         out.windows = [self.windows[w] for w in index]
         out.members, k = [], 0
@@ -493,8 +569,9 @@ class WindowLoop:
             k += len(self.members[w])
         out.window_of = np.array([n for n, w in enumerate(index) for _ in self.members[w]], dtype=np.int64)
         out.member_of = self.member_of[rows].copy()
+        out.joins, out.origins = self.joins[rows].copy(), self.origins[index].copy()
         out.records = [self.records[b] for b in rows]
-        out.step_s, out.every, out.separations = self.step_s, self.every, self.separations
+        out.step_s, out.every, out.separations, out.pairs = self.step_s, self.every, self.separations, self.pairs
         out.geometries, out.finals = [self.geometries[b] for b in rows], [self.finals[b] for b in rows]
         out.keys, out.speed_words = [self.keys[b] for b in rows], self.speed_words
         out.loss, out.loss_step = [self.loss[b] for b in rows], [self.loss_step[b] for b in rows]
@@ -506,11 +583,59 @@ class WindowLoop:
             if w in self._next:
                 tick = self._next[w]
                 start = out.members[n][0]
-                out._next[n] = _Tick(tick.t, [start + self.members[w].index(b) for b in tick.rows], tick.owns,
-                                     tick.recorded, tick.aircraft, tick.scene)
+                out._next[n] = replace(tick, rows=[start + self.members[w].index(b) for b in tick.rows], of_row={})
         out._tokens = [list(self._tokens[b]) for b in rows]
         out.value_reader = self.value_reader
         out._values, out._pending = [list(self._values[b]) for b in rows], [self._pending[b] for b in rows]
+        return out
+
+    @staticmethod
+    def together(parts: Sequence[tuple[WindowLoop, Sequence[int]]], device: torch.device, room: int | None,
+                 spent: WindowLoop | None = None) -> WindowLoop:
+        """Windows of several loops, each at its own tick, flown on as one loop (multi-aircraft control D188: a backward
+        batch's searches stepped together), on ``device``: ``parts`` each a loop and its windows (places in its
+        ``windows``, repeats permitted), the loops of one batch (one model, rules and token part). The closed loop's own
+        join (`SpeakingLoop.together`: each part's clock moved later by the ticks it is behind) and each window's own
+        state as `copy` keeps it; a window keeps its own ticks (its origin in the loop's clock moved with its part).
+        Flown on with the same numbers, a window says and flies what it would in its own loop. ``room``: the rows its
+        speaker's cache has room for past the rows written (`SpeakingLoop.together`); ``spent``: a loop among the parts
+        that nothing reads after (the one this loop replaces), its cache freed as it is copied."""
+        index = [list(windows) for _, windows in parts]
+        rows = [[b for w in i for b in loop.members[w]] for (loop, _), i in zip(parts, index)]
+        first = parts[0][0]
+        out = object.__new__(WindowLoop)
+        out.speaking = SpeakingLoop.together([(loop.speaking, r) for (loop, _), r in zip(parts, rows)], device, room,
+                                             None if spent is None else spent.speaking)
+        shifts = [out.speaking.t - loop.speaking.t for loop, _ in parts]
+        moved = list(zip([loop for loop, _ in parts], index, rows, shifts))
+        out.order = [loop.order[b] for loop, _, r, _ in moved for b in r]
+        out.words, out.device = first.words, torch.device(device)
+        out.answering, out.token_part, out.part_width = first.answering, first.token_part, first.part_width
+        out.windows = [loop.windows[w] for loop, i, _, _ in moved for w in i]
+        out.members, out._next, k, n = [], {}, 0, 0
+        for loop, i, _, _ in moved:
+            for w in i:
+                out.members.append(list(range(k, k + len(loop.members[w]))))
+                if w in loop._next:
+                    tick = loop._next[w]
+                    out._next[n] = replace(tick, rows=[k + loop.members[w].index(b) for b in tick.rows], of_row={})
+                k, n = k + len(loop.members[w]), n + 1
+        out.window_of = np.array([n for n, rows_w in enumerate(out.members) for _ in rows_w], dtype=np.int64)
+        out.member_of = np.concatenate([loop.member_of[r] for loop, _, r, _ in moved])
+        out.joins = np.concatenate([loop.joins[r] for loop, _, r, _ in moved])
+        out.origins = np.concatenate([loop.origins[i] + shift for loop, i, _, shift in moved])
+        out.step_s, out.every, out.speed_words = first.step_s, first.every, first.speed_words
+        out.separations = {code: s for loop, _, _, _ in moved for code, s in loop.separations.items()}
+        out.pairs = {code: pairs for loop, _, _, _ in moved for code, pairs in loop.pairs.items()}
+        for name in ("records", "geometries", "finals", "keys", "loss", "loss_step", "other", "_pending"):
+            setattr(out, name, [getattr(loop, name)[b] for loop, _, r, _ in moved for b in r])
+        out.speed_mask_rows = np.concatenate([loop.speed_mask_rows[r] for loop, _, r, _ in moved])
+        out.silent = np.concatenate([loop.silent[r] for loop, _, r, _ in moved])
+        out.faults = [loop.faults[w] for loop, i, _, _ in moved for w in i]
+        out._reading = [dict(loop._reading[w]) for loop, i, _, _ in moved for w in i]
+        out._tokens = [list(loop._tokens[b]) for loop, _, r, _ in moved for b in r]
+        out.value_reader = first.value_reader
+        out._values = [list(loop._values[b]) for loop, _, r, _ in moved for b in r]
         return out
 
     def fault_readings(self, w: int) -> Mapping[int, frozenset[str]]:
@@ -526,8 +651,12 @@ class WindowLoop:
         if self.speaking.alive[b]:
             raise ValueError(f"window {b} is still flown")
         if self.loss_step[b] is not None:
-            return self.loss_step[b] - int(self.speaking.join_ticks[b])
+            return self.loss_step[b] - int(self.joins[b])
         return self.speaking.start + len(self.speaking.said(b))
+
+    def own_row(self, b: int, tick: int) -> int:
+        """Row ``b``'s own Δ row at its window's tick ``tick``."""
+        return tick - int(self.joins[b])
 
     def samples(self, split: str, rows: Sequence[int] | None = None) -> list[tuple[Any, Any, list[np.ndarray]]]:
         """Each row's sentence for the loss (post-training C7): its rows with the words said as targets

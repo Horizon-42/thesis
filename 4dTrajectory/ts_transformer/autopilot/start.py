@@ -247,22 +247,45 @@ class Loop:
         last), hears no words, and does not become done (one done already stays done)."""
         self.executor.halt(torch.as_tensor(flights, device=self.executor.state.device))
 
-    def copy(self, flights: Sequence[int]) -> Loop:
+    def copy(self, flights: Sequence[int], device: torch.device | None = None) -> Loop:
         """A loop of copies of the flights ``flights`` (repeats permitted; vocabulary §6 item 5, D97 (2)): everything the
         loop holds of them — the executor's state and its record for the judge (`Executor.take`), the words said
         (`Spoken.take`), the grammar's words in force, the go-arounds heard, and the time limits, which stay the loop's
         (D90), and the join ticks (D150). Flown on with the same words, a copy flies what its original flies and gets the
-        same outcome; the loop copied is unchanged."""
+        same outcome; the loop copied is unchanged. ``device``: the copy's (this loop's when not given)."""
         index = np.asarray(flights)
         if index.ndim != 1 or not len(index) or index.dtype.kind not in "iu":     # no bool mask, as `halt` takes
             raise ValueError(f"a copy takes one or more of the loop's flights by index, got {flights!r}")
         out = copy.copy(self)
-        out.executor = self.executor.take(torch.as_tensor(index, device=self.executor.state.device))
-        out.spoken = self.spoken.take(index)
+        out.executor = self.executor.take(torch.as_tensor(index, device=self.executor.state.device), device)
+        out.spoken = self.spoken.take(index, device)
         out.geometries = [self.geometries[i] for i in index]
         out.go_arounds = self.go_arounds[index].copy()
         out.join_ticks = self.join_ticks[index].copy()
         out.grammar = [self.grammar[i] for i in index]          # InForce is frozen: shared, never changed in place
+        out._flown = None
+        return out
+
+    @staticmethod
+    def together(parts: Sequence[tuple[Loop, Sequence[int], int]], device: torch.device) -> Loop:
+        """Flights of several loops flown on as one loop (multi-aircraft control D188), on ``device``: ``parts`` each a
+        loop, its flights (repeats permitted) and the steps its clock moves later by, its join ticks with it (below 0:
+        its first steps, before any of its flights joined, are left out), so that every part is at one step. Each
+        flight keeps what `copy` keeps (`Executor.together`, `Spoken.together`) and its own clock: flown on with the
+        same words, it flies what its original flies."""
+        steps = {loop.steps + shift for loop, _, shift in parts}
+        if len(steps) != 1:
+            raise ValueError(f"the parts' clocks, moved, are at the steps {sorted(steps)}, not one")
+        index = [np.asarray(flights, dtype=np.int64) for _, flights, _ in parts]
+        out = copy.copy(parts[0][0])
+        out.executor = Executor.together([(loop.executor, torch.as_tensor(i), shift * loop.step_cycles)
+                                          for (loop, _, shift), i in zip(parts, index)], device)
+        out.spoken = Spoken.together([(loop.spoken, i, shift) for (loop, _, shift), i in zip(parts, index)], device)
+        out.geometries = [loop.geometries[f] for (loop, _, _), i in zip(parts, index) for f in i]
+        out.go_arounds = np.concatenate([loop.go_arounds[i] for (loop, _, _), i in zip(parts, index)])
+        out.join_ticks = np.concatenate([loop.join_ticks[i] + shift for (loop, _, shift), i in zip(parts, index)])
+        out.grammar = [loop.grammar[f] for (loop, _, _), i in zip(parts, index) for f in i]
+        out.steps = steps.pop()
         out._flown = None
         return out
 

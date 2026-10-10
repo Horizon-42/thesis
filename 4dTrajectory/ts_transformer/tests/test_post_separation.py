@@ -18,6 +18,7 @@ from ts_transformer.post.runways import airport_separation
 from ts_transformer.post.scene import AircraftAt
 from ts_transformer.post.speed_mask import along_course_speeds, ramp_distance_m, ramp_time_s, speed_check
 from ts_transformer.post.traffic import commanded_loss, joined, traffic
+from ts_transformer.prior.inputs import motion
 from ts_transformer.tests.post_support import FAF_M, airport, finals
 from ts_transformer.tests.support import instruction_spec
 
@@ -113,7 +114,8 @@ def _speed_scene(me_e, leader_e, *, me_speed=75.0, leader_speed=65.0, me_track=9
     aircraft = joined(_set(_one("me", me_e, h=700.0, speed=me_speed, track_deg=me_track)),
                       _set(_one("leader", leader_e, h=400.0, speed=leader_speed, category=leader_category)))
     scene = traffic(aircraft, geometry, separation, fin, 2.0)
-    return scene, along_course_speeds(aircraft, scene, 2.0), separation
+    return scene, along_course_speeds(motion(aircraft.at, aircraft.before, aircraft.known, 2.0).ground_speed_mps,
+                                      scene), separation
 
 
 def test_the_speed_mask_masks_the_words_that_close_the_gap():
@@ -147,7 +149,8 @@ def test_the_speed_mask_masks_nothing_outside_its_conditions_or_when_every_word_
                       _set(_one("joiner", -10_000.0, n=-1_500.0, h=650.0, track_deg=50.0), _one("lead", -6_000.0, h=400.0)))
     scene = traffic(aircraft, geometry, separation, fin, 2.0)
     assert scene.established.tolist() == [True, False, True]
-    check = speed_check(scene, along_course_speeds(aircraft, scene, 2.0), separation, WORDS, n)
+    speeds = along_course_speeds(motion(aircraft.at, aircraft.before, aircraft.known, 2.0).ground_speed_mps, scene)
+    check = speed_check(scene, speeds, separation, WORDS, n)
     assert not check.applies and np.array_equal(check.permitted, every)
     # a heavy leader 1 km from its threshold, 8.5 km ahead: B → F needs 5 NM (9,260 m) when it crosses (TBL 5-5-2)
     scene, speeds, separation = _speed_scene(-9_500.0, -1_000.0, leader_category="B")

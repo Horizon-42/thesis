@@ -46,8 +46,8 @@ from ts_transformer.prior.batch import RowTensors, SentenceRows
 from ts_transformer.prior.inputs import own_flight_key
 from ts_transformer.prior.landings import Landing, LandingIndex, utc_s
 from ts_transformer.prior.loop import LoopRows
-from ts_transformer.prior.model import Prior
-from ts_transformer.prior.procedure import PER_AIRCRAFT, Final
+from ts_transformer.prior.model import COPIED, Prior
+from ts_transformer.prior.procedure import Final
 from ts_transformer.prior.speaker import ABSENT, OBSERVED, SAID, Permitted, Speaker, go_around_bound
 
 #: The predicted rows the speaker's cache has room for at first (it grows as the flights need, `model.Past.grown`; the
@@ -89,13 +89,21 @@ class SpeakingLoop:
     """The closed loop of the flights ``order`` of ``loop`` (module docstring). ``sentences``, ``observed`` (each
     flight's observed rows before its first predicted step as the start gave them back, `STATE_COLUMNS`) and
     ``flights`` (their records in the split's signals: airport, entry time, key) by their place in the signals; ``landings`` each flight's,
-    in ``order`` (D105); ``finals`` each airport's (the procedure masks); ``masks`` their mode (`Speaker`, B14)."""
+    in ``order`` (D105); ``finals`` each airport's (the procedure masks); ``attention``: how its copies read the front
+    of the speaker's cache they hold once (`Speaker`; multi-aircraft control D190 (2)). ``executor_device``: the device that the
+    start's ``loop`` (the executor) was started on (multi-aircraft control S1). The executor stays on this device, and
+    so do its copies and joins. The speaker stays on ``device``. A loop started on another device is refused. None: the
+    executor follows the speaker, and each copy and join moves it to the speaker's device (the behaviour before S1)."""
 
     def __init__(self, model: Prior, loop: Loop, order: Sequence[int], sentences: Mapping[int, ClosedLoopSentence],
                  observed: Mapping[int, np.ndarray], flights: Mapping[int, Mapping[str, Any]], geometries: Mapping[str, AirportGeometry],
                  landings: Sequence[LandingIndex], finals: Mapping[str, Sequence[Final]], words: Words, *,
                  interval_s: float, variant: str, device: torch.device, temperature: float = 1.0,
-                 masks: str = PER_AIRCRAFT) -> None:
+                 attention: str = COPIED, executor_device: torch.device | None = None) -> None:
+        if executor_device is not None and loop.executor.state.device.type != torch.device(executor_device).type:
+            raise ValueError(f"the loop's executor is on {loop.executor.state.device}, not on {executor_device}")
+        #: the device of the executor and of its copies and joins (class docstring); None: the speaker's device
+        self.executor_device = None if executor_device is None else torch.device(executor_device)
         self.loop, self.order, self.words = loop, list(order), words
         count = len(self.order)
         rows = [sentences[i].rows for i in self.order]                   # the rows alone are read (D82)
@@ -108,7 +116,7 @@ class SpeakingLoop:
         #: each flight's join tick (module docstring): the start's
         self.join_ticks = loop.join_ticks.copy()
         self.speaker = Speaker(model, words, self.finals, capacity=int(self.join_ticks.max()) + self.start + FIRST_ROWS,
-                               temperature=temperature, masks=masks)
+                               temperature=temperature, attention=attention)
         # the inputs of a row: the prior's one function of a loop's row (D96 item 4), each flight's own landings (D105)
         self.rows_of = LoopRows(self.geometries, landings, [own_flight_key(f) for f in self.flights],
                                 np.array([utc_s(f["entry_time_utc"]) for f in self.flights]),
@@ -311,15 +319,19 @@ class SpeakingLoop:
                 since=np.stack([r.since[b, 0] for r in rows]), targets=targets))
         return out
 
-    def copy(self, flights: Sequence[int]) -> SpeakingLoop:
+    def copy(self, flights: Sequence[int], device: torch.device | None = None) -> SpeakingLoop:
         """A loop of copies of the flights ``flights`` (places in ``order``, repeats permitted; post-training D94): the
         start's own copy of its flights (`Loop.copy`, vocabulary D97), the speaker's (`Speaker.copy`), the inputs'
         (`LoopRows.select`) and every record. Flown on with the same numbers, masks and input of the added modules, a
         copy says what its original says and flies it within the executor's bound (vocabulary D97 (3)); the loop copied
-        is unchanged."""
+        is unchanged. ``device``: the copy's (this loop's when not given; multi-aircraft control D182: a copy held in the
+        host's memory, flown on the GPU later)."""
         index = list(flights)
         out = object.__new__(SpeakingLoop)
-        out.loop, out.speaker, out.rows_of = self.loop.copy(index), self.speaker.copy(index), self.rows_of.select(index)
+        out.executor_device = self.executor_device
+        out.loop = self.loop.copy(index, device if self.executor_device is None else self.executor_device)
+        out.speaker = self.speaker.copy(index, device)
+        out.rows_of = self.rows_of.select(index, device)
         out.order, out.words, out.every, out.start, out.t = [self.order[i] for i in index], self.words, self.every, \
             self.start, self.t
         out.join_ticks = self.join_ticks[index].copy()
@@ -331,6 +343,50 @@ class SpeakingLoop:
         out._inputs = [RowTensors(*(value[index] for value in row)) for row in self._inputs]
         for name in ("_said", "_flown", "_probability", "_permitted", "_on_final", "_blocked"):
             setattr(out, name, [list(getattr(self, name)[i]) for i in index])
+        return out
+
+    @staticmethod
+    def together(parts: Sequence[tuple[SpeakingLoop, Sequence[int]]], device: torch.device, room: int | None,
+                 spent: SpeakingLoop | None = None) -> SpeakingLoop:
+        """Flights of several loops, each at its own tick, said and flown on as one loop (multi-aircraft control D188: a
+        backward batch's searches stepped together), on ``device``: ``parts`` each a loop from its first predicted step
+        on and its flights (places in its ``order``, repeats permitted). Each part's clock is moved later by the ticks
+        it is behind the latest, its flights' join ticks with it (module docstring: a flight joins the loop at its own
+        tick), and the ticks before any flight joined are left out. Each flight keeps what `copy` keeps of it
+        (`Loop.together`, `Speaker.together`, `LoopRows.together`) and its own rows: flown on with the same numbers,
+        masks and input of the added modules, it says what it says in its own loop and flies it within the executor's
+        bound. ``room``: the rows its speaker's cache has room for past the rows written (`Speaker.together`); ``spent``:
+        a loop among the parts that nothing reads after (the one this loop replaces): its speaker's cache freed as it
+        is copied."""
+        index = [np.asarray(list(flights), dtype=np.int64) for _, flights in parts]
+        for loop, _ in parts:
+            if loop.t < loop.start or len(loop.speaker.said_rows) != loop.t - loop.start:
+                raise ValueError("a loop goes with others from its first predicted step on, a row said each tick since")
+        tick = max(loop.t - int(loop.join_ticks[i].min()) for (loop, _), i in zip(parts, index))
+        shifts = [tick - loop.t for loop, _ in parts]
+        moved = [(loop, i, shift) for (loop, _), i, shift in zip(parts, index, shifts)]
+        first = parts[0][0]
+        if len({loop.executor_device for loop, _ in parts}) != 1:
+            raise ValueError("the joined loops must hold their executors on the same device")
+        out = object.__new__(SpeakingLoop)
+        out.executor_device = first.executor_device
+        out.loop = Loop.together([(loop.loop, i, shift) for loop, i, shift in moved],
+                                 device if first.executor_device is None else first.executor_device)
+        out.speaker = Speaker.together([(loop.speaker, i, shift) for loop, i, shift in moved], device, room,
+                                       None if spent is None else spent.speaker)
+        out.rows_of = LoopRows.together([(loop.rows_of, i, shift) for loop, i, shift in moved], device)
+        out.order = [loop.order[b] for loop, i, _ in moved for b in i]
+        out.words, out.every, out.start, out.t = first.words, first.every, first.start, tick
+        out.join_ticks = np.concatenate([loop.join_ticks[i] + shift for loop, i, shift in moved])
+        for name in ("flights", "geometries", "finals"):
+            setattr(out, name, [getattr(loop, name)[b] for loop, i, _ in moved for b in i])
+        for name in ("observed", "alive", "ended"):
+            setattr(out, name, np.concatenate([getattr(loop, name)[i] for loop, i, _ in moved]))
+        out.current = np.concatenate([loop.current[i] for loop, i, _ in moved])
+        out.before = np.concatenate([loop.before[i] for loop, i, _ in moved])
+        out._inputs = _inputs_together(moved, tick)
+        for name in ("_said", "_flown", "_probability", "_permitted", "_on_final", "_blocked"):
+            setattr(out, name, [list(getattr(loop, name)[b]) for loop, i, _ in moved for b in i])
         return out
 
     def said(self, flight: int) -> np.ndarray:
@@ -373,6 +429,35 @@ class SpeakingLoop:
                                  blocked={c: np.array([row[c] for row in self._blocked[b]], dtype=bool)
                                           for c in self._blocked[b][0]}))
         return out
+
+
+def _inputs_together(parts: Sequence[tuple[SpeakingLoop, np.ndarray, int]], length: int) -> list[RowTensors]:
+    """The inputs of every tick of a loop of flights together (`SpeakingLoop.together`), ``length`` ticks: each part's
+    of its flights moved by its shift (a tick before its first: no row present); the candidates of every tick padded
+    to the most of any (a copy's rows have its own batch's, fewer than those of the batch it was copied from)."""
+    rows = [loop._inputs[max(-shift, 0):] for loop, _, shift in parts]
+    most = max(r.valid.shape[1] for kept in rows for r in kept)
+
+    def together(name: str) -> np.ndarray:                       # [B, length, ...]: one row a tick
+        blocks = []
+        for kept, (_, i, _) in zip(rows, parts):
+            # the candidates' validity is a tick's [B, K]; every other input a tick's [B, 1, ...]; K padded to the most
+            if name == "valid":
+                ticks = [v if v.shape[1] == most else np.pad(v, ((0, 0), (0, most - v.shape[1])))
+                         for v in (r.valid for r in kept)]
+                block = np.stack(ticks, axis=1)[i]
+            else:
+                ticks = [getattr(r, name) for r in kept]
+                if name == "candidates":
+                    ticks = [c if c.shape[2] == most else np.pad(c, ((0, 0), (0, 0), (0, most - c.shape[2]), (0, 0)))
+                             for c in ticks]
+                block = np.concatenate(ticks, axis=1)[i]
+            blocks.append(np.pad(block, [(0, 0), (length - block.shape[1], 0)] + [(0, 0)] * (block.ndim - 2)))
+        return np.concatenate(blocks)
+
+    values = {name: together(name) for name in RowTensors._fields}
+    return [RowTensors(*(value[:, t] if name == "valid" else value[:, t: t + 1] for name, value in values.items()))
+            for t in range(length)]
 
 
 def _on_cpu(rows: RowTensors) -> RowTensors:
