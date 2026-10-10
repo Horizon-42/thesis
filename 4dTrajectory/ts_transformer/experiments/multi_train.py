@@ -52,6 +52,10 @@ D's format and reader). Its speaking workers (``--speak-workers`` above 1) are s
 inputs and settings (``--profile``, `profiled_fit`: the profile's measure with its margin and the memory free now, each
 worker's GPU capped at its share), never measured before a run (the user, 2026-10-07); ``--speak-device`` puts them on
 a device of their own, e.g. the CPU beside the pass on the GPU (D180; by default the campaign's ``--device``).
+``--executor-device cpu`` (multi-aircraft control S1) starts the executor of each loop on the CPU. The speaker stays on
+its device (`Context.executor_device`). The default, ``speak``, keeps the executor on the speaker's device. This is a
+process option, not a campaign setting: a resume can give a different value. Each batch record holds the device of its
+executor.
 
     python run_ts.py multi_train --prior <the base> --instructions <A34's artefact> --executor <its spec> \\
         --windows <stage C's census: its edge reference> --start-campaign <stage C's campaign> --start-round <r> \\
@@ -116,6 +120,9 @@ MEASURE_MARGIN = 1.3
 #: D179, D181 (55)) change the words spoken, not the shapes — a worker past its share stops by name.
 PROFILED_SETTINGS = ("per_kind", "spans_s", "c_min", "batch_rows", "continuations", "update_groups", "data_sentences",
                      "branching", "front_attention")
+#: The devices of ``--executor-device`` (multi-aircraft control S1). ``speak``: the executor flies on the speaker's
+#: device (the behaviour before S1). ``cpu``: the executor flies on the CPU (`Context.executor_device`).
+EXECUTOR_DEVICES = ("speak", "cpu")
 #: The inputs a campaign shares with its profile.
 PROFILED_INPUTS = ("prior", "instructions", "executor", "windows", "procedure_root")
 
@@ -221,10 +228,12 @@ def window_record(window: Window) -> dict[str, Any]:
 
 
 def loop_options(context: Context) -> dict[str, Any]:
-    """Stage D's options of the window loop (post-training §9 item 5): its rule of who answers (D145) and its token
-    part (D152)."""
+    """Stage D's options of the window loop (post-training §9 item 5): the rule of who answers (D145), the token part
+    (D152) and the device of the executor (multi-aircraft control S1). The executor device is the device that
+    `Context.start_loop` starts the executor on."""
     return {"answering": Answering(context.separations, context.finals, context.words.spec.step_s),
-            "token_part": TokenPart(context.words), "part_width": TokenPart.width}
+            "token_part": TokenPart(context.words), "part_width": TokenPart.width,
+            "executor_device": context.executor_device}
 
 
 # ---- the draw
@@ -671,6 +680,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cpu-profile", type=Path,
                         help="D191: the profile of a CPU worker (multi_profile --speak-device cpu) of these inputs and "
                              "settings: with --cpu-workers")
+    parser.add_argument("--executor-device", choices=EXECUTOR_DEVICES, default="speak",
+                        help="S1: where the executor of each loop flies: speak (on the speaker's device, the default) "
+                             "or cpu (the speaker stays on its device)")
     parser.add_argument("--restart-round", action="store_true",
                         help="D185: a resume moves the round left half done aside and speaks it whole (default: its "
                              "done batches kept; on changed code, keep them only after a behaviour check)")
@@ -712,6 +724,8 @@ def main(argv: list[str] | None = None) -> int:
     context = open_context(prior_dir, instructions, executor, edges_reference,
                            torch.device("cpu") if speaking else device, procedure_root,
                            formal=not args.smoke)
+    if args.executor_device == "cpu":                # S1: set before the fork, so each worker gets it
+        context = replace(context, executor_device=torch.device("cpu"))
     stage = stage_d()
     stage.start(context, settings)                  # refused by name before the workers and campaign.json (D164)
     inputs = {"prior": str(prior_dir), "instructions": str(instructions), "executor": str(executor),

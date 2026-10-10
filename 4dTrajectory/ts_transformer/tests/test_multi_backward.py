@@ -231,6 +231,73 @@ def test_a_copy_held_on_another_device_and_brought_back_flies_and_says_as_its_or
     assert not torch.cuda.is_initialized()
 
 
+def _executor_kept_on_the_cpu(directory: str) -> None:
+    """The body of the GPU test below. It runs in a separate process. The speaker of the synthetic window is on the GPU.
+    The loop is flown two times: once with the executor started on the CPU, once with the executor on the GPU. Each
+    time the loop flies three rows, is copied to the host (D182), is joined with itself on the GPU (D188), and flies
+    to its end."""
+    import copy as copying
+    from pathlib import Path
+
+    from _pytest.monkeypatch import MonkeyPatch
+
+    from ts_transformer.experiments.post_branches import _batch_loops
+    from ts_transformer.tests.test_post_window_loop import window_setup
+
+    s = window_setup(Path(directory), MonkeyPatch())
+    gpu = torch.device("cuda")
+    model = _with_module(s["base"]).to(gpu)
+    (window,) = s["windows"]
+
+    def flown(executor: torch.device):
+        window_loop, sources = _batch_loops(model, lambda flights: s["moved_loop"](start_move_of(window), executor),
+                                            [window], [0], {0: s["stored"]}, s["flights"], s["geometries"],
+                                            {s["geometry"].code: s["roster"]}, s["finals"], s["words"],
+                                            interval_s=DELTA, variant="full", edges_reference=s["reference"],
+                                            faults={s["geometry"].code: {}}, device=gpu,
+                                            rules=Rules(**credit.rules(1337, 0, DELTA)),
+                                            loop_options={"executor_device": None if executor == gpu else executor})
+        loop = window_loop([0])
+        numbers = sources(loop, [0])
+        while loop.speaking.observing:
+            loop.observe()
+        for _ in range(3):
+            loop.step(post_branches._draws(loop, numbers))
+        held = loop.copy([0], device=CPU)
+        joint = WindowLoop.together([(held, [0]), (loop, [0])], gpu, None)
+        executor_on = {t.device.type for t in (held.speaking.loop.executor.state, joint.speaking.loop.executor.state,
+                                               joint.speaking.loop.spoken.value)}
+        speaker_on = {p.keys.device.type for p in joint.speaking.speaker.past}
+        return executor_on, speaker_on, joint.finish([copying.deepcopy(n) for n in numbers * 2])
+
+    executor_on, speaker_on, on_cpu = flown(CPU)
+    assert executor_on == {"cpu"} and speaker_on == {"cuda"}
+    executor_on, _, on_gpu = flown(gpu)
+    assert executor_on == {"cpu", "cuda"}                    # with the speaker: held on the host, joined on the GPU
+    assert len(on_cpu) == len(on_gpu) == 2
+    for a, b in zip(on_cpu, on_gpu):
+        assert np.array_equal(a.words, b.words) and a.outcome == b.outcome
+        assert np.allclose(a.states, b.states, rtol=0.0, atol=1e-6)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_an_executor_started_on_the_cpu_stays_there_beside_a_speaker_on_the_gpu(tmp_path):
+    """Multi-aircraft control S1. The executor starts on the CPU (``executor_device``) and the speaker is on the GPU.
+    The executor stays on the CPU through the host copies and the joins of a backward batch. The loop says the same
+    words, and flies the same states to 1e-6 m, as a loop whose executor follows the speaker. The test runs in a new
+    Python process, as the test above."""
+    import os
+    import subprocess
+    import sys
+
+    code = ("from ts_transformer.tests.test_multi_backward import _executor_kept_on_the_cpu; "
+            f"_executor_kept_on_the_cpu({str(tmp_path)!r})")
+    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                          env={**os.environ, "PYTHONPATH": os.pathsep.join(p for p in sys.path if p)})
+    assert done.returncode == 0, done.stderr[-3000:]
+    assert not torch.cuda.is_initialized()
+
+
 def test_the_branching_setting_defaults_to_the_grid_and_a_resume_compares_it(tmp_path):
     from dataclasses import asdict, replace
 

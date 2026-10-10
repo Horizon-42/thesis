@@ -284,6 +284,9 @@ class Context:
     data: Sequence[Any]
     #: a formal campaign's context (`open_context`'s ``formal``, D132): a start from a smoke campaign is refused (D162)
     formal: bool = False
+    #: the device that `start_loop` starts the executor on (multi-aircraft control S1). None: ``device``, the speaker's
+    #: device. A GPU worker can set the CPU here and keep its speaker on the GPU (`SpeakingLoop`).
+    executor_device: torch.device | None = None
 
     @property
     def variant(self) -> str:
@@ -294,7 +297,9 @@ class Context:
         return {code: airport_separation(g) for code, g in self.geometries.items()}
 
     def start_loop(self, split: str, windows: Sequence[Window]):
-        """The ``start_loop`` of `branch_round`: the flights of ``windows`` started with their windows' moves (C9), through
+        """The ``start_loop`` of `branch_round`: the flights of ``windows`` started with their windows' moves (C9). The
+        executor starts on ``executor_device``, or on ``device`` when it is None (multi-aircraft control S1). The start
+        goes through
         the split's opened `Start` (C13, vocabulary A44: what `start_moved` gives, read once); a window's other commanded
         aircraft (multi-aircraft control D150) start unmoved at their join steps."""
         data = self.splits[split]
@@ -307,7 +312,9 @@ class Context:
         def started(flights: Sequence[int]):
             ticks = {"join_ticks": {i: joins[i] for i in flights}} if several else {}
             return data["start"].moved({i: sentences[i] for i in flights}, {i: moves[i] for i in flights},
-                                       most_go_arounds=MOST_GO_AROUNDS, device=self.device, **ticks)
+                                       most_go_arounds=MOST_GO_AROUNDS,
+                                       device=self.device if self.executor_device is None else self.executor_device,
+                                       **ticks)
 
         return started
 
@@ -623,7 +630,8 @@ def spoken_batch(stage: Stage, model: Prior, context: Context, windows: Sequence
     part = stage.speak_batch(model, context, windows, places, settings, round_, directory, k)
     write_json_atomic(batch_record_path(directory, k), {
         "batch": k, "record": part, "windows": [stage.record(windows[p]) for p in places], "launch": dict(launch),
-        "device": context.device.type})
+        "device": context.device.type,
+        "executor_device": (context.device if context.executor_device is None else context.executor_device).type})
     return part
 
 

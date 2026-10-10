@@ -90,13 +90,20 @@ class SpeakingLoop:
     flight's observed rows before its first predicted step as the start gave them back, `STATE_COLUMNS`) and
     ``flights`` (their records in the split's signals: airport, entry time, key) by their place in the signals; ``landings`` each flight's,
     in ``order`` (D105); ``finals`` each airport's (the procedure masks); ``attention``: how its copies read the front
-    of the speaker's cache they hold once (`Speaker`; multi-aircraft control D190 (2))."""
+    of the speaker's cache they hold once (`Speaker`; multi-aircraft control D190 (2)). ``executor_device``: the device that the
+    start's ``loop`` (the executor) was started on (multi-aircraft control S1). The executor stays on this device, and
+    so do its copies and joins. The speaker stays on ``device``. A loop started on another device is refused. None: the
+    executor follows the speaker, and each copy and join moves it to the speaker's device (the behaviour before S1)."""
 
     def __init__(self, model: Prior, loop: Loop, order: Sequence[int], sentences: Mapping[int, ClosedLoopSentence],
                  observed: Mapping[int, np.ndarray], flights: Mapping[int, Mapping[str, Any]], geometries: Mapping[str, AirportGeometry],
                  landings: Sequence[LandingIndex], finals: Mapping[str, Sequence[Final]], words: Words, *,
                  interval_s: float, variant: str, device: torch.device, temperature: float = 1.0,
-                 attention: str = COPIED) -> None:
+                 attention: str = COPIED, executor_device: torch.device | None = None) -> None:
+        if executor_device is not None and loop.executor.state.device.type != torch.device(executor_device).type:
+            raise ValueError(f"the loop's executor is on {loop.executor.state.device}, not on {executor_device}")
+        #: the device of the executor and of its copies and joins (class docstring); None: the speaker's device
+        self.executor_device = None if executor_device is None else torch.device(executor_device)
         self.loop, self.order, self.words = loop, list(order), words
         count = len(self.order)
         rows = [sentences[i].rows for i in self.order]                   # the rows alone are read (D82)
@@ -321,7 +328,9 @@ class SpeakingLoop:
         host's memory, flown on the GPU later)."""
         index = list(flights)
         out = object.__new__(SpeakingLoop)
-        out.loop, out.speaker = self.loop.copy(index, device), self.speaker.copy(index, device)
+        out.executor_device = self.executor_device
+        out.loop = self.loop.copy(index, device if self.executor_device is None else self.executor_device)
+        out.speaker = self.speaker.copy(index, device)
         out.rows_of = self.rows_of.select(index, device)
         out.order, out.words, out.every, out.start, out.t = [self.order[i] for i in index], self.words, self.every, \
             self.start, self.t
@@ -357,8 +366,12 @@ class SpeakingLoop:
         shifts = [tick - loop.t for loop, _ in parts]
         moved = [(loop, i, shift) for (loop, _), i, shift in zip(parts, index, shifts)]
         first = parts[0][0]
+        if len({loop.executor_device for loop, _ in parts}) != 1:
+            raise ValueError("the joined loops must hold their executors on the same device")
         out = object.__new__(SpeakingLoop)
-        out.loop = Loop.together([(loop.loop, i, shift) for loop, i, shift in moved], device)
+        out.executor_device = first.executor_device
+        out.loop = Loop.together([(loop.loop, i, shift) for loop, i, shift in moved],
+                                 device if first.executor_device is None else first.executor_device)
         out.speaker = Speaker.together([(loop.speaker, i, shift) for loop, i, shift in moved], device, room,
                                        None if spent is None else spent.speaker)
         out.rows_of = LoopRows.together([(loop.rows_of, i, shift) for loop, i, shift in moved], device)

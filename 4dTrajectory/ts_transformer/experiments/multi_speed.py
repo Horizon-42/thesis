@@ -25,6 +25,9 @@ unexplained (D181 (56): on the GPU it nearly doubles a batch and counts a kernel
 40 functions of most cumulative time are written beside. Run it with no other job on the host or the GPU: the times are
 the host's.
 
+``--executor-device cpu`` flies the executor on the CPU. The speaker stays on ``--device``. This is the same option as
+`multi_train`'s (multi-aircraft control S1).
+
 The record is ``speed.json`` (`MULTI_SPEED_SCHEMA`) under ``--out`` (a new directory).
 
     python run_ts.py multi_speed --campaign 4dTrajectory/outputs/POOLED/multi/multi_train_20261009 --round 0 \\
@@ -41,7 +44,7 @@ import pstats
 import tempfile
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
@@ -51,7 +54,7 @@ from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
 from ts_transformer.autopilot.start import Loop
 from ts_transformer.experiments.model_speed import host_info, synchroniser
 from ts_transformer.experiments.multi_profile import rows_of
-from ts_transformer.experiments.multi_train import multi_settings_of, round_model, span_key, stage_d
+from ts_transformer.experiments.multi_train import EXECUTOR_DEVICES, multi_settings_of, round_model, span_key, stage_d
 from ts_transformer.experiments.post_train import Context, inputs_here, open_context
 from ts_transformer.experiments.post_window_loop import WindowLoop, checked_edges
 from ts_transformer.io_utils import utc_now, write_json_atomic
@@ -200,6 +203,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--round", type=int, default=0, help="the round whose draw and model speak (default 0)")
     parser.add_argument("--batch", type=int, required=True, help="the batch of that round's draw")
     parser.add_argument("--device", choices=("cpu", "cuda"), required=True)
+    parser.add_argument("--executor-device", choices=EXECUTOR_DEVICES, default="speak",
+                        help="S1: where the executor flies: speak (on the speaker's device, the default) or cpu")
     parser.add_argument("--cprofile", choices=PARTS, help="a profile inside this part (the CPU only)")
     parser.add_argument("--out", type=Path, required=True, help="a new directory")
     args = parser.parse_args(argv)
@@ -221,11 +226,14 @@ def main(argv: list[str] | None = None) -> int:
     context = open_context(Path(inputs["prior"]), Path(inputs["instructions"]), Path(inputs["executor"]),
                            edges_reference, device, Path(inputs["procedure_root"]), formal=False, data=False,
                            splits=("train",))
+    if args.executor_device == "cpu":
+        context = replace(context, executor_device=torch.device("cpu"))
     model = (stage_d().start(context, settings)[0] if args.round == 0
              else round_model(context, settings, campaign, args.round - 1)).eval()
     out.mkdir(parents=True)
     head = {"schema": MULTI_SPEED_SCHEMA, "started_utc": utc_now(), "git": git_state(), "checks": opened["checks"],
-            "inputs": {"campaign": str(campaign), "round": args.round, "batch": args.batch}, "host": host_info(device)}
+            "inputs": {"campaign": str(campaign), "round": args.round, "batch": args.batch,
+                       "executor_device": args.executor_device}, "host": host_info(device)}
     speed = timed_batch(model, context, settings, args.round, args.batch, args.cprofile)
     write_json_atomic(out / "speed.json", json.loads(json.dumps({**head, **speed, "finished_utc": utc_now()},
                                                                 default=str)))

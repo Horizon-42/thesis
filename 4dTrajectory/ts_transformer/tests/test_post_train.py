@@ -106,6 +106,22 @@ def test_the_context_holds_the_base_on_its_device(monkeypatch, tmp_path):
     assert next(context.base.parameters()).device.type == "meta" and not context.base.training
 
 
+def test_a_context_starts_its_loops_executor_on_its_executor_device(monkeypatch):
+    """Multi-aircraft control S1. `Context.start_loop` starts the executor on ``executor_device`` when it is given.
+    Otherwise it starts the executor on the context's device (the behaviour before S1). The start is a stub; "meta"
+    stands in for the GPU."""
+    seen = []
+    start = SimpleNamespace(moved=lambda sentences, moves, *, most_go_arounds, device, **ticks: seen.append(device))
+    window = SimpleNamespace(signal_index=0, signal_indices=[0], join_steps=lambda: [0], joined=[])
+    monkeypatch.setattr(post_train, "start_move_of", lambda window: None)
+    context = post_train.Context(instructions=None, executor=None, edges_reference=None, device=torch.device("meta"),
+                                 words=None, interval_s=4.0, base=None, base_identity={}, geometries={}, rosters={},
+                                 finals={}, splits={"train": {"sentences": {0: None}, "start": start}}, data=[])
+    context.start_loop("train", [window])([0])
+    replace(context, executor_device=torch.device("cpu")).start_loop("train", [window])([0])
+    assert [d.type for d in seen] == ["meta", "cpu"]
+
+
 def test_the_settings_take_a_count_of_every_kind_and_positive_sizes():
     assert set(_settings().per_kind) == set(KINDS)
     with pytest.raises(ValueError, match="each kind"):
