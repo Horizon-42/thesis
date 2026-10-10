@@ -153,13 +153,13 @@ def test_no_majority_point_within_the_bound_leaves_the_decision_points_groups():
     assert found.tried == (92, 84, 88, 76, 68, 60, 52, 44, 36)               # every point back, not past the bound
 
 
-def _backward(s, model, rules, continuations=2):
+def _backward(s, model, rules, continuations=2, majority=None):
     (window,) = s["windows"]
     return backward_round(model, lambda flights: s["moved_loop"](start_move_of(window)), [window], [0],
                           {0: s["stored"]}, s["flights"], s["geometries"], {s["geometry"].code: s["roster"]}, s["finals"],
                           s["words"], interval_s=DELTA, variant="full", edges_reference=s["reference"],
                           faults={s["geometry"].code: {}}, device=CPU, split="train", continuations=continuations,
-                          rules=rules)
+                          rules=rules, majority=majority)
 
 
 def test_a_round_found_backward_on_a_window_whose_first_avoiding_point_is_known(setup, monkeypatch):
@@ -211,6 +211,55 @@ def test_a_round_found_backward_judges_its_continuations_by_what_they_did(setup)
     assert found.to_end == 2 * len(found.groups) and found.to_event % 2 == 0
     for group, depth in zip(found.groups, found.depths_s):
         assert depth % 16.0 == 0 and 16.0 <= depth <= 8 * 32.0
+
+
+def test_a_majority_point_out_of_reach_ends_its_continuations_early_and_finds_the_same(setup, monkeypatch):
+    """D194 (3) on the synthetic window with the judgement replaced, 4 continuations, the majority 3: the event's point
+    avoids 0, the decision point behind it 1 (its fine point 0), the next point 1 and the one behind it 4 (the
+    majority point). The point between has 3 failed at its first step (`_failed` replaced too), so its majority is out
+    of reach (`multi.backward.out_of_reach`): it leaves the joint loop there, not at the judged tick. The groups, their
+    kinds and depths, and every count but the steps and rows flown, are those of the search that flies it to the judged
+    tick."""
+    s = setup
+    model = _with_module(s["base"])
+    rules = Rules(**credit.rules(1337, 0, DELTA))
+    reached = {}
+
+    def avoiding(point, happened):
+        back = (happened.tick - point) // STEP if (happened.tick - point) % STEP == 0 else None
+        return {1: 0, 2: 1, 3: 1, 4: 4}.get(back, 0)
+
+    def judged(loop, own, v, happened, point):
+        reached.setdefault(point, []).append(int(loop.speaking.t - loop.origins[own[0]]))
+        return [Trial(i < avoiding(point, happened), False) for i in range(len(own))]
+
+    def failed(loop, own, part):
+        return len(own) - avoiding(part.point, part.search.happened)
+
+    monkeypatch.setattr(post_branches, "_trials", judged)
+    monkeypatch.setattr(post_branches, "_failed", failed)
+    early = _backward(s, model, rules, continuations=4, majority=3)
+    early_reached, reached = reached, {}
+    with monkeypatch.context() as patched:
+        patched.setattr(backward, "out_of_reach", lambda *args: False)
+        full = _backward(s, model, rules, continuations=4, majority=3)
+    tick = max(early_reached) + STEP                                   # the event's tick (its point avoids 0)
+    behind = tick - 3 * STEP
+    assert early.kinds == full.kinds == [backward.DECISION, backward.MAJORITY_POINT]
+    assert [g.branch for g in early.groups] == [g.branch for g in full.groups] == [tick - 2 * STEP, tick - 4 * STEP]
+    assert [[c.reward for c in g.continuations] for g in early.groups] == \
+        [[c.reward for c in g.continuations] for g in full.groups]
+    assert (early.depths_s, early.majority_depths_s) == (full.depths_s, full.majority_depths_s)
+    assert (early.searches, early.found, early.to_event, early.to_end) == \
+        (full.searches, full.found, full.to_event, full.to_end)
+    assert early_reached[behind] == [behind] and reached[behind][0] > behind      # judged at its first step, not later
+    assert early.search_steps <= full.search_steps and early.search_rows < full.search_rows
+
+
+def test_a_point_is_out_of_reach_once_too_few_continuations_are_left_to_make_the_majority():
+    """D194 (3): 5 of 8 make the majority, so 4 failed put it out of reach and 3 do not."""
+    assert backward.out_of_reach(4, 8, 5) and not backward.out_of_reach(3, 8, 5)
+    assert backward.out_of_reach(1, 2, 2) and not backward.out_of_reach(0, 2, 2)
 
 
 def _round_trip_on_the_gpu(directory: str) -> None:

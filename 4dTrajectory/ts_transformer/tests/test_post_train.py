@@ -638,6 +638,26 @@ def test_each_pool_of_workers_is_forked_with_its_own_device_and_budget(tmp_path)
                     0, tmp_path, stage=stage)
 
 
+def test_a_round_speaks_its_batches_of_the_longest_span_first_and_sums_them_by_batch(tmp_path, monkeypatch):
+    """D194 (2): the batches not done are spoken longest span first, the batches of one span by index (stage C's windows,
+    span 0: by index); the round's record sums them in batch order, as before."""
+    spans = [300.0, 1200.0, 600.0, 1200.0, 300.0]
+    windows = [SimpleNamespace(span_s=span) for span in spans]
+    stage = SimpleNamespace(batches=lambda windows, settings: [[k] for k in range(len(windows))],
+                            record=lambda window: {"span_s": window.span_s})
+    order = []
+
+    def spoken(stage, model, context, windows, places, settings, round_, directory, k, launch):
+        order.append(k)
+        return {"groups": k, "differed": [k], "outcomes": {}}
+
+    monkeypatch.setattr(post_train, "spoken_batch", spoken)
+    record = speak_round(None, SimpleNamespace(device=CPU), windows, _settings(), 0, tmp_path, stage=stage,
+                         launch={"utc": "", "commit": "", "dirty": False})
+    assert order == [1, 3, 2, 0, 4]
+    assert record["differed"] == [0, 1, 2, 3, 4] and record["groups"] == 10
+
+
 def test_the_runner_forks_cpu_workers_beside_one_worker_on_the_speak_device(tmp_path, monkeypatch, capsys):
     """D191 through the runner: ``--cpu-workers`` with ``--cpu-batches`` beside one worker on the speak device opens the
     context on the CPU, gives `Speakers` the CPU workers and keeps the rule as the campaign's settings; the CPU's
