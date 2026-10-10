@@ -709,19 +709,33 @@ def test_more_gpu_workers_than_their_peak_and_a_batch_past_its_share_at_fewer_at
 def test_cpu_workers_are_sized_from_a_cpu_workers_profile_in_the_hosts_budget(tmp_path, monkeypatch):
     """D191: CPU workers beside the GPU workers read their measure from a profile of a CPU worker (these inputs and
     settings, ``--speak-device cpu``), counted in the host's budget with the GPU workers' host part; the GPU's budget and
-    each GPU worker's share as without them; a profile of a GPU worker as the CPU's refused by name."""
+    each GPU worker's share as without them; a profile of a GPU worker as the CPU's refused by name. D193 (4): a CPU
+    worker is counted at what it holds between batches; each has the host left by the GPU workers (at their peak with
+    the margin) in equal shares, and a CPU batch past its share is spoken again at half the CPU workers, then one;
+    refused by name only where the last level cannot hold the CPU profile's host peak with its margin."""
     gib = 1 << 30
     settings = _multi_settings(spans_s=[300.0, 600.0], batch_rows=[64, 48], cpu_batches=2, cpu_period=5)
     inputs = {key: str(tmp_path / key) for key in multi_train.PROFILED_INPUTS}
     cuda = torch.device("cuda")
     monkeypatch.setattr(multi_train, "available_memory", lambda device: {"host": 13 * gib, "gpu": 5 * gib})
     profile = _profile(tmp_path, settings, inputs)
-    cpu_profile = _profile(tmp_path, settings, inputs, gpu=False, campaign_gpu=True, name="cpu_profile")
-    # host: 3 × (2 + 0.5) for the GPU workers, 2 × (2 + 0.25 + 0.5) for the CPU workers: 13 ≤ 13 GiB
+    cpu_profile = _profile(tmp_path, settings, inputs, gpu=False, campaign_gpu=True, name="cpu_profile", margin=1.2)
+    # host: 3 × (2 + 0.5) for the GPU workers; a CPU worker's hold 1 + 0.25 + 0.5 = 1.75, its peak 2 × 1.2 + 0.75 = 3.15
     fit = multi_train.profiled_fit(profile, settings, inputs, 3, cuda, cuda, cpu_profile, 2)
     assert fit["cpu_workers"] == 2 and fit["gpu_budget"] == (5 * gib - gib // 2) // 3
-    with pytest.raises(SystemExit, match=r"host: 3 workers speaking and 3 on the CPU need 15.8 GiB"):
+    shared, hold = 13 * gib - 3 * (2 * gib + gib // 2), gib + gib // 4 + gib // 2
+    assert fit["host_budget"] == shared // 2 and fit["cpu_deferred"] == [[1, shared - hold]]
+    with pytest.raises(SystemExit, match=r"host: 3 workers speaking and 4 on the CPU need 14.5 GiB"):
+        multi_train.profiled_fit(profile, settings, inputs, 3, cuda, cuda, cpu_profile, 4)    # 7.5 + 4 × 1.75 > 13
+    # 3 CPU workers fit between batches (7.5 + 3 × 1.75 ≤ 13), but the last level 5.5 − 2 × 1.75 = 2 GiB is below a
+    # batch at the peak
+    with pytest.raises(SystemExit, match=r"a batch at the profile's host peak \(3.15 GiB with its margin\) has 2.00 GiB "
+                                         r"at the last level — start fewer \(--cpu-workers\)"):
         multi_train.profiled_fit(profile, settings, inputs, 3, cuda, cuda, cpu_profile, 3)
+    monkeypatch.setattr(multi_train, "available_memory", lambda device: {"host": 16 * gib, "gpu": 5 * gib})
+    four, shared = multi_train.profiled_fit(profile, settings, inputs, 3, cuda, cuda, cpu_profile, 4), shared + 3 * gib
+    assert four["host_budget"] == shared // 4
+    assert four["cpu_deferred"] == [[2, (shared - 2 * hold) // 2], [1, shared - 3 * hold]]     # 2.5, 3.25 ≥ 3.15 GiB
     with pytest.raises(SystemExit, match="other speaking device than"):
         multi_train.profiled_fit(profile, settings, inputs, 3, cuda, cuda, profile, 2)
 
@@ -889,11 +903,13 @@ def test_the_runner_sizes_its_workers_from_the_profile_before_any_process_uses_t
     monkeypatch.setattr(multi_train, "profiled_fit", lambda profile, settings, inputs, workers, device, speak_device,
                         cpu_profile, cpu_workers: (
         calls.append(("fit", profile, workers, inputs["settings"]["batch_rows"], speak_device.type)),
-        {"gpu_budget": 123, "deferred": [[1, 456]]})[1])
+        {"gpu_budget": 123, "deferred": [[1, 456]], "host_budget": 789, "cpu_deferred": []})[1])
 
     class FakeSpeakers:
-        def __init__(self, context, settings, workers, device, *, stage, gpu_budget, cpu_workers, deferred):
+        def __init__(self, context, settings, workers, device, *, stage, gpu_budget, cpu_workers, deferred,
+                     host_budget, cpu_deferred):
             calls.append(("speakers", context.device.type, workers, device.type, gpu_budget))
+            assert (deferred, host_budget, cpu_deferred) == ([[1, 456]], 789, [])
 
         def close(self):
             calls.append(("closed",))

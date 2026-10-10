@@ -255,18 +255,23 @@ def _digest(model) -> float:
 
 def test_a_speaking_worker_sets_its_cuda_allocator_before_it_uses_the_gpu(monkeypatch):
     """D188 (2): a worker's initialiser sets the CUDA allocator of its process (`SPEAKER_ALLOCATOR`, read at its first
-    CUDA call), whatever the campaign's shell set; its torch on one thread."""
+    CUDA call), whatever the campaign's shell set; its torch on one thread; its handler of the host cap's signal
+    (D193 (4))."""
+    import signal
+
     import torch._inductor.config as inductor
 
     monkeypatch.delenv("PYTORCH_CUDA_ALLOC_CONF", raising=False)
     monkeypatch.setattr(inductor, "compile_threads", inductor.compile_threads)
-    threads = torch.get_num_threads()
+    threads, handler = torch.get_num_threads(), signal.getsignal(signal.SIGUSR1)
     try:
         post_train._initialise_speaker()
         assert os.environ["PYTORCH_CUDA_ALLOC_CONF"] == post_train.SPEAKER_ALLOCATOR == "expandable_segments:True"
         assert torch.get_num_threads() == 1 and inductor.compile_threads == 1
+        assert signal.getsignal(signal.SIGUSR1) is post_train._past_host_share
     finally:
         torch.set_num_threads(threads)
+        signal.signal(signal.SIGUSR1, handler)
 
 
 def test_each_speaker_speaks_with_the_round_s_model_and_a_dead_one_fails_the_round(setup, tmp_path, monkeypatch):
@@ -600,7 +605,8 @@ def test_each_devices_workers_take_its_batches_in_order(tmp_path):
     speakers = object.__new__(Speakers)
     speakers.pools = {"cuda": Pool(), "cpu": Pool()}
     speakers.device, speakers.cpu_batches, speakers.cpu_period = torch.device("cuda"), 2, 5
-    speakers.stage, speakers.readings, speakers.deferred = SimpleNamespace(record=lambda w: w), 0, []
+    speakers.stage, speakers.readings = SimpleNamespace(record=lambda w: w), 0
+    speakers.deferred = {"cuda": [], "cpu": []}
     windows, places = list(range(7)), [[k] for k in range(7)]
     model = torch.nn.Linear(1, 1)
     assert speakers.speak(model, windows, places, 0, tmp_path, list(range(7)), {}) == list(range(7))
@@ -676,45 +682,52 @@ def test_the_runner_forks_cpu_workers_beside_one_worker_on_the_speak_device(tmp_
     assert "--cpu-batches above 0 needs --cpu-workers" in capsys.readouterr().err and opened == ["cpu"]
 
 
+class _LevelPool:
+    """Six workers on threads (D191's levels): each task held a moment, the most running at once counted by budget; a
+    batch raises ``error`` at each budget of ``fails``."""
+
+    def __init__(self, fails, error):
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        self.fails, self.error = fails, error
+        self.threads, self.lock = ThreadPoolExecutor(6), threading.Lock()
+        self.asked, self.running, self.most, self.at = [], 0, {}, {}
+
+    def submit(self, task, *args):
+        import threading
+        import time
+
+        k, budget = args[3], args[-1]
+        self.asked.append((k, budget))
+
+        def run():
+            with self.lock:
+                self.running += 1
+                self.most[budget] = max(self.most.get(budget, 0), self.running)
+            begun = time.monotonic()
+            threading.Event().wait(0.05)
+            self.at[(k, budget)] = (begun, time.monotonic())             # its start and end
+            with self.lock:
+                self.running -= 1
+            if budget in self.fails.get(k, ()):
+                raise self.error("past its share")
+            return k
+
+        return self.threads.submit(run)
+
+
 def test_a_batch_past_its_workers_share_is_spoken_again_after_the_others_at_fewer_at_once(tmp_path):
     """D191 (the user, 2026-10-10: the peaks last): a batch whose GPU worker runs out of its share is spoken again once
     the others are spoken, at each level in turn (fewer at once, more memory), at most a level's number at once, each
     level's batches in batch order; the results in batch order; past the last level, or with no level, the out of
     memory fails the round."""
-    import threading
-    from concurrent.futures import ThreadPoolExecutor
-
     gib = 1 << 30
     fails = {1: (None,), 3: (None, 2 * gib), 4: (None,), 5: (None,)}  # the budgets each batch runs out of
-
-    class Pool:
-        """Six workers on threads: each task held a moment, the most running at once counted by budget."""
-
-        def __init__(self):
-            self.threads, self.lock = ThreadPoolExecutor(6), threading.Lock()
-            self.asked, self.running, self.most = [], 0, {}
-
-        def submit(self, task, *args):
-            k, budget = args[3], args[-1]
-            self.asked.append((k, budget))
-
-            def run():
-                with self.lock:
-                    self.running += 1
-                    self.most[budget] = max(self.most.get(budget, 0), self.running)
-                threading.Event().wait(0.05)
-                with self.lock:
-                    self.running -= 1
-                if budget in fails.get(k, ()):
-                    raise torch.OutOfMemoryError("past its share")
-                return k
-
-            return self.threads.submit(run)
-
     speakers = object.__new__(Speakers)
-    speakers.pools, speakers.device = {"cuda": Pool()}, torch.device("cuda")
+    speakers.pools, speakers.device = {"cuda": _LevelPool(fails, torch.OutOfMemoryError)}, torch.device("cuda")
     speakers.cpu_batches, speakers.cpu_period = 0, 1
-    speakers.deferred = [(2, 2 * gib), (1, 4 * gib)]
+    speakers.deferred = {"cuda": [(2, 2 * gib), (1, 4 * gib)]}
     speakers.stage, speakers.readings = SimpleNamespace(record=lambda w: w), 0
     windows, places = list(range(6)), [[k] for k in range(6)]
     assert speakers.speak(torch.nn.Linear(1, 1), windows, places, 0, tmp_path, list(range(6)), {}) == list(range(6))
@@ -725,9 +738,90 @@ def test_a_batch_past_its_workers_share_is_spoken_again_after_the_others_at_fewe
     fails[3] = (None, 2 * gib, 4 * gib)                                 # past the last level
     with pytest.raises(torch.OutOfMemoryError, match=r"batches \[3\]: past the last level"):
         speakers.speak(torch.nn.Linear(1, 1), windows, places, 0, tmp_path, list(range(6)), {})
-    speakers.deferred = []
+    speakers.deferred = {"cuda": []}
     with pytest.raises(torch.OutOfMemoryError, match="past its share"):
         speakers.speak(torch.nn.Linear(1, 1), windows, places, 0, tmp_path, list(range(6)), {})
+
+
+def test_a_cpu_batch_past_its_host_share_is_spoken_again_at_the_cpus_levels_on_the_cpu(tmp_path):
+    """D193 (4): a CPU batch past its worker's host share (`HostMemoryError`) is spoken again after the others at the
+    CPU's levels, by the CPU's workers (a batch keeps its rule's device), at most a level's number at once; the GPU's
+    batches past their share at the GPU's levels; past the CPU's last level, its error fails the round."""
+    gib = 1 << 30
+    gpu_fails, cpu_fails = {3: (None,)}, {0: (None,), 5: (None, 3 * gib), 6: (None,)}
+    speakers = object.__new__(Speakers)
+    speakers.pools = {"cuda": _LevelPool(gpu_fails, torch.OutOfMemoryError),
+                      "cpu": _LevelPool(cpu_fails, post_train.HostMemoryError)}
+    speakers.device, speakers.cpu_batches, speakers.cpu_period = torch.device("cuda"), 2, 5    # the CPU: 0, 1, 5, 6
+    speakers.deferred = {"cuda": [(1, 4 * gib)], "cpu": [(2, 3 * gib), (1, 5 * gib)]}
+    speakers.stage, speakers.readings = SimpleNamespace(record=lambda w: w), 0
+    windows, places = list(range(7)), [[k] for k in range(7)]
+    assert speakers.speak(torch.nn.Linear(1, 1), windows, places, 0, tmp_path, list(range(7)), {}) == list(range(7))
+    gpu, cpu = speakers.pools["cuda"], speakers.pools["cpu"]
+    assert gpu.asked == [(2, None), (3, None), (4, None), (3, 4 * gib)]
+    assert cpu.asked == [(0, None), (1, None), (5, None), (6, None), (0, 3 * gib), (5, 3 * gib), (6, 3 * gib),
+                         (5, 5 * gib)]
+    assert cpu.most[3 * gib] == 2 and cpu.most[5 * gib] == 1
+    assert gpu.at[(3, 4 * gib)][1] < min(cpu.at[key][0] for key in cpu.asked[4:])     # the GPU's levels first
+    cpu_fails[5] = (None, 3 * gib, 5 * gib)
+    with pytest.raises(post_train.HostMemoryError, match=r"batches \[5\]: past the last level"):
+        speakers.speak(torch.nn.Linear(1, 1), windows, places, 0, tmp_path, list(range(7)), {})
+
+
+def test_a_host_cap_stops_the_block_where_it_is_and_a_worker_s_next_batch_starts_below_it(tmp_path, monkeypatch):
+    """D193 (4): under a host cap the sampler's signal stops a growing block with `HostMemoryError` where it is (raised
+    in the main thread by the worker's handler), soon after the cap; a block that starts past the cap stops at once.
+    Through a CPU worker's task (`_speak`): its batch past the share fails by name, and the worker's next batch starts
+    below its share: the heap's free pages are given back (`malloc_trim`) though a block taken after the batch's
+    blocks keeps the heap's top."""
+    import signal
+    import time
+
+    previous = signal.signal(signal.SIGUSR1, post_train._past_host_share)
+    try:
+        def grow(held, step_s=0.005):
+            """64 KiB blocks, written (resident), 1 MiB every ``step_s``, for at most 10 s."""
+            for _ in range(1000):
+                held.extend(np.full(64 << 10, 1, dtype=np.uint8) for _ in range(16))
+                time.sleep(step_s)
+
+        mib = 1 << 20
+        held = []
+        with pytest.raises(post_train.HostMemoryError, match="past its host share"):
+            with post_train._PeakSampler(post_train._own_memory()["swapped"], post_train._own_memory()["resident"]
+                                         + 64 * mib):
+                grow(held)
+        assert 32 <= len(held) // 16 < 300                       # stopped soon after the cap (MiB taken)
+        held.clear()
+        with pytest.raises(post_train.HostMemoryError, match="before its batch"):
+            with post_train._PeakSampler(post_train._own_memory()["swapped"], 0):
+                pass
+        with post_train._PeakSampler(post_train._own_memory()["swapped"], post_train._own_memory()["resident"]
+                                     + 512 * mib):
+            time.sleep(2 * post_train.PEAK_SAMPLE_S)                    # below the cap: no stop
+
+        pins = []
+
+        def spoken_batch(stage, model, context, windows, places, settings, round_, directory, k, launch):
+            if k == 0:
+                try:
+                    grow([])
+                finally:
+                    pins.append(np.full(64 << 10, 1, dtype=np.uint8))      # above the batch's blocks on the heap
+            return k
+
+        context = SimpleNamespace(device=torch.device("cpu"))
+        stage = SimpleNamespace(record=lambda w: w)
+        monkeypatch.setattr(post_train, "_worker_context", lambda: (context, None, stage))
+        monkeypatch.setattr(post_train, "spoken_batch", spoken_batch)
+        monkeypatch.setattr(post_train, "HOST_CAP_SAMPLE_S", post_train.PEAK_SAMPLE_S)
+        monkeypatch.setattr(post_train, "_SPEAKER", {"round": 0, "windows": [0], "model": None, "gpu_budget": None,
+                                                     "host_budget": post_train._own_memory()["resident"] + 64 * mib})
+        with pytest.raises(post_train.HostMemoryError, match="past its host share"):
+            post_train._speak(0, "", str(tmp_path), 0, [0], [0], {})
+        assert post_train._speak(0, "", str(tmp_path), 1, [0], [0], {}) == 1
+    finally:
+        signal.signal(signal.SIGUSR1, previous)
 
 
 def test_a_resume_reads_back_each_batch_spoken_on_its_rules_device_and_refuses_another(tmp_path):

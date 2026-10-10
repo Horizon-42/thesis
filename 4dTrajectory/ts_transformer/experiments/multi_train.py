@@ -523,15 +523,22 @@ def profiled_fit(profile: Path, settings: MultiSettings, inputs: dict[str, Any],
     share is spoken again after the others at fewer at once (D191, the user, 2026-10-10: the batches past their share
     go last, and more workers; `Speakers`' ``deferred``): at half the workers, a quarter, … one, each batch's budget
     the GPU less this process's hold and what each idle GPU worker holds, shared by the batches at once. So the GPU
-    refuses only workers that could not hold what they hold between batches; D179's margin is the host's and the
-    pass's (a host or a pass short of memory has no second try)."""
+    refuses only workers that could not hold what they hold between batches; D179's margin is the pass's and the GPU
+    workers' host part (a pass short of memory has no second try). The CPU workers in the same way (D193 (4)): each
+    has the host's part left by the GPU workers' (at their peak with its margin) in equal shares (`Speakers`'
+    ``host_budget``), a CPU batch past its share goes to the CPU's levels (``cpu_deferred``), and the fit counts a CPU
+    worker at what it holds between batches, refused only where the last level cannot hold the CPU profile's host peak
+    with its margin."""
     measure = _profiled(profile, settings, inputs, device, speak_device)
     cpu = _profiled(cpu_profile, settings, inputs, device, torch.device("cpu")) if cpu_workers else None
     measured, passed = (with_margin(measure[k], measure["margin"]) for k in ("measured", "pass"))
     gpu = measure["measured"]["gpu"]
     if gpu is not None:                     # a batch past its share goes to the levels (D191): a worker's floor its hold
         measured = {**measured, "gpu": {**gpu, "peak": gpu["now"]}}
-    cpu_measured = with_margin(cpu["measured"], cpu["margin"]) if cpu is not None else None
+    cpu_measured = None
+    if cpu is not None:                     # a CPU batch past its share goes to the levels (D193 (4)): its floor its hold
+        host = cpu["measured"]["host"]
+        cpu_measured = {**cpu["measured"], "host": {**host, "peak": host["now"]}}
     available = available_memory(device)
     short = workers_fit(workers, measured, passed, available, held_now=False, cpu_workers=cpu_workers,
                         cpu_measured=cpu_measured)
@@ -540,22 +547,38 @@ def profiled_fit(profile: Path, settings: MultiSettings, inputs: dict[str, Any],
                          + " — start fewer (--speak-workers, --cpu-workers)")
     budget, deferred = None, []
     if speak_device.type == "cuda":
-        shared = available["gpu"] - passed["now"]                       # the workers' part of the GPU while they speak
-        budget = shared // workers
-        hold = gpu["now"] + measure["measured"]["held"]["reader_model"]           # an idle worker's
-        at_once = workers // 2
-        while at_once >= 1:
-            deferred.append([at_once, (shared - (workers - at_once) * hold) // at_once])
-            at_once = at_once // 2 if at_once > 1 else 0
-        alone = deferred[-1][1] if deferred else budget
-        peak = int(gpu["peak"] * measure["margin"]) + measure["measured"]["held"]["reader_model"]
-        if alone < peak:
-            raise SystemExit(f"the speaking workers do not fit (O15, from the profile): a batch at the profile's GPU "
-                             f"peak ({peak / 2**30:.2f} GiB with its margin) has {alone / 2**30:.2f} GiB at the last "
-                             f"level — start fewer (--speak-workers)")
+        reader = measure["measured"]["held"]["reader_model"]
+        budget, deferred = _levels(available["gpu"] - passed["now"], workers, gpu["now"] + reader,
+                                   int(gpu["peak"] * measure["margin"]) + reader, "GPU", "--speak-workers")
+    host_budget, cpu_deferred = None, []
+    if cpu is not None:
+        held = cpu["measured"]["held"]
+        besides = held["reader_model"] + held["series"]                         # a CPU worker's, beside its batch
+        gpu_host = workers * (measured["host"]["peak"] + measure["measured"]["held"]["series"])
+        host_budget, cpu_deferred = _levels(available["host"] - gpu_host, cpu_workers, host["now"] + besides,
+                                            int(host["peak"] * cpu["margin"]) + besides, "host", "--cpu-workers")
     return {"profile": str(profile), "speak_workers": workers, "speak_device": str(speak_device),
             "cpu_profile": None if cpu_profile is None else str(cpu_profile), "cpu_workers": cpu_workers,
-            "margin": measure["margin"], "available": available, "gpu_budget": budget, "deferred": deferred}
+            "margin": measure["margin"], "available": available, "gpu_budget": budget, "deferred": deferred,
+            "host_budget": host_budget, "cpu_deferred": cpu_deferred}
+
+
+def _levels(shared: int, workers: int, hold: int, peak: int, memory: str, option: str) -> tuple[int, list[list[int]]]:
+    """``workers`` workers' share of ``shared`` bytes, and the levels a batch past its share is spoken again at (D191):
+    half the workers at once, a quarter, … one, each batch's budget ``shared`` less what each idle worker holds
+    (``hold``), in equal parts. Refused by name where the last level cannot hold a batch at ``peak`` (the profile's
+    peak with its margin and what a worker holds beside its batch; ``memory`` names it, ``option`` the workers)."""
+    levels = []
+    at_once = workers // 2
+    while at_once >= 1:
+        levels.append([at_once, (shared - (workers - at_once) * hold) // at_once])
+        at_once = at_once // 2 if at_once > 1 else 0
+    alone = levels[-1][1] if levels else shared // workers
+    if alone < peak:
+        raise SystemExit(f"the speaking workers do not fit (O15, from the profile): a batch at the profile's {memory} "
+                         f"peak ({peak / 2**30:.2f} GiB with its margin) has {alone / 2**30:.2f} GiB at the last "
+                         f"level — start fewer ({option})")
+    return shared // workers, levels
 
 
 def require_finished(campaign: Path) -> None:
@@ -740,7 +763,8 @@ def main(argv: list[str] | None = None) -> int:
                            args.cpu_workers)
         print(json.dumps({"profiled_fit": fit}), flush=True)
         speakers = Speakers(context, settings, args.speak_workers, speak_device, stage=stage,
-                            gpu_budget=fit["gpu_budget"], cpu_workers=args.cpu_workers, deferred=fit["deferred"])
+                            gpu_budget=fit["gpu_budget"], cpu_workers=args.cpu_workers, deferred=fit["deferred"],
+                            host_budget=fit["host_budget"], cpu_deferred=fit["cpu_deferred"])
     context = replace(context, device=device, base=context.base.to(device).eval())
     try:
         open_campaign(out, inputs, git, opened["checks"], schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER,
