@@ -8,10 +8,10 @@ census's sample: 18; D172: 46–48; D179, D180: 49–53; D181, O20: 54–62; D18
 71–77; D188: 78–79; D190: 80–84; D190, D191: 85, 87, 88; D191–D193 and the log: 86, 90–98), item 23 (it asked for 6 and
 7), item 20 (built: item 40) and the names of MC0–MC4 (written into the interfaces).
 
-State: 2026-10-10 (night): D193 (3) and (4) built on `dev-multi-s6` (9d6886ec, 22fd1031), not merged; D193 (1)'s
-check done; the traffic-only arm done; D192 built on the user's word (172bc07d) and profiled; all merged (19d90d45);
-nothing runs (stage D's log §22). 89
-is a measure kept from D190; 99–103 are new.
+State: 2026-10-11 (01:15): arm A (`multi_train_majority_20261010`, D192, 2 rounds) runs; it stopped once in round 0
+on a defect of S6 with join ticks, fixed (14e53df6, merged) and resumed with its done batches kept (item 104). D194
+(2), (3) built on `dev-speed` (ce886c4a, 9bdbe6c5; reviewed, the second round clean), not merged; they go into arm B.
+89 is a measure kept from D190; 99–103 are of the night before; 104–107 are new.
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -201,3 +201,39 @@ The code says the details; read the two commits.
     a test. (c) "The searches that found a majority point" are the length of `majority_depths_s` (each its span and
     depth), the decision point counted when it is the majority point. (d) `branching` is a profiled setting, so a
     campaign with `majority` needs its own profile.
+
+## A fix and the speed-ups of 2026-10-11 (D194 proposed)
+
+104. **A speaker keeps a row of records for each tick after its first said row** (fix, 14e53df6, merged; prior §7
+    item 3, D193 (3)). Arm A stopped in round 0: a joint loop of the backward search was rebuilt with the said flights
+    of a window left (S6), its other flight still in its observed rows; at the next tick no aircraft was said,
+    `Speaker.say` kept no row of records, and the next `SpeakingLoop.together` refused the loop (its rows said ≠ its
+    ticks). Now the records (`forbidden` … `drawn_probability`, `said_rows`) have a row for every row `say` says from the
+    first in which an aircraft is said, a row with no aircraft said included; the rows before it stay unrecorded, as
+    before. A flight's own records (`permitted`, the sentences) read its own said rows only: unchanged. The check on
+    fixed inputs (R68 on arm A's campaign, the code before and after) gave every digest equal, so A's 174 done
+    batches were kept (D185). Please write this into prior §7 item 3's records ("every row in which some aircraft is
+    said" → "every row from the first in which some aircraft is said").
+105. **D194 (2): a round's batches longest span first** (proposal; `dev-speed` ce886c4a, the user's choice of
+    2026-10-11: speed-ups that change no group). `speak_round` speaks the batches not done in the order of their span,
+    longest first, those of one span by index (stage C's windows have span 0: by index, as before). Why: the batches
+    were sent by index, which is by span ascending, so the 1200 s batches came last and the round's last ~10 min ran on
+    a few workers (MC6 round 4: 7 batches in its last 10 min, 33–47 in each 10 min before). The record still sums the
+    batches in batch order, a batch's device is still its rule's (by index, D191), and the pass reads the groups by
+    batch index, so nothing learned changes. The batches deferred to a level (D191) are still spoken last, by index.
+106. **D194 (3): a majority point out of reach ends its continuations early** (proposal; ce886c4a, 9bdbe6c5). In a
+    search for the majority point (D192), a point tried behind the decision point leaves the joint loop as soon as
+    fewer of its continuations are left than the majority (`multi.backward.out_of_reach`: K − failed < majority; 5 of
+    8: once 4 have failed). A failure is counted only where it stays to the judged tick (`_failed`): v answered for a
+    loss; for a loss event, the event's partner answered for one with v; for an end, v ended with the event's
+    outcome. A go-around said is read at the judged tick only (it would need v's sentence read at every step), so a
+    go-around event stops later, never wrongly. The search's answers (the points chosen, the groups, their kinds and
+    depths, the counts of points and continuations) are those of the search without the stop; only the steps, the
+    rows and the seconds of the search fall. The decision point and the fine point are never stopped early. Tested
+    (`test_multi_backward.py`: the rule; `_failed` against `_trials` on one state for each kind of event; on the
+    synthetic window the same answers with and without the stop). `continuations_to_event` keeps counting each
+    continuation of a point tried, also one that stopped before the event + 60 s.
+107. **D194 (4): arm B with 8 CPU workers** (a launch setting; no code). The profiles of D192 (`profile_d192_gpu`,
+    `profile_d192_cpu`) fit 3 GPU + 8 CPU workers; A runs with 6. A batch's device is its rule's (`--cpu-batches 7
+    --cpu-period 10`, by index), so the number of workers changes no group. Expected: about 10 % faster speaking (a
+    CPU worker slowed from 0.61 to 0.53 batches a minute from 4 to 6 workers; 8 of the 20 cores are performance cores).
