@@ -1862,7 +1862,7 @@ SETTINGS_ADDED = ("clip_norm", "epochs", "segment_only", "branch_every_s", "valu
 RESUME_MAY_CHANGE = ("rounds", "cpu_batches", "cpu_period")
 
 
-def _but_resumable(inputs: Mapping[str, Any]) -> dict[str, Any]:
+def but_resumable(inputs: Mapping[str, Any]) -> dict[str, Any]:
     """The inputs with the settings a resume may change left out (`RESUME_MAY_CHANGE`)."""
     return {**inputs, "settings": {k: v for k, v in inputs["settings"].items() if k not in RESUME_MAY_CHANGE}}
 
@@ -1888,7 +1888,7 @@ def open_campaign(out: Path, inputs: dict[str, Any], git: dict[str, Any], checks
             raise SystemExit(f"{out}: a {record['schema']} campaign, not {schema}")
         recorded, asked = inputs_here(record["inputs"]), inputs_here(inputs)
         recorded = {**recorded, "settings": asdict(settings_type(**recorded["settings"]))}
-        if _but_resumable(recorded) != _but_resumable(asked):
+        if but_resumable(recorded) != but_resumable(asked):
             raise SystemExit(f"{out}: a campaign of other inputs or settings; a resume takes the same, its rounds or more")
         before, after = recorded["settings"]["rounds"], asked["settings"]["rounds"]
         if after < before:

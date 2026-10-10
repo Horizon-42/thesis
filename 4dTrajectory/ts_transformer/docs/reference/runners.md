@@ -1810,3 +1810,27 @@ about 5 + 10 min. Tests: `tests/test_window_behaviour.py`.
 
     python run_ts.py window_behaviour --campaign 4dTrajectory/outputs/POOLED/multi/multi_train_20261009 \
         --out <a new directory> [--model-round N] [--windows W] [--against <another behaviour.json>]
+
+### R69 · `run_ts.py multi_compare` — a stage D campaign's start and rounds side by side: landed, reward, the pull to the base
+
+2026-10-10 (the user: the landed rate, the reward and the pull to the base compared, each number named by its file and
+field). `--read-start DIR` reads the campaign's start model (stage D's `Stage.start`) on its select windows by the
+campaign's own selection readout (the same windows and random numbers as every round's), here or by `--speak-workers`
+workers on `--device` (the rule of the CPU's batches left off, as every round's readout), into a new directory
+(`start_read.json`, `ts-multi-start-read-v1`, with the campaign's inputs); a clean tree unless `--smoke`, the checks
+first. The start read comes after the rounds, by other code: the same run first reads the last done round's model on
+the same windows and stops unless that is the round's own readout (the behaviour check on fixed inputs, as
+`post_ceiling`'s draw 0; it doubles the time). `--out FILE` compares each done round's `round.json` and, with `--start
+DIR`, that start read (refused for other inputs or settings, the rule of the CPU's batches apart, or read on another
+kind of device than a round's `speak_device`): by airport and over all, landed (`outcomes.landed` of
+`aircraft`), the reward (`reward_sum` over `aircraft`; D30: 1 a landing on a runway of the present direction, 0.9ⁿ
+after n go-arounds, else 0 — the campaign's log prints it as `reward_mean`), the losses of separation, and each
+round's pass: `kl` (the pull to the base before its weight 0.04), `data`, `surrogate`, `updates` (a pass of no update
+has no means). Each airport's cells of span × kind are summed and checked against its `all` cell, and every row must
+read the same aircraft, refused by name otherwise. Writes `ts-multi-compare-v1` and prints a table. The same read of
+MC7's start alone (a one-off before this runner) took 22 min on 3 GPU workers beside the test suite. Tests: `tests/test_multi_compare.py`.
+
+    python run_ts.py multi_compare --campaign 4dTrajectory/outputs/POOLED/multi/<campaign> --read-start <a new dir> \
+        [--speak-workers N] [--device cuda]
+    python run_ts.py multi_compare --campaign 4dTrajectory/outputs/POOLED/multi/<campaign> [--start <its dir>] \
+        --out <a new file>.json
