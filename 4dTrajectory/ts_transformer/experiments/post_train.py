@@ -691,7 +691,7 @@ def speak_round(model: Prior, context: Context, windows: Sequence[Window], setti
     # the batches of the longest span first (multi-aircraft control D194 (2)): the last batches of a round are then the
     # short ones and the workers end near together; the pass reads the groups by batch index, not by this order
     todo = sorted((k for k in range(len(places)) if k not in done), key=lambda k: -windows[places[k][0]].span_s)
-    spoken =(speakers.speak(model, windows, places, round_, directory, todo, launch) if speakers is not None else
+    spoken = (speakers.speak(model, windows, places, round_, directory, todo, launch) if speakers is not None else
               [spoken_batch(stage, model, context, windows, places[k], settings, round_, directory, k, launch)
                for k in todo])
     parts = [done[k] if k in done else spoken[todo.index(k)] for k in range(len(places))]

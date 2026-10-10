@@ -343,7 +343,9 @@ def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loo
       window, v on numbers of its own, the other aircraft on their first-sentence numbers from the point. A step says
       and flies one row of every window in it, each window at its own tick (`WindowLoop.together`).
     - **When a continuation stops.** A point's continuations are flown to the event + 60 s (or their end, if earlier),
-      then judged (`_trials`) and the search sent their trials; a point not chosen leaves the loop there.
+      then judged (`_trials`) and the search sent their trials; a point not chosen leaves the loop there. A point
+      behind the decision point in a search for the majority point is judged as soon as its majority is out of reach
+      (D194 (3), `_failed`): the search's answer is the same.
     - **A point chosen** goes on in the same loop to its window's end, beside the points then tried, and its group is
       made when its windows end (D142: its W of D141, v's rows from the point).
     - **Joining.** Before a step, the parts that ended leave and the searches' next points join: a point from its held

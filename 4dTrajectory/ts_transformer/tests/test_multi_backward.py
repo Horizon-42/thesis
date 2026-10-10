@@ -256,6 +256,42 @@ def test_a_majority_point_out_of_reach_ends_its_continuations_early_and_finds_th
     assert early.search_steps <= full.search_steps and early.search_rows < full.search_rows
 
 
+@pytest.mark.parametrize("kind", [LOSS, END, GO_AROUND])
+def test_a_continuation_counted_failed_early_is_one_the_judgement_fails(kind):
+    """D194 (3): `_failed` counts a continuation only where `_trials` on the same state judges it not to avoid the event
+    (so the search's answer cannot change), and counts each failure that stays to the judged tick: a loss v answered
+    for, the event's partner answering for a loss with v (a loss event), v ended with the event's outcome (an end). A
+    go-around said is left to the judged tick."""
+    from types import SimpleNamespace
+
+    from ts_transformer.experiments.post_branches import _Part, _Search, _failed, _trials
+    from ts_transformer.instructions.words import COLUMNS, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED
+
+    cases = ["v answered", "partner answered", "ended so", "ended otherwise", "alive", "go-around"]
+    loss = [object() if c == "v answered" else None for c in cases for _ in (0, 1)]
+    other = ["P" if c == "v answered" else None for c in cases for _ in (0, 1)]
+    for w, c in enumerate(cases):
+        if c == "partner answered":
+            loss[2 * w + 1], other[2 * w + 1] = object(), f"V{w}"
+    alive = np.array([c not in ("ended so", "ended otherwise") or m == 1 for c in cases for m in (0, 1)])
+    said = {2 * w: np.full((3, len(COLUMNS)), UNCHANGED) for w in range(len(cases))}
+    said[2 * cases.index("go-around")][1, RUNWAY] = RUNWAY_GO_AROUND
+    loop = SimpleNamespace(
+        members=[[2 * w, 2 * w + 1] for w in range(len(cases))], loss=loss, other=other,
+        records=[SimpleNamespace(key=f"V{w}" if m == 0 else "P") for w in range(len(cases)) for m in (0, 1)],
+        own_row=lambda b, point: 0,
+        speaking=SimpleNamespace(alive=alive, ended=np.zeros(len(alive), bool), start=0, said=lambda b: said[b],
+                                 outcome=lambda b: SimpleNamespace(outcome="X" if cases[b // 2] == "ended so" else "Y")))
+    happened = Event(40, kind, partner="P" if kind == LOSS else None, outcome="X" if kind == END else None)
+    part = _Part(_Search(0, 0, 0, happened, 55, iter(())), 8, len(cases), [])
+    failed = {c: _failed(loop, [w], part) for w, c in enumerate(cases)}
+    judged = {c: not _trials(loop, [w], 0, happened, 8)[0].avoids for w, c in enumerate(cases)}
+    assert all(failed[c] <= judged[c] for c in cases)
+    assert failed == {"v answered": 1, "partner answered": int(kind == LOSS), "ended so": int(kind == END),
+                      "ended otherwise": 0, "alive": 0, "go-around": 0}
+    assert _failed(loop, range(len(cases)), part) == sum(failed.values())
+
+
 def test_a_point_is_out_of_reach_once_too_few_continuations_are_left_to_make_the_majority():
     """D194 (3): 5 of 8 make the majority, so 4 failed put it out of reach and 3 do not."""
     assert backward.out_of_reach(4, 8, 5) and not backward.out_of_reach(3, 8, 5)
