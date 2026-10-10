@@ -8,9 +8,9 @@ census's sample: 18; D172: 46–48; D179, D180: 49–53; D181, O20: 54–62; D18
 71–77; D188: 78–79; D190: 80–84; D190, D191: 85, 87, 88), item 23 (it asked for 6 and 7), item 20 (built: item 40) and
 the names of MC0–MC4 (written into the interfaces).
 
-State: 2026-10-10 (night): items 85, 87, 88 decided (D190, D191) and deleted; D191 built on `dev-multi-control`, and at
-the user's word of that night the batches past their worker's share spoken last at fewer at once (item 91); the next
-campaign launched on the GPU alone (item 90). 86 and 90 wait for the user; 89, 91–94 come from D191.
+State: 2026-10-10 (evening, after the handover): the user decided R1 of the plan (item 95) and ordered the speed-ups S1
+and S2, built on `dev-multi-speed` (items 96, 97); the traffic-only arm (the plan's R3) runs. 86 and 90 wait for the
+user; 89, 91–94 come from D191; 95–98 are new.
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -189,3 +189,22 @@ campaign launched on the GPU alone (item 90). 86 and 90 wait for the user; 89, 9
     stage C measure (`campaign.json` `measures`) holds `cpu_workers` and `cpu_measured`, and a measure taken before
     D191 holds no CPU worker's: a launch with CPU workers measures again (as D167's record without a measure);
     `profiled_fit`'s line names `cpu_profile`, `cpu_workers` and the levels (`deferred`).
+
+## The plan of 2026-10-10 evening and the speed-ups S1, S2 (`dev-multi-speed`)
+
+Please review the plan and write what it decides into `multi_control.md`. The code says the details; read the commits.
+
+95. **The plan**: `readouts/2026-10-10_stage_d_next_plan.zh.md` (uncommitted until this note's commit). Its status table
+    lists each item and who decided it. The user's decision: R1, point B replaced by the point that at least 5 of 8
+    continuations avoid (not built; for D192). The user's other words: R6 (value function) not done; R3 (traffic-only
+    arm) launched. The rest are proposals.
+96. **S1, built** (2961b99a): the process option `--executor-device cpu` (`multi_train`, `multi_speed`) flies the
+    executor on the CPU while the speaker stays on the GPU; default `speak`, bit for bit the code before. Not a campaign
+    setting. Not yet done: the D181 (57) bound on real windows and the GPU timing (the GPU runs the arm).
+97. **S2, built** (88a3990e): the rows not flown read their tokens in one call per window; bit for bit
+    (`window_behaviour` against 2961b99a on stage D's and stage C's windows, `prior_behaviour`). Batch 86 on the CPU:
+    the window loop 20.1 → 17.6 s, the batch 84.3 → 81.5 s. One part was tried and dropped: the speaker's runway mask
+    in one call for all runway words is slower above about 64 rows (the plan, S2).
+98. **S6, a proposal** (changes D188's joint loop): rows no longer flown stay in the joint loop and are still said and
+    flown, about 46 of 135 rows a step on batch 86; nothing reads their words or states. Dropping them at a rebuild
+    would save about a third of the speaker's, the executor's and the tokens' work. For the designer and the user.
