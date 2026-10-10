@@ -8,7 +8,7 @@ masks the pass's in distribution only: another device's generator, or with ``--e
 campaign of several passes a round, D169, the first pass's order), every ``--every``-th of them, at that model
 (no step taken: every ratio is 1, so no word is clipped). Of each update, by the optimizer's parameter groups
 (`parameter_groups`: the prior's own, the traffic modules') and over all: the gradient of the surrogate (the reward's
-advantages), of the pull to the base (times `post.loss.KL_WEIGHT`) and of the data term (times `post.loss.DATA_WEIGHT`),
+advantages), of the pull to the base (times `post.loss.KL_WEIGHT`) and of the data term (times the campaign's weight),
 `post.loss.update_gradients`: each part's norm and its share of the update's direction, ⟨g_part, g⟩ / |g|² with g the
 sum of the parts (the shares add up to 1), and the cosine of each pair. Under AdamW a parameter's step is about its
 learning rate whatever its gradient's size: the shares say which part points the update, the learning rate how far it
@@ -39,7 +39,7 @@ from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
 from ts_transformer.experiments import post_train, window_behaviour
 from ts_transformer.experiments.post_window_loop import checked_edges
 from ts_transformer.io_utils import utc_now, write_json_atomic
-from ts_transformer.post.loss import PassStart, update_gradients
+from ts_transformer.post.loss import DATA_WEIGHT, PassStart, update_gradients
 from ts_transformer.post.traffic_attention import parameter_groups
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
@@ -207,9 +207,10 @@ def main(argv: list[str] | None = None) -> int:
         groups[group["name"]] = range(at, at + len(group["params"]))
         at += len(group["params"])
     start = PassStart(model)
-    # MIRROR of `post_train.run_campaign` and the stages' `train` (`STAGE_C.train`; stage D's default `train_pass`):
+    # MIRROR of `post_train.run_campaign` and the stages' `train` (`STAGE_C.train`; stage D's `train_pass` with its data weight):
     # the pass's numbers, its dropout's seed and the rows a group counts
     segment_rows = (post_train.segment_rows_of(settings, context.interval_s) if stage is post_train.STAGE_C else None)
+    data_weight = DATA_WEIGHT if stage is post_train.STAGE_C else settings.data_weight          # the stage's pass
     torch.manual_seed(post_train.pass_seed(settings.seed, args.round))             # the data term's dropout
     pairs = post_train.update_pairs(directory, context.data, settings, np.random.default_rng([settings.seed,
                                                                                                args.round, 1]),
@@ -219,7 +220,7 @@ def main(argv: list[str] | None = None) -> int:
     for u, (pieces, data) in enumerate(pairs):
         if u % args.every:
             continue
-        parts = update_gradients(model, start, context.base, pieces, data, parameters)
+        parts = update_gradients(model, start, context.base, pieces, data, parameters, data_weight)
         updates.append({"update": u, "groups": len(pieces), "parts": measured(parts, groups, parameters)})
         flat = {part: _flat(parts[part], parameters) for part in PARTS}
         consistency.add({"surrogate": flat["surrogate"], "data": flat["data"], "whole": sum(flat.values())})
