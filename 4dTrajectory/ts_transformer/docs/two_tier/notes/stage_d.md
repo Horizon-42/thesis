@@ -1,44 +1,40 @@
 # 阶段 D：当前命令
 
 只放最新一条命令，新命令整份覆盖，不是日志（过程记在 `readouts/2026-10-06_stage_d_implementation_log.md`）。
-2026-10-10，Claude 写，用户转发。上一条（D190、profile、完整套件）你已做完（日志 §20），这条整份替换它。
+2026-10-10 晚，Claude 写，用户转发。上一条（D191、CPU worker 的 profile、混合 worker）你已做完（日志 §21），这条整份替换它。
 
 ```
-你 requests 的 85、87、88 处理完了（写进 multi_control D190 和 prior §7）：
-- 85、88 按你建的接受；88：句子结束之后的行在界外，不算。
-- 87：两种方式都保留是用户的话，D190 已改写；prior §7 item 1、3 的名字补上了（Past.taken 换成 Front、Past.together、
-  COPIED、MERGED、FRONT_ATTENTIONS；Speaker(…, attention=)）。runners.md 里 post_train（R65）和 multi_train 的
-  --front-attention 你自己补上。
-- 86（前缀分两块存）和 90（下一个 campaign）等用户定，先不做。
+你 requests 的 86、90–98 处理完了（multi_control D179、D191 改写，新 D192、D193；prior §7 item 7、
+post_training §9 item 8 和接口表第 4 行补了名字）：
+- 91、94：写进 D191（重批放最后；续跑可以改 CPU 批的规则；选择读数只在说话设备的 worker 上读；记录里的
+  cpu_workers、cpu_measured、deferred）。D179 改成：1.3 的余量只管主机和训练那一遍，GPU worker 按批与批之间
+  占的显存算。92、93 是测量，留在日志里。90 已经启动。这几条从 requests 里删掉。
+- 95（R1）：写成 D192，新取值 branching = majority；grid、backward 都不动、逐位相同。细节我定了：往回的上限不放宽
+  （8 个点里没有 5 条避开的点，就只有决策点那几组）；不加"没说复飞"的条件；16 s 的点保留；决策点自己就有 5 条
+  避开时只成一组；批记录里每组加上类别（决策点、16 s、多数点）和找到多数点的搜索数。用户说"先不实现"：不建。
+  计划清单 R1 那行写上 D192。
+- 96、97（S1、S2）：写进 D193 (1)(2)，按你建的接受。S1 是进程选项，不是活动设置；正式用之前要在真实窗口上
+  按 D181 (57) 的界核对。
+- 98（S6）：接受，D193 (3)。
+- S4：接受，D193 (4)。
+- 86（S5）：不做（D193 末尾写了原因），从 requests 里删掉。
+- R2、R3、R4、R7、S3 是实验，用户定，不改设计。R5 只读盘上的数据，你自己排，在第 5 轮的组被删之前读完。
 
-新的：multi_control D191（O20 (61)，用户 2026-10-10）——说话 worker 同时用 GPU 和 CPU。
+名字：设计里 MC7 是阶段 D 的 Training view（前端）的里程碑。multi_train_20261010 是 MC6 第二次启动
+（multi_train_20261009 是第一次）。日志、计划清单、交接、intents.json 里一律叫 MC6，计划清单里的"MC7"改掉。
 
-一、先量（一次）
-1. multi_profile --speak-device cpu，设置同 §18（MC6 的设置、--branching backward、front_attention merged），
-   从 run worktree 跑，主机和 GPU 上不跑别的：一个 CPU worker 的主机内存峰值和 batch 0、23、86 的时间。
-2. 算一下：3 个 GPU worker 旁边，主机放得下几个 CPU worker（主机这份要算上 GPU worker 的主机部分和主进程）。
-   少于 2 个就停下，把数报给用户，不往下建。
-
-二、代码（dev-multi-control，放得下 2 个以上才做）
-3. 混合 worker（D191）：
-   - stage C 和 stage D 的 runner：GPU worker 照旧，另加 CPU worker 的个数（参数名你定，按 L25 的规矩）。
-   - 每批在哪个设备上说，由固定规则按它在轮里的位置定（按批号，每一段里固定几批放 CPU）；这个规则是 campaign 设置，
-     记录下来、续跑时比较；默认全部放在 campaign 的说话设备上（等于现在的行为，没有这个字段的记录按默认读）。
-     规则里 CPU 的份额按两边每批的实测时间定，让两边同时说完。选择读数的批用同一规则。
-   - 每种设备的 worker 按顺序取自己设备的批，所以一轮的结果和 worker 谁快谁慢无关。
-   - D185 的续跑：每个已完成的批按规则核对它的设备类型（不再是"剩下的批和已完成的用同一类设备"）。
-   - 内存估算（D179、O15）分两本账：GPU 那本是 GPU worker 和训练那一遍；主机那本是所有 worker 的主机部分
-     （CPU worker 的整个峰值、GPU worker 的主机部分）和主进程。
-   - CPU worker 一个线程。
-   - 核对：默认规则（全在一种设备上）时，一轮和改之前逐位相同（window_behaviour 和 C27 的续跑测试）；
-     测试：规则按批号分配、同一规则两次分得一样、续跑时设备不符按名拒绝、两本账各自算。
-     CPU 和 GPU 说同一批最后几位可能不同（post-training §6.4），不做跨设备的比较。
-   - 审核走 agent（范围是 diff）。
-4. 用混合 worker 说一轮的几批（GPU 3 个 + 你算出的 CPU 个数），记下两边各说了几批、各用了多久，
-   估一轮说话的时间，写进日志。
-5. 合并前跑完整 ts 测试套件，提交号和通过数写进日志；报告 dev-multi-control 能否快进 dev-two-tier，由用户合并。
-   然后按新的数重提下一个 campaign（requests 90），由用户定。
-
-日志写一行；requests 整份重写，85、87、88 删掉（86、90 留着等用户）。
-你只能写各文档 §0.3 的状态行、multi_control §0.3、你的日志、requests 文件、code-health-followups 和 runners.md。
+顺序（代码在 dev-multi-speed 上接着做，先把 dev-two-tier 并进来，只有文档，小改动）：
+1. D193 (3)：联合循环重建时，已经不飞的行（降落了，或失去间隔后结束，窗口里还有别的飞机在飞）拿掉，不再说、
+   不再飞、不再算 token。核对按 D188 (1) 的方式：CPU 单线程，固定输入，stage D 和 stage C 的窗口；决策点、16 s
+   点、B 点、组、深度都和改之前相同，边界附近的抽样计数，状态在 STATE_BOUND_M 内；逐位相同就写明。新写法要
+   好读，旧写法删掉。审核按项目 CLAUDE.md 的 Code review。
+2. D193 (4)：CPU worker 设主机内存上限，超了在 worker 里报错、接住；CPU 批超份额就在其他批说完后、少几个 CPU
+   worker 同时的时候再说（还在 CPU 上）；profiled_fit 按 CPU worker 批与批之间占的主机内存算，最后一级放不下
+   profile 的主机峰值 × 1.3 才拒绝。测试照 GPU 那边的层级测试写。审核同上。
+3. GPU 空出来以后（只训交通模块的对照跑完）：D193 (1) 的核对（MC6 第 0 轮第 0、23、86 批的真实窗口，
+   --executor-device cpu 对 speak，D181 (57) 的界），第 86 批两种执行器设备各计时一次；D193 (3) 前后同一批的
+   时间顺手记下。都是报告，不是放行的门槛。
+4. 完整 ts 套件，然后报告 dev-multi-speed 能不能 ff 进 dev-two-tier。
+5. 文档：交接 §8 欠的照做（日志 §22、multi_control 和 post_training 的 §0.3 行、intents.json 里 MC6 第二次
+   启动、学习率对照、只训交通模块对照的条目）；requests 整份重写，只留还没定的。
 ```

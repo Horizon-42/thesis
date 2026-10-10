@@ -9,7 +9,7 @@ then `design/outline.md` §0 and §3.2, then each stage document's §0. Paths ar
 - **You own the design documents** in `design/`: `outline.md` (principles, shared decisions, the decision index
   §3.2), `vocabulary.md` (stage A), `prior.md` (stage B), `post_training.md` (stage C), `multi_control.md` (stage D),
   `frontend.md` (the Training view, fronter). You write decisions (D numbers), open items (O numbers), milestones and
-  public interfaces. **Next free numbers: D192, O22** (outline §3.2 keeps the index; update it with every new number).
+  public interfaces. **Next free numbers: D194, O22** (outline §3.2 keeps the index; update it with every new number).
 - **You give orders, you do not build.** Implementers build code; you never commit code. Orders go into
   `notes/stage_c.md`, `notes/stage_d.md`, `notes/fronter.md` (in Chinese, plain words, imperative, only the changes;
   never a role preamble). The user forwards them.
@@ -63,8 +63,8 @@ explicit in the note ("顺序：…").
   (bugs, waste, mirrors, wrong interfaces), with that stage's checks; names go into its report and you write them into
   the interface after. Formats/identities of artefacts, rebuilds and decided rules still go to the user first. The
   rule names stage D's implementer only.
-- **Fast forms** (outline D138): a faster computation is a mode beside the readable one, checked equal on fixed inputs
-  before use. Shared code changes keep stage C's behaviour bit for bit (D149). No code fingerprints anywhere (outline
+- **Fast forms** (outline D187): a faster computation replaces the code before it after one check on fixed inputs
+  before its commit (bit for bit, or D181 (57)'s bound where the batch changes), written to be read; no modes. Shared code changes keep stage C's behaviour bit for bit (D149). No code fingerprints anywhere (outline
   D21): behaviour checks only.
 - **Runs**: formal runs from a run worktree at the merged commit (D163), in a systemd unit, intent in
   `docs/experiments/intents.json` before publication; the user merges branches; no data overwritten or deleted without
