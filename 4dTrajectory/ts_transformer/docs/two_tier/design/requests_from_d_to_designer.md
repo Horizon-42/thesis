@@ -5,12 +5,12 @@ time. Each item is a reading the implementer made where the design says nothing,
 until the user decides. Paths are relative to `4dTrajectory/ts_transformer/`. The numbers are kept from the earlier
 notes; the items the user decided are deleted (D166: 6, 7, 19, 21, 22, 25, 29–35; O16: 36, written into D146; the
 census's sample: 18; D172: 46–48; D179, D180: 49–53; D181, O20: 54–62; D181–D186: 63–70; the interfaces and D182:
-71–77; D188: 78–79; D190: 80–84), item 23 (it asked for 6 and 7), item 20 (built: item 40) and the names of MC0–MC4
-(written into the interfaces).
+71–77; D188: 78–79; D190: 80–84; D190, D191: 85, 87, 88), item 23 (it asked for 6 and 7), item 20 (built: item 40) and
+the names of MC0–MC4 (written into the interfaces).
 
-State: 2026-10-10: items 80–84 decided (D190) and deleted; D190 built on `dev-multi-control` (stage D's log §20).
-Items 85–90 come from it (85, 87, 88 readings; 86, 89 measured; 90 the next campaign, proposed); the others are
-MC0–MC5's readings still open.
+State: 2026-10-10 (night): items 85, 87, 88 decided (D190, D191) and deleted; D191 built on `dev-multi-control`, and at
+the user's word of that night the batches past their worker's share spoken last at fewer at once (item 91); the next
+campaign launched on the GPU alone (item 90). 86 and 90 wait for the user; 89, 91–94 come from D191.
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -155,52 +155,37 @@ MC0–MC5's readings still open.
     the unit is an anchor (its windows of the spans are nested and share their aircraft); within a span, windows of
     other anchors may still share flights in a dense select set (stated).
 
-## D190 (stage D's log §20; 2026-10-10)
+## D190, D191 (stage D's log §20, §21; 2026-10-10)
 
-85. **D190 (1)'s room where no part has a schedule** (reading). The next rebuild of the joint loop is known by its
-    parts' schedule only: a point tried leaves at its judged tick, the decision point's copy at the fine point; a point
-    chosen goes on to its window's end, which is not known. Read: the room after a rebuild is the steps to the first
-    end by the schedule; where every part is a point chosen, D183's step (64 rows), as a copy's. A point chosen at its
-    judged tick that goes on with no part leaving or joining leaves the loop at the end of its room: the loop is then
-    rebuilt as it is (a rebuild frees the old cache a layer at a time; a growth would hold the cache twice). No number
-    changes (bit for bit on fixed inputs, log §20).
-86. **The front's length: one for a cache** (reading and proposal; measured). `Past.together` chooses one length S for
-    every front of a cache, as few rows as hold it smallest: a front for each kin the same that far, one for each
-    other line, and every line's own rows from S on in one block (one attention a layer). Measured before it was
-    built (MC6's backward batches 0 / 23 / 86 on the GPU at 519d6e7d; the joint loop's cache at its largest, in rows of
-    one line and every layer, 8 KiB each): held whole 54,656 / 143,992 / 125,552 (with D183's room); one length (built)
-    24,626 / 58,480 / 34,032; two blocks of own rows, the lines parted by where their fronts end, 20,930 / 44,158 /
-    23,616; the least possible (each line from where it parts) 17,528 / 37,389 / 21,984. With one length `merged` fits
-    3 workers and 4 fall short by 0.4 GiB (7.0 GiB against 6.6; a worker's measured peak 1.33 GiB, 4 need it at most
-    1.25). Proposal, the user chooses: (a) two blocks of own rows (two attentions a layer; about 0.11 GiB less at batch
-    23, not measured on a worker: perhaps 4 workers with `merged`); (b) as built, 3 workers.
-87. **Both ways kept; the names they add** (reading). notes/stage_d.md asked the old form deleted (D187); the user's word
-    of 2026-10-09 kept both new ways as a setting: the old form (each copy holding the shared rows) is deleted, and how
-    a line reads its front is a campaign setting `front_attention` of stage C (`post_train.Settings`, in
-    `SETTINGS_ADDED`) and of stage D (`MultiSettings`, in `PROFILED_SETTINGS`), `--front-attention`, `copied` the
-    default (the standing permission: a record without it reads as the code before, bit for bit). The architecture
-    test's prior interface gained `prior.model` `COPIED`, `MERGED`, `FRONT_ATTENTIONS`. Prior §7 item 1's Code column
-    still names `Past.taken(index, room, device)` (deleted; now `Past.together(parts, room, device, attention)` and
-    `Front`), item 3 not `Speaker(…, attention=)`; `docs/reference/runners.md` does not name `--front-attention` for
-    `post_train` (R65) or `multi_train`. Proposal: the designer writes them.
-88. **What the check of `merged` counted** (reading). D181 (57)'s bound on fixed inputs (the CPU, one thread; against
-    the code before): of 1,600 continuations (stage C's first batch 608, stage D's grid batches 760, its backward
-    batches 232) the words of one differ — backward batch 23, row 102 of 131, the speed word class 34 against 33
-    (neighbours), the states before it bit for bit, the reward the same: counted as a draw near a boundary; every other
-    continuation's states bit for bit. Beside them, 3 records of permitted words differ only in rows past their
-    sentence's end (an aircraft said on after it is done, `Speaker.say`: no sentence keeps those words, and
-    `masked_log_probability` reads the sentence's rows) and one continuation's traffic tokens differ from its row 18
-    (up to 0.077; its words and states the same: another aircraft of its window drew otherwise, read as a draw near a
-    boundary; the check records the varied aircraft's words only). Proposal: confirm that rows past a sentence's end
-    are outside the bound.
+86. **The front's length: one for a cache** (proposal; measured, stage D's log §20). One length S for every front of a
+    cache; two blocks of own rows would hold the joint loop's cache at its largest in 44,158 rows instead of 58,480 on
+    batch 23 (20,930 / 23,616 instead of 24,626 / 34,032 on batches 0 / 86). The user chooses; not built.
 89. **The two ways' time** (measured, the profile at §18's settings on 7893d787). Copied: batches 0 / 23 / 86 in 56.8 /
-    68.0 / 63.0 s (D189: 55.3 / 64.9 / 61.0; the copy of each line's rows a layer at a time each step); merged: 55.5 /
-    63.5 / 59.9 s. A round's speaking at MC6's batches (23 / 63 / 138 by span): copied about 14,300 worker-seconds,
-    merged 13,500 (D189: 13,800); on 3 workers about 1.3 and 1.25 h. On the CPU the copy costs more (the checks, five
-    processes at once, information only: backward batches copied 90 / 159 / 117 s, before 83 / 118 / 111, merged 76 /
-    94 / 82).
-90. **The next campaign** (proposal; the user decides). MC6's start (stage C's `post_seg60_20261007` round 5, seed 2035)
-    and settings, branch points found backward, 8 rounds, 3 GPU speaking workers; `front_attention` `merged` (13 %
-    less memory and the faster, within D181 (57)'s bound) or `copied` (bit for bit the code before). Its speaking about
-    1.25–1.3 h a round, 10–11 h for 8 rounds, the passes besides; a new profile is not needed (this one is at its
-    settings, each way).
+    68.0 / 63.0 s; merged: 55.5 / 63.5 / 59.9 s (D189: 55.3 / 64.9 / 61.0). The campaign of item 90 reads `merged`.
+90. **The next campaign: launched** (the user, 2026-10-10 at night: once the tests pass, run it; the GPU alone this
+    time; decide and report). MC6's start (stage C's `post_seg60_20261007` round 5, seed 2035) and settings, branch
+    points found backward, `front_attention` `merged`, 8 rounds, 5 GPU speaking workers sized by item 91,
+    `outputs/POOLED/multi/multi_train_20261010` from a run worktree at the commit of item 91 (stage D's log §21). Its
+    first round's time is the measure of its speed (no measure before it, the user's word).
+91. **The peaks last** (built at the user's word of 2026-10-10: "the peaks last, or more workers"). A GPU batch past
+    its worker's share (CUDA's out of memory under its cap) no longer fails the round: it is spoken again after the
+    others at fewer at once — half the workers, a quarter, … one —, each level's budget the GPU less the campaign
+    process's hold and what each idle worker holds, shared by its batches at once; past the last level the round
+    fails. The worker frees the batch's memory before it is free for another (the error raised again without the
+    batch's frames). So the GPU's fit counts a worker at what it holds between batches (D179's margin stays for the
+    host and the pass, which have no second try), and refuses only workers whose last level cannot hold a batch at the
+    profile's peak × the margin. Reading, for the designer to write into D179/D191: the margin of D179 no longer sizes
+    GPU workers; 5 workers on the GPU (the host's 3.24 GiB each with the margin of 1.3 sets the number).
+92. **The profile does not bound a round's batches** (measured). The same 56 batches of MC6's round 0 on 3 GPU workers
+    stopped: one batch reached 2.05 GiB allocated in a rebuild of the joint loop, past its worker's share of 2.21 GiB,
+    where the profile's three batches peaked at 1.33 GiB with the CUDA context (allocated 0.94). A batch's memory is set
+    by the searches flown together, not by its rows: no measure of a few batches bounds it, the levels of item 91 do
+    not need one.
+93. **Mixed workers, measured once** (D191 step 4, 5b4cd739). Of MC6's round 0, every 4th batch (56), 3 GPU and 3 CPU
+    workers, 6 of every 13 on the CPU: the GPU's 30 batches in 929 s, the CPU's 26 in 995 s — a batch and worker 93 and
+    115 s against 60 and 69 s alone (six processes at once slow each); about 66 min a round. Not used by item 90 (the
+    user: the GPU alone this time); the rule (`--cpu-batches`, `--cpu-period`) is a setting for a later campaign.
+94. **What the records hold more** (reading). `round.json` holds `cpu_workers` (information, as `speak_device`); a
+    stage C measure (`campaign.json` `measures`) holds `cpu_workers` and `cpu_measured`, and a measure taken before
+    D191 holds no CPU worker's: a launch with CPU workers measures again (as D167's record without a measure);
+    `profiled_fit`'s line names `cpu_profile`, `cpu_workers` and the levels (`deferred`).

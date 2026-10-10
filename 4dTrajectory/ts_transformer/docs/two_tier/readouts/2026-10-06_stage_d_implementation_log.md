@@ -689,3 +689,21 @@ held whole 54,656 / 143,992 / 125,552, one front length 24,626 / 58,480 / 34,032
 0.56 / 0.53, 1.19 / 0.94, 0.78 / 0.73 GiB (D189: 55.3 / 64.9 / 61.0 s; 0.99 / 0.78, 2.07 / 1.77, 1.80 / 1.53); a
 worker's GPU peak copied 1.53, merged 1.33 GiB (D189 2.21): 3 workers fit either way, 4 not (8.0 and 7.0 GiB against
 6.5 and 6.6) — requests items 86, 89; the full ts suite at 82dd7695: 2,103 passed, 1 skipped (at 7893d787 the two frontend-fixture tests failed: the export now writes `front_attention`; 82dd7695 wrote them again).
+
+## 21 D191 and the campaign of item 90 (notes/stage_d.md 一–二; the user's words of 2026-10-10 at night)
+
+A CPU worker (`outputs/POOLED/multi/profile_d191_cpu_20261010`, §18's settings, backward, merged, 540b7a43): batches
+0 / 23 / 86 in 60.4 / 80.2 / 69.1 s (the GPU's 55.5 / 63.5 / 59.9), its host peak 2.13 GiB; beside 3 GPU workers (3.24
+GiB of the host each with D179's margin) the host holds 3 CPU workers (2.92 GiB each) in 18.9–20.6 GiB. On
+`dev-multi-control`: 5b4cd739 D191 (the rule `cpu_batches` of every `cpu_period`, a second pool on the CPU, D185's
+check by batch, the two budgets, `--cpu-workers` / `--cpu-batches` / `--cpu-period` / `--cpu-profile`; the default bit
+for bit: window_behaviour on stage C's and D's windows the same behaviour; review: two S2s fixed, second round clean).
+Mixed, once (5b4cd739, every 4th batch of MC6's round 0, 3 GPU + 3 CPU, 6 of 13 on the CPU): the GPU's 30 batches in
+929 s, the CPU's 26 in 995 s (93 / 115 s a batch and worker, against 60 / 69 alone); the same 56 batches on 3 GPU workers
+alone stopped on a batch at 2.05 GiB allocated, past its share (the profile's peak 1.33 GiB) — requests items 92, 93.
+At the user's word (the peaks last, more workers; the GPU alone this time; no more measures): e2b69736 the levels
+(a batch past its share spoken again after the others at half the workers, … one; the GPU's fit at a worker's hold
+between batches; review: three S2s fixed, second round clean) — requests item 91; the full ts suite at e2b69736:
+2,113 passed, 1 skipped. The campaign of item 90 launched 2026-10-10 03:20 from `.claude/worktrees/run-mc7` at
+e2b69736 (systemd unit `mc7`): MC6's start and settings, backward, merged, 5 GPU speaking workers,
+`outputs/POOLED/multi/multi_train_20261010`.
