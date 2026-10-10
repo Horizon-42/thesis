@@ -112,6 +112,7 @@ def stage_c_campaign_scenario(s, tmp_path, monkeypatch) -> dict[str, str]:
             # fields more, `Sentence.until` and `Group.varied`, so its pickle is a few bytes longer), are left out
             record.pop("git"), record.pop("finished_utc"), record.pop("groups_bytes")
             record.pop("speak_device")              # the workers' device, recorded after it (information, `--speak-device`)
+            record.pop("cpu_workers")               # the CPU workers, recorded after it (information, D191)
             # the pass's records added after it (information: the gradients' norms, D168; each pass's means, D169)
             for key in ("grad_norm_mean", "grad_norm_max", "grad_clipped_share", "passes"):
                 record["pass"].pop(key, None)

@@ -583,7 +583,7 @@ def test_each_devices_workers_take_its_batches_in_order(tmp_path):
     speakers = object.__new__(Speakers)
     speakers.pools = {"cuda": Pool(), "cpu": Pool()}
     speakers.device, speakers.cpu_batches, speakers.cpu_period = torch.device("cuda"), 2, 5
-    speakers.stage, speakers.readings = SimpleNamespace(record=lambda w: w), 0
+    speakers.stage, speakers.readings, speakers.deferred = SimpleNamespace(record=lambda w: w), 0, []
     windows, places = list(range(7)), [[k] for k in range(7)]
     model = torch.nn.Linear(1, 1)
     assert speakers.speak(model, windows, places, 0, tmp_path, list(range(7)), {}) == list(range(7))
@@ -634,9 +634,10 @@ def test_the_runner_forks_cpu_workers_beside_one_worker_on_the_speak_device(tmp_
     monkeypatch.setattr(post_train, "git_state", lambda: {"head": "x", "dirty": False})
     monkeypatch.setattr(post_train, "require_conforming_closed_loop", lambda *a: (None, {"checks": {}}, None))
     monkeypatch.setattr(post_train, "checked_edges", lambda path: None)
+    base = SimpleNamespace(to=lambda device: base, eval=lambda: base)          # no CUDA touched in the test process
     monkeypatch.setattr(post_train, "open_context", lambda *a, **k: (opened.append(a[4].type),
-                                                                     SimpleNamespace(base=torch.nn.Linear(1, 1),
-                                                                                     device=a[4], interval_s=4.0))[1])
+                                                                     SimpleNamespace(base=base, device=a[4],
+                                                                                     interval_s=4.0))[1])
     monkeypatch.setattr(post_train, "replace", lambda c, **k: c)
     monkeypatch.setattr(post_train, "Speakers", Workers)
     monkeypatch.setattr(post_train, "campaign_model", lambda *a: (None, None))
@@ -656,6 +657,60 @@ def test_the_runner_forks_cpu_workers_beside_one_worker_on_the_speak_device(tmp_
     with pytest.raises(SystemExit):
         post_train.main(argv)                                       # the CPU's batches and no CPU workers
     assert "--cpu-batches above 0 needs --cpu-workers" in capsys.readouterr().err and opened == ["cpu"]
+
+
+def test_a_batch_past_its_workers_share_is_spoken_again_after_the_others_at_fewer_at_once(tmp_path):
+    """D191 (the user, 2026-10-10: the peaks last): a batch whose GPU worker runs out of its share is spoken again once
+    the others are spoken, at each level in turn (fewer at once, more memory), at most a level's number at once, each
+    level's batches in batch order; the results in batch order; past the last level, or with no level, the out of
+    memory fails the round."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    gib = 1 << 30
+    fails = {1: (None,), 3: (None, 2 * gib), 4: (None,), 5: (None,)}  # the budgets each batch runs out of
+
+    class Pool:
+        """Six workers on threads: each task held a moment, the most running at once counted by budget."""
+
+        def __init__(self):
+            self.threads, self.lock = ThreadPoolExecutor(6), threading.Lock()
+            self.asked, self.running, self.most = [], 0, {}
+
+        def submit(self, task, *args):
+            k, budget = args[3], args[-1]
+            self.asked.append((k, budget))
+
+            def run():
+                with self.lock:
+                    self.running += 1
+                    self.most[budget] = max(self.most.get(budget, 0), self.running)
+                threading.Event().wait(0.05)
+                with self.lock:
+                    self.running -= 1
+                if budget in fails.get(k, ()):
+                    raise torch.OutOfMemoryError("past its share")
+                return k
+
+            return self.threads.submit(run)
+
+    speakers = object.__new__(Speakers)
+    speakers.pools, speakers.device = {"cuda": Pool()}, torch.device("cuda")
+    speakers.cpu_batches, speakers.cpu_period = 0, 1
+    speakers.deferred = [(2, 2 * gib), (1, 4 * gib)]
+    speakers.stage, speakers.readings = SimpleNamespace(record=lambda w: w), 0
+    windows, places = list(range(6)), [[k] for k in range(6)]
+    assert speakers.speak(torch.nn.Linear(1, 1), windows, places, 0, tmp_path, list(range(6)), {}) == list(range(6))
+    pool = speakers.pools["cuda"]
+    assert pool.asked[:6] == [(k, None) for k in range(6)]
+    assert [k for k, budget in pool.asked if budget == 2 * gib] == [1, 3, 4, 5] and pool.most[2 * gib] == 2
+    assert [k for k, budget in pool.asked if budget == 4 * gib] == [3] and pool.most[4 * gib] == 1
+    fails[3] = (None, 2 * gib, 4 * gib)                                 # past the last level
+    with pytest.raises(torch.OutOfMemoryError, match=r"batches \[3\]: past the last level"):
+        speakers.speak(torch.nn.Linear(1, 1), windows, places, 0, tmp_path, list(range(6)), {})
+    speakers.deferred = []
+    with pytest.raises(torch.OutOfMemoryError, match="past its share"):
+        speakers.speak(torch.nn.Linear(1, 1), windows, places, 0, tmp_path, list(range(6)), {})
 
 
 def test_a_resume_reads_back_each_batch_spoken_on_its_rules_device_and_refuses_another(tmp_path):

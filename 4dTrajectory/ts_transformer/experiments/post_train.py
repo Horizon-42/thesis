@@ -96,7 +96,7 @@ import tempfile
 import threading
 import time
 from collections import Counter
-from concurrent.futures import ProcessPoolExecutor, wait
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Sequence
@@ -725,15 +725,24 @@ class Speakers:
     **Workers on two devices** (multi-aircraft control D191). Beside the workers on the speak device, workers on the CPU
     (one thread each, as every worker): each batch of a round and of the selection readout goes to the workers of the
     device the campaign's rule gives it by its place (`batch_device`), and each device's workers take its batches in
-    order, so a round is the same whatever the workers' timing."""
+    order, so a round is the same whatever the workers' timing.
+
+    **The peaks last** (D191, the user's word). A batch whose GPU worker runs out of its share (CUDA's out of memory
+    under its budget, ``gpu_budget``) is spoken again once every other batch of the round or the readout is spoken,
+    with fewer at once and more memory each (``deferred``: each level's batches at once and their budget; a batch past
+    one level's budget goes to the next): the batches that need the most memory are spoken with fewer beside them. A
+    batch's words depend only on its own inputs and its device's kind, so the round is the same."""
 
     def __init__(self, context: Context, settings: Settings, workers: int, device: torch.device,
-                 stage: Stage = STAGE_C, gpu_budget: int | None = None, cpu_workers: int = 0) -> None:
+                 stage: Stage = STAGE_C, gpu_budget: int | None = None, cpu_workers: int = 0,
+                 deferred: Sequence[tuple[int, int]] = ()) -> None:
         """``gpu_budget``: each worker's GPU memory, bytes (its CUDA context and what its allocator holds; stage D's,
         from its profile, `multi_train.profiled_fit`): a worker's allocator is capped at it less its context, measured
         at its first task, so a worker past it stops by name (CUDA's out of memory) and takes nothing of the others';
         None: no cap (stage C's campaign). ``cpu_workers``: workers on the CPU besides, for the batches the rule
-        (``settings``' ``cpu_batches`` of every ``cpu_period``) gives the CPU (D191; refused as `cpu_workers_refused`)."""
+        (``settings``' ``cpu_batches`` of every ``cpu_period``) gives the CPU (D191; refused as `cpu_workers_refused`).
+        ``deferred``: the levels a batch past its share is spoken again at (class docstring), each its batches at once
+        and their GPU budget, fewer and more; none: an out of memory fails the round (as a worker with no cap)."""
         if workers < 1 or workers + cpu_workers < 2:
             raise ValueError(f"{workers} worker(s) and {cpu_workers} on the CPU: speakers are 2 or more processes (one "
                              f"speaks without them)")
@@ -762,6 +771,7 @@ class Speakers:
         self.workers, self.cpu_workers = workers, cpu_workers
         self.device = device
         self.cpu_batches, self.cpu_period = settings.cpu_batches, settings.cpu_period
+        self.deferred = [tuple(level) for level in deferred]
         self.readings = 0
 
     def _pool(self, k: int) -> ProcessPoolExecutor:
@@ -774,11 +784,12 @@ class Speakers:
         (`spoken_batch`), in that order; on a failure the batches not started are cancelled."""
         state = directory / "speaking_model.pt"
         torch.save(model.state_dict(), state)
-        return self._results(state, [self._pool(k).submit(_speak, round_, str(state), str(directory), k,
-                                                          list(places[k]),
-                                                          [self.stage.record(windows[i]) for i in places[k]],
-                                                          dict(launch))
-                                     for k in batches])
+
+        def submit(k: int, budget: int | None = None) -> Any:
+            return self._pool(k).submit(_speak, round_, str(state), str(directory), k, list(places[k]),
+                                        [self.stage.record(windows[i]) for i in places[k]], dict(launch), budget)
+
+        return self._results(state, list(batches), submit)
 
     def read(self, model: Prior, windows: Sequence[Window], places: Sequence[Sequence[int]], split: str,
              draw: int = 0) -> list[list[WindowResult]]:
@@ -788,9 +799,12 @@ class Speakers:
         with tempfile.TemporaryDirectory(prefix="post_reading_") as scratch:
             state = Path(scratch) / "reading_model.pt"
             torch.save(model.state_dict(), state)
-            return self._results(state, [self._pool(k).submit(_read, self.readings, str(state), split, list(p),
-                                                              [self.stage.record(windows[i]) for i in p], draw)
-                                         for k, p in enumerate(places)])
+
+            def submit(k: int, budget: int | None = None) -> Any:
+                return self._pool(k).submit(_read, self.readings, str(state), split, list(places[k]),
+                                            [self.stage.record(windows[i]) for i in places[k]], draw, budget)
+
+            return self._results(state, list(range(len(places))), submit)
 
     def measure(self, round_: int, directory: Path, model: Prior, kind: str | None = None) -> dict[str, Any]:
         """O15: one worker's memory at the formal size — the measured batches of round ``round_`` (`measured_batches`: stage
@@ -807,18 +821,49 @@ class Speakers:
         finally:
             state.unlink()
 
-    @staticmethod
-    def _results(state: Path, futures: list[Any]) -> list[Any]:
-        """Every future's result, in order; on a failure the tasks not started are cancelled; the model file ``state``
-        goes once every running task has ended."""
+    def _results(self, state: Path, keys: list[int], submit: Callable[..., Any]) -> list[Any]:
+        """Each batch's result (``keys``, submitted by ``submit``), in order: a batch whose GPU worker ran out of its
+        share spoken again after the others at the levels of `deferred` (class docstring), each level's batches in
+        order, at most its number at once; past the last level, its out of memory fails the round. On a failure the
+        tasks not started are cancelled; the model file ``state`` goes once every running task has ended."""
+        futures = [submit(k) for k in keys]
+        submitted = list(futures)
         try:
-            return [future.result() for future in futures]
+            out: dict[int, Any] = {}
+            pending = []
+            for k, future in zip(keys, futures):
+                try:
+                    out[k] = future.result()
+                except torch.OutOfMemoryError:
+                    if not self.deferred:
+                        raise
+                    pending.append(k)
+            for at_once, budget in self.deferred:           # the peaks last, fewer at once (D191)
+                if not pending:
+                    break
+                queue, running, pending = sorted(pending), {}, []
+                while queue or running:
+                    while queue and len(running) < at_once:
+                        k = queue.pop(0)
+                        future = submit(k, budget)
+                        submitted.append(future)
+                        running[future] = k
+                    done, _ = wait(running, return_when=FIRST_COMPLETED)
+                    for future in sorted(done, key=running.get):
+                        k = running.pop(future)
+                        try:
+                            out[k] = future.result()
+                        except torch.OutOfMemoryError:
+                            pending.append(k)
+            if pending:
+                raise torch.OutOfMemoryError(f"batches {sorted(pending)}: past the last level's budget (D191)")
+            return [out[k] for k in keys]
         except BaseException:
-            for future in futures:
+            for future in submitted:
                 future.cancel()
             raise
         finally:
-            wait(futures)
+            wait(submitted)
             state.unlink()
 
     def close(self) -> None:
@@ -860,6 +905,22 @@ def _worker_context() -> tuple[Context, Settings, Stage]:
     return held["context"], held["settings"], held["stage"]
 
 
+def _freed(context: Context, budget: int | None) -> None:
+    """After a task: a worker's GPU cache freed (its batch's tensors gone: an out of memory is raised again without
+    the batch's frames, `_speak`) and its share capped again where the task had a budget of its own (``budget``: the
+    share; None: unchanged)."""
+    if context.device.type == "cuda":
+        torch.cuda.empty_cache()
+    _budget(context, budget)
+
+
+def _budget(context: Context, budget: int | None) -> None:
+    """A worker's allocator capped at ``budget`` for a task (`_cap_gpu`; D191's batch spoken again alone), or left as it
+    is (None)."""
+    if budget is not None:
+        _cap_gpu(context.device, budget)
+
+
 def _cap_gpu(device: torch.device, budget: int) -> None:
     """A worker's allocator capped at ``budget`` less its CUDA context (`Speakers`' ``gpu_budget``): its use by
     ``nvidia-smi`` less what its allocator holds now."""
@@ -873,9 +934,10 @@ def _cap_gpu(device: torch.device, budget: int) -> None:
 
 
 def _speak(round_: int, state: str, directory: str, k: int, places: list[int], records: list[dict[str, Any]],
-           launch: dict[str, Any]) -> dict[str, Any]:
+           launch: dict[str, Any], budget: int | None = None) -> dict[str, Any]:
     """A worker's batch (`Speakers`): the round's model and windows made once a round (the stage's), then the stage's
-    `Stage.speak_batch` and the batch's record (`spoken_batch`)."""
+    `Stage.speak_batch` and the batch's record (`spoken_batch`); ``budget``: this batch's GPU memory in place of the
+    worker's share (a batch spoken again alone, D191), its share back after it."""
     held = _SPEAKER
     context, settings, stage = _worker_context()
     if held.get("round") != round_:
@@ -887,17 +949,21 @@ def _speak(round_: int, state: str, directory: str, k: int, places: list[int], r
     windows = held["windows"]
     if [stage.record(windows[i]) for i in places] != records:
         raise ValueError(f"round {round_}, batch {k}: the worker drew other windows than the campaign")
+    _budget(context, budget)
     try:
         return spoken_batch(stage, held["model"], context, windows, places, settings, round_, Path(directory), k, launch)
+    except torch.OutOfMemoryError as error:
+        short = str(error)          # the batch's frames, and its tensors, let go with this block: the cache freed below
     finally:
-        if context.device.type == "cuda":
-            torch.cuda.empty_cache()
+        _freed(context, None if budget is None else held["gpu_budget"])
+    raise torch.OutOfMemoryError(short)
 
 
-def _read(reading: int, state: str, split: str, places: list[int], records: list[dict[str, Any]], draw: int
-          ) -> list[WindowResult]:
+def _read(reading: int, state: str, split: str, places: list[int], records: list[dict[str, Any]], draw: int,
+          budget: int | None = None) -> list[WindowResult]:
     """A worker's batch of the selection readout (`Speakers.read`): the reading's model made once a reading, the split's
-    readout windows once (the stage's `Stage.selection`, the same draw), then the stage's `Stage.read_batch`."""
+    readout windows once (the stage's `Stage.selection`, the same draw), then the stage's `Stage.read_batch`;
+    ``budget`` as `_speak`'s."""
     held = _SPEAKER
     context, settings, stage = _worker_context()
     selection = held.setdefault("selection", {})
@@ -910,11 +976,14 @@ def _read(reading: int, state: str, split: str, places: list[int], records: list
         model, _ = stage.start_model(context, settings)
         model.load_state_dict(torch.load(state, map_location=context.device, weights_only=True))
         held.update(reading=reading, reader=model.eval())
+    _budget(context, budget)
     try:
         return stage.read_batch(held["reader"], context, windows, places, settings, split, draw)
+    except torch.OutOfMemoryError as error:
+        short = str(error)          # as `_speak`'s
     finally:
-        if context.device.type == "cuda":
-            torch.cuda.empty_cache()
+        _freed(context, None if budget is None else held["gpu_budget"])
+    raise torch.OutOfMemoryError(short)
 
 
 def _measure(round_: int, state: str, directory: str) -> dict[str, Any]:
