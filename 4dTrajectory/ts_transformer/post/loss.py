@@ -220,6 +220,36 @@ def update_step(model: Prior, start: PassStart, base: Prior, pieces: Sequence[Sa
     return LossParts(reward + KL_WEIGHT * kl + DATA_WEIGHT * teacher, reward, kl, teacher, words, clipped)
 
 
+def update_gradients(model: Prior, start: PassStart, base: Prior, pieces: Sequence[Samples], data: RowTensors,
+                     parameters: Sequence[torch.nn.Parameter]) -> dict[str, list[torch.Tensor | None]]:
+    """One update's gradient part by part (the user, 2026-10-10: which part sets a pass's direction): of each of
+    ``parameters``, the surrogate's, the pull's (times `KL_WEIGHT`) and the data term's (times `DATA_WEIGHT`), each
+    summed over the pieces as `update_step` sums them, so that the three add up to `update_step`'s gradient (to float
+    rounding); None where a part does not reach a parameter. No gradient is left in the model; the words are scored in
+    eval mode, the data term in training mode (as `update_step`)."""
+    model.eval()
+    rows = sum(piece.counted.sum() for piece in pieces).to(torch.float32)
+    out: dict[str, list[torch.Tensor | None]] = {part: [None] * len(parameters)
+                                                 for part in ("surrogate", "pull", "data")}
+
+    def add(part: str, grads: Sequence[torch.Tensor | None]) -> None:
+        out[part] = [g if held is None else held if g is None else held + g for held, g in zip(out[part], grads)]
+
+    for piece in pieces:
+        log_p = masked_log_probability(model, piece.rows, piece.permitted, piece.traffic)
+        with torch.no_grad():
+            start_log_p = masked_log_probability(start.model, piece.rows, piece.permitted, piece.traffic)
+            base_log_p = masked_log_probability(base, piece.rows, piece.permitted)
+        loss, _, _ = _surrogate_words(log_p, start_log_p, piece.advantage, piece.counted, CLIP)
+        add("surrogate", torch.autograd.grad(_counted_sum(loss, piece.counted) / rows, parameters, retain_graph=True,
+                                             allow_unused=True))
+        add("pull", torch.autograd.grad(KL_WEIGHT * _counted_sum(_pull_words(log_p, base_log_p), piece.counted) / rows,
+                                        parameters, allow_unused=True))
+        object.__setattr__(piece.traffic, "embedded", None)      # the input keeps no embedded tokens and their graph
+    add("data", torch.autograd.grad(DATA_WEIGHT * data_term(model, data), parameters, allow_unused=True))
+    return out
+
+
 def landed_step(model: Prior, start: PassStart, base: Prior, pieces: Sequence[Samples], data: RowTensors) -> LossParts:
     """One update of a campaign that trains on the landed sentences (P49), in pieces as `update_step`: each kept
     sentence's words, teacher-forced under its traffic and the speaker's records, their negative log-likelihood (in

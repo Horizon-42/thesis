@@ -1834,3 +1834,21 @@ MC7's start alone (a one-off before this runner) took 22 min on 3 GPU workers be
         [--speak-workers N] [--device cuda]
     python run_ts.py multi_compare --campaign 4dTrajectory/outputs/POOLED/multi/<campaign> [--start <its dir>] \
         --out <a new file>.json
+
+### R70 · `run_ts.py pass_gradients` — which part of the loss sets a round's pass, stages C and D
+
+2026-10-10 (the user: is a flat reward the learning rate's or the reward's?). A round whose groups are still on disk (a
+round left half done; a round's groups are deleted after its pass), read at the model that spoke it (the round before's
+checkpoint, or the start), its pass's updates in the pass's own order (`update_pairs` with the round's numbers), every
+`--every`-th, no step taken (every ratio 1). Of each update, by parameter group (the prior's own, the traffic modules')
+and over all: the gradient of the surrogate (the advantages), of the pull to the base (× 0.04) and of the data term
+(× 1) — `post.loss.update_gradients`, whose three parts add up to `update_step`'s gradient — each part's norm, its share
+⟨g_part, g⟩ / |g|² of the update's direction (the shares add up to 1) and the cosine of each pair; the means over the
+updates read. Under AdamW a parameter's step is about its learning rate whatever its gradient's size: the shares say
+which part points the update, the learning rate how far. On the CPU by default (`--device`, `--threads`); the data
+term's dropout masks are the pass's in distribution only (another device's generator, or updates left out by
+`--every`); of a campaign of several passes a round (D169), the first pass's order. Writes `ts-pass-gradients-v1`; a clean tree unless
+`--smoke`, the checks first. Tests: `tests/test_pass_gradients.py`, `tests/test_post_loss.py`.
+
+    python run_ts.py pass_gradients --campaign 4dTrajectory/outputs/POOLED/multi/<campaign> --round <r> \
+        --out <a new file>.json [--every K] [--device cpu] [--threads T]
