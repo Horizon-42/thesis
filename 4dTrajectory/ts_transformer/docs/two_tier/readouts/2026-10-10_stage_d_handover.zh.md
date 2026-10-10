@@ -1,12 +1,14 @@
 # Stage D 交接（2026-10-10 16:40）
 
+（命名，设计方 2026-10-10：`multi_train_20261010` 是 MC6 的第二次启动，`multi_train_20261009` 是第一次；本文件原来叫它 MC7，已改。MC7 是阶段 D 的 Training view 的里程碑。路径 `run-mc7`、`mc7_r5.json` 是文件名，不改。）
+
 接手的 agent 先读本文件，再读 `notes/stage_d.md`（设计方的命令）和
 `readouts/2026-10-06_stage_d_implementation_log.md`（stage D 的日志，最新是 §21）。本文件之后的日志 §22 还没写，见第 8 节。
 
 ## 0. 现在的状态（一句话）
 
-**没有任何活动在跑。** MC7 由用户在 16:31 喊停（第 5 轮做了一半），学习率对照已跑完，梯度一致性读取因内存被我停了。
-所有决定都等用户：MC7 是否续跑、是否先改奖励/信用分配设计、是否读梯度一致性。**没有用户明确命令，不要续跑或启动任何活动**
+**没有任何活动在跑。** MC6 由用户在 16:31 喊停（第 5 轮做了一半），学习率对照已跑完，梯度一致性读取因内存被我停了。
+所有决定都等用户：MC6 是否续跑、是否先改奖励/信用分配设计、是否读梯度一致性。**没有用户明确命令，不要续跑或启动任何活动**
 （用户 16:30："谁让你开始mc7的？"——我把"拍在那个空档"当成了续跑许可，这是错的）。
 
 ## 1. 代码与分支
@@ -14,7 +16,7 @@
 | 位置 | 内容 |
 |---|---|
 | 代码分支 `dev-multi-control`（worktree `.claude/worktrees/multi-control`，干净） | HEAD `a2f51add`；`dev-two-tier`（`ca00c334`）可快进到它，合并由用户做 |
-| 运行 worktree `.claude/worktrees/run-mc7` | detached `c7c35b67`，MC7 和学习率对照都从这里跑；里面有数据软链（`data`、`4dTrajectory/outputs`、`trajectory_data_process/outputs`、`aeroviz-4d/public/data/airports`），删除 worktree 前先 `unlink` 软链 |
+| 运行 worktree `.claude/worktrees/run-mc7` | detached `c7c35b67`，MC6 和学习率对照都从这里跑；里面有数据软链（`data`、`4dTrajectory/outputs`、`trajectory_data_process/outputs`、`aeroviz-4d/public/data/airports`），删除 worktree 前先 `unlink` 软链 |
 
 今天 `dev-multi-control` 上的提交（`ca00c334` 日志只记到 `e2b69736`）：
 
@@ -30,7 +32,7 @@
 
 `runners.md` R69、R70 已在代码分支里。全套测试最后一次是 `c7c35b67` 时跑的（2,115 passed, 1 skipped）；之后三个提交只跑了改动模块的测试。
 
-## 2. MC7（`4dTrajectory/outputs/POOLED/multi/multi_train_20261010`）
+## 2. MC6（`4dTrajectory/outputs/POOLED/multi/multi_train_20261010`）
 
 设置：起点 stage C `post_seg60_20261007` 第 5 轮，种子 2035，8 轮，backward 分支，`front_attention merged`，学习率
 prior 1e-5 / traffic 1e-4（全程不变，用户 09:27 决定"先不改"），AdamW，weight decay 0.01，无梯度裁剪。
@@ -54,27 +56,27 @@ prior 1e-5 / traffic 1e-4（全程不变，用户 09:27 决定"先不改"），A
 
 ## 3. 学习率对照（`4dTrajectory/outputs/POOLED/multi/multi_train_lr3_20261010`，已完成）
 
-用户 13:27 下令。MC7 同起点、同种子、同窗口，只把学习率乘 3（3e-5 / 3e-4），跑 2 轮，3G+3C 5/9。
+用户 13:27 下令。MC6 同起点、同种子、同窗口，只把学习率乘 3（3e-5 / 3e-4），跑 2 轮，3G+3C 5/9。
 
 | | 降落率 | 每架奖励 | 失去间隔 | KL | 被裁剪的词 |
 |---|---|---|---|---|---|
-| 第 0 轮 1×（MC7） / 3× | 82.8% / 82.0% | 0.8221 / 0.8148 | 15.2% / 15.6% | 0.0456 / 0.0523 | 0.83% / 2.21% |
-| 第 1 轮 1×（MC7） / 3× | 82.1% / **80.4%** | 0.8140 / **0.7985** | 15.9% / 16.2% | 0.0491 / 0.0638 | 0.67% / 2.40% |
+| 第 0 轮 1×（MC6） / 3× | 82.8% / 82.0% | 0.8221 / 0.8148 | 15.2% / 15.6% | 0.0456 / 0.0523 | 0.83% / 2.21% |
+| 第 1 轮 1×（MC6） / 3× | 82.1% / **80.4%** | 0.8140 / **0.7985** | 15.9% / 16.2% | 0.0491 / 0.0638 | 0.67% / 2.40% |
 
 训练窗口第一遍：第 0 轮两边 5440 / 5441 落地（证明样本相同）；第 1 轮 81.6% / 81.3%。
 **结论：步子太小不是原因，3 倍更差，两轮后低于起点。** 对照表 `handover_20261010/lr3/compare_r01.json`。
 
 ## 4. 梯度诊断
 
-- **梯度构成**（R70 v1，`handover_20261010/grad/mc7_r5.json`）：MC7 第 5 轮前 46 批（只有 300 s 和 600 s 窗口），第 4 轮模型，
+- **梯度构成**（R70 v1，`handover_20261010/grad/mc7_r5.json`）：MC6 第 5 轮前 46 批（只有 300 s 和 600 s 窗口），第 4 轮模型，
   29 个更新。先验参数：奖励项占更新方向 55%（中间一半 41–69%），数据项 45%，拉回 ≈0，奖励与数据项余弦 0.005；交通参数：奖励项 ≈100%。
   **奖励信号没有被别的项盖过。**
-- **一致性**（R70 v2）：**没读成**。16:22 开始，16:29 我停掉——它一个进程占 7.1 GB（我估 3 GB），挤 MC7 内存，而且和 MC7 抢 CPU 很慢。
+- **一致性**（R70 v2）：**没读成**。16:22 开始，16:29 我停掉——它一个进程占 7.1 GB（我估 3 GB），挤 MC6 内存，而且和 MC6 抢 CPU 很慢。
   现在机器空，第 5 轮 92 批分支组在盘上，是读它的好时机（要用户同意）：
   `python run_ts.py pass_gradients --campaign 4dTrajectory/outputs/POOLED/multi/multi_train_20261010 --round 5 --out <新文件>.json --every 2 --threads 8`
-  （从 `multi-control` worktree，干净树；约 7 GB 主机内存）。**MC7 第 5 轮一旦跑完，它的分支组会被删。**
+  （从 `multi-control` worktree，干净树；约 7 GB 主机内存）。**MC6 第 5 轮一旦跑完，它的分支组会被删。**
 
-## 5. 速度（同一批：MC7 第 0 轮第 86 批，1200 s，4 窗口 24 架，起点模型，机器上无其他任务）
+## 5. 速度（同一批：MC6 第 0 轮第 86 批，1200 s，4 窗口 24 架，起点模型，机器上无其他任务）
 
 | | 整批 | speaker | 窗口循环 | 执行器 | 其他 |
 |---|---|---|---|---|---|
@@ -98,7 +100,7 @@ prior 1e-5 / traffic 1e-4（全程不变，用户 09:27 决定"先不改"），A
 
 ## 7. 等用户决定的事
 
-1. MC7 续跑剩下的第 5–7 轮，还是先改设计再开新活动。
+1. MC6 续跑剩下的第 5–7 轮，还是先改设计再开新活动。
 2. 是否现在读梯度一致性（第 4 节）。读出来若奖励梯度各次更新几乎不相关，就该改奖励/信用分配设计（分支组大小、优势摊到哪些行、基线）。
 3. 起点的正式读数（`multi_compare --read-start`，约 40 分钟 GPU，含重读最后一轮的核对）：表里的起点 81.5% 是一次性读的，未核对。
 4. 速度方向的两个提案（第 5 节）。
@@ -106,13 +108,13 @@ prior 1e-5 / traffic 1e-4（全程不变，用户 09:27 决定"先不改"），A
 
 ## 8. 还没写的文档（交给接手者）
 
-- 日志 `2026-10-06_stage_d_implementation_log.md` §22：`c7c35b67`、`35a6e072`、`a23a49d7`、`a2f51add`；MC7 各轮；学习率对照；梯度构成；速度；资源经验（本文件第 2–6 节就是素材）。
+- 日志 `2026-10-06_stage_d_implementation_log.md` §22：`c7c35b67`、`35a6e072`、`a23a49d7`、`a2f51add`；MC6 各轮；学习率对照；梯度构成；速度；资源经验（本文件第 2–6 节就是素材）。
 - `multi_control.md` §0.3、`post_training.md` §0.3 的行；`requests_from_d_to_designer.md` 重写（加今天的读数和提案）。
-- `docs/experiments/intents.json`：MC7 和学习率对照发布前要有条目。
+- `docs/experiments/intents.json`：MC6 和学习率对照发布前要有条目。
 
 ## 9. 文件索引
 
-- 活动：`4dTrajectory/outputs/POOLED/multi/multi_train_20261010`（MC7）、`multi_train_lr3_20261010`（学习率对照）。
+- 活动：`4dTrajectory/outputs/POOLED/multi/multi_train_20261010`（MC6）、`multi_train_lr3_20261010`（学习率对照）。
 - Profile：`outputs/POOLED/multi/profile_d190_merged_20261010`（GPU worker）、`profile_d191_cpu_20261010`（CPU worker）。
 - 交接目录 `4dTrajectory/outputs/POOLED/multi/handover_20261010/`（/tmp 里的东西都复制在这里）：
   `mc7/`（各次启动脚本 `run.sh`、`resume_mixed.sh`，日志 `run.log`、`run_mixed*.log`，对比表 `compare_r*.json`，`memlog.sh`）、

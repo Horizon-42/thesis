@@ -5,12 +5,12 @@ time. Each item is a reading the implementer made where the design says nothing,
 until the user decides. Paths are relative to `4dTrajectory/ts_transformer/`. The numbers are kept from the earlier
 notes; the items the user decided are deleted (D166: 6, 7, 19, 21, 22, 25, 29–35; O16: 36, written into D146; the
 census's sample: 18; D172: 46–48; D179, D180: 49–53; D181, O20: 54–62; D181–D186: 63–70; the interfaces and D182:
-71–77; D188: 78–79; D190: 80–84; D190, D191: 85, 87, 88), item 23 (it asked for 6 and 7), item 20 (built: item 40) and
-the names of MC0–MC4 (written into the interfaces).
+71–77; D188: 78–79; D190: 80–84; D190, D191: 85, 87, 88; D191–D193 and the log: 86, 90–98), item 23 (it asked for 6 and
+7), item 20 (built: item 40) and the names of MC0–MC4 (written into the interfaces).
 
-State: 2026-10-10 (evening, after the handover): the user decided R1 of the plan (item 95) and ordered the speed-ups S1
-and S2, built on `dev-multi-speed` (items 96, 97); the traffic-only arm (the plan's R3) runs. 86 and 90 wait for the
-user; 89, 91–94 come from D191; 95–98 are new.
+State: 2026-10-10 (night): D193 (3) and (4) built on `dev-multi-s6` (9d6886ec, 22fd1031), not merged; D193 (1)'s
+check done; the traffic-only arm done; D192 built on the user's word (172bc07d); nothing runs (stage D's log §22). 89
+is a measure kept from D190; 99–103 are new.
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -157,54 +157,46 @@ user; 89, 91–94 come from D191; 95–98 are new.
 
 ## D190, D191 (stage D's log §20, §21; 2026-10-10)
 
-86. **The front's length: one for a cache** (proposal; measured, stage D's log §20). One length S for every front of a
-    cache; two blocks of own rows would hold the joint loop's cache at its largest in 44,158 rows instead of 58,480 on
-    batch 23 (20,930 / 23,616 instead of 24,626 / 34,032 on batches 0 / 86). The user chooses; not built.
 89. **The two ways' time** (measured, the profile at §18's settings on 7893d787). Copied: batches 0 / 23 / 86 in 56.8 /
     68.0 / 63.0 s; merged: 55.5 / 63.5 / 59.9 s (D189: 55.3 / 64.9 / 61.0). The campaign of item 90 reads `merged`.
-90. **The next campaign: launched** (the user, 2026-10-10 at night: once the tests pass, run it; the GPU alone this
-    time; decide and report). MC6's start (stage C's `post_seg60_20261007` round 5, seed 2035) and settings, branch
-    points found backward, `front_attention` `merged`, 8 rounds, 5 GPU speaking workers sized by item 91,
-    `outputs/POOLED/multi/multi_train_20261010` from a run worktree at the commit of item 91 (stage D's log §21). Its
-    first round's time is the measure of its speed (no measure before it, the user's word).
-91. **The peaks last** (built at the user's word of 2026-10-10: "the peaks last, or more workers"). A GPU batch past
-    its worker's share (CUDA's out of memory under its cap) no longer fails the round: it is spoken again after the
-    others at fewer at once — half the workers, a quarter, … one —, each level's budget the GPU less the campaign
-    process's hold and what each idle worker holds, shared by its batches at once; past the last level the round
-    fails. The worker frees the batch's memory before it is free for another (the error raised again without the
-    batch's frames). So the GPU's fit counts a worker at what it holds between batches (D179's margin stays for the
-    host and the pass, which have no second try), and refuses only workers whose last level cannot hold a batch at the
-    profile's peak × the margin. Reading, for the designer to write into D179/D191: the margin of D179 no longer sizes
-    GPU workers; 5 workers on the GPU (the host's 3.24 GiB each with the margin of 1.3 sets the number).
-92. **The profile does not bound a round's batches** (measured). The same 56 batches of MC6's round 0 on 3 GPU workers
-    stopped: one batch reached 2.05 GiB allocated in a rebuild of the joint loop, past its worker's share of 2.21 GiB,
-    where the profile's three batches peaked at 1.33 GiB with the CUDA context (allocated 0.94). A batch's memory is set
-    by the searches flown together, not by its rows: no measure of a few batches bounds it, the levels of item 91 do
-    not need one.
-93. **Mixed workers, measured once** (D191 step 4, 5b4cd739). Of MC6's round 0, every 4th batch (56), 3 GPU and 3 CPU
-    workers, 6 of every 13 on the CPU: the GPU's 30 batches in 929 s, the CPU's 26 in 995 s — a batch and worker 93 and
-    115 s against 60 and 69 s alone (six processes at once slow each); about 66 min a round. Not used by item 90 (the
-    user: the GPU alone this time); the rule (`--cpu-batches`, `--cpu-period`) is a setting for a later campaign.
-94. **What the records hold more** (reading). `round.json` holds `cpu_workers` (information, as `speak_device`); a
-    stage C measure (`campaign.json` `measures`) holds `cpu_workers` and `cpu_measured`, and a measure taken before
-    D191 holds no CPU worker's: a launch with CPU workers measures again (as D167's record without a measure);
-    `profiled_fit`'s line names `cpu_profile`, `cpu_workers` and the levels (`deferred`).
 
-## The plan of 2026-10-10 evening and the speed-ups S1, S2 (`dev-multi-speed`)
+## D193 on `dev-multi-s6` (stage D's log §22; 2026-10-10 night)
 
-Please review the plan and write what it decides into `multi_control.md`. The code says the details; read the commits.
+The code says the details; read the two commits.
 
-95. **The plan**: `readouts/2026-10-10_stage_d_next_plan.zh.md` (uncommitted until this note's commit). Its status table
-    lists each item and who decided it. The user's decision: R1, point B replaced by the point that at least 5 of 8
-    continuations avoid (not built; for D192). The user's other words: R6 (value function) not done; R3 (traffic-only
-    arm) launched. The rest are proposals.
-96. **S1, built** (2961b99a): the process option `--executor-device cpu` (`multi_train`, `multi_speed`) flies the
-    executor on the CPU while the speaker stays on the GPU; default `speak`, bit for bit the code before. Not a campaign
-    setting. Not yet done: the D181 (57) bound on real windows and the GPU timing (the GPU runs the arm).
-97. **S2, built** (88a3990e): the rows not flown read their tokens in one call per window; bit for bit
-    (`window_behaviour` against 2961b99a on stage D's and stage C's windows, `prior_behaviour`). Batch 86 on the CPU:
-    the window loop 20.1 → 17.6 s, the batch 84.3 → 81.5 s. One part was tried and dropped: the speaker's runway mask
-    in one call for all runway words is slower above about 64 rows (the plan, S2).
-98. **S6, a proposal** (changes D188's joint loop): rows no longer flown stay in the joint loop and are still said and
-    flown, about 46 of 135 rows a step on batch 86; nothing reads their words or states. Dropping them at a rebuild
-    would save about a third of the speaker's, the executor's and the tokens' work. For the designer and the user.
+99. **Each flight's own permitted record** (reading; changes D181 (63) at the loop's level). With S6 a flight that has
+    left the loop has no rows in the speaker, so a record padded to the most rows among the flights asked would depend
+    on which flights left. `SpeakingLoop.permitted(flights)` now gives a list, one record a flight: its sentence's rows
+    (`len` of its said words) and its airport's classes (`column_words`). The loss finds a record's row by its time and
+    reads a padded class as forbidden, so the loss is the same: checked on MC6's round 5 groups, 144 sentences, 143 cut
+    shorter, the log-probabilities equal bit for bit. `Speaker.permitted(indices)` (prior §7 item 3) is unchanged and
+    keeps D181 (63)'s padding. Stage C's pinned digests of D149 hash these records: two of them ("round real", the
+    batch scenario) changed, and d5cc5d6a with the record cut alone gives the same two, so they were written again
+    (6c5269af). Please write this into D193 (3) or D181 (63).
+100. **New and removed public names** (for prior §7 item 7, post-training §9 and the key-code index). `SpeakingLoop`:
+    `held` (the flights still in the engines), `left` (each left flight's frozen `Left` record), `inside` (the held
+    flights' places), `outcome(flight)`, `landings(flight)`, `in_force(flight)`, `permitted(flights)` (item 99); a left
+    flight's states, sentences and outcome come from its record. `WindowLoop`: `landings` removed (read
+    `speaking.landings(flight)`), `results(rows=None)` per row. A loop with no flight held has no speaker or executor.
+    The line numbers of `SpeakingLoop` and `SpeakingLoop.step` in prior §12's index moved.
+101. **S4's readings** (D193 (4), 22fd1031). (a) The cap reads the worker's own memory (`_own_memory`, as O15's
+    sampler) every `HOST_CAP_SAMPLE_S` = 1 s, a constant: one `smaps_rollup` read took 12–53 ms in a worker of 2.4 GB at
+    a load of 35, so O15's 0.2 s would cost 6–25 % of a core; a batch can grow for 1 s past its cap, and the stop waits
+    for the torch operation in progress. (b) The error is raised in the worker's main thread by a signal (SIGUSR1, the
+    worker's handler), so it comes where the batch is and the worker catches it as CUDA's out of memory. (c) A capped
+    CPU worker gives the heap's free pages back after each batch (glibc `malloc_trim`): without it the next batch
+    starts past its cap (tested). (d) The host's part for the CPU workers is the free host less the GPU workers' (at
+    their peak with the margin, and their series); a CPU worker holds between batches its profile's `now`, the reader's
+    model and the round's series. (e) The GPU's levels are spoken before the CPU's, one device after the other.
+102. **For the user: the measures of tonight** (stage D's log §22; no criterion). Batch 86 of MC6's round 0 on the
+    GPU: 62.1 s before S6, 53.9 s with S6, 48.8 s with S6 and the executor on the CPU (S1); on the CPU 68.1 → 51.0 s.
+    The rule of a mixed launch (`--cpu-batches`, `--cpu-period`) was set by the speeds before S1 and S6 and is to be set
+    again at the next launch. The traffic-only arm lands 82.4 / 82.5 %, inside MC6's rounds; R5 finds no sign that
+    the first rows after a point decide.
+103. **D192 as built** (172bc07d; please check against the row). (a) The count is `continuations // 2 + 1`, more than
+    half: 5 of D192's 8. (b) The kinds go into the record under `majority` only (`group_kinds`: decision, fine, majority),
+    not into backward's: the row says "a backward batch's record adds each group's kind", but a new key in backward's
+    record would change the records of MC6's campaign, which is to stay resumable; backward's record keys are pinned by
+    a test. (c) "The searches that found a majority point" are the length of `majority_depths_s` (each its span and
+    depth), the decision point counted when it is the majority point. (d) `branching` is a profiled setting, so a
+    campaign with `majority` needs its own profile.

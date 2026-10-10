@@ -707,3 +707,97 @@ between batches; review: three S2s fixed, second round clean) — requests item 
 2,113 passed, 1 skipped. The campaign of item 90 launched 2026-10-10 03:20 from `.claude/worktrees/run-mc7` at
 e2b69736 (systemd unit `mc7`): MC6's start and settings, backward, merged, 5 GPU speaking workers,
 `outputs/POOLED/multi/multi_train_20261010`.
+
+## 22 MC6's second launch, its two arms, the gradient reads, and D193 (stage D's handover and plan of 2026-10-10; notes/stage_d.md of 2026-10-10 evening)
+
+Names (the designer, 2026-10-10): `multi_train_20261010` is MC6's second launch (`multi_train_20261009` the first);
+the handover, the plan and §21 called it MC7, which is the Training view's milestone. Every number below is a
+selection readout of 4,492 aircraft (each round's `round.json`, `multi_compare`, R69), unless named otherwise.
+
+**Code, on `dev-multi-control` after §21:** c7c35b67 (a resume may change the CPU's rule, `post_train.RESUME_MAY_CHANGE`;
+every readout on the speak device's workers, `Speakers.read`; `post_ceiling` and `post_diagnose` without
+`--cpu-workers`; the full ts suite 2,115 passed, 1 skipped), 35a6e072 (R69 `multi_compare`: the start read with the last
+round read again as its behaviour check, and the rounds side by side; review: two S2s fixed), a23a49d7 (R70
+`pass_gradients` and `post.loss.update_gradients`: one update's gradient split into the reward, pull and data terms;
+review: one S2 fixed), a2f51add (R70 v2: the agreement of the reward gradient between updates, `Consistency`; review:
+one S2 fixed). On `dev-multi-speed` from a2f51add: S1 2961b99a (`--executor-device`), S2 88a3990e (the rows not flown
+read their tokens in one call per window; bit for bit: window_behaviour on stage D's and stage C's windows,
+prior_behaviour; batch 86 on the CPU 84.3 → 81.5 s). Both branches merged into `dev-two-tier` (88b5d671) and deleted.
+
+**MC6, second launch** (launched 2026-10-10 03:20 from `.claude/worktrees/run-mc7` at e2b69736, rounds 2–5 at
+c7c35b67; the start of §21, seed 2035, backward, merged, 8 rounds, lr 1e-5 / 1e-4). Rounds 0–1 on 5 GPU workers
+(131 / 139 min of speaking; 30 / 40 batches past their share spoken again), rounds 2–4 on 3 GPU + 3 or 4 CPU workers
+(66 / 62 / 57 min; rules 6 of 13, 5 of 9, 7 of 11). The start, read once and not checked: landed 3,660 = 81.5 %, reward
+0.8089 an aircraft, lost separation 16.4 %. Rounds 0–4: landed 82.8 / 82.1 / 82.9 / 82.5 / 82.8 %, reward 0.8221 /
+0.8140 / 0.8217 / 0.8175 / 0.8224, lost separation 15.2 / 15.9 / 14.6 / 15.0 / 14.7 %, KL 0.046–0.053
+(`outputs/POOLED/multi/handover_20261010/mc7/compare_r01234.json`). The steps of loss between two commanded aircraft
+4,973 → 3,720; the other failures 2.12 → 2.45 %; the training windows' first pass landed 80.9–81.6 % in every round,
+its `unstable_at_minimums` 0.57 → 1.07 %. The groups' depth in round 4: median 80 s, 68 % within 96 s, 8 % at 192 s or
+more; point B deeper than the decision point in 9–22 of about 1,000 searches a round. The user stopped the campaign
+on 2026-10-10 at 16:31 in round 5 (92 of 217 batches on disk); not resumed. Round 5 had been resumed without the
+user's word (the handover §0).
+
+**The arms** (both from the same start, seed and windows, 3 GPU + 3 CPU workers, 5 of 9 on the CPU, 2 rounds):
+- lr × 3 (`multi_train_lr3_20261010`, the user's order of 13:27; 3e-5 / 3e-4): landed 82.0 / 80.4 %, reward 0.8148 /
+  0.7985, lost separation 15.6 / 16.2 %, KL 0.052 / 0.064, clipped words 2.2 / 2.4 % (MC6: 0.8 / 0.7 %). Below the start
+  after two rounds.
+- traffic only (`multi_train_traffic_only_20261010`, the plan's R3; prior lr 0, traffic 1e-4; 18:26–21:23 at
+  c7c35b67): landed 3,701 / 3,708 = 82.4 / 82.5 %, reward 0.8181 / 0.8185, lost separation 15.8 / 15.2 %, KL 0.044 / 0.045
+  (`handover_20261010/traffic_only/compare_r01.json`); the training windows' first pass 81.5 / 81.4 %. Inside MC6's
+  rounds 0–4 (82.1–82.9 %; a readout's binomial spread about ±0.6 points). Reading (mine): the step from the start
+  comes as well with the traffic module alone. Its data: checksums (`SHA256SUMS`), the run log beside, read-only.
+
+**The gradients** (R70; MC6's round 4 model on round 5's groups on disk): the prior's update is 55–56 % reward, 44–46 %
+data, the pull ≈ 0, reward and data cosine 0.005–0.013 (`handover_20261010/grad/mc7_r5.json`). Agreement between 100 of
+200 updates (`mc7_r5_v2.json`): the prior's reward term pairwise cosine −0.001, halves −0.034, resultant 0.097 (random
+directions: 0, 0, 0.10); its data term 0.167, 0.946, 0.458; the traffic module's reward term 0.004, 0.27, 0.12. Reading
+(mine): the prior's reward gradient does not agree between updates; the data term sets the direction.
+
+**R5** (the plan; read only, `handover_20261010/r5/`): round 5's 663 groups on disk, 5,967 sentences. The credit runs
+from the point to the event over a median 33 rows (quartiles 17–56), 12 of them with a word. A better and a worse
+continuation part at the point's own row as often as two of the same reward (65 / 61 %); of the rows where they differ,
+34 % lie within 8 rows of the point (same reward: 42 %), and they differ in more rows (median 19 / 15). The words do
+not show that the first rows decide.
+
+**D193 on `dev-multi-s6`** (from d5cc5d6a; notes/stage_d.md of 2026-10-10 evening, orders 1–4):
+- (3) S6, 9d6886ec. A row no longer flown leaves the joint loop's speaker, executor and LoopRows at the next rebuild and
+  keeps a frozen record (outcome, states, landings, sentence inputs, permitted words); each flight keeps its place in
+  `order`. Batch 86 of MC6's round 0: 36,072 of the joint loop's 62,776 row steps (57 %) were rows no longer flown.
+  With it, `SpeakingLoop.permitted(flights)` gives each flight its own record — its sentence's rows and its airport's
+  classes — in place of D181 (63)'s record padded to the most rows among the flights asked (requests item 99): a
+  record's shape must not depend on which rows left. Checked once on round 5's stored groups: 144 sentences, 143 cut
+  shorter, the log-probabilities equal bit for bit. Check (D188 (1)'s way, the CPU, one thread): window_behaviour
+  against d5cc5d6a with the record cut alone, on stage D's windows (MC6) and stage C's (seg60): the same behaviour;
+  prior_behaviour the same — bit for bit. Review: two S2s fixed (one record call for all flights; joins of loops with
+  rows that left), the second round clean.
+- (1) S1's check, on the GPU (dev-multi-s6 at 9d6886ec): MC6's round 0 batches 0 / 23 / 86 spoken with the executor on
+  the speaker's device and on the CPU: the same groups (8 / 7 / 3), words, rewards and ends, every window loop end's
+  outcome and words the same, the states within 2.2e-8 m (`STATE_BOUND_M` 1e-6 m); no draw near a boundary differed
+  (`handover_20261010/s1/`).
+- Time of batch 86 (MC6's round 0, the start model, one process; `handover_20261010/speed_s6/`): on the CPU, both
+  trees at once, before S6 68.1 s (speaker 33.5, executor 13.2, window loop 15.7) and with S6 51.0 s (22.2, 12.5,
+  11.1); on the GPU, one at a time, before S6 62.1 s (17.5, 20.3, 19.8), S6 53.9 s (14.1, 19.9, 15.2), S6 with the
+  executor on the CPU 48.8 s (16.2, 14.2, 12.8).
+- (4) S4, 22fd1031. Each CPU worker has a host share; its batch past it stops inside the worker (`HostMemoryError`,
+  raised in the main thread by the sampler's signal, read every `HOST_CAP_SAMPLE_S` = 1 s: one `smaps_rollup` read took
+  12–53 ms in a worker of 2.4 GB at a load of 35) and is spoken again after the others at the CPU's levels, on the
+  CPU; the GPU's levels go first. The worker gives the heap's free pages back after each batch (`malloc_trim`). The
+  fit counts a CPU worker at what it holds between batches and refuses only where the last level cannot hold the CPU
+  profile's host peak × its margin. Tests as the GPU's levels; review: one S2 fixed (the sampler's own period), the
+  second round clean.
+- The full ts suite at 22fd1031: 2,132 passed, 1 skipped, 2 failed — stage C's pinned digests of D149
+  (`test_post_generalised`: "round real" and the batch scenario), which hash the sentences' permitted records. d5cc5d6a
+  with the record cut alone gives the same two digests, so the change is item 99's shape only; repinned, 6c5269af.
+  My S6 check had compared against that cut tree and so did not see it.
+
+**D192 on `dev-multi-s6`** (the user's word of 2026-10-10 22:10, "现在实现"), 172bc07d. `--branching majority`: after
+the decision point and its 16 s point, the search goes on back within the same candidate points to the first point
+where more than half of the K continuations avoid the event (`continuations // 2 + 1`: 5 of 8; a go-around that avoids
+counts); the decision point is the majority point when it has that many, and gives one group; no majority point within
+the bound leaves the decision point's groups. The batch record under `majority` adds `group_kinds` (decision, fine,
+majority) and `majority_depths_s` ([span, depth] of each majority point found, the decision point included); backward's
+record unchanged. Checks: the search on trials of known counts (a majority point behind the decision point, where
+D182's B would be another point; the decision point as the majority point; none within the bound); the batch record of
+every branching; window_behaviour on MC6's windows against the S6 check's reference: the same behaviour (backward bit
+for bit). Review: no S1/S2. Not run on real windows with `majority`: no campaign without the user's word.
+The full ts suite at 172bc07d: 2,137 passed, 1 skipped.

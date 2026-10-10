@@ -76,10 +76,10 @@ the evidence is in §9.
 ### 0.3 Implementation
 
 Stage D's implementer keeps this table and its log, `readouts/2026-10-06_stage_d_implementation_log.md` (outline §5
-rule 10); its readings and requests go to `requests_from_d_to_designer.md`. State, 2026-10-09 (night): MC0–MC5 and
-MC11's D181 merged into `dev-two-tier`; MC6 stopped by the user in its round 0; D183, D186, D185 (post-training C27),
-MC12 (D182), the orders A–D of 2026-10-09 (D187), D188–D191 built on `dev-multi-control`, not merged; the campaign of
-requests item 90 (MC7) launched 2026-10-10 03:20 at e2b69736, 5 GPU speaking workers (log §21).
+rule 10); its readings and requests go to `requests_from_d_to_designer.md`. State, 2026-10-10 (night): everything up
+to D191, R69, R70 and D193 (1) (2) merged into `dev-two-tier` (88b5d671); MC6's second launch stopped by the user in
+round 5; its two arms (lr × 3, traffic only) done; D193 (3) (4) and D192 built on `dev-multi-s6`, not merged; nothing runs
+(log §22).
 
 | Milestone | State |
 |---|---|
@@ -89,16 +89,20 @@ requests item 90 (MC7) launched 2026-10-10 03:20 at e2b69736, 5 GPU speaking wor
 | MC4 | Committed 054727db, ac919f9c, 2b370d37, fccbab8d, 6cc49ad1; the smoke and its resume passed (log §7, §8, §11) |
 | MC5 | The memory measure (D179, D180): committed 48c21e50; measured once for MC6's settings, the GPU's profile `outputs/POOLED/multi/profile_mc6_gpu32_20261009` (log §14, §15) |
 | Frontend D177 (12), D178 (6) | `multi.census.judged_steps` 897e433f, `loop_positions` a332466a (log §13, §14) |
-| MC6 | Stopped by the user inside round 0 (2026-10-09 14:31, 134 of 224 batches); not resumed; `outputs/POOLED/multi/multi_train_20261009` kept as it was (log §15, §16) |
+| MC6 | First launch stopped by the user inside round 0 (2026-10-09 14:31, 134 of 224 batches), `outputs/POOLED/multi/multi_train_20261009` kept as it was (log §15, §16). Second launch (`multi_train_20261010`, 2026-10-10 03:20, e2b69736 then c7c35b67; backward, merged): rounds 0–4 landed 82.1–82.9 % against the start's 81.5 %, stopped by the user in round 5 (92 of 217 batches), not resumed; its arms lr × 3 (`multi_train_lr3_20261010`, 80.4 % after 2 rounds) and traffic only (`multi_train_traffic_only_20261010`, 82.4 / 82.5 %) (log §22) |
 | MC11 (D181) | Merged: 55 (92341758), 58–60 (37526695), 56 `multi_speed` (a8df27f7); item 56 measured on the GPU (log §16) |
-| MC11 (D183, D186) | On `dev-multi-control`: 69 (0fa9df2e), D183 (317979f9; its copy allocated once, order B, 64e62b4e), D186 (1) (ab6b2e8e), (2) (3) (ad950c8a; the fast forms replace the old code, order A, ae4249fd); the behaviour check `window_behaviour` (cfe5da0f); every change the same on stage C's and D's fixed windows and in prior_behaviour; the CPU batch 86: 189 → 130 s (log §17) |
-| Post-training C27 (D185) | On `dev-multi-control`: 33e24bbe; the resume through the speaking workers (order C, 646ffb3a) (log §17) |
-| MC12 (D182) | On `dev-multi-control`: de0711aa; the grid the same on stage C's and D's fixed windows; the GPU measures of grid against backward wait for the user's word (log §17) |
-| MC12 (D188) | On `dev-multi-control`: (1) the searches stepped together, efef5c4d (against the code before on MC6's batches 0, 23, 86: every group and continuation bit for bit on the CPU); (2) the speaking workers' allocator, c024a333 (the group files the same with and without it) (log §19) |
-| MC11 (D189) | On `dev-multi-control`: (0)–(2) ceccd417, (3) 9c2161fa; window_behaviour on stage C's and D's windows and prior_behaviour the same bit for bit; the profile at §18's settings, `outputs/POOLED/multi/profile_d189_20261009`: batches 0 / 23 / 86 in 55 / 65 / 61 s (§18: 112 / 117 / 81 s), a worker's GPU peak 2.21 GiB: 2 workers fit (log §19) |
-| MC11 (D190) | On `dev-multi-control`: (1) the joint loop's room to its next rebuild, ada6a79d (bit for bit: window_behaviour on stage C's and D's windows, prior_behaviour, MC6's backward batches); (2) the copies of a point hold their front once, 7893d787 (the stage C frontend fixtures 82dd7695), `front_attention` `copied` (the default, bit for bit) or `merged` (D181 (57)'s bound: the words of 1 of 1,600 continuations differ); the profile at §18's settings, `outputs/POOLED/multi/profile_d190_{copied,merged}_20261010`: a worker's GPU peak 1.53 / 1.33 GiB, 3 workers fit (log §20) |
-| MC11 (D191) | On `dev-multi-control`: 5b4cd739 (workers on the GPU and the CPU, each batch's device by a rule; the default bit for bit), e2b69736 (a GPU batch past its worker's share spoken again after the others at fewer at once, the user's word); a CPU worker's profile `outputs/POOLED/multi/profile_d191_cpu_20261010`; the full suite 2,113 passed (log §21) |
-| MC7 (requests item 90) | Launched 2026-10-10 03:20 from `.claude/worktrees/run-mc7` at e2b69736: MC6's start and settings, backward, merged, 5 GPU workers, `outputs/POOLED/multi/multi_train_20261010` (log §21) |
+| MC11 (D183, D186) | Merged (88b5d671): 69 (0fa9df2e), D183 (317979f9; its copy allocated once, order B, 64e62b4e), D186 (1) (ab6b2e8e), (2) (3) (ad950c8a; the fast forms replace the old code, order A, ae4249fd); the behaviour check `window_behaviour` (cfe5da0f); every change the same on stage C's and D's fixed windows and in prior_behaviour; the CPU batch 86: 189 → 130 s (log §17) |
+| Post-training C27 (D185) | Merged (88b5d671): 33e24bbe; the resume through the speaking workers (order C, 646ffb3a) (log §17) |
+| MC12 (D182) | Merged (88b5d671): de0711aa; the grid the same on stage C's and D's fixed windows; the GPU measures of grid against backward wait for the user's word (log §17) |
+| MC12 (D188) | Merged (88b5d671): (1) the searches stepped together, efef5c4d (against the code before on MC6's batches 0, 23, 86: every group and continuation bit for bit on the CPU); (2) the speaking workers' allocator, c024a333 (the group files the same with and without it) (log §19) |
+| MC11 (D189) | Merged (88b5d671): (0)–(2) ceccd417, (3) 9c2161fa; window_behaviour on stage C's and D's windows and prior_behaviour the same bit for bit; the profile at §18's settings, `outputs/POOLED/multi/profile_d189_20261009`: batches 0 / 23 / 86 in 55 / 65 / 61 s (§18: 112 / 117 / 81 s), a worker's GPU peak 2.21 GiB: 2 workers fit (log §19) |
+| MC11 (D190) | Merged (88b5d671): (1) the joint loop's room to its next rebuild, ada6a79d (bit for bit: window_behaviour on stage C's and D's windows, prior_behaviour, MC6's backward batches); (2) the copies of a point hold their front once, 7893d787 (the stage C frontend fixtures 82dd7695), `front_attention` `copied` (the default, bit for bit) or `merged` (D181 (57)'s bound: the words of 1 of 1,600 continuations differ); the profile at §18's settings, `outputs/POOLED/multi/profile_d190_{copied,merged}_20261010`: a worker's GPU peak 1.53 / 1.33 GiB, 3 workers fit (log §20) |
+| MC11 (D191) | Merged (88b5d671): 5b4cd739 (workers on the GPU and the CPU, each batch's device by a rule; the default bit for bit), e2b69736 (a GPU batch past its worker's share spoken again after the others at fewer at once, the user's word); a CPU worker's profile `outputs/POOLED/multi/profile_d191_cpu_20261010`; the full suite 2,113 passed (log §21) |
+| MC11 (R69, R70) | Merged (88b5d671): `multi_compare` 35a6e072, `pass_gradients` a23a49d7, a2f51add; read on MC6's round 5 (log §22) |
+| MC11 (D193 (1) (2)) | Merged (88b5d671): S1 2961b99a, S2 88a3990e (bit for bit); S1's check on the GPU on MC6's batches 0 / 23 / 86: the same groups, words and ends, states within 2.2e-8 m; batch 86 on the GPU 53.9 → 48.8 s with the executor on the CPU (log §22) |
+| MC11 (D193 (3)) | On `dev-multi-s6`: 9d6886ec; window_behaviour on stage C's and D's windows and prior_behaviour the same bit for bit; batch 86 on the CPU 68.1 → 51.0 s, on the GPU 62.1 → 53.9 s; each flight's own permitted record (requests item 99) (log §22) |
+| MC11 (D193 (4)) | On `dev-multi-s6`: 22fd1031; a CPU batch past its host share spoken again at the CPU's levels (log §22) |
+| MC12 (D192) | On `dev-multi-s6`: 172bc07d, `--branching majority`; backward the same behaviour on MC6's windows; not run on real windows (log §22, requests item 103) |
 | MC8–MC10 | Not started |
 
 ### 0.4 Plan
