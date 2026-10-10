@@ -397,3 +397,31 @@ def test_loops_flown_together_move_each_parts_rows_and_pad_a_copys_narrower_rows
     assert not ticks[0].present[0, 0] and ticks[0].present[1, 0] and ticks[0].time_s[1, 0] == 6.0
     assert ticks[2].time_s[0, 0] == 2.0 and ticks[2].valid[0].tolist() == [True, True, False]
     assert ticks[2].candidates[0, 0, 2].tolist() == [0.0] * 7 and ticks[2].time_s[1, 0] == 8.0
+
+
+def test_a_loop_whose_said_flights_left_keeps_a_row_of_records_each_tick_and_goes_with_others(tmp_path, monkeypatch):
+    """S6 with join ticks: flight 1 joins inside flight 0's observed rows; flight 0 ends and leaves at a rebuild
+    (`SpeakingLoop.together`); at the next tick no flight is said. The speaker keeps a row of records for that tick (said
+    by none), so the loop goes with others again (MC A's batch of 2026-10-11 stopped here), and flight 1 says what it
+    says alone."""
+    from ts_transformer.experiments.prior_speaking_loop import SpeakingLoop as Loops
+
+    speaking, _, _ = _setup(tmp_path, monkeypatch)
+    keys = KEYS[:2]
+    sources = _sources(keys)
+    loop = speaking(np.array([0, 2]), keys)
+    while loop.roles()[0] != SAID:
+        _fly(loop, sources, steps=1)
+    assert loop.roles().tolist() == [SAID, OBSERVED]
+    _fly(loop, sources, steps=1)                                    # flight 0 said once
+    assert loop.roles().tolist() == [SAID, OBSERVED]
+    loop.end(np.array([True, False]))
+    joint = Loops.together([(loop, [0, 1])], CPU, None)
+    assert 0 in joint.left and joint.inside.tolist() == [1]
+    _fly(joint, sources, steps=1)
+    assert not joint.speaker.said_rows[-1].any()
+    assert len(joint.speaker.said_rows) == joint.t - joint.start
+    again = _fly(Loops.together([(joint, [0, 1])], CPU, None), sources)       # a window goes whole, its left flight too
+    alone = _fly(speaking(None, keys[1:]), _sources(keys[1:]))
+    assert np.array_equal(again.said(1), alone.said(0))
+    assert np.allclose(again.states(1), alone.states(0), rtol=0.0, atol=STATE_BOUND_M)

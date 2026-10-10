@@ -36,8 +36,10 @@ each in that order along its own rows: the network runs once on the whole row; a
 the cache as not present (`Past.present` false: no later row reads it) and changes nothing of it; an observed one's
 as `observe` writes it; a said one's words are drawn as `speak` draws them, with its numbers and masks. The mark of the
 first predicted step is each aircraft's own. The records of a row (``forbidden`` … ``drawn_probability``) are kept for
-every row in which some aircraft is said, ``[B, …]`` each, with ``said_rows`` the aircraft said in it; `permitted`
-gives each aircraft its own said rows. `observe` and `speak` are the forms of a row in which every aircraft has one role
+every row from the first in which some aircraft is said, ``[B, …]`` each, with ``said_rows`` the aircraft said in it:
+also for a later row in which no aircraft is said (multi-aircraft control S6: the aircraft said have left, the others
+are absent or observed), so that a loop keeps one row of records for each tick from its first predicted step on
+(`Speaker.together` moves the rows by ticks); `permitted` gives each aircraft its own said rows. `observe` and `speak` are the forms of a row in which every aircraft has one role
 (`speak` is `say` with every aircraft said).
 """
 
@@ -384,7 +386,7 @@ class Speaker:
         self._last_s = np.where(present, times[:, 0], self._last_s)
         self._role = roles.astype(np.int64)
         self._go_arounds = self._go_arounds + (said[:, RUNWAY] == RUNWAY_GO_AROUND)
-        if not said_now.any():
+        if not said_now.any() and not self.said_rows:
             return said
         for column, value in enumerate(forbidden_row):
             self.forbidden[column].append(value)
