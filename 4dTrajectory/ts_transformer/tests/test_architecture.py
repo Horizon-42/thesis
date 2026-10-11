@@ -1116,7 +1116,7 @@ POST_INTERFACE = {
     "post.branches": {"first_numbers", "continuation_numbers", "branch_points", "Group", "Sentence", "samples",
                       "BRANCH_EVERY_S", "CONTINUATIONS"},
     "post.loss": {"Samples", "surrogate", "pull_to_base", "data_term", "update_step", "update_loss", "one_pass",
-                  "passes"},
+                  "passes", "DATA_WEIGHT"},                                    # D194 (1): `update_step`'s default
 }
 
 
