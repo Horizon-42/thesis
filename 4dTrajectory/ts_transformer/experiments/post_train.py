@@ -766,7 +766,10 @@ class Speakers:
     one level's budget goes to the next): the batches that need the most memory are spoken with fewer beside them. A
     batch's words depend only on its own inputs and its device's kind, so the round is the same. A CPU batch past its
     worker's host share (``host_budget``; `HostMemoryError`, D193 (4)) goes to the CPU's levels (``cpu_deferred``) in
-    the same way, still on the CPU; the GPU's levels are spoken first, then the CPU's."""
+    the same way, still on the CPU; the GPU's levels are spoken first, then the CPU's. A CPU batch past the CPU's last
+    level is spoken again once more on the speak device, at its last level (the user, 2026-10-11: one batch must not stop
+    the campaign); its record holds that device. Only a batch past that level too fails the round. Whether a batch goes
+    there depends on its sampled host peak, so such a batch's device can differ between two runs of a round."""
 
     def __init__(self, context: Context, settings: Settings, workers: int, device: torch.device,
                  stage: Stage = STAGE_C, gpu_budget: int | None = None, cpu_workers: int = 0,
@@ -828,10 +831,11 @@ class Speakers:
         state = directory / "speaking_model.pt"
         torch.save(model.state_dict(), state)
 
-        def submit(k: int, budget: int | None = None) -> Any:
-            return self.pools[self._kind(k)].submit(_speak, round_, str(state), str(directory), k, list(places[k]),
-                                                    [self.stage.record(windows[i]) for i in places[k]], dict(launch),
-                                                    budget)
+        def submit(k: int, budget: int | None = None, kind: str | None = None) -> Any:
+            return self.pools[kind or self._kind(k)].submit(_speak, round_, str(state), str(directory), k,
+                                                            list(places[k]),
+                                                            [self.stage.record(windows[i]) for i in places[k]],
+                                                            dict(launch), budget)
 
         return self._results(state, list(batches), submit, self._kind)
 
@@ -846,7 +850,7 @@ class Speakers:
             torch.save(model.state_dict(), state)
             pool = self.pools[self.device.type]                   # every round's readout on one device (D191)
 
-            def submit(k: int, budget: int | None = None) -> Any:
+            def submit(k: int, budget: int | None = None, kind: str | None = None) -> Any:
                 return pool.submit(_read, self.readings, str(state), split, list(places[k]),
                                    [self.stage.record(windows[i]) for i in places[k]], draw, budget)
 
@@ -871,8 +875,9 @@ class Speakers:
                  ) -> list[Any]:
         """Each batch's result (``keys``, submitted by ``submit``; ``kind_of`` gives its device's kind), in order: a
         batch past its worker's share (`PAST_SHARE`) spoken again after the others at its device's levels of
-        `deferred` (class docstring), each level's batches in order, at most its number at once; past the last level,
-        its error fails the round. On a failure the tasks not started are cancelled; the model file ``state`` goes once
+        `deferred` (class docstring), each level's batches in order, at most its number at once; a CPU batch past the
+        CPU's last level then once more on the speak device at its last level (``submit``'s ``kind``); past that, its
+        error fails the round. On a failure the tasks not started are cancelled; the model file ``state`` goes once
         every running task has ended."""
         futures = [submit(k) for k in keys]
         submitted = list(futures)
@@ -886,26 +891,39 @@ class Speakers:
                     if not self.deferred[kind_of(k)]:
                         raise
                     pending.setdefault(kind_of(k), []).append(k)
+            failed: BaseException | None = None
+
+            def level(past: list[int], at_once: int, budget: int, kind: str | None = None) -> list[int]:
+                """The batches ``past`` spoken again, at most ``at_once`` at a time with ``budget`` each (on the
+                device of ``kind``; None: their own); those past it again."""
+                nonlocal failed
+                queue, running, again = sorted(past), {}, []
+                while queue or running:
+                    while queue and len(running) < at_once:
+                        k = queue.pop(0)
+                        future = submit(k, budget, kind)
+                        submitted.append(future)
+                        running[future] = k
+                    done, _ = wait(running, return_when=FIRST_COMPLETED)
+                    for future in sorted(done, key=running.get):
+                        k = running.pop(future)
+                        try:
+                            out[k] = future.result()
+                        except PAST_SHARE as error:
+                            again.append(k)
+                            failed = error
+                return again
+
             for kind in sorted(pending, key=lambda kind: kind == "cpu"):       # the peaks last (D191), the GPU's first
                 past = pending[kind]
                 for at_once, budget in self.deferred[kind]:                    # fewer at once
-                    if not past:
-                        break
-                    queue, running, past = sorted(past), {}, []
-                    while queue or running:
-                        while queue and len(running) < at_once:
-                            k = queue.pop(0)
-                            future = submit(k, budget)
-                            submitted.append(future)
-                            running[future] = k
-                        done, _ = wait(running, return_when=FIRST_COMPLETED)
-                        for future in sorted(done, key=running.get):
-                            k = running.pop(future)
-                            try:
-                                out[k] = future.result()
-                            except PAST_SHARE as error:
-                                past.append(k)
-                                failed = error
+                    if past:
+                        past = level(past, at_once, budget)
+                speak_kind = self.device.type
+                if past and kind == "cpu" and speak_kind != "cpu" and self.deferred[speak_kind]:
+                    print(f"batches {sorted(past)}: past the CPU's last level, spoken again on {speak_kind} at its "
+                          f"last level", flush=True)
+                    past = level(past, *self.deferred[speak_kind][-1], kind=speak_kind)    # on the speak device
                 if past:
                     raise type(failed)(f"batches {sorted(past)}: past the last level's budget (D191)")
             return [out[k] for k in keys]

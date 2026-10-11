@@ -766,24 +766,34 @@ def test_a_batch_past_its_workers_share_is_spoken_again_after_the_others_at_fewe
 def test_a_cpu_batch_past_its_host_share_is_spoken_again_at_the_cpus_levels_on_the_cpu(tmp_path):
     """D193 (4): a CPU batch past its worker's host share (`HostMemoryError`) is spoken again after the others at the
     CPU's levels, by the CPU's workers (a batch keeps its rule's device), at most a level's number at once; the GPU's
-    batches past their share at the GPU's levels; past the CPU's last level, its error fails the round."""
+    batches past their share at the GPU's levels; past the CPU's last level, once more on the GPU at the GPU's last level
+    (the user, 2026-10-11: one batch must not stop the campaign); past that too, its error fails the round."""
     gib = 1 << 30
-    gpu_fails, cpu_fails = {3: (None,)}, {0: (None,), 5: (None, 3 * gib), 6: (None,)}
+    gpu_fails, cpu_fails = {3: (None, 2 * gib)}, {0: (None,), 5: (None, 3 * gib), 6: (None,)}
     speakers = object.__new__(Speakers)
     speakers.pools = {"cuda": _LevelPool(gpu_fails, torch.OutOfMemoryError),
                       "cpu": _LevelPool(cpu_fails, post_train.HostMemoryError)}
     speakers.device, speakers.cpu_batches, speakers.cpu_period = torch.device("cuda"), 2, 5    # the CPU: 0, 1, 5, 6
-    speakers.deferred = {"cuda": [(1, 4 * gib)], "cpu": [(2, 3 * gib), (1, 5 * gib)]}
+    speakers.deferred = {"cuda": [(2, 2 * gib), (1, 4 * gib)], "cpu": [(2, 3 * gib), (1, 5 * gib)]}
     speakers.stage, speakers.readings = SimpleNamespace(record=lambda w: w), 0
     windows, places = list(range(7)), [[k] for k in range(7)]
     assert speakers.speak(torch.nn.Linear(1, 1), windows, places, 0, tmp_path, list(range(7)), {}) == list(range(7))
     gpu, cpu = speakers.pools["cuda"], speakers.pools["cpu"]
-    assert gpu.asked == [(2, None), (3, None), (4, None), (3, 4 * gib)]
+    assert gpu.asked == [(2, None), (3, None), (4, None), (3, 2 * gib), (3, 4 * gib)]
     assert cpu.asked == [(0, None), (1, None), (5, None), (6, None), (0, 3 * gib), (5, 3 * gib), (6, 3 * gib),
                          (5, 5 * gib)]
     assert cpu.most[3 * gib] == 2 and cpu.most[5 * gib] == 1
     assert gpu.at[(3, 4 * gib)][1] < min(cpu.at[key][0] for key in cpu.asked[4:])     # the GPU's levels first
-    cpu_fails[5] = (None, 3 * gib, 5 * gib)
+    cpu_fails[5] = (None, 3 * gib, 5 * gib)                             # past the CPU's last level: on the GPU
+    del gpu.asked[:], cpu.asked[:]
+    assert speakers.speak(torch.nn.Linear(1, 1), windows, places, 0, tmp_path, list(range(7)), {}) == list(range(7))
+    assert gpu.asked == [(2, None), (3, None), (4, None), (3, 2 * gib), (3, 4 * gib), (5, 4 * gib)]  # its last level
+    assert cpu.asked[-1] == (5, 5 * gib) and gpu.at[(5, 4 * gib)][0] > cpu.at[(5, 5 * gib)][1]
+    gpu_fails[5] = (4 * gib,)                                           # past the GPU's last level too
+    with pytest.raises(torch.OutOfMemoryError, match=r"batches \[5\]: past the last level"):
+        speakers.speak(torch.nn.Linear(1, 1), windows, places, 0, tmp_path, list(range(7)), {})
+    del gpu_fails[3]
+    speakers.deferred["cuda"] = []                                      # no GPU level: no second try
     with pytest.raises(post_train.HostMemoryError, match=r"batches \[5\]: past the last level"):
         speakers.speak(torch.nn.Linear(1, 1), windows, places, 0, tmp_path, list(range(7)), {})
 
