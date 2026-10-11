@@ -68,7 +68,7 @@ def test_a_read_is_the_rounds_readout_a_line_a_window_and_sealed(read_world, tmp
     assert lister.main(["--multi", str(read), "--outcomes", *given, "--out", str(tmp_path / "list")]) == 0
     stage = stage_d()
     taken = listed_windows(argparse.ArgumentParser(), STAGE_D, read_window_list(tmp_path / "list" / "list.json"),
-                           "select", stage.selection(context, settings), STAGE_D.selection_fields(settings))
+                           "select", stage.selection(context, settings, "select"), STAGE_D.selection_fields(settings))
     assert [place for place, _ in taken] == list(range(len(lines)))
 
 
