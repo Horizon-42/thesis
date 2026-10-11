@@ -28,10 +28,17 @@ words the caller permits there (all, when not given), make the row pass `apply` 
 check with the later columns "unchanged" would refuse good words (a level below the aircraft, which a descent class in
 the angle column makes grammatical), and the permitted words of the later columns make sure that a row never reaches a
 column with no permitted word. It is `apply` itself: `_rules` is written once over operations that take a single row
-(`_ONE`, for `apply`) or numpy arrays (`_MANY`), and the mask evaluates it at once on every completion of the later
-columns, for a batch of aircraft. A heading or a speed word enters the rules only as said or "unchanged" (rule 1), so
-each of those columns is evaluated at "unchanged" and at one said word that stands for every said word — the tests
-check the mask against every completion through `apply`.
+(`_ONE`, for `apply`) or numpy arrays (`_MANY`), and the mask evaluates it at once, for a batch of aircraft, on every
+completion of the later columns that can change the answer.
+
+**The property the mask rests on** (multi-aircraft control D186 (2), vocabulary §6 item 2): a heading or a speed word
+enters the rules only through rule 1 — at the first step every column says a word; after it, any word passes. So a
+heading or speed column asked is evaluated at "unchanged" and at one said word that stands for every said word; and a
+later heading or speed column is no column of the completions: it adds one condition for each aircraft — some
+permitted word of it, a said one at the first step — and a said word stands in for it in the rules. The rules are then
+evaluated on the completions of the later runway, altitude and angle columns only. The tests compare the mask with
+every completion through `apply` (D62's definition): a change of rules 1–6 that reads a heading or speed word anywhere
+else breaks the property, those tests fail, and the mask changes with the rules.
 """
 
 from __future__ import annotations
@@ -259,7 +266,9 @@ def column_mask(in_force: Sequence[InForce | None], said: np.ndarray, column: in
     aircraft's airport does not have is never permitted): whether each word of ``column`` can be said after the words
     in force ``in_force`` (None: the first step) and the earlier columns' words ``said`` (``[B, column]``), to an
     aircraft ``height_m`` above E — whether some words of the later columns, each among ``permitted[c]`` (``[B, words of
-    column c]``, `column_words` order; every word where not given), make the row pass `apply` (module docstring)."""
+    column c]``, `column_words` order; every word where not given), make the row pass `apply` (module docstring). The
+    later heading and speed columns are each one condition of an aircraft (``each_said_word_possible``), the later
+    runway, altitude and angle columns the completions the rules are evaluated on (module docstring: the property)."""
     batch = len(in_force)
     said = np.asarray(said, dtype=np.int64).reshape(batch, column)
     if column > ALTITUDE:
@@ -269,46 +278,47 @@ def column_mask(in_force: Sequence[InForce | None], said: np.ndarray, column: in
     if set(permitted) - set(later):
         raise ValueError(f"permitted words are for the later columns {later}, got {sorted(permitted)}")
     most = int(max(n_candidates))
-    width = 2 + len(later)                                     # the batch, the column asked, then each later column
-    axis = {c: 2 + k for k, c in enumerate(later)}
+    first = np.array([f is None for f in in_force])
+    completed = [c for c in later if c not in (HEADING, SPEED)]   # the columns whose completions the rules read
+    width = 2 + len(completed)                                 # the batch, the column asked, then each completed column
+    axis = {c: 2 + k for k, c in enumerate(completed)}
 
     def along(values: np.ndarray, dim: int) -> np.ndarray:
         shape = [1] * width
         shape[0], shape[dim] = values.shape[0], values.shape[1]
         return values.reshape(shape)
 
-    def reduced(c: int) -> bool:                               # read only as said or "unchanged" (module docstring)
-        return c in (HEADING, SPEED)
+    def per_aircraft(values: Any, dtype: Any) -> np.ndarray:
+        return np.asarray(values, dtype=dtype).reshape((batch,) + (1,) * (width - 1))
 
     asked = column_words(column, words, most)
-    values = np.array([[UNCHANGED, 0]]) if reduced(column) else asked[None, :]
+    said_or_unchanged = column in (HEADING, SPEED)        # asked at "unchanged" and one said word (the property)
+    values = np.array([[UNCHANGED, 0]]) if said_or_unchanged else asked[None, :]
     row: dict[int, np.ndarray] = {column: along(np.repeat(values, batch, axis=0), 1)}
-    allowed = np.ones((batch,) + (1,) * (width - 1), dtype=bool)
     for c in range(column):
-        row[c] = said[:, c].reshape((batch,) + (1,) * (width - 1))
+        row[c] = per_aircraft(said[:, c], np.int64)
+    allowed = np.ones((batch,) + (1,) * (width - 1), dtype=bool)
+    # each aircraft: every later heading and speed column has a permitted word that rule 1 lets it say
+    each_said_word_possible = np.ones(batch, dtype=bool)
     for c in later:
         full = column_words(c, words, most)
         given = np.asarray(permitted.get(c, np.ones((batch, len(full)), dtype=bool)), dtype=bool)
         if given.shape != (batch, len(full)):
             raise ValueError(f"the permitted words of column {COLUMNS[c]} are [{batch}, {len(full)}], got {given.shape}")
-        if reduced(c):
-            values = np.tile([UNCHANGED, 0], (batch, 1))
-            given = np.stack([given[:, 0], given[:, 1:].any(axis=1)], axis=1)
+        if c in axis:
+            row[c] = along(np.tile(full, (batch, 1)), axis[c])
+            allowed = allowed & along(given, axis[c])
         else:
-            values = np.tile(full, (batch, 1))
-        row[c] = along(values, axis[c])
-        allowed = allowed & along(given, axis[c])
+            some_said = given[:, 1:].any(axis=1)
+            each_said_word_possible &= np.where(first, some_said, given[:, 0] | some_said)
+            row[c] = per_aircraft(np.zeros(batch), np.int64)  # a said word stands in: rule 1 was read just above
     before = [InForce(UNCHANGED, False, UNCHANGED, UNCHANGED, UNCHANGED, UNCHANGED) if f is None else f for f in in_force]
-
-    def per_aircraft(values: list[Any], dtype: Any) -> np.ndarray:
-        return np.asarray(values, dtype=dtype).reshape((batch,) + (1,) * (width - 1))
-
-    code = _rules(_MANY, words, per_aircraft([f is None for f in in_force], bool),
+    code = _rules(_MANY, words, per_aircraft(first, bool),
                   per_aircraft([f.runway for f in before], np.int64), per_aircraft([f.go_around for f in before], bool),
                   per_aircraft([f.altitude for f in before], np.int64), per_aircraft([f.angle for f in before], np.int64),
                   *(row[c] for c in range(len(COLUMNS))), per_aircraft(height_m, np.float64),
                   per_aircraft(list(n_candidates), np.int64))[0]
-    passes = ((code == 0) & allowed).any(axis=tuple(range(2, width)))
-    if reduced(column):
+    passes = ((code == 0) & allowed).any(axis=tuple(range(2, width))) & each_said_word_possible[:, None]
+    if said_or_unchanged:                                       # every said word answers as the one evaluated
         return np.concatenate([passes[:, :1], np.repeat(passes[:, 1:], len(asked) - 1, axis=1)], axis=1)
     return passes

@@ -63,7 +63,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Any, Sequence
 
 import numpy as np
 from geokit import FT_M, NM_M
@@ -116,6 +116,29 @@ class Traffic:
             raise ValueError("a track less its course lies in [-180, 180] degrees")
         if np.any(np.asarray(self.established, dtype=bool) & ~said):
             raise ValueError("an established aircraft has a runway in force")
+
+    def take(self, index: Sequence[int]) -> Traffic:
+        """The aircraft ``index`` (places, in that order): each one's values, computed for it alone (multi-aircraft
+        control D189 (1): a scene seen from each of its aircraft is one scene reordered)."""
+        i = np.asarray(index, dtype=np.int64)
+        return Traffic(e_m=self.e_m[i], n_m=self.n_m[i], height_m=self.height_m[i],
+                       runway=tuple(self.runway[k] for k in i), along_m=self.along_m[i],
+                       track_minus_course_deg=self.track_minus_course_deg[i],
+                       right_of_course_m=self.right_of_course_m[i], established=np.asarray(self.established)[i],
+                       category=tuple(self.category[k] for k in i))
+
+    @staticmethod
+    def joined(parts: Sequence[Traffic]) -> Traffic:
+        """Several scenes' aircraft as one scene, in order (D189 (1): a scene with aircraft added, computed for them
+        alone)."""
+        def joined(name: str) -> Any:
+            if name in ("runway", "category"):
+                return tuple(v for part in parts for v in getattr(part, name))
+            return np.concatenate([np.asarray(getattr(part, name)) for part in parts])
+
+        return Traffic(**{name: joined(name) for name in ("e_m", "n_m", "height_m", "runway", "along_m",
+                                                          "track_minus_course_deg", "right_of_course_m", "established",
+                                                          "category")})
 
 
 @dataclass(frozen=True)

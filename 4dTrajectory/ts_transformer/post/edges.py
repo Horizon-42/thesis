@@ -36,6 +36,8 @@ predicted step, the commanded aircraft's from the row after its first predicted 
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 from geokit import NM_M
 
@@ -46,6 +48,7 @@ from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.prior.inputs import motion
 from ts_transformer.post.runways import approach_clock_m
 from ts_transformer.post.scene import AircraftAt
+from ts_transformer.post.traffic import scene_aircraft
 
 #: The name of this set of features: a changed feature is a new name (principle 8).
 EDGES_SCHEMA = "post-edges-v1"
@@ -67,73 +70,139 @@ def _scaled(distance_m) -> np.ndarray:
     return np.arcsinh(np.asarray(distance_m, dtype=np.float64) / SCALE_M)
 
 
+class Pairs:
+    """The features of a pair that read only its runways in force and its wake categories, each computed once (multi-
+    aircraft control D189 (1)): the runways' relation (`Separation.relation` reads the two runways) and the distance the
+    rules require, scaled (`Separation.distance_nm` reads the two runways and the two categories)."""
+
+    def __init__(self, separation: Separation) -> None:
+        self.separation = separation
+        self._relations: dict[tuple[str, str], str] = {}
+        self._required: dict[tuple[str, str | None, str, str | None], float] = {}
+
+    def relation(self, a: str, b: str) -> str:
+        if (a, b) not in self._relations:
+            self._relations[(a, b)] = self.separation.relation(a, b)
+        return self._relations[(a, b)]
+
+    def required(self, leader: str, leader_category: str | None, follower: str, follower_category: str | None) -> float:
+        """The feature ``required`` of a leader and a follower (module docstring)."""
+        key = (leader, leader_category, follower, follower_category)
+        if key not in self._required:
+            self._required[key] = float(_scaled(self.separation.distance_nm(*key) * NM_M))
+        return self._required[key]
+
+
+def clocks(aircraft: AircraftAt, geometry: AirportGeometry, separation: Separation) -> np.ndarray:
+    """``[N]``: each aircraft's position on the approach clock of its R (`runways.approach_clock_m`), NaN without one in
+    force (the scene's ``along_m``, `post.traffic.traffic`)."""
+    out = np.full(len(aircraft), np.nan)
+    for k in np.flatnonzero(aircraft.runway_index >= 0):
+        out[k] = float(approach_clock_m(separation, geometry, int(aircraft.runway_index[k]), aircraft.at[k, 0],
+                                        aircraft.at[k, 1]))
+    return out
+
+
 def tokens(own: AircraftAt, others: AircraftAt, geometry: AirportGeometry, separation: Separation,
            step_s: float) -> np.ndarray:
-    """``[len(others), len(TOKEN_FEATURES)]`` float32: the token of each other aircraft at one step (module docstring);
-    ``own`` the commanded aircraft (one)."""
+    """``[len(others), len(TOKEN_FEATURES)]`` float32: the token of each other aircraft at one step (module docstring).
+    ``own`` is the commanded aircraft (one)."""
     if len(own) != 1:
         raise ValueError(f"the tokens are read from one commanded aircraft, not {len(own)}")
+    (out,) = each_tokens(own, others, geometry, Pairs(separation), step_s)
+    return out
+
+
+def each_tokens(owns: AircraftAt, others: AircraftAt, geometry: AirportGeometry, pairs: Pairs,
+                step_s: float) -> list[np.ndarray]:
+    """The tokens of ``others`` as each aircraft of ``owns`` reads them alone, at one step: for each own aircraft,
+    `tokens` of it and ``others``, bit for bit (multi-aircraft control S2). The own aircraft do not read each other.
+    The motions and approach clocks are calculated one time for all the aircraft."""
+    count = len(owns)
+    both = scene_aircraft(owns, others)
+    views = np.tile(np.arange(count, len(both), dtype=np.int64), (count, 1))
+    return window_tokens(both, count, geometry, pairs, motion(both.at, both.before, both.known, step_s),
+                         clocks(both, geometry, pairs.separation), views=views)
+
+
+def window_tokens(aircraft: AircraftAt, commanded: int, geometry: AirportGeometry, pairs: Pairs, moving: Any,
+                  clock_m: np.ndarray, views: np.ndarray | None = None) -> list[np.ndarray]:
+    """The tokens of every pair of a window at one step (multi-aircraft control D189 (3)): of each of the first
+    ``commanded`` aircraft of ``aircraft`` (a window's set: its commanded aircraft, then its recorded ones), the token
+    of every other aircraft in its view's order (the recorded ones, then the other commanded ones), ``[len(aircraft) -
+    1, len(TOKEN_FEATURES)]`` float32 each; from the set's motions (``moving``, `prior.inputs.motion`'s) and approach
+    clocks (`clocks`), computed once for the window, and the pairs' runway features from ``pairs``. Each feature is
+    computed over every pair at once, elementwise, but the two products of a pair's offset with the commanded
+    aircraft's frame, one matrix product for each commanded aircraft (a stacked product could round another way): each
+    token's numbers are those of the aircraft alone. ``views``: ``[commanded, m]``, the other aircraft that each
+    commanded aircraft reads, in order (`each_tokens`). None: the view above."""
+    count = len(aircraft)
     index = {name: k for k, name in enumerate(TOKEN_FEATURES)}
-    out = np.zeros((len(others), len(TOKEN_FEATURES)), dtype=np.float64)
-    if not len(others):
-        return out.astype(np.float32)
-    mine, theirs = motion(own.at, own.before, own.known, step_s), motion(others.at, others.before, others.known, step_s)
-    velocity_i = np.array([mine.east_mps[0], mine.north_mps[0]])
-    velocity_j = np.stack((theirs.east_mps, theirs.north_mps), axis=1)
-    framed = bool(mine.known[0]) and mine.ground_speed_mps[0] > 0.0
-    forward = velocity_i / mine.ground_speed_mps[0] if framed else np.zeros(2)
-    left = np.array([-forward[1], forward[0]])
-    offset = others.at[:, :2] - own.at[0, :2]
-    dh = others.at[:, 2] - own.at[0, 2]
-    out[:, index["front"]] = _scaled(offset @ forward)
-    out[:, index["left"]] = _scaled(offset @ left)
-    out[:, index["height"]] = dh / HEIGHT_SCALE_M
-    known = mine.known[0] & theirs.known
-    relative = velocity_j - velocity_i
-    distance = np.hypot(offset[:, 0], offset[:, 1])
-    approach = -(offset * relative).sum(axis=1)
+    # each commanded aircraft's other aircraft, in its view's order
+    others = (np.array([[*range(commanded, count), *(c for c in range(commanded) if c != i)]
+                        for i in range(commanded)], dtype=np.int64).reshape(commanded, count - 1)
+              if views is None else views)
+    out = np.zeros((commanded, others.shape[1], len(TOKEN_FEATURES)), dtype=np.float64)
+    if not others.shape[1]:
+        return list(out.astype(np.float32))
+    velocity = np.stack((moving.east_mps, moving.north_mps), axis=1)
+    ground = moving.ground_speed_mps
+    framed = moving.known[:commanded] & (ground[:commanded] > 0.0)
+    forward = np.zeros((commanded, 2))
+    forward[framed] = velocity[:commanded][framed] / ground[:commanded][framed, None]
+    left = np.stack((-forward[:, 1], forward[:, 0]), axis=1)
+    offset = aircraft.at[others, :2] - aircraft.at[:commanded, None, :2]
+    dh = aircraft.at[others, 2] - aircraft.at[:commanded, None, 2]
+    out[..., index["front"]] = _scaled(np.stack([offset[i] @ forward[i] for i in range(commanded)]))
+    out[..., index["left"]] = _scaled(np.stack([offset[i] @ left[i] for i in range(commanded)]))
+    out[..., index["height"]] = dh / HEIGHT_SCALE_M
+    known = moving.known[:commanded, None] & moving.known[others]
+    relative = velocity[others] - velocity[:commanded, None]
+    distance = np.hypot(offset[..., 0], offset[..., 1])
+    approach = -(offset * relative).sum(axis=-1)
     closing = np.divide(approach, distance, out=np.zeros_like(approach), where=distance > 0.0)
-    speed2 = (relative * relative).sum(axis=1)
+    speed2 = (relative * relative).sum(axis=-1)
     cpa = np.clip(np.divide(approach, speed2, out=np.full_like(approach, CPA_HORIZON_S), where=speed2 > 0.0),
                   0.0, CPA_HORIZON_S)
-    closest = offset + relative * cpa[:, None]
-    climb = theirs.vertical_rate_mps - mine.vertical_rate_mps[0]
-    out[:, index["closing"]] = np.where(known, closing / SPEED_SCALE_MPS, 0.0)
-    out[:, index["cpa_time"]] = np.where(known, cpa / CPA_HORIZON_S, 0.0)
-    out[:, index["cpa_horizontal"]] = np.where(known, _scaled(np.hypot(closest[:, 0], closest[:, 1])), 0.0)
-    out[:, index["cpa_vertical"]] = np.where(known, (dh + climb * cpa) / HEIGHT_SCALE_M, 0.0)
-    out[:, index["motion_unknown"]] = ~known
-    out[:, index["ground_speed"]] = theirs.ground_speed_mps / SPEED_SCALE_MPS
-    out[:, index["vertical_rate"]] = theirs.vertical_rate_mps / VERTICAL_RATE_SCALE_MPS
-    angle = np.radians(theirs.track_deg - mine.track_deg[0])
-    directed = theirs.known & framed
-    out[:, index["direction_sin"]] = np.where(directed, np.sin(angle), 0.0)
-    out[:, index["direction_cos"]] = np.where(directed, np.cos(angle), 0.0)
-    _runways(out, index, own, others, geometry, separation)
-    return out.astype(np.float32)
+    closest = offset + relative * cpa[..., None]
+    climb = moving.vertical_rate_mps[others] - moving.vertical_rate_mps[:commanded, None]
+    out[..., index["closing"]] = np.where(known, closing / SPEED_SCALE_MPS, 0.0)
+    out[..., index["cpa_time"]] = np.where(known, cpa / CPA_HORIZON_S, 0.0)
+    out[..., index["cpa_horizontal"]] = np.where(known, _scaled(np.hypot(closest[..., 0], closest[..., 1])), 0.0)
+    out[..., index["cpa_vertical"]] = np.where(known, (dh + climb * cpa) / HEIGHT_SCALE_M, 0.0)
+    out[..., index["motion_unknown"]] = ~known
+    out[..., index["ground_speed"]] = ground[others] / SPEED_SCALE_MPS
+    out[..., index["vertical_rate"]] = moving.vertical_rate_mps[others] / VERTICAL_RATE_SCALE_MPS
+    angle = np.radians(moving.track_deg[others] - moving.track_deg[:commanded, None])
+    directed = moving.known[others] & framed[:, None]
+    out[..., index["direction_sin"]] = np.where(directed, np.sin(angle), 0.0)
+    out[..., index["direction_cos"]] = np.where(directed, np.cos(angle), 0.0)
+    for i in range(commanded):
+        _runways(out[i], index, aircraft, i, others[i], geometry, pairs, clock_m)
+    return list(out.astype(np.float32))
 
 
-def _runways(out: np.ndarray, index: dict[str, int], own: AircraftAt, others: AircraftAt, geometry: AirportGeometry,
-             separation: Separation) -> None:
-    """The features that read the runways in force (module docstring), into ``out``."""
+def _runways(out: np.ndarray, index: dict[str, int], aircraft: AircraftAt, i: int, others: np.ndarray,
+             geometry: AirportGeometry, pairs: Pairs, clock_m: np.ndarray) -> None:
+    """The features that read the runways in force (module docstring) of aircraft ``i`` and its ``others`` (places in
+    ``aircraft``, ``clock_m`` their approach clocks), into ``out``."""
     out[:, index["clock_incomparable"]] = 1.0
-    r_i = int(own.runway_index[0])
+    r_i = int(aircraft.runway_index[i])
     if r_i < 0:
         return
-    ident_i = geometry.candidates[r_i].ident
-    along_i = float(approach_clock_m(separation, geometry, r_i, own.at[0, 0], own.at[0, 1]))
-    for k in np.flatnonzero(others.runway_index >= 0):
-        r_j = int(others.runway_index[k])
-        ident_j = geometry.candidates[r_j].ident
-        relation = separation.relation(ident_i, ident_j)
+    ident_i, category_i = geometry.candidates[r_i].ident, aircraft.category[i]
+    along_i = clock_m[i]
+    for k in np.flatnonzero(aircraft.runway_index[others] >= 0):
+        j = int(others[k])
+        ident_j = geometry.candidates[int(aircraft.runway_index[j])].ident
+        relation = pairs.relation(ident_i, ident_j)
         out[k, index[relation]] = 1.0
         if relation == UNRELATED:
             continue
-        along = float(approach_clock_m(separation, geometry, r_j, others.at[k, 0], others.at[k, 1])) - along_i
+        along = clock_m[j] - along_i
         out[k, index["clock_incomparable"]] = 0.0
         out[k, index["clock_ahead"]] = _scaled(along)
         if along >= 0.0:            # the other aircraft leads
-            required = separation.distance_nm(ident_j, others.category[k], ident_i, own.category[0])
+            out[k, index["required"]] = pairs.required(ident_j, aircraft.category[j], ident_i, category_i)
         else:
-            required = separation.distance_nm(ident_i, own.category[0], ident_j, others.category[k])
-        out[k, index["required"]] = _scaled(required * NM_M)
+            out[k, index["required"]] = pairs.required(ident_i, category_i, ident_j, aircraft.category[j])

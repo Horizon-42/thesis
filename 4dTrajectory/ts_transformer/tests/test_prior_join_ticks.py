@@ -115,7 +115,7 @@ def _digest(loop: SpeakingLoop) -> str:
                      "words_in_force", "since", "targets"):
             out.update(np.ascontiguousarray(getattr(rows, name)).tobytes())
     out.update(np.stack(loop.speaker.drawn_probability).tobytes())
-    permitted = loop.permitted()
+    permitted = loop.speaker.permitted()             # the speaker's whole record, as it was pinned
     for mask in permitted.masks:
         out.update(mask.tobytes())
     out.update(permitted.time_s.tobytes())
@@ -170,7 +170,6 @@ def test_a_flight_that_joins_at_its_tick_says_and_flies_what_it_says_alone(tmp_p
     together = _fly(speaking(JOIN_TICKS), _sources(KEYS[:4]))
     drawn = np.stack(together.speaker.drawn_probability, axis=1)       # [B, rows of the batch]
     said_rows = np.stack(together.speaker.said_rows, axis=1)
-    records = together.permitted()
     for b, key in enumerate(KEYS[:4]):
         alone = _fly(speaking(None, (key,)), _sources((key,)))
         assert np.array_equal(together.said(b), alone.said(0))
@@ -181,10 +180,10 @@ def test_a_flight_that_joins_at_its_tick_says_and_flies_what_it_says_alone(tmp_p
         its_drawn = np.stack(alone.speaker.drawn_probability, axis=1)[0]
         rows = len(its_drawn)
         np.testing.assert_allclose(drawn[b, said_rows[b]][:rows], its_drawn, rtol=1e-5, atol=1e-7)
-        mine, its = records.select([b]), alone.permitted()
-        assert np.array_equal(mine.time_s[0, :rows], its.time_s[0])
+        mine, its = together.permitted([b])[0], alone.permitted([0])[0]       # each the flight's own record (S6)
+        assert np.array_equal(mine.time_s, its.time_s)
         for a, c in zip(mine.masks, its.masks):
-            assert np.array_equal(a[0, :rows, : c.shape[2]], c[0])
+            assert np.array_equal(a, c)
         (sentence,), (single,) = together.sentences("train")[b: b + 1], alone.sentences("train")
         assert sentence.rows == single.rows and np.array_equal(sentence.time_s, single.time_s)
         np.testing.assert_allclose(sentence.own, single.own, rtol=0.0, atol=1e-6)
@@ -319,7 +318,7 @@ def test_a_silent_flight_says_unchanged_with_probability_one_and_flies_its_words
     assert (drawn[silent_from:] == 1.0).all()
     sentence = loop.sentences("train")[1]
     with torch.no_grad():
-        log_p = masked_log_probability(model, collate([sentence], CPU), loop.permitted().select([1]))
+        log_p = masked_log_probability(model, collate([sentence], CPU), loop.permitted([1])[0])
     start = loop.start
     assert float(log_p[0, start + silent_from:].abs().max()) == 0.0
     alone = _fly(speaking(None, (KEYS[0],)), _sources((KEYS[0],)))
@@ -363,3 +362,66 @@ def test_a_row_refused_at_a_flights_first_predicted_step_leaves_the_loop_as_it_w
     never, refused = flown(False), flown(True)
     for b in range(4):
         assert np.array_equal(never.said(b), refused.said(b)) and np.array_equal(never.states(b), refused.states(b))
+
+
+def test_loops_flown_together_move_each_parts_rows_and_pad_a_copys_narrower_rows():
+    """D188: the records of the rows said (`Speaker.together`) and the inputs of every tick (`SpeakingLoop.together`)
+    of loops flown together: each part's rows moved by its shift (a row before its first: the fill, no row present), its
+    first rows left out below 0, and a row narrower than the widest (a copy's batch has fewer candidates than the batch
+    it was copied from) padded to it."""
+    from types import SimpleNamespace
+
+    from ts_transformer.experiments.prior_speaking_loop import _inputs_together
+    from ts_transformer.prior.batch import RowTensors
+    from ts_transformer.prior.speaker import _rows_together
+
+    wide = [np.full((2, 4), r + 1.0) for r in range(2)] + [np.full((2, 3), 3.0)]       # copied before its third row
+    other = [np.full((1, 4), 10.0 + r) for r in range(5)]
+    out = _rows_together([wide, other], [np.array([1]), np.array([0, 0])], [1, -1], -1.0)
+    assert len(out) == 4 and all(row.shape == (3, 4) for row in out)
+    assert out[0][0].tolist() == [-1.0] * 4 and out[1][0].tolist() == [1.0] * 4
+    assert out[3][0].tolist() == [3.0, 3.0, 3.0, -1.0]                                   # the narrower row padded
+    assert [row[1:, 0].tolist() for row in out] == [[11.0, 11.0], [12.0, 12.0], [13.0, 13.0], [14.0, 14.0]]
+
+    def row(b, k, value):                                     # one tick's inputs of b aircraft and k candidates
+        return RowTensors(np.full((b, 1), value), np.zeros((b, 1, 4)), np.full((b, 1, k, 7), value),
+                          np.ones((b, k), bool), np.zeros((b, 1), np.int64), np.zeros((b, 1), bool),
+                          np.zeros((b, 1, 2)), np.zeros((b, 1, 3), np.int64), np.zeros((b, 1, 5)),
+                          np.ones((b, 1), bool), np.zeros((b, 1), bool), np.ones((b, 1), bool),
+                          np.zeros((b, 1, 5), np.int64))
+
+    copy = SimpleNamespace(_inputs=[row(1, 3, 1.0), row(1, 2, 2.0)])                  # narrower after it was copied
+    later = SimpleNamespace(_inputs=[row(1, 3, 5.0 + t) for t in range(4)])
+    ticks = _inputs_together([(copy, np.array([0]), 1), (later, np.array([0]), -1)], 3)
+    assert len(ticks) == 3 and all(t.candidates.shape == (2, 1, 3, 7) and t.valid.shape == (2, 3) for t in ticks)
+    assert not ticks[0].present[0, 0] and ticks[0].present[1, 0] and ticks[0].time_s[1, 0] == 6.0
+    assert ticks[2].time_s[0, 0] == 2.0 and ticks[2].valid[0].tolist() == [True, True, False]
+    assert ticks[2].candidates[0, 0, 2].tolist() == [0.0] * 7 and ticks[2].time_s[1, 0] == 8.0
+
+
+def test_a_loop_whose_said_flights_left_keeps_a_row_of_records_each_tick_and_goes_with_others(tmp_path, monkeypatch):
+    """S6 with join ticks: flight 1 joins inside flight 0's observed rows; flight 0 ends and leaves at a rebuild
+    (`SpeakingLoop.together`); at the next tick no flight is said. The speaker keeps a row of records for that tick (said
+    by none), so the loop goes with others again (MC A's batch of 2026-10-11 stopped here), and flight 1 says what it
+    says alone."""
+    from ts_transformer.experiments.prior_speaking_loop import SpeakingLoop as Loops
+
+    speaking, _, _ = _setup(tmp_path, monkeypatch)
+    keys = KEYS[:2]
+    sources = _sources(keys)
+    loop = speaking(np.array([0, 2]), keys)
+    while loop.roles()[0] != SAID:
+        _fly(loop, sources, steps=1)
+    assert loop.roles().tolist() == [SAID, OBSERVED]
+    _fly(loop, sources, steps=1)                                    # flight 0 said once
+    assert loop.roles().tolist() == [SAID, OBSERVED]
+    loop.end(np.array([True, False]))
+    joint = Loops.together([(loop, [0, 1])], CPU, None)
+    assert 0 in joint.left and joint.inside.tolist() == [1]
+    _fly(joint, sources, steps=1)
+    assert not joint.speaker.said_rows[-1].any()
+    assert len(joint.speaker.said_rows) == joint.t - joint.start
+    again = _fly(Loops.together([(joint, [0, 1])], CPU, None), sources)       # a window goes whole, its left flight too
+    alone = _fly(speaking(None, keys[1:]), _sources(keys[1:]))
+    assert np.array_equal(again.said(1), alone.said(0))
+    assert np.allclose(again.states(1), alone.states(0), rtol=0.0, atol=STATE_BOUND_M)

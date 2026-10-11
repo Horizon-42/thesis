@@ -37,7 +37,7 @@ from __future__ import annotations
 import copy
 import math
 from dataclasses import dataclass, fields
-from typing import Any
+from typing import Any, Callable, Sequence
 
 import torch
 
@@ -142,18 +142,20 @@ class Executor:
         """Hold the flights ``flights`` (``[B]`` bool) from the next cycle on (module docstring)."""
         self.halted = self.halted | flights.to(self.halted.device)
 
-    def take(self, flights: torch.Tensor) -> Executor:
+    def take(self, flights: torch.Tensor, device: torch.device | None = None) -> Executor:
         """A copy of the flights ``flights`` (``[K]`` long, repeats permitted; vocabulary §6 item 5, D97 (2)): everything
         the executor holds of them — their inputs, runways and charts, time limits and reserve, first cycles, state,
         bank, the laws' state, done and halted, end cycles and the record so far — and nothing of the other flights. The
         cycles flown and their layout are the batch's. Flown on, each copy flies as its original would (a flight's
-        states do not depend on the other flights of its batch, D97 (3))."""
+        states do not depend on the other flights of its batch, D97 (3)). ``device``: the copy's (this executor's when
+        not given; multi-aircraft control D182: a copy held in the host's memory, flown on the GPU later)."""
         flights = torch.as_tensor(flights, dtype=torch.long, device=self.state.device)
         if flights.ndim != 1 or not len(flights) or bool(((flights < 0) | (flights >= len(self.state))).any()):
             raise ValueError(f"a copy takes one or more of the batch's {len(self.state)} flights, got {flights.tolist()}")
+        device = self.state.device if device is None else torch.device(device)
 
         def pick(rows: torch.Tensor) -> torch.Tensor:
-            return rows[flights].clone()
+            return rows[flights].clone().to(device)
 
         def picked(record: Any) -> Any:                  # a dataclass of per-flight tensors
             return type(record)(**{f.name: pick(getattr(record, f.name)) for f in fields(record)})
@@ -177,6 +179,79 @@ class Executor:
             for record in (self.states, self.commands, self.wanted, self.sentence_times, self.runway_rows))
         out.limits = {name: [pick(rows) for rows in record] for name, record in self.limits.items()}
         out.modes = {name: [pick(rows) for rows in record] for name, record in self.modes.items()}
+        return out
+
+    @staticmethod
+    def together(parts: Sequence[tuple[Executor, torch.Tensor, int]], device: torch.device) -> Executor:
+        """Flights of several executors flown on as one multi-aircraft batch (module docstring; multi-aircraft control
+        D188: a backward batch's searches, each at its own point), on ``device``: ``parts`` each an executor, its
+        flights (``[K]`` long, repeats permitted) and the cycles its clock moves later by (below 0: its first cycles,
+        before any of its flights started, are left out), so that every part is at one cycle. Each flight keeps what
+        `take` keeps, its first cycle moved with its part: it flies on as its original would. The cycles are laid out
+        again for the batch's flights."""
+        counts = {executor.count + shift for executor, _, shift in parts}
+        if len(counts) != 1:
+            raise ValueError(f"the parts' clocks, moved, are at the cycles {sorted(counts)}, not one")
+        first = parts[0][0]
+        index = [torch.as_tensor(flights, dtype=torch.long, device=e.state.device) for e, flights, _ in parts]
+        device = torch.device(device)
+
+        def rows(get: Callable[[Executor], torch.Tensor]) -> torch.Tensor:
+            return torch.cat([get(e)[i].to(device) for (e, _, _), i in zip(parts, index)])
+
+        def records(get: Callable[[Executor], list[torch.Tensor]]) -> list[torch.Tensor]:
+            # each part's cycles stacked, its flights taken and moved by its shift; the batch's cycles one by one again
+            length = len(get(first)) + parts[0][2]
+            if length == 0:
+                return []
+            template = next(get(e)[0] for e, _, _ in parts if get(e))     # the latest part has cycles: one exists
+            blocks = []
+            for (e, _, shift), i in zip(parts, index):
+                kept = (torch.stack(get(e), dim=1)[i][:, max(-shift, 0):] if get(e)
+                        else template.new_zeros((len(i), 0, *template.shape[1:])))
+                before = template.new_zeros((len(i), length - kept.shape[1], *template.shape[1:]))   # no flight's own
+                blocks.append(torch.cat((before.to(kept.device), kept), dim=1).to(device))
+            return list(torch.cat(blocks).unbind(1))
+
+        def law_rows(law: str, name: str) -> torch.Tensor | None:
+            values = [getattr(getattr(e, law), name) for e, _, _ in parts]
+            if all(value is None for value in values):
+                return None
+            # a part with no cycle flown: its flights start fresh at their own cycle 0 (`Lateral.word_error`)
+            return torch.cat([(value[i] if value is not None else torch.zeros(len(i), dtype=torch.float64,
+                                                                              device=i.device)).to(device)
+                              for value, i in zip(values, index)])
+
+        out = copy.copy(first)
+        for name in ("inputs", "runways", "charts"):
+            records_of = [getattr(e, name) for e, _, _ in parts]
+            setattr(out, name, type(records_of[0])(**{f.name: torch.cat([getattr(r, f.name)[i].to(device)
+                                                                          for r, i in zip(records_of, index)])
+                                                       for f in fields(records_of[0])}))
+        out.plant = Plant(out.inputs)
+        for name in ("time_limit_s", "most_s", "state", "bank", "runway_issued", "done", "halted", "last_command"):
+            setattr(out, name, rows(lambda e, name=name: getattr(e, name)))
+        out.start = torch.cat([(e.start[i] + shift).to(device) for (e, _, shift), i in zip(parts, index)])
+        if bool((out.start < 0).any()):
+            raise ValueError("a part's cycles left out are a flight's own")
+        out.staggered = bool((out.start != 0).any())
+        out.cycles = (int((out.start + torch.ceil(out.most_s / first.params.cycle_s).long()).max()) if out.staggered
+                      else int(math.ceil(float(out.most_s.max()) / first.params.cycle_s)))
+        out.done_cycle = torch.where(out.done, rows(lambda e: e.done_cycle), out.cycles - 1 - out.start)
+        for law_name in ("lateral", "vertical", "speed"):
+            law = copy.copy(getattr(first, law_name))
+            for held in law.PER_FLIGHT:
+                setattr(law, held, law_rows(law_name, held))
+            setattr(out, law_name, law)
+        out.count = counts.pop()
+        if out.count == 0:                  # a batch that has flown no cycle anchors its first as a new batch does
+            out.lateral.word_deg = None
+        out.speed.approach_ias_mps = rows(lambda e: e.speed.approach_ias_mps)
+        out.states, out.commands, out.wanted, out.sentence_times, out.runway_rows = (
+            records(lambda e, name=name: getattr(e, name))
+            for name in ("states", "commands", "wanted", "sentence_times", "runway_rows"))
+        out.limits = {name: records(lambda e, name=name: e.limits[name]) for name in first.limits}
+        out.modes = {name: records(lambda e, name=name: e.modes[name]) for name in first.modes}
         return out
 
     def own_cycle(self) -> torch.Tensor:

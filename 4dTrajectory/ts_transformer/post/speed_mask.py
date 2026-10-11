@@ -30,8 +30,6 @@ from ts_transformer.inference.separation import Traffic
 from ts_transformer.instructions.grammar import column_words
 from ts_transformer.instructions.spec import ATC_NO_SPEED_ASSIGNMENT_DISTANCE_M
 from ts_transformer.instructions.words import SPEED, UNCHANGED, Words
-from ts_transformer.prior.inputs import motion
-from ts_transformer.post.scene import AircraftAt
 
 
 def ramp_distance_m(t_s: float, speed_mps: float, target_mps: np.ndarray, accel_mps2: float) -> np.ndarray:
@@ -71,11 +69,11 @@ class SpeedCheck:
     fallback: bool = False
 
 
-def along_course_speeds(aircraft: AircraftAt, scene: Traffic, step_s: float) -> np.ndarray:
-    """``[N]``: each aircraft's ground speed along the course of its R (module docstring), NaN without R in force;
-    ``scene`` the `Traffic` of the same aircraft (`post.traffic.traffic`)."""
-    moving = motion(aircraft.at, aircraft.before, aircraft.known, step_s)
-    return moving.ground_speed_mps * np.cos(np.radians(scene.track_minus_course_deg))
+def along_course_speeds(ground_speed_mps: np.ndarray, scene: Traffic) -> np.ndarray:
+    """``[N]``: each aircraft's ground speed along the course of its R (module docstring), NaN without R in force, from
+    its ground speed (`prior.inputs.motion`'s) and the `Traffic` of the same aircraft (`post.traffic.traffic`); each
+    value its aircraft's alone (multi-aircraft control D189 (1): computed once for a window's aircraft)."""
+    return ground_speed_mps * np.cos(np.radians(scene.track_minus_course_deg))
 
 
 def next_ahead(scene: Traffic, k: int, separation: Separation) -> int | None:

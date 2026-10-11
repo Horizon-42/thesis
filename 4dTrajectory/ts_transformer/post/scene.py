@@ -195,6 +195,14 @@ class AircraftAt:
     def __len__(self) -> int:
         return len(self.keys)
 
+    def take(self, index: Sequence[int]) -> AircraftAt:
+        """The aircraft ``index`` (places, in that order; multi-aircraft control D189 (1))."""
+        i = np.asarray(index, dtype=np.int64)
+        return AircraftAt(keys=tuple(self.keys[k] for k in i), at=self.at[i], before=self.before[i],
+                          known=self.known[i], runway_index=self.runway_index[i],
+                          category=tuple(self.category[k] for k in i), last_step=self.last_step[i],
+                          go_around=self.go_around[i])
+
     @classmethod
     def of(cls, items: Sequence[tuple[str, tuple, tuple, bool, int, str | None, bool, bool]]) -> AircraftAt:
         """From ``(key, at, before, known, runway_index, category, last_step, go_around)`` for each aircraft."""

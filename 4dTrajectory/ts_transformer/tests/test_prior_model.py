@@ -15,7 +15,7 @@ from ts_transformer.prior.batch import (
     target_classes,
 )
 from ts_transformer.prior.checkpoint import CHECKPOINT_SCHEMA, load_checkpoint, save_checkpoint
-from ts_transformer.prior.model import Prior, PriorConfig, WORD_COLUMNS
+from ts_transformer.prior.model import CACHE_STEP_ROWS, COPIED, MERGED, Past, Prior, PriorConfig, WORD_COLUMNS
 from ts_transformer.tests.support import instruction_spec, prior_sentence
 
 CPU = torch.device("cpu")
@@ -92,6 +92,88 @@ def test_a_past_that_outgrows_its_room_grows_and_gives_the_same_rows(words):
             outputs.append(torch.cat(pieces, dim=1))
             assert all(p.keys.shape[2] >= count and p.rows == count for p in past)
     torch.testing.assert_close(outputs[1], outputs[0], rtol=0, atol=0, equal_nan=True)
+
+
+def test_a_past_grows_by_steps_of_the_cache(words):
+    """D183 (3): a line that outgrows its room grows by steps of `CACHE_STEP_ROWS` (as many as its rows need), never
+    doubles: one row past a room of 2 gives 2 + 64; a sentence written at once into a room of 2, 2 + 64·k for the
+    fewest k."""
+    from ts_transformer.prior.model import CACHE_STEP_ROWS
+
+    model = small_prior(words)
+    rows = collate(sentences(words), CPU)
+    batch = rows.present.shape[0]
+    with torch.no_grad():
+        _, _, past = model.extend(rows.between(0, 2), model.no_past(batch, 2))
+        assert {(p.rows, p.keys.shape[2]) for p in past} == {(2, 2)}
+        _, _, past = model.extend(rows.between(2, 3), past)
+        assert {(p.rows, p.keys.shape[2], p.values.shape[2], p.present.shape[1]) for p in past} == \
+            {(3, 2 + CACHE_STEP_ROWS, 2 + CACHE_STEP_ROWS, 2 + CACHE_STEP_ROWS)}
+        long = collate(sentences(words, count=8), CPU)                   # rows past one step: two steps
+        _, _, past = model.extend(long, model.no_past(long.present.shape[0], 2))
+    written = long.present.shape[1]
+    assert written - 2 > CACHE_STEP_ROWS
+    steps = -(-(written - 2) // CACHE_STEP_ROWS)
+    assert {(p.rows, p.keys.shape[2]) for p in past} == {(written, 2 + steps * CACHE_STEP_ROWS)}
+
+
+def _lines(rows, index):
+    """Rows of the sentences ``index`` (repeats permitted) as a batch of their own."""
+    index = torch.as_tensor(index)
+    return type(rows)(*(value[index] for value in rows))
+
+
+def test_copies_of_lines_hold_their_front_once_and_read_as_the_lines_held_whole(words):
+    """Multi-aircraft control D190 (2): copies of lines (``[0, 0, 0, 1, 2, 2]``) taken together hold the rows written
+    once for each line copied (three fronts; of their own only the room), and said on with rows of their own (the
+    copies of a line part at once), each row reads what the same lines held whole read: `COPIED` bit for bit, `MERGED`
+    to the last bits; each copy writes its own rows only (the front as it was, grown past its room)."""
+    model = small_prior(words)
+    rows = collate(sentences(words), CPU)
+    cut, index, later = 12, [0, 0, 0, 1, 2, 2], [0, 1, 2, 1, 0, 2]
+    with torch.no_grad():
+        _, _, past = model.extend(rows.between(0, cut), model.no_past(3, cut))
+        whole = [p._replace(keys=p.keys[index], values=p.values[index], present=p.present[index],
+                            kin=np.arange(6), kin_rows=np.zeros(6, dtype=np.int64)) for p in past]
+        out = {}
+        for attention in (None, COPIED, MERGED):
+            held = whole if attention is None else [Past.together([(p, torch.as_tensor(index), 0)], 4, CPU, attention)
+                                                    for p in past]
+            if attention is not None:
+                assert {(p.start, p.front.keys.shape[0], p.keys.shape[2]) for p in held} == {(cut, 3, 4)}
+                fronts = [(p.front.keys.clone(), p.front.values.clone(), p.front.present.clone()) for p in held]
+            pieces = []
+            for r in range(cut, cut + 6):
+                h, _, held = model.extend(_lines(rows.between(r, r + 1), later), held)
+                pieces.append(h)
+            out[attention] = torch.cat(pieces, dim=1)
+            if attention is not None:
+                assert all(torch.equal(a, b) for p, f in zip(held, fronts)
+                           for a, b in zip((p.front.keys, p.front.values, p.front.present), f))
+                assert {(p.rows, p.start, p.keys.shape[2]) for p in held} == {(cut + 6, cut, 4 + CACHE_STEP_ROWS)}
+    assert torch.equal(out[COPIED], out[None])
+    torch.testing.assert_close(out[MERGED], out[None], rtol=1e-5, atol=1e-5)
+    assert not torch.equal(out[None][0], out[None][1])                  # the copies of line 0 parted
+
+
+def test_a_kin_stays_one_through_another_together_and_a_line_taken_alone_holds_its_rows_whole(words):
+    """D190 (2): lines taken once each from a past whose copies share a front stay a kin (their front still held once);
+    a copy taken with a line of another kin holds no front (nothing to share): its rows the same."""
+    model = small_prior(words)
+    rows = collate(sentences(words), CPU)
+    with torch.no_grad():
+        _, _, past = model.extend(rows.between(0, 10), model.no_past(3, 10))
+        shared = [Past.together([(p, torch.as_tensor([0, 0, 1, 1]), 0)], 2, CPU, COPIED) for p in past]
+        _, _, shared = model.extend(_lines(rows.between(10, 12), [0, 1, 1, 2]), shared)
+        again = [Past.together([(p, torch.arange(4), 0)], 2, CPU, COPIED) for p in shared]
+        assert {(p.start, p.front.keys.shape[0], tuple(p.kin_rows)) for p in again} == {(10, 2, (10, 10, 10, 10))}
+        alone = [Past.together([(p, torch.as_tensor([1, 2]), 0)], 2, CPU, COPIED) for p in shared]
+        assert {(p.start, p.front) for p in alone} == {(0, None)}
+        for p, a in zip(shared, alone):
+            keys, values, present = (torch.cat((x[p.front.of], y), dim=-2 if x.dim() > 2 else -1) for x, y in
+                                     ((p.front.keys, p.keys[:, :, :2]), (p.front.values, p.values[:, :, :2]),
+                                      (p.front.present, p.present[:, :2])))
+            assert torch.equal(a.keys[:, :, :12], keys[[1, 2]]) and torch.equal(a.present[:, :12], present[[1, 2]])
 
 
 def test_a_shift_of_every_time_changes_no_output(words):

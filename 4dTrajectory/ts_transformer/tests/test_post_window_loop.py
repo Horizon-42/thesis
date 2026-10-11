@@ -4,13 +4,14 @@ artefact of one flight that free generation's tests use (A26's test artefact).""
 from __future__ import annotations
 
 import copy
-from dataclasses import replace
+from dataclasses import astuple, replace
 
 import numpy as np
 import pytest
 import torch
 
 from flight_scenarios.fas_geometry import fas_course_geometry
+from ts_transformer.autopilot.flights import FlightInputs
 from ts_transformer.autopilot.judge import OUTCOMES
 from ts_transformer.autopilot.start import NO_MOVE, start_moved
 from ts_transformer.experiments import post_window_loop
@@ -53,7 +54,8 @@ def window_setup(tmp_path, monkeypatch):
     from ts_transformer.tests.support import executor_inputs
 
     monkeypatch.setattr(start_module, "flight_inputs", lambda series, flights, anchors, airports, rule, device:
-                        executor_inputs(flights[0], airports[0], anchors[0], rule=rule))
+                        FlightInputs(*(t.to(device) for t in astuple(
+                            executor_inputs(flights[0], airports[0], anchors[0], rule=rule)))))
     flights = {0: signals_flights(directory, "train")[0]}
     geometries = load_candidates(directory)
     geometry = geometries[flights[0]["airport"]]
@@ -72,9 +74,9 @@ def window_setup(tmp_path, monkeypatch):
     torch.manual_seed(0)
     base = Prior(PriorConfig.from_words(words, "full", d_model=32, layers=1, heads=4, feedforward=64)).eval()
 
-    def moved_loop(move):
+    def moved_loop(move, device=CPU):
         return start_moved(directory, "train", DELTA, {0: stored}, tmp_path / "executor", {0: move},
-                           most_go_arounds=MOST_GO_AROUNDS, device=CPU)
+                           most_go_arounds=MOST_GO_AROUNDS, device=device)
 
     return dict(directory=directory, words=words, stored=stored, flights=flights, geometries=geometries,
                 geometry=geometry, roster=roster, finals=finals, windows=windows, reference=reference, base=base,

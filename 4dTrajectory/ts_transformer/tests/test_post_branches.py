@@ -109,11 +109,31 @@ def test_a_round_gives_groups_after_each_branch_point_and_their_samples(setup):
     expected = torch.tensor([0.0, 1.0, 0.0]) - 1.0 / 3.0
     assert torch.allclose(batch.advantage[:, start], expected)
     assert (batch.advantage[~batch.counted] == 0).all()
+    assert torch.equal(samples([rewarded], CPU, scale=0.25).advantage, batch.advantage * 0.25)    # D195: a group's weight
     # the samples go through the loss of C7
     optimizer = torch.optim.AdamW(parameter_groups(model, prior_lr=1e-4, traffic_lr=1e-3))
     data = batch.rows
     (parts,) = one_pass(model, s["base"], optimizer, [([batch], data)])
     assert torch.isfinite(parts.loss)
+
+
+@pytest.mark.parametrize("first, continuations, side", [
+    (0.0, [0.0] * 7 + [1.0], 1),              # one lucky continuation against eight
+    (4.0, [3.0] * 8, 1),                      # the first sentence the one good one
+    (5.0, [5.0, 4.0, 5.0, 4.0, 5.0, 5.0, 5.0, 5.0], 2),
+    (0.0, [1.0] * 6 + [0.0] * 2, 3),
+    (0.0, [1.0] * 4 + [0.0] * 4, 4),
+    (0.9, [0.9] * 8, 0),                      # all the same: no side
+    (7.0, [1.0, 1.0] + [0.0] * 6, 1),         # the two at the mean (1) are on neither side: 1 above, 6 below
+    (0.1, [0.3, 0.4, 0.4], 1),                # 0.3 at the mean within SIDE_TOLERANCE (computed 0.30000000000000004)
+])
+def test_a_group_s_minority_side_is_the_smaller_count_either_side_of_its_mean(first, continuations, side):
+    """D195: `Group.minority`, the count of the sentences on the smaller side of the group's mean reward."""
+    def sentence(reward):
+        return Sentence(rows=None, permitted=None, tokens=[], reward=reward)
+
+    group = Group(window=0, branch=0, first=sentence(first), continuations=tuple(sentence(r) for r in continuations))
+    assert group.minority == side
 
 
 def test_a_window_whose_second_pass_differs_is_counted_and_gives_no_sample(setup, monkeypatch):
@@ -141,6 +161,40 @@ def test_a_window_whose_second_pass_differs_is_counted_and_gives_no_sample(setup
     assert len(points) > 1, "the first sentence lasts past a second branch point"
     assert alone.spoken_again == [0] and alone.differed == [0] and alone.groups == []
 
+
+
+def test_a_branch_points_copies_are_released_once_its_groups_are_taken(setup, monkeypatch):
+    """D183 (4): a branch point's copies (their cache) are released at the end of its block, before the next point's
+    copies are made; the groups keep none of their tensors."""
+    import weakref
+
+    from ts_transformer.experiments.post_window_loop import WindowLoop
+
+    s = setup
+    model = _with_module(s["base"])
+    copies, caches = [], []
+    real_copy, real_finish = WindowLoop.copy, WindowLoop.finish
+
+    def released():
+        return all(r() is None for r in copies + caches)
+
+    def copy(self, windows):
+        assert released(), "an earlier branch point's copies are alive at the next point"
+        out = real_copy(self, windows)
+        copies.append(weakref.ref(out))
+        return out
+
+    def finish(self, numbers):
+        out = real_finish(self, numbers)
+        if any(r() is self for r in copies):                       # the cache as flown (it may have grown)
+            caches.extend(weakref.ref(t) for p in self.speaking.speaker.past for t in (p.keys, p.values, p.present))
+        return out
+
+    monkeypatch.setattr(WindowLoop, "copy", copy)
+    monkeypatch.setattr(WindowLoop, "finish", finish)
+    round_ = _round(s, model, s["windows"])
+    assert round_.differed == [] and len(round_.groups) >= 2 and len(copies) == len(round_.groups)
+    assert caches and released()
 
 
 def test_a_windows_numbers_are_keyed_by_its_place_in_the_round(setup, monkeypatch):
@@ -198,5 +252,6 @@ def test_an_aircraft_ended_at_its_first_predicted_step_before_a_row_flown_has_it
     loop.observed = np.arange(2 * 3 * 6, dtype=float).reshape(2, 3, 6)
     loop._flown = [[], [np.ones(6), np.ones(6) * 2]]
     loop.alive, loop.ended = np.array([False, False]), np.array([True, True])
+    loop.left = {}                                        # neither has left the loop (S6)
     assert np.array_equal(loop.states(0), loop.observed[0])
     assert loop.states(1).shape == (5, 6) and np.array_equal(loop.states(1)[3:], [[1.0] * 6, [2.0] * 6])

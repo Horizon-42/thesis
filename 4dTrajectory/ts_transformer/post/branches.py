@@ -13,6 +13,11 @@ advantage of each is its reward minus the mean of the group, on the rows from th
 branch point, §2 item 9 point 5); a group whose rewards are all the same gives no sample. A first sentence in several
 groups gives a sample in each.
 
+**A group's weight** (D195, the user, 2026-10-11; `GROUP_WEIGHTS`): `EQUAL`, every group's advantages as they are (the
+behaviour before it), or `MINORITY_SIDE`, each group's advantages times its minority side (`Group.minority`: the count
+of its sentences on the smaller side of its mean) divided by the round's mean minority side. A group of one sentence
+against eight then pushes a quarter of a group of four against five; the mean weight of a round's groups is 1.
+
 **A window of several commanded aircraft** (multi-aircraft control D142, D143, D149; post-training §9 item 9): a group
 names the aircraft it varies (``Group.varied``, its place among the window's commanded aircraft; stage C's: 0, its one
 aircraft), its sentences are that aircraft's, its rewards the window's (the caller's rule), and each sentence counts
@@ -42,6 +47,12 @@ CONTINUATIONS = 8
 #: `autopilot.conformance.STATE_BOUND_M` (vocabulary D97 (3)), which stage C's runners do not import (the
 #: architecture test): `tests/test_post_branches.py` pins the two.
 STATE_BOUND_M = 1e-6
+#: D195: the weights of a group (module docstring)
+EQUAL = "equal"
+MINORITY_SIDE = "minority-side"
+GROUP_WEIGHTS = (EQUAL, MINORITY_SIDE)
+#: a reward closer to its group's mean than this is on neither side of it (`Group.minority`)
+SIDE_TOLERANCE = 1e-9
 
 
 def first_numbers(seed: int, round_: int, window: int) -> np.random.Generator:
@@ -119,14 +130,22 @@ class Group:
         rewards = [s.reward for s in self.sentences]
         return max(rewards) > min(rewards)
 
+    @property
+    def minority(self) -> int:
+        """Its minority side (D195): the count of its sentences above the group's mean reward or of those below it,
+        whichever is smaller (a sentence at the mean is on neither side). 0 for a group whose rewards are all the same."""
+        advantages = self.advantages()
+        return int(min((advantages > SIDE_TOLERANCE).sum(), (advantages < -SIDE_TOLERANCE).sum()))
 
-def samples(groups: Sequence[Group], device: torch.device, part_width: int = 0, segment_rows: int | None = None
-            ) -> Samples:
+
+def samples(groups: Sequence[Group], device: torch.device, part_width: int = 0, segment_rows: int | None = None,
+            scale: float = 1.0) -> Samples:
     """The loss's batch of the samples of ``groups`` (`post.loss.Samples`): every sentence of every informative group,
     its advantage on the rows from its group's branch point on up to its event (``Sentence.until``; and only there) —
     or, with ``segment_rows`` (P55), only up to ``segment_rows`` rows after the branch point (the next branch point; the
     later words left to the later groups) —, the speaker's records joined and the tokens padded to the longest sentence
-    (with a caller's token part of ``part_width``, `traffic_attention.traffic_of`)."""
+    (with a caller's token part of ``part_width``, `traffic_attention.traffic_of`). Each advantage times ``scale`` (a
+    group's weight, D195)."""
     items = [(sentence, advantage, group.branch) for group in groups if group.informative
              for sentence, advantage in zip(group.sentences, group.advantages())]
     if not items:
@@ -144,7 +163,7 @@ def samples(groups: Sequence[Group], device: torch.device, part_width: int = 0, 
     if segment_rows is not None:
         branch = torch.tensor([b for _, _, b in items], device=device)[:, None]
         counted = counted & (steps < branch + segment_rows)
-    advantage = torch.tensor([a for _, a, _ in items], dtype=torch.float32, device=device)[:, None] * counted
+    advantage = torch.tensor([a * scale for _, a, _ in items], dtype=torch.float32, device=device)[:, None] * counted
     return Samples(rows, Permitted.join([s.permitted for s, _, _ in items]), traffic_of(tokens, device, part_width),
                    advantage, counted)
 

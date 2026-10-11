@@ -43,6 +43,7 @@ def test_a_profile_with_workers_measures_them_and_stops_where_they_do_not_fit(se
         assert "one_batch" not in record                                # each span's batch spoken once, by the worker
         (batch,) = workers["measured"]["batches"]
         assert batch["span_s"] == 1.0 and batch["rows"] == 1 and batch["s"] > 0 and batch["gpu_reserved_peak"] is None
+        assert batch["gpu_allocated_peak"] is None and batch["record"]["groups"] >= 0    # the batch's own record
         assert set(workers["short"]) == {"1", "2"} and not any(workers["short"].values())
         assert workers["speak_device"] == "cpu" and workers["margin"] == multi_train.MEASURE_MARGIN == 1.3
         assert {"round", "spread"}.isdisjoint(record) and not (out / "round_0").exists()      # D179: no round

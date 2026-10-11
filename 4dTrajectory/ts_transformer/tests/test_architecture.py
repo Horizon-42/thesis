@@ -829,15 +829,16 @@ POST_MAY_IMPORT = ("post.", "instructions.", "inference.separation", "inference.
 #: give them, where §7 still reads "new, B9/B10"; the round of D111 and D118–D122 (items 1 and 4: the identity as a readout
 #: shows it, the one val read, the selection's cells); B13 (D128): `holds_claim` replaced by `holds_written_claim`, as
 #: B13's code gives it where §7 still reads the old name; the claim of the val read itself (`claim_validation_read`,
-#: `lock_val_read`, `settle_written_claim`), for C10's validation readout (user, 2026-10-06; §7 item 1 lists them).
+#: `lock_val_read`, `settle_written_claim`), for C10's validation readout (user, 2026-10-06; §7 item 1 lists them);
+#: the speaker's ways to read a front its copies hold once (`COPIED`, `MERGED`, `FRONT_ATTENTIONS`), a campaign's setting
+#: of stage C and D (multi-aircraft control D190 (2), built by stage D under outline D184; §7 items 1 and 3).
 #: Item 7's names are methods of `SpeakingLoop`, which no import shows.
 PRIOR_INTERFACE = {
     "prior.checkpoint": {"load_checkpoint", "CHECKPOINT_SCHEMA", "open_prior", "OpenedPrior", "readable_identity",
                          "validation_claim", "written_claim", "holds_written_claim", "spend_validation_claim",
                          "CLAIM_SPENT_BY", "claim_validation_read", "lock_val_read", "settle_written_claim"},
-    "prior.model": {"Prior"},
-    # BATCH: B14 (outline D138), stage C's window loop speaks under the masks' batch mode (proposed for §7 to the designer)
-    "prior.procedure": {"PROCEDURE_MASKS", "procedure_digests", "airport_finals", "Final", "BATCH"},
+    "prior.model": {"Prior", "COPIED", "MERGED", "FRONT_ATTENTIONS"},
+    "prior.procedure": {"PROCEDURE_MASKS", "procedure_digests", "airport_finals", "Final"},
     "prior.inputs": {"state_inputs", "sentence_rows", "own_flight_key", "motion"},
     "prior.loop": {"LoopRows"},
     "prior.landings": {"Landing", "LandingIndex"},
@@ -944,6 +945,8 @@ TRAINING_EXPORT_NAMES = {
     "experiments.training_attitude": {"attitude_payload", "executor_attitude"},
     "experiments.prior_training_export": {"procedure_block"},
 }
+#: The timers of stage B's `model_speed` (D136), which stage D's `multi_speed` (D181 (56)) times its parts with.
+MODEL_SPEED_NAMES = {"experiments.model_speed": {"host_info", "synchroniser"}}
 
 
 def _experiments_imports_refused(source: str, own: tuple[str, ...] = ("post_",)) -> list[str]:
@@ -961,9 +964,9 @@ def _experiments_imports_refused(source: str, own: tuple[str, ...] = ("post_",))
                 continue
             if module == "experiments":
                 refused += [f"from experiments import {a.name}" for a in node.names if not a.name.startswith(own)]
-            elif module in TRAINING_EXPORT_NAMES:
-                refused += [f"from {module} import {a.name}" for a in node.names
-                            if a.name not in TRAINING_EXPORT_NAMES[module]]
+            elif module in TRAINING_EXPORT_NAMES or module in MODEL_SPEED_NAMES:
+                names = {**TRAINING_EXPORT_NAMES, **MODEL_SPEED_NAMES}[module]
+                refused += [f"from {module} import {a.name}" for a in node.names if a.name not in names]
             elif module == SPEAKING_LOOP:
                 refused += [f"from {module} import {a.name}" for a in node.names if a.name not in SPEAKING_LOOP_NAMES]
             elif not module.split(".")[1].startswith(own):
@@ -1111,9 +1114,9 @@ POST_INTERFACE = {
     "post.traffic_attention": {"TrafficConfig", "Traffic", "traffic_of", "TrafficTokens", "TrafficAttention",
                                "add_traffic_attention", "parameter_groups", "TokenPart", "add_token_part"},
     "post.branches": {"first_numbers", "continuation_numbers", "branch_points", "Group", "Sentence", "samples",
-                      "BRANCH_EVERY_S", "CONTINUATIONS"},
+                      "BRANCH_EVERY_S", "CONTINUATIONS", "EQUAL", "MINORITY_SIDE", "GROUP_WEIGHTS"},   # D195
     "post.loss": {"Samples", "surrogate", "pull_to_base", "data_term", "update_step", "update_loss", "one_pass",
-                  "passes"},
+                  "passes", "DATA_WEIGHT"},                                    # D194 (1): `update_step`'s default
 }
 
 

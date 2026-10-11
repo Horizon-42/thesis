@@ -36,8 +36,10 @@ each in that order along its own rows: the network runs once on the whole row; a
 the cache as not present (`Past.present` false: no later row reads it) and changes nothing of it; an observed one's
 as `observe` writes it; a said one's words are drawn as `speak` draws them, with its numbers and masks. The mark of the
 first predicted step is each aircraft's own. The records of a row (``forbidden`` … ``drawn_probability``) are kept for
-every row in which some aircraft is said, ``[B, …]`` each, with ``said_rows`` the aircraft said in it; `permitted`
-gives each aircraft its own said rows. `observe` and `speak` are the forms of a row in which every aircraft has one role
+every row from the first in which some aircraft is said, ``[B, …]`` each, with ``said_rows`` the aircraft said in it:
+also for a later row in which no aircraft is said (multi-aircraft control S6: the aircraft said have left, the others
+are absent or observed), so that a loop keeps one row of records for each tick from its first predicted step on
+(`Speaker.together` moves the rows by ticks); `permitted` gives each aircraft its own said rows. `observe` and `speak` are the forms of a row in which every aircraft has one role
 (`speak` is `say` with every aircraft said).
 """
 
@@ -53,8 +55,8 @@ from ts_transformer.instructions.grammar import InForce, column_mask, column_wor
 from ts_transformer.instructions.words import COLUMNS, HEADING, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words
 from ts_transformer.prior.batch import RUNWAY_FIXED_CLASSES, RUNWAY_GO_AROUND_CLASS, RowTensors
 from ts_transformer.prior.inputs import Heard
-from ts_transformer.prior.model import Past, Prior, require_eval
-from ts_transformer.prior.procedure import PER_AIRCRAFT, Final, ProcedureMasks
+from ts_transformer.prior.model import CACHE_STEP_ROWS, COPIED, FRONT_ATTENTIONS, Past, Prior, require_eval
+from ts_transformer.prior.procedure import Final, ProcedureMasks
 
 
 class Position(NamedTuple):
@@ -162,6 +164,32 @@ def runway_after(word: np.ndarray, in_force: Sequence[InForce | None], n_candida
     return np.minimum(runway, np.asarray(n_candidates) - 1), go_around
 
 
+def _rows_together(records: Sequence[list[np.ndarray]], index: Sequence[np.ndarray], shifts: Sequence[int],
+                   fill: Any) -> list[np.ndarray]:
+    """Several speakers' records of the rows said (one ``[B, ...]`` array a row; `Speaker.together`): of each, its
+    aircraft ``index`` moved by its shift (its first rows left out below 0), joined row by row; a row a part did not say
+    is ``fill``, and a narrower row (the runway column: a copy's batch has fewer candidates than the batch it was copied
+    from, `permitted`) is padded with it to the widest."""
+    lengths = {len(rows) + shift for rows, shift in zip(records, shifts)}
+    if len(lengths) != 1:
+        raise ValueError(f"the parts' rows said, moved, end at the rows {sorted(lengths)}, not one")
+    (length,) = lengths
+    if length == 0:
+        return []
+    widest = max((row for rows in records for row in rows), key=lambda row: row.shape[1:])
+    width = widest.shape[1:]
+    blocks = []
+    for rows, i, shift in zip(records, index, shifts):
+        kept = [row if row.shape[1:] == width else
+                np.pad(row, [(0, 0)] + [(0, n - m) for n, m in zip(width, row.shape[1:])], constant_values=fill)
+                for row in rows[max(-shift, 0):]]
+        block = np.full((length, len(i), *width), fill, dtype=widest.dtype)
+        if kept:
+            block[length - len(kept):] = np.stack(kept)[:, i]
+        blocks.append(block)
+    return list(np.concatenate(blocks, axis=1))
+
+
 class Speaker:
     """A batch of aircraft the prior speaks to, all at the same row. `observe` encodes the rows before the first
     predicted step; `speak` says the next row (the first predicted step first). Rows come in time order, each later
@@ -170,22 +198,24 @@ class Speaker:
     vocabulary D80 for the start)."""
 
     def __init__(self, model: Prior, words: Words, finals: Sequence[Sequence[Final]], *, capacity: int,
-                 temperature: float = 1.0, masks: str = PER_AIRCRAFT) -> None:
+                 temperature: float = 1.0, attention: str = COPIED) -> None:
         """``finals``: each aircraft's airport's finals, one for each candidate in the pointer's order (the procedure
         masks it speaks under, §4, kept fresh for this batch: their state is this batch's); ``capacity``: the rows the
-        cache has room for at first (it grows as a sentence needs, `model.Past.grown`); ``masks``: the procedure masks'
-        mode (`procedure.MASK_MODES`, B14: the same masks; `BATCH` the faster)."""
+        cache has room for at first (it grows as a sentence needs, `model.Past.grown`); ``attention``: how its copies
+        read the front of the cache they hold once (`model.FRONT_ATTENTIONS`; multi-aircraft control D190 (2))."""
         if not temperature > 0.0:
             raise ValueError(f"temperature {temperature}: it must be positive")
+        if attention not in FRONT_ATTENTIONS:
+            raise ValueError(f"attention {attention!r} is none of {FRONT_ATTENTIONS}")
         require_eval(model, "the speaker")
         for finals_b in finals:
             geometry = finals_b[0].geometry
             if [f.index for f in finals_b] != list(range(len(geometry.candidates))):
                 raise ValueError(f"{geometry.code}: the finals are not one for each candidate, in the pointer's order")
         self.model, self.words = model, words
-        self.procedure = ProcedureMasks(finals, words, masks)
+        self.procedure = ProcedureMasks(finals, words)
         self._n_candidates = np.array([len(f) for f in finals], dtype=np.int64)
-        self.temperature = temperature
+        self.temperature, self.attention = temperature, attention
         self.past = model.no_past(len(finals), capacity)
         # each aircraft's words in force (`inputs.Heard`, the training sentences' own walk): a loop reads the inputs of
         # the next row from it (`heard`, a copy: the speaker's own changes only as it says a row)
@@ -301,32 +331,49 @@ class Speaker:
         h, tokens, past = self.model.extend(row, self.past, extra)
         g = h
         said = np.zeros((count, 0), dtype=np.int64)
-        permitted_row, forbidden_row, drawn_row = [], [], np.zeros((count, len(COLUMNS)))
-        others = torch.as_tensor(~said_now, device=h.device)[:, None]
+        permitted_row, forbidden_row, drawn_row, empty = [], [], [], []
         for column in range(len(COLUMNS)):
             logits = self.model.column_logits(column, g, tokens, row.valid, row.first)[:, 0]
-            allowed = self._allowed(column, said, at, caller, procedure)
+            if column == RUNWAY:
+                allowed = self._runway_allowed(at, caller, procedure)
+            else:
+                if column == HEADING:
+                    # the runway word drawn: the procedure's and the caller's masks of every later column are the row's,
+                    # computed once (multi-aircraft control D189 (2)), under the runway and G it leaves to each aircraft
+                    # said (an aircraft not said keeps its own: every class is permitted to it)
+                    runway, go_around = self._runway_after(np.where(said_now, said[:, RUNWAY], UNCHANGED))
+                    held = self._procedure_masks(runway, go_around, at, procedure)
+                    others = {c: self._others(c, held, caller) for c in range(HEADING, len(COLUMNS))}
+                allowed = self._allowed(column, said, at, others)
             if allowed[said_now, logits.shape[-1]:].any():
                 raise ValueError(f"column {COLUMNS[column]}: a mask permits a word the model has no class for")
             # an aircraft not said draws a word that no one keeps: every class of the model permitted to it
-            permitted = torch.as_tensor(allowed[:, : logits.shape[-1]], device=logits.device) | others
-            masked = logits.masked_fill(~permitted, float("-inf"))
-            if torch.isneginf(masked).all(dim=-1).any():
-                raise ValueError(f"column {COLUMNS[column]}: an aircraft has no permitted word (D62)")
+            permitted = allowed[:, : logits.shape[-1]] | ~said_now[:, None]
+            on_device = torch.as_tensor(permitted, device=logits.device)
+            masked = logits.masked_fill(~on_device, float("-inf"))
+            empty.append(torch.isneginf(masked).all(dim=-1))
             probabilities = torch.softmax(logits, dim=-1)
-            forbidden_row.append(probabilities.masked_fill(permitted, 0.0).sum(dim=-1).cpu().numpy())
+            forbidden_row.append(probabilities.masked_fill(on_device, 0.0).sum(dim=-1))
             drawn = torch.softmax(masked / self.temperature, dim=-1)
             if column == RUNWAY:
-                go_around_drawn = drawn[:, RUNWAY_GO_AROUND_CLASS].cpu().numpy()
-                go_around_permitted = permitted[:, RUNWAY_GO_AROUND_CLASS].cpu().numpy()
+                go_around_drawn = drawn[:, RUNWAY_GO_AROUND_CLASS]
+                go_around_permitted = permitted[:, RUNWAY_GO_AROUND_CLASS]
             chosen = draw(drawn, numbers[:, column])
-            permitted_row.append(permitted.cpu().numpy())
-            drawn_row[:, column] = drawn.gather(-1, chosen)[:, 0].double().cpu().numpy()
+            permitted_row.append(permitted)
+            drawn_row.append(drawn.gather(-1, chosen)[:, 0].double())
             g = self.model.after_choice(column, g, chosen, tokens)
-            said = np.concatenate((said, class_words(column, chosen.cpu().numpy())), axis=1)
+            said = np.concatenate((said, class_words(column, chosen.cpu().numpy())), axis=1)   # the one value a column
+        # the row's records on the device brought back at once (D189 (2)), before the row is flown
+        empty = torch.stack(empty).cpu().numpy()
+        if empty.any():
+            column = int(np.flatnonzero(empty.any(axis=1))[0])
+            raise ValueError(f"column {COLUMNS[column]}: an aircraft has no permitted word (D62)")
+        forbidden_row = list(torch.stack(forbidden_row).cpu().numpy())
+        drawn_row = torch.stack(drawn_row, dim=1).cpu().numpy()
+        go_around_drawn = go_around_drawn.cpu().numpy()
         said = np.where(said_now[:, None], said, UNCHANGED)
         runway, go_around = self._runway_after(said[:, RUNWAY])
-        blocked = {c: ~procedure.permitted(c, runway, go_around, at.e_m, at.n_m, at.height_m) for c in procedure.columns}
+        blocked = {c: ~held[c] for c in procedure.columns}
         heard = [aircraft.copy() for aircraft in self._heard]
         for b in np.flatnonzero(said_now):
             heard[b].hear(said[b], float(at.height_m[b]), float(row.time_s[b, 0]))
@@ -339,7 +386,7 @@ class Speaker:
         self._last_s = np.where(present, times[:, 0], self._last_s)
         self._role = roles.astype(np.int64)
         self._go_arounds = self._go_arounds + (said[:, RUNWAY] == RUNWAY_GO_AROUND)
-        if not said_now.any():
+        if not said_now.any() and not self.said_rows:
             return said
         for column, value in enumerate(forbidden_row):
             self.forbidden[column].append(value)
@@ -381,18 +428,23 @@ class Speaker:
         return Permitted(tuple(masks), own_rows(np.stack([row[index] for row in self.permitted_times], axis=1), np.nan),
                          own_rows(np.stack([row[index] for row in self.permitted_own], axis=1), 0.0), self.temperature)
 
-    def copy(self, indices: Sequence[int]) -> Speaker:
+    def copy(self, indices: Sequence[int], device: torch.device | None = None) -> Speaker:
         """A speaker of the aircraft ``indices`` of this one (repeats permitted), in that order (D96 item 5): their cache,
         the state of their procedure masks, their words heard, their go-arounds, their roles and their records. Continued with the
-        same inputs and numbers, a copy of every aircraft says what this speaker says, bit for bit."""
+        same inputs and numbers, a copy of every aircraft says what this speaker says (bit for bit; with copies of one
+        aircraft that read their front `MERGED`, to the last bits of the attention, multi-aircraft control D190 (2)).
+        ``device``: the cache's (this one's when not given; multi-aircraft control D182: a copy held in the host's
+        memory). The cache holds the rows written and one step of room (D183), the copies of an aircraft their rows to
+        here once (`model.Past.together`)."""
         indices = list(indices)
         out = object.__new__(Speaker)
-        out.model, out.words, out.temperature = self.model, self.words, self.temperature
+        out.model, out.words = self.model, self.words
+        out.temperature, out.attention = self.temperature, self.attention
         out.procedure = self.procedure.select(indices)
         out._n_candidates = self._n_candidates[indices].copy()
         index = torch.as_tensor(indices, device=self.past[0].keys.device)
-        out.past = [Past(p.keys[index].clone(), p.values[index].clone(), p.present[index].clone(), p.rows)
-                    for p in self.past]
+        target = self.past[0].keys.device if device is None else torch.device(device)
+        out.past = [Past.together([(p, index, 0)], CACHE_STEP_ROWS, target, self.attention) for p in self.past]
         out._heard = [self._heard[i].copy() for i in indices]
         out.forbidden = {c: [row[indices] for row in rows] for c, rows in self.forbidden.items()}
         out.go_around_probability = [row[indices] for row in self.go_around_probability]
@@ -406,6 +458,56 @@ class Speaker:
         out._role = self._role[indices].copy()
         out._go_arounds = self._go_arounds[indices].copy()
         out._last_s = self._last_s[indices].copy()
+        return out
+
+    @staticmethod
+    def together(parts: Sequence[tuple[Speaker, Sequence[int], int]], device: torch.device, room: int | None,
+                 spent: Speaker | None = None) -> Speaker:
+        """Aircraft of several speakers as one speaker (multi-aircraft control D188), its cache on ``device``: ``parts``
+        each a speaker, its aircraft (repeats permitted) and the rows its clock moves later by (below 0: its first rows,
+        before any of its aircraft's own, are left out), so that every part has encoded the same rows and said the same
+        rows since. Each aircraft keeps what `copy` keeps, its cache with ``room`` rows past the rows written (multi-aircraft
+        control D190 (1): a joint loop's, the steps to its next rebuild; None where they are not known: one step of
+        D183, as `copy`), its records of the rows said moved with its rows (a row its speaker did not say: said by none,
+        nothing permitted). Continued with the same inputs and numbers, an aircraft says what it says in its own speaker
+        (as `copy` says). The parts' model, words, temperature and attention are one speaker's. ``spent``: a speaker
+        among the parts that nothing reads after (the one this speaker replaces), its cache freed a layer at a time as
+        it is copied, so that the device holds the two speakers' caches whole at no time."""
+        first = parts[0][0]
+        index = [np.asarray(list(aircraft), dtype=np.int64) for _, aircraft, _ in parts]
+        shifts = [shift for _, _, shift in parts]
+        out = object.__new__(Speaker)
+        out.model, out.words = first.model, first.words
+        out.temperature, out.attention = first.temperature, first.attention
+        out.procedure = ProcedureMasks.together([(s.procedure, i) for (s, _, _), i in zip(parts, index)])
+        out._n_candidates = np.concatenate([s._n_candidates[i] for (s, _, _), i in zip(parts, index)])
+        out.past = []
+        for layer in range(len(first.past)):
+            out.past.append(Past.together([(s.past[layer], torch.as_tensor(i, device=s.past[layer].keys.device), shift)
+                                           for (s, _, shift), i in zip(parts, index)],
+                                         CACHE_STEP_ROWS if room is None else room, device, first.attention))
+            if spent is not None:
+                spent.past[layer] = None                  # copied: the spent speaker's layer freed
+        out._heard = [s._heard[b].copy() for (s, _, _), i in zip(parts, index) for b in i]
+
+        def said(get: Callable[[Speaker], list[np.ndarray]], fill: Any) -> list[np.ndarray]:
+            return _rows_together([get(s) for s, _, _ in parts], index, shifts, fill)
+
+        out.forbidden = {c: said(lambda s, c=c: s.forbidden[c], np.nan) for c in first.forbidden}
+        out.go_around_probability = said(lambda s: s.go_around_probability, np.nan)
+        out.go_around_permitted = said(lambda s: s.go_around_permitted, False)
+        blocked = {c: said(lambda s, c=c: [row[c] for row in s.procedure_blocked], False)
+                   for c in first.procedure.columns}
+        out.said_rows = said(lambda s: s.said_rows, False)
+        out.procedure_blocked = [{c: rows[r] for c, rows in blocked.items()} for r in range(len(out.said_rows))]
+        out.permitted_rows = list(zip(*(said(lambda s, c=c: [row[c] for row in s.permitted_rows], False)
+                                        for c in range(len(COLUMNS)))))
+        out.permitted_times = said(lambda s: s.permitted_times, np.nan)
+        out.permitted_own = said(lambda s: s.permitted_own, 0.0)
+        out.drawn_probability = said(lambda s: s.drawn_probability, np.nan)
+        out._role = np.concatenate([s._role[i] for (s, _, _), i in zip(parts, index)])
+        out._go_arounds = np.concatenate([s._go_arounds[i] for (s, _, _), i in zip(parts, index)])
+        out._last_s = np.concatenate([s._last_s[i] for (s, _, _), i in zip(parts, index)])
         return out
 
     # ---- what a loop reads of the speaker, and does not change (§7 item 3, D106 item 6)
@@ -432,29 +534,29 @@ class Speaker:
     def _go_around(self) -> np.ndarray:
         return np.array([f is not None and f.go_around for f in self.in_force])
 
-    def _allowed(self, column: int, said: np.ndarray, at: Position, caller: Mapping[int, np.ndarray],
-                 procedure: ProcedureMasks) -> np.ndarray:
-        """``[B, words]``: the words of ``column`` that every mask permits, after the row's earlier words ``said``
-        (module docstring)."""
-        if column != RUNWAY:
-            runway, go_around = self._runway_after(said[:, RUNWAY])
-            later = {c: self._others(c, runway, go_around, at, caller, procedure)
-                     for c in range(column + 1, len(COLUMNS))}
-            return (column_mask(self.in_force, said, column, at.height_m, self._n_candidates, self.words, later)
-                    & self._others(column, runway, go_around, at, caller, procedure))
-        # a runway word is permitted where some permitted heading word of the row can follow it: the grammar asked at
-        # the heading column after it, with the later columns' masks under the runway and G it leaves (exact, and one
-        # heading column's work for each runway word, not the whole row's)
+    def _allowed(self, column: int, said: np.ndarray, at: Position, others: Mapping[int, np.ndarray]) -> np.ndarray:
+        """``[B, words]``: the words of ``column`` (after the runway's) that every mask permits, after the row's earlier
+        words ``said`` (module docstring); ``others`` the procedure's and the caller's masks of this column and every
+        later one, the row's once its runway word is drawn."""
+        later = {c: others[c] for c in range(column + 1, len(COLUMNS))}
+        return (column_mask(self.in_force, said, column, at.height_m, self._n_candidates, self.words, later)
+                & others[column])
+
+    def _runway_allowed(self, at: Position, caller: Mapping[int, np.ndarray], procedure: ProcedureMasks) -> np.ndarray:
+        """``[B, words]``: the runway words every mask permits (module docstring): a runway word is permitted where some
+        permitted heading word of the row can follow it — the grammar asked at the heading column after it, with the
+        later columns' masks under the runway and G it leaves (exact, and one heading column's work for each runway
+        word, not the whole row's)."""
         count = len(self.in_force)
         runway_words = column_words(RUNWAY, self.words, int(self._n_candidates.max()))
         out = np.zeros((count, len(runway_words)), dtype=bool)
         for w, word in enumerate(runway_words):
             runway, go_around = self._runway_after(np.full(count, word))
-            later = {c: self._others(c, runway, go_around, at, caller, procedure)
-                     for c in range(HEADING + 1, len(COLUMNS))}
+            held = self._procedure_masks(runway, go_around, at, procedure)
+            later = {c: self._others(c, held, caller) for c in range(HEADING + 1, len(COLUMNS))}
             heading = column_mask(self.in_force, np.full((count, 1), word), HEADING, at.height_m, self._n_candidates,
                                   self.words, later)
-            out[:, w] = (heading & self._others(HEADING, runway, go_around, at, caller, procedure)).any(axis=1)
+            out[:, w] = (heading & self._others(HEADING, held, caller)).any(axis=1)
         if RUNWAY in caller:
             out &= caller[RUNWAY]
         return out
@@ -462,13 +564,18 @@ class Speaker:
     def _runway_after(self, word: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         return runway_after(word, self.in_force, self._n_candidates)
 
-    def _others(self, column: int, runway: np.ndarray, go_around: np.ndarray, at: Position,
-                caller: Mapping[int, np.ndarray], procedure: ProcedureMasks) -> np.ndarray:
-        """The words of ``column`` the procedure masks (``procedure``, the row's) and the caller's permit."""
+    def _procedure_masks(self, runway: np.ndarray, go_around: np.ndarray, at: Position,
+                         procedure: ProcedureMasks) -> dict[int, np.ndarray]:
+        """The words the procedure masks (``procedure``, the row's) permit in each column they rule, under ``runway``
+        and ``go_around``."""
+        return {c: procedure.permitted(c, runway, go_around, at.e_m, at.n_m, at.height_m) for c in procedure.columns}
+
+    def _others(self, column: int, held: Mapping[int, np.ndarray], caller: Mapping[int, np.ndarray]) -> np.ndarray:
+        """The words of ``column`` the procedure masks (``held``, `_procedure_masks`) and the caller's permit."""
         width = len(column_words(column, self.words, int(self._n_candidates.max())))
         out = np.ones((len(self.in_force), width), dtype=bool)
-        if column in procedure.columns:
-            out &= procedure.permitted(column, runway, go_around, at.e_m, at.n_m, at.height_m)
+        if column in held:
+            out &= held[column]
         if column in caller:
             out &= caller[column]
         return out

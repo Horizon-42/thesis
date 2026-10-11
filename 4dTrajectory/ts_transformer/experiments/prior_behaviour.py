@@ -16,8 +16,7 @@ the same on fixed inputs, never by an equal commit (the user, 2026-10-02; no cod
 The fixed inputs: the artefact's vocabulary spec and its first airport's candidates and finals (the procedure masks
 the speaker speaks under), configuration A's shape (`PriorConfig`'s defaults) and training values (`TrainConfig`'s), a
 set of sentences drawn from a fixed seed (`fixed_sentences`), the speaker's numbers from a fixed seed. The answer
-holds every number as its float's hex, compared exactly. The speaker and the speaking loop run with the procedure
-masks in both modes (B14) and a difference is refused by name; the answer is the per-aircraft mode's.
+holds every number as its float's hex, compared exactly.
 
     python run_ts.py prior_behaviour --instructions <artefact>
 """
@@ -49,7 +48,7 @@ from ts_transformer.prior.batch import (
 from ts_transformer.prior.inputs import Heard, sentence_rows, state_inputs
 from ts_transformer.prior.landings import Landing, LandingIndex
 from ts_transformer.prior.model import Prior, PriorConfig
-from ts_transformer.prior.procedure import BATCH, MASK_MODES, PER_AIRCRAFT, Final, airport_finals
+from ts_transformer.prior.procedure import Final, airport_finals
 from ts_transformer.prior.runs import Run, RunData
 from ts_transformer.prior.selection import RULES, kept, left_out, side
 from ts_transformer.prior.speaker import Position, Speaker
@@ -151,10 +150,8 @@ class Straight:
         self.halted |= flights
 
 
-def speaking(model: Prior, words: Words, finals: Sequence[Final], days: DaySplit, masks: str = PER_AIRCRAFT
-             ) -> dict[str, Any]:
-    """Three flights of ``finals``' airport in `SpeakingLoop` on `Straight` at Δ = 4 s (module docstring), the procedure
-    masks in the mode ``masks``."""
+def speaking(model: Prior, words: Words, finals: Sequence[Final], days: DaySplit) -> dict[str, Any]:
+    """Three flights of ``finals``' airport in `SpeakingLoop` on `Straight` at Δ = 4 s (module docstring)."""
     geometry = finals[0].geometry
     count, every, start = 3, 2, 4
     noon = float(np.datetime64(f"{days.days['train'][0]}T12:00:00", "s").astype(np.int64))
@@ -175,7 +172,7 @@ def speaking(model: Prior, words: Words, finals: Sequence[Final], days: DaySplit
     observed = {b: states[b, : start * every] for b in range(count)}
     loop = SpeakingLoop(model, Straight(states[:, -1], every, 2), list(range(count)), rows, observed, flights,
                         {geometry.code: geometry}, landings, {geometry.code: finals}, words, interval_s=4.0,
-                        variant="full", device=torch.device("cpu"), masks=masks)
+                        variant="full", device=torch.device("cpu"))
     while loop.observing:
         loop.observe()
     numbers = [flight_numbers(SEED, 0, b) for b in range(count)]
@@ -305,17 +302,11 @@ def behaviour(words: Words, finals: Sequence[Final], days: DaySplit) -> dict[str
         at = [Position(np.full(SENTENCES, -15_000.0 + 400.0 * r) + 3_000.0 * np.arange(SENTENCES),
                        np.zeros(SENTENCES), np.full(SENTENCES, 900.0 - 10.0 * r)) for r in range(FIRST + SAID)]
         numbers = np.random.default_rng(SEED).random((SAID, SENTENCES, len(COLUMNS)))
-        spoken = {}
-        for masks in MASK_MODES:                     # B14: the procedure masks' two modes say the same, bit for bit
-            speaker = Speaker(model, words, [finals] * SENTENCES, capacity=8, masks=masks)
-            speaker.observe(rows.between(0, FIRST), at[:FIRST])
-            said = [speaker.speak(rows.between(r, r + 1), at[r], numbers[r - FIRST]).tolist()
-                    for r in range(FIRST, FIRST + SAID)]
-            spoken[masks] = (said, hexed(np.stack(speaker.drawn_probability)),
-                             [{c: v.tolist() for c, v in row.items()} for row in speaker.procedure_blocked],
-                             [m.tolist() for m in speaker.permitted().masks])
-        require_same_modes("the speaker", spoken)
-        said, probabilities = spoken[PER_AIRCRAFT][:2]
+        speaker = Speaker(model, words, [finals] * SENTENCES, capacity=8)
+        speaker.observe(rows.between(0, FIRST), at[:FIRST])
+        said = [speaker.speak(rows.between(r, r + 1), at[r], numbers[r - FIRST]).tolist()
+                for r in range(FIRST, FIRST + SAID)]
+        probabilities = hexed(np.stack(speaker.drawn_probability))
         runway = first_step_runway(model, sentences, config.tokens_per_batch, cpu)
         heard = Heard(finals[0].geometry, words)
         for r, row in enumerate(said):
@@ -330,9 +321,7 @@ def behaviour(words: Words, finals: Sequence[Final], days: DaySplit) -> dict[str
                                                                       variant="constants"), cpu))
         inputs = fixed_inputs(finals[0].geometry, days)
         sentence = fixed_sentence([row[0] for row in said], finals[0].geometry, words, days)
-        loops = {masks: speaking(model, words, finals, days, masks) for masks in MASK_MODES}
-        require_same_modes("the speaking loop", loops)
-        loop = loops[PER_AIRCRAFT]
+        loop = speaking(model, words, finals, days)
     finally:
         torch.set_num_threads(threads)
     from ts_transformer.experiments.prior_campaign import settings
@@ -347,14 +336,6 @@ def behaviour(words: Words, finals: Sequence[Final], days: DaySplit) -> dict[str
             "train_loss": hexed([row["train_loss_per_step"] for row in result.history]),
             "select_loss": hexed([row["select_loss_per_step"] for row in result.history]),
             "words": said, "probabilities": probabilities}
-
-
-def require_same_modes(what: str, answers: dict[str, Any]) -> None:
-    """B14: what ``what`` said and flew with the procedure masks in each mode (``answers`` by mode) is the same — refused
-    by name otherwise; the answer is the per-aircraft mode's (the reference)."""
-    if answers[BATCH] != answers[PER_AIRCRAFT]:
-        raise ValueError(f"{what} says otherwise with the procedure masks' batch mode than with the per-aircraft mode "
-                         f"(B14)")
 
 
 def main(argv: list[str] | None = None) -> int:

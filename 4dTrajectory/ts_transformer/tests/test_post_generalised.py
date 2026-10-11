@@ -5,56 +5,17 @@ stage C's code before the change: `BEFORE_GENERALISATION`, the digests that code
 
 from __future__ import annotations
 
-import hashlib
-from dataclasses import astuple, replace
+from dataclasses import replace
 
 import numpy as np
 import torch
 
 from ts_transformer.experiments.prior_speaking_loop import flight_numbers
+from ts_transformer.experiments.window_behaviour import Digest as _Digest
 from ts_transformer.post.branches import samples
 from ts_transformer.post.scene import moved_start_window
 from ts_transformer.tests.test_post_branches import _ahead, _round
 from ts_transformer.tests.test_post_window_loop import CPU, _window_loop, _with_module, setup  # noqa: F401
-
-
-class _Digest:
-    """A sha256 of output data (outline D139 item 5), fed arrays and values in order."""
-
-    def __init__(self) -> None:
-        self.hash = hashlib.sha256()
-
-    def add(self, *values) -> None:
-        for value in values:
-            if isinstance(value, torch.Tensor):
-                value = value.detach().cpu().numpy()
-            if isinstance(value, np.ndarray):
-                self.hash.update(str(value.dtype).encode() + str(value.shape).encode())
-                self.hash.update(np.ascontiguousarray(value).tobytes())
-            else:
-                self.hash.update(repr(value).encode())
-
-    def rows(self, rows) -> None:
-        for name in ("time_s", "own", "candidates", "runway_in_force", "go_around", "heading_in_force",
-                     "words_in_force", "since", "targets"):
-            self.add(getattr(rows, name))
-
-    def permitted(self, permitted) -> None:
-        self.add(*permitted.masks, permitted.time_s, permitted.own, permitted.temperature)
-
-    def sentence(self, rows, permitted, tokens) -> None:
-        self.rows(rows)
-        self.permitted(permitted)
-        self.add(len(tokens), *tokens)
-
-    def result(self, result) -> None:
-        self.add(result.index, result.kind, result.outcome, None if result.loss is None else astuple(result.loss),
-                 result.loss_step, result.other, result.reward, result.go_arounds, result.words, result.states,
-                 result.speed_mask_rows, result.faulty_steps, result.loss_reads_fault)
-
-    def samples(self, batch) -> None:
-        self.add(*batch.rows, *batch.permitted.masks, batch.permitted.time_s, batch.permitted.own,
-                 batch.traffic.tokens, batch.traffic.present, batch.advantage, batch.counted)
 
 
 def stage_c_scenario(s) -> dict[str, str]:
@@ -151,6 +112,7 @@ def stage_c_campaign_scenario(s, tmp_path, monkeypatch) -> dict[str, str]:
             # fields more, `Sentence.until` and `Group.varied`, so its pickle is a few bytes longer), are left out
             record.pop("git"), record.pop("finished_utc"), record.pop("groups_bytes")
             record.pop("speak_device")              # the workers' device, recorded after it (information, `--speak-device`)
+            record.pop("cpu_workers")               # the CPU workers, recorded after it (information, D191)
             # the pass's records added after it (information: the gradients' norms, D168; each pass's means, D169)
             for key in ("grad_norm_mean", "grad_norm_max", "grad_clipped_share", "passes"):
                 record["pass"].pop(key, None)
@@ -176,7 +138,7 @@ def stage_c_campaign_scenario(s, tmp_path, monkeypatch) -> dict[str, str]:
     (group,) = _round(s, model, [_ahead(s["windows"][0])]).groups
     rewarded = replace(group, continuations=(replace(group.continuations[0], reward=1.0), group.continuations[1]))
 
-    def speak(model, context, windows, settings, round_, directory, speakers, *, stage):
+    def speak(model, context, windows, settings, round_, directory, speakers, *, stage, launch):
         torch.save([rewarded, rewarded], directory / "groups_0.pt")
         return {"windows": len(windows)}
 
@@ -211,7 +173,9 @@ def test_stage_cs_campaign_is_the_campaign_before_the_skeleton_bit_for_bit(setup
 
 
 #: `stage_c_scenario`'s digests, written by stage C's code before its generalisation (dev-two-tier-v4 c7a0b6b0, the CPU,
-#: one thread).
+#: one thread). "round real" written again by d5cc5d6a with each flight's own permitted record alone (S6, multi-aircraft
+#: control D193 (3), requests_from_d item 99): its sentences' records are no longer padded to the most rows of those
+#: asked; the other digests stay.
 BEFORE_GENERALISATION = {
     "module": "8ef2cf46f1b72b4b62813330bf8f53bb59819a99862dc087c036e978031b4122",
     "window real": "62e8e4e86314c20be46d9a70988b9cefbfb9a7cc9939bc6a7994c73a2a3b4026",
@@ -219,12 +183,13 @@ BEFORE_GENERALISATION = {
     "window B": "afe5951db940afbdd830714c5485771f9046e14c5d22bf852e4efd37deaba271",
     "round A": "1e7dadf27004b47b1582c4c4ea801a35cb775db75ce9224c1c8b25134ac77ed5",
     "samples A": "96c0207aaba55f9089327068ca64239f1db9df538865040ed679c45e32b08ab9",
-    "round real": "cf8eacd236f3e55403ef464f884ab231a60e4166de8f6dabac17ed200f518172",
+    "round real": "02b295dc011920f8c54cd0e1b709e258267db93116822b15ccdd4855f13b86cc",
 }
 
 
-#: `stage_c_batch_scenario`'s digest, written by the same code.
-BATCH_BEFORE_GENERALISATION = "8cc8c87b8df623836a2968fef9d58d59aef4b8245042cc6179874b2e06e45a0d"
+#: `stage_c_batch_scenario`'s digest, written by the same code, and again as "round real" (S6: its two rows' records each
+#: their own).
+BATCH_BEFORE_GENERALISATION = "b35bfbebc8b58a0bb98ecc8ca7118f41f1bc124791926de4f046995a406195a7"
 
 
 def test_a_stage_c_batch_whose_first_window_ended_is_the_code_before_its_generalisation_bit_for_bit(setup, monkeypatch):

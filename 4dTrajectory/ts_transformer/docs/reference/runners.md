@@ -1704,7 +1704,15 @@ Both keep the pull toward the base and the data term, and each round ends with t
 checkpoint.
 - The start is the base with zero-output traffic modules, or a round of another campaign (`--start-campaign`,
   `--start-round`; D162: a seed other than the source's).
-- A resume continues from the last checkpoint and may raise `--rounds` (D157).
+- A resume continues from the last checkpoint and may raise `--rounds` (D157) and change `--cpu-batches` /
+  `--cpu-period` (D191, below; its entry holds the rule before and after). A round left half done keeps its done
+  batches (D185, C27; stage D's `multi_train` alike): each batch writes its files and then `record_<k>.json` (its
+  record, its windows, its launch's commit as information, the kind of device), each under a temporary name renamed
+  when complete; a resume reads the done batches back and speaks the others, and refuses by name done batches of
+  another draw, or spoken on another kind of device than this launch's rule gives the batch (multi-aircraft control
+  D191, below). `--restart-round` moves the round aside as `round_<r>.aborted-<UTC>`
+  instead. On changed code choose one: `--restart-round`, or keep the done batches after `window_behaviour` (R68) on
+  the code before and after.
 - `--speak-workers` speaks the batches in worker processes, measured against the host's and the GPU's memory before
   the first round (O15). The measure is kept in `campaign.json` (`measures`); a later launch on the same devices with
   at most the workers it admitted reads it and checks only the memory free now (seconds, D167, C18); a record without
@@ -1720,6 +1728,21 @@ checkpoint.
 - `--branch-every-s` and `--segment-only` (D170, C21; branch training only): the branch points' interval (default
   120 s, a whole number of Δ rows) and a group's advantage counted only up to the next branch point (default: to the
   event).
+- `--front-attention copied|merged` (multi-aircraft control D190 (2), a setting): how a window's copies read the
+  front of the speaker's cache they hold once — copied back a layer at a time (the default, bit for bit the code
+  before) or read once for them all (no copy; the last bits of the attention may move).
+- `--cpu-workers N` with `--cpu-batches B --cpu-period P` (multi-aircraft control D191; the two last are settings, by
+  default 0 of 1; a resume may change them, the user 2026-10-10): N speaking workers on the CPU (one thread each) beside
+  the workers on the speak device; of every P batches of a round, by index, the first B are spoken on the CPU, the
+  others on the speak device, each device's workers taking its batches in order; the selection readout is read on the
+  speak device alone, so every round's readout is read on one device whatever rule spoke the round. The fit counts two
+  budgets: the GPU's (its workers and the pass), the host's (every worker's host memory, a CPU worker's whole peak); a
+  launch measures one CPU worker besides (a recorded measure without one measures again). Refused by name: CPU batches
+  without CPU workers or the reverse, CPU workers beside a speak device that is the CPU.
+  `post_ceiling` (R64) and `post_diagnose` (R66) read any campaign on the speak device alone, as its readout was read.
+- Stage D's `multi_train` takes `--front-attention`, `--cpu-workers`, `--cpu-batches` and `--cpu-period` alike; its
+  workers are sized from `--profile` (`multi_profile`) and, with CPU workers, `--cpu-profile` (a `multi_profile
+  --speak-device cpu` of the same inputs and settings).
 - A clean tree unless `--smoke`; formal runs from a detached run worktree (D163).
 - Writes `campaign.json` (`ts-post-train-v1`) and, for each round, `round.json` and `checkpoint.pt`
   (`ts-post-checkpoint-v1`).
@@ -1769,3 +1792,66 @@ export takes a list (`--windows`, D176 (3), frontend F5). Tests: `tests/test_win
     python run_ts.py window_list --diagnose 4dTrajectory/outputs/POOLED/post/<diagnose id> on \
         --ceiling 4dTrajectory/outputs/POOLED/post/<ceiling id> start --outcomes lost_separation \
         --out 4dTrajectory/outputs/POOLED/post/<list id> [--all]
+
+### R68 · `run_ts.py window_behaviour` — the window loop's behaviour on fixed inputs, stages C and D (multi-aircraft control D181, D183, D186; post-training D185)
+
+2026-10-09. The check that code before and after a change behaves the same (root `CLAUDE.md`: never by an equal commit),
+which D181's one-off script did for items 58–60. From a campaign of stage C (its branch method; the landed and value
+methods are refused by name) or D (`--campaign`, by its schema; its inputs' checks first), on the CPU with one thread: the model of `--model-round` (default the start), round
+`--draw-round`'s draw (default 0) — of each span its first batch, at most `--windows` of its windows, spoken by the
+stage's own batch speaker (groups written to a scratch directory, not kept) — and the first `--readout-per-span`
+(default 4) selection windows of each span read by the stage's reader in its batches. Writes `behaviour.json`
+(`ts-window-behaviour-v1`) into a new directory: digests (sha256) of each first-pass end, each branch group, the windows
+spoken again and differed (of a campaign whose points are found backward, D182: the groups' depths and the search's
+counts too), and each readout window's read; the commit as information. `--against` another record:
+the parts that differ named, exit status 1 when any does; refused for records of other inputs. Run the same command
+on a checkout of the code before (a detached worktree) and after. Stage C's seg60 round 5 and stage D's MC6 start took
+about 5 + 10 min. Tests: `tests/test_window_behaviour.py`.
+
+    python run_ts.py window_behaviour --campaign 4dTrajectory/outputs/POOLED/multi/multi_train_20261009 \
+        --out <a new directory> [--model-round N] [--windows W] [--against <another behaviour.json>]
+
+### R69 · `run_ts.py multi_compare` — a stage D campaign's start and rounds side by side: landed, reward, the pull to the base
+
+2026-10-10 (the user: the landed rate, the reward and the pull to the base compared, each number named by its file and
+field). `--read-start DIR` reads the campaign's start model (stage D's `Stage.start`) on its select windows by the
+campaign's own selection readout (the same windows and random numbers as every round's), here or by `--speak-workers`
+workers on `--device` (the rule of the CPU's batches left off, as every round's readout), into a new directory
+(`start_read.json`, `ts-multi-start-read-v1`, with the campaign's inputs); a clean tree unless `--smoke`, the checks
+first. The start read comes after the rounds, by other code: the same run first reads the last done round's model on
+the same windows and stops unless that is the round's own readout (the behaviour check on fixed inputs, as
+`post_ceiling`'s draw 0; it doubles the time). `--out FILE` compares each done round's `round.json` and, with `--start
+DIR`, that start read (refused for other inputs or settings, the rule of the CPU's batches apart, or read on another
+kind of device than a round's `speak_device`): by airport and over all, landed (`outcomes.landed` of
+`aircraft`), the reward (`reward_sum` over `aircraft`; D30: 1 a landing on a runway of the present direction, 0.9ⁿ
+after n go-arounds, else 0 — the campaign's log prints it as `reward_mean`), the losses of separation, and each
+round's pass: `kl` (the pull to the base before its weight 0.04), `data`, `surrogate`, `updates` (a pass of no update
+has no means). Each airport's cells of span × kind are summed and checked against its `all` cell, and every row must
+read the same aircraft, refused by name otherwise. Writes `ts-multi-compare-v1` and prints a table. The same read of
+MC7's start alone (a one-off before this runner) took 22 min on 3 GPU workers beside the test suite. Tests: `tests/test_multi_compare.py`.
+
+    python run_ts.py multi_compare --campaign 4dTrajectory/outputs/POOLED/multi/<campaign> --read-start <a new dir> \
+        [--speak-workers N] [--device cuda]
+    python run_ts.py multi_compare --campaign 4dTrajectory/outputs/POOLED/multi/<campaign> [--start <its dir>] \
+        --out <a new file>.json
+
+### R70 · `run_ts.py pass_gradients` — which part of the loss sets a round's pass, stages C and D
+
+2026-10-10 (the user: is a flat reward the learning rate's or the reward's?). A round whose groups are still on disk (a
+round left half done; a round's groups are deleted after its pass), read at the model that spoke it (the round before's
+checkpoint, or the start), its pass's updates in the pass's own order (`update_pairs` with the round's numbers), every
+`--every`-th, no step taken (every ratio 1). Of each update, by parameter group (the prior's own, the traffic modules')
+and over all: the gradient of the surrogate (the advantages), of the pull to the base (× 0.04) and of the data term (×
+1) — `post.loss.update_gradients`, whose three parts add up to `update_step`'s gradient — each part's norm, its share
+⟨g_part, g⟩ / |g|² of the update's direction (the shares add up to 1) and the cosine of each pair; the means over the
+updates read. Under AdamW a parameter's step is about its learning rate whatever its gradient's size: the shares say
+which part points the update, the learning rate how far. On the CPU by default (`--device`, `--threads`); the data
+term's dropout masks are the pass's in distribution only (another device's generator, or updates left out by `--every`);
+of a campaign of several passes a round (D169), the first pass's order. And whether the updates read point one way
+(after a 3× learning rate did worse, 2026-10-10), for the surrogate, the data term (a reference) and the whole, by group
+and over all: the mean pairwise cosine of the updates' gradients, the cosine of the sums of the even and odd updates,
+the coherence |Σ g_i| / Σ |g_i| (1 aligned, about 1/√n independent). Writes `ts-pass-gradients-v2`; a clean tree unless
+`--smoke`, the checks first. Tests: `tests/test_pass_gradients.py`, `tests/test_post_loss.py`.
+
+    python run_ts.py pass_gradients --campaign 4dTrajectory/outputs/POOLED/multi/<campaign> --round <r> \
+        --out <a new file>.json [--every K] [--device cpu] [--threads T]

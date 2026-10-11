@@ -111,7 +111,7 @@ def test_a_round_speaks_each_window_n_times_and_writes_the_kept_sentences(setup,
         assert speak_round(model, context, windows, settings, 0, there, speakers, stage=STAGE_C_LANDED) == record
     finally:
         speakers.close()
-    assert sorted(p.name for p in there.iterdir()) == ["kept_0.pt", "kept_1.pt"]
+    assert sorted(p.name for p in there.iterdir()) == ["kept_0.pt", "kept_1.pt", "record_0.json", "record_1.json"]
     assert all((here / n).read_bytes() == (there / n).read_bytes() for n in ("kept_0.pt", "kept_1.pt"))
 
 
@@ -169,7 +169,7 @@ def test_a_landed_campaign_resumed_is_the_campaign_run_through(setup, tmp_path, 
     monkeypatch.setattr(post_train, "landed_train_pass", real)
     assert done_rounds(broken) == 1
     reopened = open_campaign(broken, _inputs(settings, tmp_path), {"head": "y", "dirty": False}, {})
-    assert len(reopened["aborted"]) == 1
+    assert reopened["aborted"] == [] and (broken / "round_1" / "record_0.json").exists()   # D185: its batches kept
     run_campaign(broken, settings, context, stage=STAGE_C_LANDED)
     assert _same(torch.load(broken / "round_1" / "checkpoint.pt", weights_only=False)["model"], state["model"])
     with pytest.raises(SystemExit, match="other inputs"):
@@ -256,9 +256,9 @@ def test_the_runner_hands_the_method_s_stage_to_the_workers_and_the_campaign(tmp
     handed = {}
 
     class Workers:
-        workers = 2
+        workers, cpu_workers = 2, 0
 
-        def __init__(self, context, settings, workers, device, *, stage):
+        def __init__(self, context, settings, workers, device, *, stage, cpu_workers):
             handed["speakers"] = stage
             handed["speak_device"] = device
 
@@ -274,7 +274,8 @@ def test_the_runner_hands_the_method_s_stage_to_the_workers_and_the_campaign(tmp
     monkeypatch.setattr(post_train, "Speakers", Workers)
     monkeypatch.setattr(post_train, "campaign_model", lambda *a: (None, None))
     monkeypatch.setattr(post_train, "require_workers_fit", lambda *a: {"speak_workers": 2, "measured": None, "pass": None,
-                                                                      "available": None})
+                                                                      "available": None, "cpu_workers": 0,
+                                                                      "cpu_measured": None})
     monkeypatch.setattr(post_train, "run_campaign", lambda out, settings, context, speakers, *, stage:
                         handed.update(campaign=stage, method=settings.method))
     argv = ["--prior", str(tmp_path / "p"), "--instructions", str(tmp_path / "i"), "--executor", str(tmp_path / "e"),

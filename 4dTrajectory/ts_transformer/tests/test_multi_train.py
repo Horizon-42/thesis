@@ -4,6 +4,7 @@ the synthetic artefact of stage C's campaign tests."""
 
 from __future__ import annotations
 
+import argparse
 import json
 from dataclasses import asdict, replace
 from types import SimpleNamespace
@@ -20,6 +21,7 @@ from ts_transformer.experiments.multi_train import (
 from ts_transformer.multi.separation import PAIRS
 from ts_transformer.multi.tokens import PART_FEATURES, TOKENS_SCHEMA
 from ts_transformer.multi.windows import COMPRESSED, REAL_KIND, left_out
+from ts_transformer.post.branches import EQUAL, GROUP_WEIGHTS, MINORITY_SIDE
 from ts_transformer.tests.support import INSTRUCTION_STEP_S
 from ts_transformer.tests.test_multi_windows import built  # noqa: F401
 from ts_transformer.tests.test_post_branches import _ahead
@@ -36,6 +38,32 @@ def _multi_settings(spans_s=(1.0,), **changed):
                   data_sentences=1, select_per_airport=1,
                   start={"campaign": "c", "round": 0, "checkpoint_sha256": "0" * 64})
     return MultiSettings(**{**values, **changed})
+
+
+@pytest.mark.parametrize("branching", ["grid", "backward"])
+@pytest.mark.parametrize("attention", ["copied", "merged"])
+def test_a_batch_is_spoken_with_its_campaigns_front_attention(monkeypatch, branching, attention):
+    """D190 (2): stage D's batch gives its window loops its loop options and the campaign's
+    `MultiSettings.front_attention`, its branch points D143's or found backward."""
+    from ts_transformer.tests.test_post_train import _Spoken
+
+    seen = {}
+
+    def spoken(*args, **kwargs):
+        seen.update(kwargs["loop_options"])
+        raise _Spoken
+
+    monkeypatch.setattr(multi_train, "branch_round", spoken)
+    monkeypatch.setattr(multi_train, "backward_round", spoken)
+    monkeypatch.setattr(multi_train, "loop_options", lambda context: {"answering": "the stage's"})
+    context = SimpleNamespace(splits={"train": {"sentences": {}, "flights": {}, "faults": {}}},
+                              start_loop=lambda split, batch: None, geometries={}, rosters={}, finals={}, words=None,
+                              interval_s=INSTRUCTION_STEP_S, variant="full", edges_reference=None,
+                              device=torch.device("cpu"))
+    settings = _multi_settings(front_attention=attention, branching=branching)
+    with pytest.raises(_Spoken):
+        multi_train.speak_batch(None, context, [], [], settings, 0, None, 0)
+    assert seen == {"answering": "the stage's", "attention": attention}
 
 
 def _stream_context(built):
@@ -55,6 +83,47 @@ def test_the_settings_refuse_what_is_not_a_campaign_of_stage_d():
                   {"start": {"campaign": "c"}}):
         with pytest.raises(ValueError):
             _multi_settings(**wrong)
+
+
+def test_the_data_weight_defaults_to_the_code_before_it_and_reaches_the_pass(monkeypatch):
+    """R2 of stage D's plan: `MultiSettings.data_weight` defaults to `post.loss.DATA_WEIGHT` (a record without it reads
+    so), is refused below 0, and stage D's pass gives it to `post_train.train_pass`."""
+    from ts_transformer.post.loss import DATA_WEIGHT
+
+    settings = _multi_settings()
+    assert settings.data_weight == DATA_WEIGHT
+    recorded = asdict(settings)
+    del recorded["data_weight"]
+    assert MultiSettings(**recorded) == settings
+    with pytest.raises(ValueError, match="data_weight"):
+        _multi_settings(data_weight=-0.5)
+    seen = {}
+    monkeypatch.setattr(multi_train, "train_pass", lambda *args, **kwargs: seen.update(kwargs) or {})
+    multi_train.stage_d().train("model", "context", "optimizer", "directory", _multi_settings(data_weight=0.25), "rng",
+                                part_width=7, round_=0, companion=None)
+    assert seen == {"part_width": 7, "data_weight": 0.25, "group_weight": EQUAL}
+
+
+def test_the_group_weight_defaults_to_the_code_before_it_and_reaches_the_pass(monkeypatch):
+    """D195: `MultiSettings.group_weight` defaults to `EQUAL` (a record without it reads so), is refused outside
+    `GROUP_WEIGHTS`, is read from ``--group-weight`` and stage D's pass gives it to `post_train.train_pass`."""
+    settings = _multi_settings()
+    assert settings.group_weight == EQUAL
+    recorded = asdict(settings)
+    del recorded["group_weight"]
+    assert MultiSettings(**recorded) == settings
+    with pytest.raises(ValueError, match="group_weight"):
+        _multi_settings(group_weight="kind")
+    parser = argparse.ArgumentParser()
+    multi_train.add_arguments(parser)
+    (option,) = [a for a in parser._actions if a.dest == "group_weight"]
+    assert option.option_strings == ["--group-weight"] and option.default == EQUAL
+    assert tuple(option.choices) == GROUP_WEIGHTS
+    seen = {}
+    monkeypatch.setattr(multi_train, "train_pass", lambda *args, **kwargs: seen.update(kwargs) or {})
+    multi_train.stage_d().train("model", "context", "optimizer", "directory", _multi_settings(group_weight=MINORITY_SIDE),
+                                "rng", part_width=7, round_=0, companion=None)
+    assert seen["group_weight"] == MINORITY_SIDE
 
 
 def test_each_kinds_count_is_split_equally_by_span():
@@ -333,6 +402,49 @@ def test_stage_ds_round_with_speaking_workers_is_the_round_of_one_process(setup,
     assert records[0] == records[1]
 
 
+def test_stage_ds_round_stopped_after_a_batch_resumes_by_its_batches(setup, tmp_path, monkeypatch):
+    """C27, D185 for stage D: a round stopped after its first batch (two batches: the same flight's windows) and resumed
+    keeps that batch and speaks the other, and gives the round of a campaign run through: its speaking record and its
+    checkpoint, bit for bit."""
+    from ts_transformer.tests.test_post_train import _same
+
+    s = setup
+    short_round(monkeypatch, s)
+    context = _context(s)
+    start = _stage_c(s, tmp_path, context)
+    window = replace(_ahead(s["windows"][0]), span_s=1.0)
+    monkeypatch.setattr(multi_train, "draw_windows",
+                        lambda context, settings, rng: ([window, window], {"drawn": {REAL_KIND: 2}}))
+    settings = _multi_settings(start=start, per_kind={REAL_KIND: 2, COMPRESSED: 0})
+    options = dict(schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER, settings_type=MultiSettings)
+    inputs = {**{key: str(tmp_path / "inputs" / key) for key in post_train.INPUT_PATHS}, "settings": asdict(settings),
+              "smoke": True}
+    through, stopped = tmp_path / "through", tmp_path / "stopped"
+    post_train.open_campaign(through, inputs, {"head": "x", "dirty": False}, {}, **options)
+    post_train.run_campaign(through, settings, context, stage=stage_d())
+    real = multi_train.speak_batch
+    spoken = []
+
+    def stopping(*args):
+        spoken.append(args[-1])
+        if args[-1] == 1 and len(spoken) == 2:
+            raise RuntimeError("stopped")
+        return real(*args)
+
+    monkeypatch.setattr(multi_train, "speak_batch", stopping)
+    stage = stage_d()                                           # its batch speaker the stopping one
+    post_train.open_campaign(stopped, inputs, {"head": "x", "dirty": False}, {}, **options)
+    with pytest.raises(RuntimeError, match="stopped"):
+        post_train.run_campaign(stopped, settings, context, stage=stage)
+    assert (stopped / "round_0" / "record_0.json").exists() and not (stopped / "round_0" / "record_1.json").exists()
+    post_train.open_campaign(stopped, inputs, {"head": "y", "dirty": False}, {}, **options)
+    post_train.run_campaign(stopped, settings, context, stage=stage)
+    assert spoken == [0, 1, 1]
+    ours, theirs = (json.loads((out / "round_0" / "round.json").read_text()) for out in (stopped, through))
+    assert ours["speaking"] == theirs["speaking"] and ours["speaking"]["batches"] == 2
+    assert _same(*(torch.load(out / "round_0" / "checkpoint.pt", weights_only=False) for out in (stopped, through)))
+
+
 def test_the_readouts_losses_by_pair_are_the_loops_on_a_window_of_several_aircraft(setup):
     """§5 item 4 (the review of MC4, S2-4): on the window of three commanded aircraft (each lost against another), the
     readout's judgement again on the states flown (`window_losses_of`) finds, at the step of each loss the loop charged,
@@ -491,7 +603,10 @@ def test_the_runner_records_stage_ds_campaign_and_opens_its_context_formal_or_sm
         assert calls == [("start_of", formal)] + [("finished", tmp_path / "c")] * formal + [
             ("spans", [300.0, 600.0]), ("context", formal), ("start", start),
             ("campaign", {"schema": MULTI_CAMPAIGN_SCHEMA, "reader": MULTI_CLAIM_READER,
-                          "settings_type": MultiSettings}), ("run", True)]
+                          "settings_type": MultiSettings, "restart_round": False}), ("run", True)]
+    calls.clear()
+    assert multi_train.main(argv + ["--smoke", "--restart-round"]) == 0                   # D185
+    assert [k["restart_round"] for name, k in calls if name == "campaign"] == [True]
 
 
 def test_the_time_the_aircraft_take(built):
@@ -551,7 +666,7 @@ def test_the_loops_crossing_time_is_the_timing_readouts(setup, monkeypatch):
     crossing = {"at_row": 37.5, "runway_index": 0, "cross_m": 0.0, "height_m": 15.0}
     monkeypatch.setattr(loop.speaking.loop, "outcome", lambda b: SimpleNamespace(outcome=LANDED, crossing=crossing))
     loop._landed(np.array([True, False, False]))
-    (added,) = [x for x in loop.landings[1].landings if x.flight_key == loop.keys[0]]
+    (added,) = [x for x in loop.speaking.landings(1).landings if x.flight_key == loop.keys[0]]
     (item,) = timing.landed(loop.records[:1], [crossing], loop.speaking.loop.params.cycle_s)
     assert item.loop_s == added.time_s
 
@@ -584,7 +699,7 @@ def test_a_round_of_stage_d_is_refused_unless_its_identity_is_the_campaigns(setu
 
 
 def _profile(tmp_path, settings, inputs, *, gpu=True, workers=True, schema=multi_train.MULTI_PROFILE_SCHEMA,
-             margin=1.0, speak_device=None, campaign_gpu=None):
+             margin=1.0, speak_device=None, campaign_gpu=None, name="profile"):
     """A profile record of stage D (`multi_profile`'s ``profile.json``) of ``settings`` and ``inputs``: its worker
     measured on the GPU (``gpu``) or the CPU, its pass on the GPU (``campaign_gpu``, by default as the worker)."""
     gib = 1 << 30
@@ -596,10 +711,76 @@ def _profile(tmp_path, settings, inputs, *, gpu=True, workers=True, schema=multi
     if workers:
         record["workers"] = {"measured": measured, "pass": {"peak": 3 * gib, "now": gib // 2} if on_gpu else None,
                              "speak_device": speak_device or ("cuda" if gpu else "cpu"), "margin": margin}
-    directory = tmp_path / "profile"
+    directory = tmp_path / name
     directory.mkdir(exist_ok=True)
     (directory / "profile.json").write_text(json.dumps(record))
     return directory
+
+
+def test_more_gpu_workers_than_their_peak_and_a_batch_past_its_share_at_fewer_at_once(tmp_path, monkeypatch):
+    """D191 (the user, 2026-10-10: the batches past their share go last, and more workers): the GPU refuses only workers
+    that could not hold what they hold between batches (the host and the pass keep D179's margin); a batch past its
+    share is spoken again at half the workers, then one, each budget the GPU less this process's hold and what each
+    idle worker holds, shared by the batches at once."""
+    gib = 1 << 30
+    settings = _multi_settings(spans_s=[300.0, 600.0], batch_rows=[64, 48])
+    inputs = {key: str(tmp_path / key) for key in multi_train.PROFILED_INPUTS}
+    cuda = torch.device("cuda")
+    profile = _profile(tmp_path, settings, inputs, margin=1.3)
+    # 6 workers: at their peak 6 × (1 + 0.25) = 7.5 > 7 − 0.5; between batches 6 × 0.5 = 3; the pass 3.9 + 3 ≤ 7; the
+    # host 6 × (2.6 + 0.5) = 18.6 ≤ 19
+    monkeypatch.setattr(multi_train, "available_memory", lambda device: {"host": 19 * gib, "gpu": 7 * gib})
+    fit = multi_train.profiled_fit(profile, settings, inputs, 6, cuda, cuda)
+    shared = 7 * gib - gib // 2
+    assert fit["gpu_budget"] == shared // 6
+    assert fit["deferred"] == [[3, (shared - 3 * (gib // 2)) // 3], [1, shared - 5 * (gib // 2)]]
+    monkeypatch.setattr(multi_train, "available_memory", lambda device: {"host": 18 * gib, "gpu": 7 * gib})
+    with pytest.raises(SystemExit, match=r"host: 6 workers speaking need 18.6 GiB"):
+        multi_train.profiled_fit(profile, settings, inputs, 6, cuda, cuda)
+    # a batch at the profile's GPU peak (3 × 1.3 + 0.25 GiB) with no level to be spoken at, where the pass and the
+    # workers between batches fit (3.9 + 4 × 0.5 ≤ 6): the last level 6 − 0.5 − 3 × 0.5 = 4 GiB, refused by name
+    big = tmp_path / "big"
+    big.mkdir()
+    record = json.loads((_profile(big, settings, inputs, margin=1.3) / "profile.json").read_text())
+    record["workers"]["measured"]["gpu"]["peak"] = 3 * gib
+    (big / "profile" / "profile.json").write_text(json.dumps(record))
+    monkeypatch.setattr(multi_train, "available_memory", lambda device: {"host": 64 * gib, "gpu": 6 * gib})
+    with pytest.raises(SystemExit, match=r"a batch at the profile's GPU peak \(4.15 GiB with its margin\) has 4.00 GiB"):
+        multi_train.profiled_fit(big / "profile", settings, inputs, 4, cuda, cuda)
+
+
+def test_cpu_workers_are_sized_from_a_cpu_workers_profile_in_the_hosts_budget(tmp_path, monkeypatch):
+    """D191: CPU workers beside the GPU workers read their measure from a profile of a CPU worker (these inputs and
+    settings, ``--speak-device cpu``), counted in the host's budget with the GPU workers' host part; the GPU's budget and
+    each GPU worker's share as without them; a profile of a GPU worker as the CPU's refused by name. D193 (4): a CPU
+    worker is counted at what it holds between batches; each has the host left by the GPU workers (at their peak with
+    the margin) in equal shares, and a CPU batch past its share is spoken again at half the CPU workers, then one;
+    refused by name only where the last level cannot hold the CPU profile's host peak with its margin."""
+    gib = 1 << 30
+    settings = _multi_settings(spans_s=[300.0, 600.0], batch_rows=[64, 48], cpu_batches=2, cpu_period=5)
+    inputs = {key: str(tmp_path / key) for key in multi_train.PROFILED_INPUTS}
+    cuda = torch.device("cuda")
+    monkeypatch.setattr(multi_train, "available_memory", lambda device: {"host": 13 * gib, "gpu": 5 * gib})
+    profile = _profile(tmp_path, settings, inputs)
+    cpu_profile = _profile(tmp_path, settings, inputs, gpu=False, campaign_gpu=True, name="cpu_profile", margin=1.2)
+    # host: 3 × (2 + 0.5) for the GPU workers; a CPU worker's hold 1 + 0.25 + 0.5 = 1.75, its peak 2 × 1.2 + 0.75 = 3.15
+    fit = multi_train.profiled_fit(profile, settings, inputs, 3, cuda, cuda, cpu_profile, 2)
+    assert fit["cpu_workers"] == 2 and fit["gpu_budget"] == (5 * gib - gib // 2) // 3
+    shared, hold = 13 * gib - 3 * (2 * gib + gib // 2), gib + gib // 4 + gib // 2
+    assert fit["host_budget"] == shared // 2 and fit["cpu_deferred"] == [[1, shared - hold]]
+    with pytest.raises(SystemExit, match=r"host: 3 workers speaking and 4 on the CPU need 14.5 GiB"):
+        multi_train.profiled_fit(profile, settings, inputs, 3, cuda, cuda, cpu_profile, 4)    # 7.5 + 4 × 1.75 > 13
+    # 3 CPU workers fit between batches (7.5 + 3 × 1.75 ≤ 13), but the last level 5.5 − 2 × 1.75 = 2 GiB is below a
+    # batch at the peak
+    with pytest.raises(SystemExit, match=r"a batch at the profile's host peak \(3.15 GiB with its margin\) has 2.00 GiB "
+                                         r"at the last level — start fewer \(--cpu-workers\)"):
+        multi_train.profiled_fit(profile, settings, inputs, 3, cuda, cuda, cpu_profile, 3)
+    monkeypatch.setattr(multi_train, "available_memory", lambda device: {"host": 16 * gib, "gpu": 5 * gib})
+    four, shared = multi_train.profiled_fit(profile, settings, inputs, 3, cuda, cuda, cpu_profile, 4), shared + 3 * gib
+    assert four["host_budget"] == shared // 4
+    assert four["cpu_deferred"] == [[2, (shared - 2 * hold) // 2], [1, shared - 3 * hold]]     # 2.5, 3.25 ≥ 3.15 GiB
+    with pytest.raises(SystemExit, match="other speaking device than"):
+        multi_train.profiled_fit(profile, settings, inputs, 3, cuda, cuda, profile, 2)
 
 
 def test_the_workers_are_sized_from_the_profile_and_the_memory_free_now(tmp_path, monkeypatch):
@@ -620,13 +801,15 @@ def test_the_workers_are_sized_from_the_profile_and_the_memory_free_now(tmp_path
     with pytest.raises(SystemExit, match=r"do not fit \(O15, from the profile\): host"):
         multi_train.profiled_fit(profile, settings, inputs, 4, cuda, cuda)      # 4 × 2.5 = 10 > 8 GiB
     monkeypatch.setattr(multi_train, "available_memory", lambda device: {"host": 16 * gib, "gpu": 5 * gib})
-    # the workers speak beside what this process holds after a pass (D167's form, subtracted once): 4 × 1.25 = 5 GiB
-    # against 5 − 0.5 = 4.5 refused, where the pass alone (3 + 4 × 0.5 = 5 ≤ 5) fits
-    with pytest.raises(SystemExit, match=r"profile\): gpu: 4 workers speaking need 5.0 GiB .* 4.5 GiB available"):
-        multi_train.profiled_fit(profile, settings, inputs, 4, cuda, cuda)
+    # the workers speak beside what this process holds after a pass (D167's form, subtracted once): at their peak
+    # 4 × 1.25 = 5 GiB against 5 − 0.5 = 4.5, no longer refused (D191: a batch past its share goes to the levels);
+    # between batches 4 × 0.5 = 2, and the pass (3 + 4 × 0.5 = 5 ≤ 5) fits
+    assert multi_train.profiled_fit(profile, settings, inputs, 4, cuda, cuda)["deferred"] == [
+        [2, (9 * gib // 2 - 2 * (gib // 2)) // 2], [1, 9 * gib // 2 - 3 * (gib // 2)]]
     monkeypatch.setattr(multi_train, "available_memory", lambda device: {"host": 8 * gib, "gpu": 5 * gib})
     for other, named in ((replace(settings, batch_rows=[32, 48]), "batch_rows"), (replace(settings, spans_s=[300.0, 1200.0]),
-                                                                            "spans_s")):
+                                                                            "spans_s"),
+                         (replace(settings, branching="backward"), "branching")):           # D182: profiled
         with pytest.raises(SystemExit, match=f"other {named} than this campaign's"):
             multi_train.profiled_fit(profile, other, inputs, 2, cuda, cuda)
     with pytest.raises(SystemExit, match="other prior than"):
@@ -641,6 +824,13 @@ def test_the_workers_are_sized_from_the_profile_and_the_memory_free_now(tmp_path
                                  2, cuda, cuda)                       # a profile of the whole round (before D179)
     with pytest.raises(SystemExit, match="no measure of the speaking workers"):
         multi_train.profiled_fit(_profile(tmp_path, settings, inputs, workers=False), settings, inputs, 2, cuda, cuda)
+    profile = _profile(tmp_path, settings, inputs)                    # its workers measured again (written over above)
+    before = json.loads((profile / "profile.json").read_text())       # a profile from before D182 reads as the grid
+    del before["inputs"]["settings"]["branching"]
+    (profile / "profile.json").write_text(json.dumps(before))
+    assert multi_train.profiled_fit(profile, settings, inputs, 2, cuda, cuda)["speak_workers"] == 2
+    with pytest.raises(SystemExit, match="other branching than this campaign's"):
+        multi_train.profiled_fit(profile, replace(settings, branching="backward"), inputs, 2, cuda, cuda)
     monkeypatch.setattr(multi_train, "available_memory", lambda device: {"host": 8 * gib, "gpu": None})
     on_cpu = _profile(tmp_path, settings, inputs, gpu=False)
     assert multi_train.profiled_fit(on_cpu, settings, inputs, 2, cpu, cpu)["gpu_budget"] is None
@@ -668,10 +858,11 @@ def test_the_fit_takes_each_measured_peak_times_its_margin(tmp_path, monkeypatch
     assert multi_train.profiled_fit(_profile(tmp_path, settings, inputs), settings, inputs, 3, cuda, cuda)
     with pytest.raises(SystemExit, match=r"from the profile\): gpu: the pass beside 3 workers needs 5\.4 GiB"):
         multi_train.profiled_fit(margined, settings, inputs, 3, cuda, cuda)
-    # and so does the worker's GPU peak: on 4.6 GiB, 3 × (1.3 + 0.25) GiB do not fit beside the pass's 0.5
+    # the worker's GPU peak does not (D191: a batch past its share goes to the levels): on 4.6 GiB, 3 workers beside
+    # the pass's 0.5 hold 3 × (0.25 + 0.25) between batches
     monkeypatch.setattr(multi_train, "available_memory", lambda device: {"host": 16 * gib, "gpu": int(4.6 * gib)})
     assert multi_train.profiled_fit(_profile(tmp_path, settings, inputs), settings, inputs, 3, cuda, cuda)
-    with pytest.raises(SystemExit, match=r"from the profile\): gpu: 3 workers speaking need 4\.6 GiB"):
+    with pytest.raises(SystemExit, match=r"from the profile\): gpu: the pass beside 3 workers"):
         multi_train.profiled_fit(margined, settings, inputs, 3, cuda, cuda)
     record = {"host": {"peak": 10, "now": 4}, "gpu": None, "held": {}}
     assert multi_train.with_margin(record, 1.3) == {"host": {"peak": 13, "now": 4}, "gpu": None, "held": {}}
@@ -722,7 +913,7 @@ def test_the_runner_takes_a_profile_with_its_speaking_workers_only(tmp_path, cap
     for extra in (["--speak-workers", "2"], ["--profile", str(tmp_path / "profile")]):
         with pytest.raises(SystemExit):
             multi_train.main(argv + extra)
-        assert "--profile goes with --speak-workers above 1" in capsys.readouterr().err
+        assert "--profile goes with speaking workers" in capsys.readouterr().err
     for extra, message in ((["--speak-device", "cpu"], "it needs --speak-workers 2 or more"),
                            (["--device", "cpu", "--speak-workers", "2", "--speak-device", "cuda",
                              "--profile", str(tmp_path / "profile")], "--speak-device cuda needs --device cuda")):
@@ -752,13 +943,16 @@ def test_the_runner_sizes_its_workers_from_the_profile_before_any_process_uses_t
     monkeypatch.setattr(multi_train, "open_context", lambda *a, **k: (calls.append(("context", a[4].type)),
                                                                       FakeContext(a[4], base))[1])
     monkeypatch.setattr(multi_train, "stage_d", lambda: SimpleNamespace(start=lambda c, s: calls.append(("start",))))
-    monkeypatch.setattr(multi_train, "profiled_fit", lambda profile, settings, inputs, workers, device, speak_device: (
+    monkeypatch.setattr(multi_train, "profiled_fit", lambda profile, settings, inputs, workers, device, speak_device,
+                        cpu_profile, cpu_workers: (
         calls.append(("fit", profile, workers, inputs["settings"]["batch_rows"], speak_device.type)),
-        {"gpu_budget": 123})[1])
+        {"gpu_budget": 123, "deferred": [[1, 456]], "host_budget": 789, "cpu_deferred": []})[1])
 
     class FakeSpeakers:
-        def __init__(self, context, settings, workers, device, *, stage, gpu_budget):
+        def __init__(self, context, settings, workers, device, *, stage, gpu_budget, cpu_workers, deferred,
+                     host_budget, cpu_deferred):
             calls.append(("speakers", context.device.type, workers, device.type, gpu_budget))
+            assert (deferred, host_budget, cpu_deferred) == ([[1, 456]], 789, [])
 
         def close(self):
             calls.append(("closed",))

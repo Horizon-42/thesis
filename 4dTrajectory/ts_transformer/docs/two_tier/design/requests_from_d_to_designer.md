@@ -4,11 +4,14 @@ Stage D's implementer writes this file (outline §5 rule 10, multi-aircraft cont
 time. Each item is a reading the implementer made where the design says nothing, or a gap; a reading is a proposal
 until the user decides. Paths are relative to `4dTrajectory/ts_transformer/`. The numbers are kept from the earlier
 notes; the items the user decided are deleted (D166: 6, 7, 19, 21, 22, 25, 29–35; O16: 36, written into D146; the
-census's sample: 18; D172: 46–48; D179, D180: 49–53; D181, O20: 54–62; D181–D186: 63–70; the interfaces and D182: 71–77), item 23 (it asked for 6 and 7), item 20 (built: item 40) and the names of MC0–MC4
-(written into the interfaces).
+census's sample: 18; D172: 46–48; D179, D180: 49–53; D181, O20: 54–62; D181–D186: 63–70; the interfaces and D182:
+71–77; D188: 78–79; D190: 80–84; D190, D191: 85, 87, 88; D191–D193 and the log: 86, 90–98; D193, D194 and the log: 89, 99–107), item 23 (it asked for 6 and
+7), item 20 (built: item 40) and the names of MC0–MC4 (written into the interfaces).
 
-State: 2026-10-09 (night): items 71–77 decided (the names into the interfaces; 77 (b) into D182 (3)) and deleted;
-nothing of MC11 or MC12 is open here. The items below are MC0–MC5's readings still open.
+State: 2026-10-11 (13:30): arms A and B done (readout `readouts/2026-10-11_stage_d_arms_ab.zh.md`); notes/stage_d.md's
+order 1 (D194 (3) for every point tried) built and merged (d3dc3b26, 226ed303), order 2 checked; the formal campaign
+`multi_train_majority_formal_20261011` (arm A's settings, 8 rounds) runs, rounds 0 / 1 landed 81.9 / 81.6 %; the
+user's group weight built and merged (afb9aea2, item 112) (stage D's log §22). 108–112 are open.
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -152,3 +155,57 @@ nothing of MC11 or MC12 is open here. The items below are MC0–MC5's readings s
     independent numbers: an upper bound of the noise of comparing two rounds, which share their numbers. Over all spans
     the unit is an anchor (its windows of the spans are nested and share their aircraft); within a span, windows of
     other anchors may still share flights in a dense select set (stated).
+
+## D194 and arms A, B (stage D's log §22; 2026-10-11)
+
+108. **The CPU's levels and the CPU profile of D192** (measured in A's round 1; for D191, D193 (4) and O15). With 6 CPU
+    workers a worker's host share was 2.43 GiB; about 40 CPU batches, nearly all of span 1200 s, went past it and were
+    spoken again after the first pass, most one at a time (levels 3 at 2.78 GiB, 1 at 4.19 GiB): 20 of them took
+    02:06–02:33, while the first pass took 37 min for 183 batches. With 4 workers (a share of 3.64 GiB; the user's
+    word, A resumed with its batches kept) the other 20 took 8 min. The CPU profile (batches 0 / 23 / 86) holds below
+    the host peak of the majority's batches of 1200 s, so the fit's levels assume a tail that does not happen. Proposal,
+    for the user: (a) a CPU profile of D192 on the batches of 1200 s with the most aircraft, or (b) a batch spoken again
+    goes to the level whose budget holds the peak it reached, not to each level in turn. B runs with 4 CPU workers;
+    its round 0 measures the first pass and the tail with 4.
+109. **D194 (3) on the GPU: one search of 224 batches differs** (measured; please write the bound into D194 (3)). Arm B's
+    round 0 speaks from A's start with A's settings (the data weight acts in the pass only), so its groups are A round
+    0's where the code behaves the same. Of 224 batch records, 4 are the same and 219 differ only in the search's seconds, steps or rows
+    (D194 (3)); batch 147, on the GPU, differs in one search: A (c60f59c6) chose the decision point at 128 s with its
+    majority point at 224 s, B (e77bc220) found no avoiding continuation at 128 s and chose 160 s, its fine point at
+    144 s and the majority point at 224 s (12 → 13 groups). The search's own stop acts only behind its decision point,
+    so this is the other searches' stop: the joint loop's rows fall earlier, and on the GPU a row's rounding depends
+    on the batch's shape. Every CPU batch (158) is the same; window_behaviour (CPU) found every digest equal. Reading:
+    D194 (3) keeps the answers on the CPU bit for bit, on the GPU within the GPU's rounding (as D193 S1: states within
+    2.2e-8 m), here 1 search in 224 batches.
+110. **For the user: B's round 0 with 4 CPU workers** (D194 (4)'s measure). Spoken 03:00–03:56 (A round 0: 69 min
+    with its stop). The GPU's 66 batches were done by 03:27; the CPU's 158 batches took to 03:56, the last 1200 s batch
+    alone at the end; no tail of the levels as in A's round 1. The CPU is now the slower device: 7 of every 10 batches
+    go to it (`--cpu-batches 7 --cpu-period 10`, set before S1 and S6, item 102). A rule with fewer CPU batches would
+    end the round earlier; arms compared keep one rule (D194), so it is for a next campaign.
+111. **D194 (3) for every point tried, as built** (notes/stage_d.md order 1; d3dc3b26, merged 226ed303). `_Part.need`:
+    1 for a point tried before the decision point, the fine point and point B, the majority behind the decision point
+    in a search for the majority point; `out_of_reach(failed, continuations, need)`; the decision point's copy is never
+    stopped. Order 2: window_behaviour on arm A's campaign (MC6's round 0 draw, batches 0 / 23 / 86, majority, the CPU,
+    one process) against 14e53df6 (no D194 (3)): "the same behaviour". Tests: a synthetic search whose points before
+    the decision point and fine point all fail stops them at their first step and finds the same; the batch test of
+    D188 allows a point judged early where every continuation failed. Review: no S1/S2; S3: point B's own early stop
+    has no test of its own (the same expression); on the GPU the answer is the same within the GPU's rounding only
+    (item 109), now for more points; `_failed` now runs for every point tried at every step (its seconds against the
+    rows saved are to be read in the formal campaign's records).
+
+112. **The group weight: a decision of the user to write as D195** (the user, 2026-10-11; built afb9aea2, merged into
+    dev-two-tier; the code and the intents already name it D195, the next free number). The user's words: weigh each
+    branch group so that a lucky group (one continuation better than the first sentence of 8) still counts but less,
+    and train every kind of group together. As built (`MultiSettings.group_weight`, `--group-weight`): `equal` (the
+    default, the behaviour before it; a record without it reads so) or `minority-side`: each group's advantages times
+    its minority side over the round's mean minority side. The minority side (`post.branches.Group.minority`) is the
+    smaller count of the group's sentences above and below its mean reward, a sentence within `SIDE_TOLERANCE` (1e-9)
+    of the mean on neither side; 1–4 with 8 continuations. The mean comes from each batch record's `group_minorities`
+    (written under `minority-side` only), the pass record holds it as `minority_mean`, and pass_gradients (R70) reads
+    with the campaign's weight; not profiled (no memory change); stage C unchanged. Why the minority side and not the
+    count of better continuations (the user chose it after both were shown): a group whose first sentence is its one
+    good sentence has the same one-against-eight form, and a mean difference is only as sure as its smaller side. On
+    round 2's groups the summed |advantage| share of one-against-eight groups falls from 19 to 7 %, the majority
+    groups' rises from 23 to 28 %. The user's plan: the control arm `multi_train_minority_side_20261011` (the formal
+    campaign's settings with `minority-side`, 3 rounds, compared with the formal campaign's rounds 0–2) if the formal
+    campaign's next two rounds stay flat. Please write D195 into multi_control.md and its arm into the plan.
