@@ -256,6 +256,49 @@ def test_a_majority_point_out_of_reach_ends_its_continuations_early_and_finds_th
     assert early.search_steps <= full.search_steps and early.search_rows < full.search_rows
 
 
+def test_a_point_whose_continuations_all_failed_ends_them_early_and_finds_the_same(setup, monkeypatch):
+    """D194 (3) for the points the decision point and the fine point are searched with (point B's search, 4
+    continuations): the two points before the decision point and the fine point avoid with none, and all 4 have failed
+    at their first step (`_failed` replaced), so each leaves the joint loop there; the decision point avoids with 2. The
+    groups, their depths and every count but the steps and rows flown are those of the search that flies each point to
+    the judged tick."""
+    s = setup
+    model = _with_module(s["base"])
+    rules = Rules(**credit.rules(1337, 0, DELTA))
+    reached = {}
+
+    def avoiding(point, happened):
+        return 2 if happened.tick - point == 3 * STEP else 0
+
+    def judged(loop, own, v, happened, point):
+        reached.setdefault(point, []).append(int(loop.speaking.t - loop.origins[own[0]]))
+        return [Trial(i < avoiding(point, happened), False) for i in range(len(own))]
+
+    def failed(loop, own, part):
+        return len(own) - avoiding(part.point, part.search.happened)
+
+    monkeypatch.setattr(post_branches, "_trials", judged)
+    monkeypatch.setattr(post_branches, "_failed", failed)
+    early = _backward(s, model, rules, continuations=4)
+    early_reached, reached = reached, {}
+    with monkeypatch.context() as patched:
+        patched.setattr(backward, "out_of_reach", lambda *args: False)
+        full = _backward(s, model, rules, continuations=4)
+    tick = max(early_reached) + STEP                                   # the event's tick (its point avoids 0)
+    decision = tick - 3 * STEP
+    assert [g.branch for g in early.groups] == [g.branch for g in full.groups] == [decision]
+    assert [[c.reward for c in g.continuations] for g in early.groups] == \
+        [[c.reward for c in g.continuations] for g in full.groups]
+    assert (early.depths_s, early.searches, early.found, early.to_event, early.to_end) == \
+        (full.depths_s, full.searches, full.found, full.to_event, full.to_end)
+    for point in (tick - STEP, tick - 2 * STEP):                       # judged at their first step, not later
+        assert early_reached[point] == [point] and reached[point][0] > point
+    fine = decision + FINE
+    assert early_reached[fine] == [fine] and reached[fine][0] > fine
+    assert early_reached[decision] == reached[decision]                # the decision point flown to the judged tick
+    assert early.search_steps <= full.search_steps and early.search_rows < full.search_rows
+
+
 @pytest.mark.parametrize("kind", [LOSS, END, GO_AROUND])
 def test_a_continuation_counted_failed_early_is_one_the_judgement_fails(kind):
     """D194 (3): `_failed` counts a continuation only where `_trials` on the same state judges it not to avoid the event
@@ -292,10 +335,12 @@ def test_a_continuation_counted_failed_early_is_one_the_judgement_fails(kind):
     assert _failed(loop, range(len(cases)), part) == sum(failed.values())
 
 
-def test_a_point_is_out_of_reach_once_too_few_continuations_are_left_to_make_the_majority():
-    """D194 (3): 5 of 8 make the majority, so 4 failed put it out of reach and 3 do not."""
+def test_a_point_is_out_of_reach_once_too_few_continuations_are_left_to_choose_it():
+    """D194 (3): 5 of 8 make the majority, so 4 failed put it out of reach and 3 do not; a point that needs 1 avoiding
+    continuation is out of reach once all 8 failed."""
     assert backward.out_of_reach(4, 8, 5) and not backward.out_of_reach(3, 8, 5)
     assert backward.out_of_reach(1, 2, 2) and not backward.out_of_reach(0, 2, 2)
+    assert backward.out_of_reach(8, 8, 1) and not backward.out_of_reach(7, 8, 1)
 
 
 def _round_trip_on_the_gpu(directory: str) -> None:
@@ -498,7 +543,8 @@ def test_the_searches_of_a_batch_step_together_and_find_what_each_finds_alone(se
     """D188: on the window of three commanded aircraft (`test_post_window_multi._multi`), the searches of its varied
     aircraft stepped together in one loop find what each finds searched alone (its aircraft the only one varied): the
     same groups (point, varied aircraft, depth; each continuation's words, reward and bound). Each point tried is judged
-    at its own event + 60 s, or where its continuations ended before; each point chosen is flown to its window's end."""
+    at its own event + 60 s, or where its continuations ended before, or where every one failed (D194 (3)); each point
+    chosen is flown to its window's end."""
     from ts_transformer.tests.test_post_window_multi import _multi
 
     s = setup
@@ -510,9 +556,10 @@ def test_the_searches_of_a_batch_step_together_and_find_what_each_finds_alone(se
 
     def trials(loop, own, v, happened, point):
         alive = loop.speaking.alive[[b for w in own for b in loop.members[w]]].any()
+        out = real(loop, own, v, happened, point)
         judged.append((v, point, int(loop.speaking.t - loop.origins[own[0]]), backward.judged_until(happened, DELTA),
-                       bool(alive)))
-        return real(loop, own, v, happened, point)
+                       bool(alive) and any(t.avoids for t in out)))
+        return out
 
     monkeypatch.setattr(post_branches, "_trials", trials)
 
@@ -524,8 +571,8 @@ def test_the_searches_of_a_batch_step_together_and_find_what_each_finds_alone(se
 
     together = round_of(rules.varied)
     assert together.searches == 3 and len({g.varied for g in together.groups}) == 3       # every aircraft varied
-    for v, point, tick, until, alive in judged:                  # each point tried at its own judged tick
-        assert tick == until or (tick < until and not alive)
+    for v, point, tick, until, open_ in judged:                  # each point tried at its own judged tick
+        assert tick == until or (tick < until and not open_)
     assert together.to_end == 2 * len(together.groups) and together.to_event == 2 * (len(judged) - len(together.groups))
     alones = [round_of(lambda window, loop, rows, results, v=v: [x for x in rules.varied(window, loop, rows, results)
                                                                   if x[0] == v]) for v in range(3)]

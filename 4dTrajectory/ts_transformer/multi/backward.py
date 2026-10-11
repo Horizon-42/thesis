@@ -145,12 +145,13 @@ def avoids(happened: Event, *, answered: str | None, partner_answered_v: bool, e
     return ended != happened.outcome
 
 
-def out_of_reach(failed: int, continuations: int, majority: int) -> bool:
+def out_of_reach(failed: int, continuations: int, need: int) -> bool:
     """Whether a point with ``failed`` of its ``continuations`` already judged not to avoid the event can no longer be
-    the majority point (D192, D194 (3)). A continuation that does not avoid it by some tick does not avoid it at the
+    chosen, ``need`` of them having to avoid it (D194 (3)): 1 for the decision point, the fine point and point B, the
+    majority for the majority point (D192). A continuation that does not avoid it by some tick does not avoid it at the
     judged tick: a loss answered for, an end and a go-around said stay (`avoids`). The point's continuations can then
     end at that tick: the search's answer is the same."""
-    return continuations - failed < majority
+    return continuations - failed < need
 
 
 def search(candidates: Sequence[int], fine_ticks: int, majority: int | None = None
