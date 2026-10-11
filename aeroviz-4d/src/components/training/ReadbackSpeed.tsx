@@ -49,8 +49,8 @@ export default function ReadbackSpeed({ m, onCursorChange, onColumnChange }: {
         const selected = m.focused("speed", index);
         const ok = span.transitionOk && span.accelOk;
         return (
-          <g key={`speed-${index}`} aria-label={`speed ${span.targetMps} m/s from ${m.envelopeTimeS(span.row)} s`} opacity={m.recede(selected)}>
-            <line className="training-readback-transition" x1={m.xTime(m.envelopeTimeS(span.row))} x2={m.xTime(m.envelopeTimeS(span.arrivalRow))}
+          <g key={`speed-${index}`} aria-label={`speed ${span.targetMps} m/s from ${m.envelopeTimeS(span.firstRow)} s`} opacity={m.recede(selected)}>
+            <line className="training-readback-transition" x1={m.xTime(m.envelopeTimeS(span.firstRow))} x2={m.xTime(m.envelopeTimeS(span.arrivalRow))}
               y1={ySpeed(span.targetMps)} y2={ySpeed(span.targetMps)} stroke={selected ? TRAINING_WORD_COLOR : ok ? TRAINING_SPEED_COLOR : TRAINING_OUTSIDE_COLOR}
               strokeDasharray="3 2" strokeWidth={1}>
               <title>

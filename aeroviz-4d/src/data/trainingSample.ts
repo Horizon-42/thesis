@@ -1,7 +1,7 @@
 /**
  * trainingSample.ts
  * -----------------
- * The Training view's data contract for STAGE A of the two-tier vocabulary (`instruction-v6`): the airport's index of
+ * The Training view's data contract for STAGE A of the two-tier vocabulary (`instruction-v7`): the airport's index of
  * stage-A sets and one set's flights. Written by `ts_transformer/experiments/training_export.py` (the files:
  * `ts_transformer/instructions/training_files.py`); design: vocabulary §12.1 A23, outline §6.
  *
@@ -42,12 +42,13 @@ export const TRAINING_INDEX_SCHEMA = "aeroviz-training-index-v3";
 /** MIRROR of `INDEX_FILE`: a NEW index beside the old view's `index.json`, which this view never reads. */
 export const TRAINING_INDEX_FILE = "index_v5.json";
 /** MIRROR of `SAMPLE_SCHEMA`: a set's sample (v11, D135: a flown sentence is the one block of every stage, its track
- *  unrounded, `parseFlownBlock`; an older set is refused by name). */
-export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v11";
+ *  unrounded, `parseFlownBlock`; v12, the angle and speed leads: the vocabulary's `angleLeadS` and `speedLeadS`, a tube and
+ *  a speed span from their `firstRow`; an older set is refused by name). */
+export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v12";
 /** MIRROR of `SET_KIND`: a stage-A set — flights read back through the closed loop. */
 export const TRAINING_SET_KIND = "closed-loop-readback";
 /** MIRROR of `instructions.spec.READING_RULE`: what a word MEANS, which no field can say. */
-export const TRAINING_READING_RULE = "instruction-v6";
+export const TRAINING_READING_RULE = "instruction-v7";
 
 /** MIRROR of `instructions.words.COLUMNS`. The columns are POSITIONAL: this order is that of every word grid and of the
  *  five rows the sentence bar draws. */
@@ -135,6 +136,11 @@ export interface TrainingVocabulary {
   headingStepDeg: number;
   /** A heading word is judged from this long after it is said. */
   headingLeadS: number;
+  /** An angle word (and the altitude word said with it) says the path angle this long after it is said; its tube starts
+   *  there. */
+  angleLeadS: number;
+  /** A speed word says the speed this long after it is said; its span starts there. */
+  speedLeadS: number;
   headingToleranceDeg: number;
   altitudeLevelsM: number[];
   altitudeTolerancesM: number[];
@@ -217,7 +223,10 @@ export interface TrainingHeadingBand {
 }
 
 export interface TrainingAltitudeTube {
+  /** The row the word is said at. */
   row: number;
+  /** The first row the tube covers: where the word arrives, the angle lead after it is said. */
+  firstRow: number;
   /** One past the last row the tube covers. */
   endRow: number;
   /** The level above E; null: "no level-off". */
@@ -231,7 +240,10 @@ export interface TrainingAltitudeTube {
 }
 
 export interface TrainingSpeedSpan {
+  /** The row the word is said at. */
   row: number;
+  /** The first row the span covers: where the word arrives, the speed lead after it is said. */
+  firstRow: number;
   endRow: number;
   targetMps: number;
   toleranceMps: number;
@@ -696,7 +708,9 @@ export function parseVocabulary(reader: Reader): TrainingVocabulary {
   if (rowIntervalsS.length === 0) reader.fail("rowIntervalsS is empty: there is no closed-loop sentence to read");
   return {
     readingRule: TRAINING_READING_RULE, stepS: reader.number("stepS"), headingStepDeg: reader.number("headingStepDeg"),
-    headingLeadS: reader.number("headingLeadS"), headingToleranceDeg: reader.number("headingToleranceDeg"),
+    headingLeadS: reader.number("headingLeadS"), angleLeadS: reader.number("angleLeadS"),
+    speedLeadS: reader.number("speedLeadS"),
+    headingToleranceDeg: reader.number("headingToleranceDeg"),
     altitudeLevelsM: levels, altitudeTolerancesM: reader.numbers("altitudeTolerancesM", levels.length),
     noLevelOff: reader.integer("noLevelOff", 0, Number.MAX_SAFE_INTEGER), angleClasses,
     speed: {
@@ -824,14 +838,17 @@ function headingBands(list: Reader[]): TrainingHeadingBand[] {
 function altitudeTubes(list: Reader[]): TrainingAltitudeTube[] {
   return list.map((item) => {
     const row = item.count("row");
+    const firstRow = item.count("firstRow");
     const endRow = item.count("endRow");
-    if (endRow < row) item.fail(`endRow ${endRow} is before row ${row}`);
-    const lowMslM = item.numbers("lowMslM", endRow - row);
+    if (firstRow < row) item.fail(`firstRow ${firstRow} is before row ${row}`);
+    if (endRow < firstRow) item.fail(`endRow ${endRow} is before firstRow ${firstRow}`);
+    const lowMslM = item.numbers("lowMslM", endRow - firstRow);
     const rows = item.count("rows");
     const inside = item.count("inside");
     if (inside > rows) item.fail(`inside ${inside} is more than its ${rows} rows`);
     return {
-      row, endRow, levelM: item.nullableNumber("levelM"), lowMslM, highMslM: item.numbers("highMslM", endRow - row), rows, inside,
+      row, firstRow, endRow, levelM: item.nullableNumber("levelM"), lowMslM,
+      highMslM: item.numbers("highMslM", endRow - firstRow), rows, inside,
       contained: item.boolean("contained"),
     };
   });
@@ -840,11 +857,15 @@ function altitudeTubes(list: Reader[]): TrainingAltitudeTube[] {
 function speedSpans(list: Reader[]): TrainingSpeedSpan[] {
   return list.map((item) => {
     const row = item.count("row");
+    const firstRow = item.count("firstRow");
     const endRow = item.count("endRow");
-    if (endRow < row) item.fail(`endRow ${endRow} is before row ${row}`);
+    const arrivalRow = item.count("arrivalRow");
+    if (firstRow < row) item.fail(`firstRow ${firstRow} is before row ${row}`);
+    if (endRow < firstRow) item.fail(`endRow ${endRow} is before firstRow ${firstRow}`);
+    if (arrivalRow < firstRow) item.fail(`arrivalRow ${arrivalRow} is before firstRow ${firstRow}`);
     return {
-      row, endRow, targetMps: item.number("targetMps"), toleranceMps: item.number("toleranceMps"),
-      arrivalRow: item.count("arrivalRow"), transitionOk: item.boolean("transitionOk"), accelOk: item.boolean("accelOk"),
+      row, firstRow, endRow, targetMps: item.number("targetMps"), toleranceMps: item.number("toleranceMps"),
+      arrivalRow, transitionOk: item.boolean("transitionOk"), accelOk: item.boolean("accelOk"),
       contained: item.boolean("contained"),
     };
   });

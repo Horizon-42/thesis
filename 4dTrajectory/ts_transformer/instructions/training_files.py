@@ -41,10 +41,12 @@ from ts_transformer.io_utils import utc_now
 #: ends it (D79), the flights drawn from the closed-loop files and checked against the stored outcome (D86) — so that a
 #: view of this code never reads a v9 set. Index v3 (``index_v5.json``) / sample v11 (D135, 2026-10-06): a flown sentence
 #: is the one block of every stage (`experiments.training_export.flown_sentence`), its track unrounded; the sets are
-#: listed in a new index beside v2's, which the view before D135 reads until the old sets are deleted.
+#: listed in a new index beside v2's, which the view before D135 reads until the old sets are deleted. Sample v12 (executor
+#: design D7, D8): the vocabulary's ``angleLeadS`` and ``speedLeadS``, a tube and a speed span from their ``firstRow``
+#: (where the word arrives).
 INDEX_SCHEMA = "aeroviz-training-index-v3"
 INDEX_FILE = "index_v5.json"
-SAMPLE_SCHEMA = "aeroviz-training-sample-v11"
+SAMPLE_SCHEMA = "aeroviz-training-sample-v12"
 SAMPLE_FILE = "sample.json"
 SET_KIND = "closed-loop-readback"
 #: The splits a set draws from (outline §6 item 4, D85): the splits a readout reads.
@@ -86,19 +88,24 @@ def heading_bands(track_deg: np.ndarray, words: Sequence[tuple[int, float]], lea
     return out
 
 
-def tube_payload(word_row: int, end_row: int, level_m: float | None, low_m: np.ndarray, high_m: np.ndarray,
-                 elevation_m: float, check: dict[str, Any]) -> dict[str, Any]:
-    """An altitude word's tube over its rows ``[row, end)`` (`labeller.vertical.tube_bounds`, heights above E) as MSL
-    heights, beside the flight's MSL track, with its check (`tube_checks`)."""
-    return {"row": int(word_row), "endRow": int(end_row), "levelM": None if level_m is None else round(level_m, 1),
+def tube_payload(word_row: int, first_row: int, end_row: int, level_m: float | None, low_m: np.ndarray,
+                 high_m: np.ndarray, elevation_m: float, check: dict[str, Any]) -> dict[str, Any]:
+    """An altitude word said at ``row``: its tube over its rows ``[firstRow, endRow)`` — from where it arrives, the
+    angle lead after it is said (`labeller.vertical.tube_bounds`, heights above E) — as MSL heights, beside the flight's
+    MSL track, with its check (`tube_checks`)."""
+    return {"row": int(word_row), "firstRow": int(first_row), "endRow": int(end_row),
+            "levelM": None if level_m is None else round(level_m, 1),
             "lowMslM": rounded(np.asarray(low_m) + elevation_m, 1), "highMslM": rounded(np.asarray(high_m) + elevation_m, 1),
             "rows": int(check["rows"]), "inside": int(check["inside"]), "contained": bool(check["contained"])}
 
 
 def speed_payload(check: dict[str, Any], target_mps: float, tolerance_mps: float) -> dict[str, Any]:
-    """A speed word's span (`labeller.speed.span_checks`): its rows, its target and band, where it arrived, its checks."""
-    return {"row": int(check["row"]), "endRow": int(check["row"] + check["rows"]), "targetMps": float(target_mps),
-            "toleranceMps": float(tolerance_mps), "arrivalRow": int(check["row"] + check["arrival_rows"]),
+    """A speed word's span (`labeller.speed.span_checks`): the row it is said at, its rows ``[firstRow, endRow)`` (from
+    where it arrives, the speed lead after it is said), its target and band, where it arrived, its checks."""
+    first = int(check["first_row"])
+    return {"row": int(check["row"]), "firstRow": first, "endRow": first + int(check["rows"]),
+            "targetMps": float(target_mps), "toleranceMps": float(tolerance_mps),
+            "arrivalRow": first + int(check["arrival_rows"]),
             "transitionOk": bool(check["transition_ok"]), "accelOk": bool(check["accel_ok"]),
             "contained": bool(check["contained"])}
 

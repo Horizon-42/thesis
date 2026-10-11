@@ -118,8 +118,10 @@ def instruction_spec(**changes):
         descent_angle_edges_deg=(-0.5, 1.4, 2.6, 3.7, 10.0), descent_angle_centres_deg=(0.8, 2.1, 3.0, 4.4),
         climb_angle_centre_deg=1.3, speed_accel_max_mps2=2.5, **measure.D22_GRID,
     )
-    # H_final = H unless a test changes it (D66: at H_final = H the closed-loop reading is the one before it)
-    data = measure.build_spec(measured, closed_loop_final_vertical_m=measure.SUGGESTED["closed_loop_vertical_m"]).to_dict()
+    # H_final = H unless a test changes it (D66: at H_final = H the closed-loop reading is the one before it); no angle or
+    # speed lead unless a test gives one (at L_γ = L_v = 0 the reading is the one before D7 and D8)
+    data = measure.build_spec(measured, closed_loop_final_vertical_m=measure.SUGGESTED["closed_loop_vertical_m"],
+                              angle_lead_s=0.0, speed_lead_s=0.0).to_dict()
     data.update(changes)
     return VocabularySpec.from_dict(data)
 

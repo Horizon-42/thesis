@@ -24,8 +24,11 @@ from geokit import FT_M, KT_MS, NM_M
 #: holds "go-around", D1, D10), heading words relative to the course of the runway in force (D8), altitude words on a
 #: 40-level grid of at most three uniform segments (D22) with "no level-off", as heights above the airport elevation E
 #: (D58; instruction-v4 read them as MSL), the go-around read from the track (D18, D19), "unspecified" from the capture
-#: row (D4); since instruction-v6 the closed-loop reading's vertical tolerance in the final descent (D66, a field of its own).
-READING_RULE = "instruction-v6"
+#: row (D4); since instruction-v6 the closed-loop reading's vertical tolerance in the final descent (D66, a field of its own);
+#: since instruction-v7 the angle words' and the speed words' leads L_γ and L_v (`angle_lead_s`, `speed_lead_s`, executor
+#: design §17, D7, D8): an angle word, and the altitude word said with it, says the path angle L_γ later, a speed word the
+#: speed L_v later, as a heading word says the track L later.
+READING_RULE = "instruction-v7"
 #: The spec file's format: v8 (A29, D73) records no digest of the labeller's code beside the spec.
 SPEC_SCHEMA = "ts-instruction-spec-v8"
 
@@ -103,6 +106,9 @@ class VocabularySpec:
     #: The climb class covers climbs up to this angle; its nominal angle is the centre.
     climb_angle_max_deg: float
     climb_angle_centre_deg: float
+    #: An angle word says the class the path angle has this long later (and the altitude word said with it moves with
+    #: it); the executor arrives on it then (executor design R5.3, §17, D7).
+    angle_lead_s: float
     # --- speed: ground-speed targets
     #: A raw ground-speed row outside these is bad data (no fixed-wing aircraft flies an
     #: approach slower, none reaches this in a terminal area): the flight is refused.
@@ -118,6 +124,9 @@ class VocabularySpec:
     speed_min_hold_s: float
     #: Transition envelope: the largest acceleration magnitude.
     speed_accel_max_mps2: float
+    #: A speed word ("unspecified" too) says the speed this long later; the executor arrives on it then (executor design
+    #: R5.5, §17 C8, D8).
+    speed_lead_s: float
     #: From the capture row on the speed is "unspecified" unless a hold of at least this long ends at or after the
     #: capture row and at least `unspecified_distance_m` before the threshold (5-7-1 b.4 / d; vocabulary §4.5, D4).
     unspecified_plateau_s: float
@@ -182,6 +191,10 @@ class VocabularySpec:
                              "step of its own word, would leave the word's envelope")
         if self.heading_lead_s < 0.0 or not _divides(self.heading_lead_s, self.step_s):
             raise ValueError(f"heading_lead_s {self.heading_lead_s} is not a whole number of steps")
+        if self.angle_lead_s < 0.0 or not _divides(self.angle_lead_s, self.step_s):
+            raise ValueError(f"angle_lead_s {self.angle_lead_s} is not a whole number of steps")
+        if self.speed_lead_s < 0.0 or not _divides(self.speed_lead_s, self.step_s):
+            raise ValueError(f"speed_lead_s {self.speed_lead_s} is not a whole number of steps")
         if not self.turn_bank_max_deg < 90.0:
             raise ValueError("turn_bank_max_deg must be below 90°")
         steps, tops = self.altitude_segment_steps_m, self.altitude_segment_tops_m

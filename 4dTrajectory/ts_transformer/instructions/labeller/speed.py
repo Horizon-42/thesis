@@ -20,6 +20,10 @@ speed under way there, begun less than a minimum hold before, is the pilot's own
 A flight with go-arounds has one reading per approach (D26, `read_speed` on each approach's rows: from row 0 or the
 go-around row before it to the next go-around row or the end), with that approach's capture row and runway. An approach
 that ends at a go-around row outside the corridor has no capture row: its words run to its end, none "unspecified".
+
+THE SPEED LEAD L_v (`speed_lead_s`; executor design R5.5, §17 C8, D8). A speed word says the speed L_v later: the flight's
+speed words, "unspecified" among them, are said L_v before the rows they are read at here (`records.said_earlier`, in
+`read.read_flight`, after every approach is read), and each word's span is judged from where it arrives (`span_checks`).
 """
 
 from __future__ import annotations
@@ -177,23 +181,26 @@ def run_steps(speed: np.ndarray, in_force: int, target: int, first_row: int, las
 
 
 def span_checks(instructions: list[Instruction], speed: np.ndarray, spec: VocabularySpec, words: Words) -> list[dict[str, Any]]:
-    """Each speed word's span: a monotone transition to the target, then the band. Run on the
-    assembled sentence, so a word the assembly dropped is not judged."""
+    """Each speed word's span, from where it arrives (``speed_lead_s`` after it is said, module docstring) to where the
+    next one does: a monotone transition to the target, then the band. Run on the assembled sentence, so a word the
+    assembly dropped is not judged. A word that arrives past the last row is not judged."""
+    lead, last = spec.rows_exact(spec.speed_lead_s), len(speed)
     ordered = sorted((item for item in instructions if item.column == SPEED), key=lambda item: item.row)
-    ends = [item.row for item in ordered[1:]] + [len(speed)]
+    firsts = [min(item.row + lead, last) for item in ordered]
+    ends = firsts[1:] + [last]
     results = []
-    for word, end in zip(ordered, ends):
+    for word, first, end in zip(ordered, firsts, ends):
         target = words.speed_mps(word.value)
-        if target is None:
+        if target is None or first >= end:
             continue
-        span = speed[word.row: end]
+        span = speed[first: end]
         inside = envelope.speed_band(span, target, spec.speed_tolerance_mps)
         arrival = int(np.argmax(inside)) if inside.any() else len(span)
         transition_ok = envelope.speed_transition_ok(span[: arrival + 1], target, spec.speed_tolerance_mps)
         accel = np.abs(np.diff(span[: arrival + 1])) / spec.step_s if arrival > 0 else np.zeros(0)
         after = inside[arrival:]
         results.append({
-            "row": word.row, "rows": end - word.row, "arrival_rows": arrival,
+            "row": word.row, "first_row": first, "rows": end - first, "target_mps": target, "arrival_rows": arrival,
             "cut_before_arrival": arrival >= len(span),
             "transition_ok": transition_ok,
             "accel_ok": bool(len(accel) == 0 or accel.max() <= spec.speed_accel_max_mps2),

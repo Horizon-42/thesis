@@ -184,6 +184,108 @@ def test_level_descend_level_descend_reads_targets_angles_and_no_level_off():
     assert [round(c["tube_width_end_m"]) for c in checks][:2] == [140, 80]  # ε 70 m in segment 2, 40 m in segment 1
 
 
+def _level_descend_level_descend():
+    distance = np.arange(400) * 150.0
+    altitude = np.concatenate((np.full(100, 1500.0), 1500.0 - np.arange(1, 81) * 150.0 * np.tan(np.radians(2.1)),
+                               np.full(120, 1500.0 - 80 * 150.0 * np.tan(np.radians(2.1)))))
+    return distance, np.concatenate((altitude, altitude[-1] - np.arange(1, 101) * 150.0 * np.tan(np.radians(3.0))))
+
+
+def test_an_angle_lead_says_the_angle_and_its_altitude_word_that_much_earlier_and_the_tube_starts_where_they_arrive():
+    """Executor design §17 (D7) C1–C3: every angle word, and the altitude word said with it, comes L_γ earlier; the
+    words keep their order; each tube starts where its words arrive, L_γ after they are said, and still holds the
+    track."""
+    distance, altitude = _level_descend_level_descend()
+    base_spec, led_spec = spec(), spec(angle_lead_s=8.0)                # 8 s: 4 rows of 2 s
+    words = Words(base_spec)
+    base = read_vertical(distance, altitude, base_spec, words, [])
+    led = read_vertical(distance, altitude, led_spec, Words(led_spec), [])
+
+    def said(reading):
+        return sorted((i.column, i.row, i.value) for i in reading.instructions)
+
+    assert said(led) == sorted((c, max(r - 4, 0), v) for c, r, v in said(base))
+    assert all(r > 4 for c, r, v in said(base) if r)                     # no word of this track falls before row 0
+    checks = tube_checks(led.instructions, distance, altitude, led_spec, Words(led_spec))
+    rows = sorted(r for c, r, v in said(led) if c == ALTITUDE)
+    assert [c["row"] for c in checks] == rows
+    assert [c["first_row"] for c in checks] == [r + 4 for r in rows]
+    assert all(c["contained"] for c in checks)
+
+
+def test_words_led_before_row_0_are_said_at_row_0_and_the_last_of_a_column_stands():
+    """§17 C5: row 0 says the class in force L_γ later — a descent that begins inside the lead is said at row 0 in place
+    of the level, with its target."""
+    one = spec(angle_lead_s=48.0)                                       # 24 rows
+    words = Words(one)
+    distance = np.arange(140) * 150.0
+    altitude = np.concatenate((np.full(22, 1200.0), 1200.0 - np.arange(1, 119) * 150.0 * np.tan(np.radians(3.0))))
+    unled = read_vertical(distance, altitude, spec(), Words(spec()), [])
+    start = [i.row for i in unled.instructions if i.column == ANGLE and i.value != ANGLE_LEVEL]
+    assert start and 0 < start[0] <= 24                                  # the descent begins inside the lead
+    reading = read_vertical(distance, altitude, one, words, [])
+    at_0 = {i.column: i for i in reading.instructions if i.row == 0}
+    assert at_0[ANGLE].value == words.angle_index(3.0) and at_0[ANGLE].kind == "initial"
+    assert at_0[ALTITUDE].value == words.altitude_no_level_off
+    assert len([i for i in reading.instructions if i.column == ANGLE]) == 1
+
+
+def test_a_speed_lead_says_every_speed_word_that_much_earlier_and_judges_it_from_where_it_arrives():
+    """Executor design §17 C8 (D8): every speed word, "unspecified" among them, comes L_v earlier, in order; the
+    "unspecified" row is where it is said; each span is judged from L_v after its word."""
+    flight = instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
+    base = read_flight(flight, instruction_airport(), spec(), Words(spec()))
+    one = spec(speed_lead_s=6.0)                                        # 3 rows
+    reading = read_flight(flight, instruction_airport(), one, Words(one))
+    assert columns(reading, SPEED) == [(max(row - 3, 0), value) for row, value in columns(base, SPEED)]
+    assert reading.unspecified_row == base.unspecified_row - 3
+    assert columns(reading, ALTITUDE) == columns(base, ALTITUDE) and columns(reading, HEADING) == columns(base, HEADING)
+    spans = reading.checks["speed"]
+    assert spans and all(span["first_row"] == span["row"] + 3 for span in spans)
+
+
+def test_a_led_go_around_is_said_with_its_climb_words_and_ends_where_it_ended_before():
+    """§17: the go-around row is its climb's row, so it moves L_γ earlier with the climb's level and "climb" (rule 6
+    still holds in that row); the runway word that ends it is read from the level-off as before."""
+    e, n, altitude, track, speed = fly_legs(GO_AROUND_LEGS, 90.0, 900.0, -400.0, 0.0)
+    flight = instruction_flight(e, n, altitude, track, speed)
+    base = read_flight(flight, instruction_airport(), spec(), Words(spec()))
+    one = spec(angle_lead_s=8.0)
+    words = Words(one)
+    reading = read_flight(flight, instruction_airport(), one, words)
+    (go,), (again,) = reading.go_around_rows, reading.runway_again_rows
+    assert go == base.go_around_rows[0] - 4 and again == base.runway_again_rows[0]
+    assert reading.words[go, RUNWAY] == RUNWAY_GO_AROUND and reading.words[go, ANGLE] == words.angle_climb
+    assert words.altitude_level_m(int(reading.words[go, ALTITUDE])) == 840.0
+    # each column's lead is its own (V12): the approaches end where the climb is read, so the heading and speed words,
+    # the capture rows and "unspecified" do not move with L_γ
+    assert columns(reading, HEADING) == columns(base, HEADING) and columns(reading, SPEED) == columns(base, SPEED)
+    assert [(a.first, a.end, a.capture_row, a.unspecified_row) for a in reading.approaches] == \
+        [(a.first, a.end, a.capture_row, a.unspecified_row) for a in base.approaches]
+
+
+def test_the_runway_word_that_ends_a_go_around_comes_at_the_latest_with_the_said_no_level_off():
+    """D19 with the angle lead (rule 5): with no level-off after the climb, the runway word comes with the final
+    descent's "no level-off" as it is SAID (L_γ before the descent is read); a level-off before it still comes first."""
+    from types import SimpleNamespace
+
+    from ts_transformer.instructions.labeller.read import runway_again_rows
+    from ts_transformer.instructions.labeller.vertical import VerticalPiece, VerticalReading
+
+    one = spec(angle_lead_s=8.0)
+    words = Words(one)
+    height = np.concatenate((np.full(30, 300.0), np.full(70, 600.0)))
+    final = Instruction(ALTITUDE, words.altitude_no_level_off, 56, "target")      # its descent read at row 60
+    found = [SimpleNamespace(point=10)]
+    climbing = [VerticalPiece(0, 20, MOVE, angle_deg=3.0), VerticalPiece(20, 60, MOVE, angle_deg=-3.0)]
+    reading = VerticalReading([final], climbing, go_around_rows=[16], go_around_read_rows=[20])
+    assert runway_again_rows(found, reading, height, 100, one, words) == [56]
+    level = VerticalPiece(40, 60, LEVEL, target_index=words.altitude_index(600.0), median_m=600.0)
+    reading = VerticalReading([final], [*climbing[:1], VerticalPiece(20, 40, MOVE, angle_deg=-3.0), level],
+                              go_around_rows=[16], go_around_read_rows=[20])
+    assert runway_again_rows(found, reading, height, 100, one, words) == [40]
+
+
 def test_a_level_between_two_grid_levels_is_found_and_named_by_the_nearest():
     """§4.4: the level test is the piece's own median ± 25 m, not the grid's band — a level at 630 m, 30 m from both
     neighbours, is a level (said as the lower, at a tie)."""

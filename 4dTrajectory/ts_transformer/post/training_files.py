@@ -38,10 +38,11 @@ from ts_transformer.instructions.training_files import TrainingFiles
 #: 2026-10-08): a set's cohort is one of two forms — ``drawn`` (v4's fields) or ``listed`` (a window list's path,
 #: sha256, sentence and count, and the select seed of the readout numbers its windows flew with). From 2026-10-08 a set's
 #: source names no speed readout (the user unbound it; no reader ever read it): sets written before keep an unread
-#: ``speed``, and the names stay.
+#: ``speed``, and the names stay. Sample v6 (executor design D7, D8): the vocabulary block's ``angleLeadS`` and
+#: ``speedLeadS``, a tube's and a speed span's ``firstRow``.
 INDEX_SCHEMA = "aeroviz-training-window-index-v4"
 INDEX_FILE = "index_post_v4.json"
-SAMPLE_SCHEMA = "aeroviz-training-window-sample-v5"
+SAMPLE_SCHEMA = "aeroviz-training-window-sample-v6"
 SAMPLE_FILE = "sample.json"
 SET_KIND = "training-windows"
 

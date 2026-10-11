@@ -100,17 +100,18 @@ export function planDegrees(line: { lon: number[]; lat: number[] }): number[] {
   return line.lon.flatMap((lon, point) => [lon, line.lat[point]]);
 }
 
-/** One altitude tube as a wall over the judged track's ground position: a position per row it covers, with that row's lower
+/** One altitude tube as a wall over the judged track's ground position: a position per row it covers (from its `firstRow`,
+ *  where its word arrives), with that row's lower
  *  and upper edge (MSL as exported, plus the flight's HAE − MSL). Envelope row r is the judged track's point r (both
  *  count from the same origin); a tube longer than the track is cut where the track ends. */
 export function trainingTubeWall(track: TrainingTrack, tube: TrainingAltitudeTube, haeMinusMslM: number) {
   const last = Math.min(tube.endRow, track.tS.length);
   const positions: number[] = [];
-  for (let row = tube.row; row < last; row += 1) positions.push(track.lon[row], track.lat[row]);
+  for (let row = tube.firstRow; row < last; row += 1) positions.push(track.lon[row], track.lat[row]);
   return {
     positions,
-    minimumHeights: tube.lowMslM.slice(0, last - tube.row).map((value) => value + haeMinusMslM),
-    maximumHeights: tube.highMslM.slice(0, last - tube.row).map((value) => value + haeMinusMslM),
+    minimumHeights: tube.lowMslM.slice(0, Math.max(last - tube.firstRow, 0)).map((value) => value + haeMinusMslM),
+    maximumHeights: tube.highMslM.slice(0, Math.max(last - tube.firstRow, 0)).map((value) => value + haeMinusMslM),
   };
 }
 

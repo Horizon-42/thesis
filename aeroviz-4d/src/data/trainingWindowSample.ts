@@ -74,8 +74,9 @@ export const TRAINING_WINDOW_INDEX_FILES: Record<TrainingWindowStage, string> = 
   D: "index_multi_v2.json",
 };
 /** MIRROR of `training_files.SAMPLE_SCHEMA` (v4: the window format of stages C and D, frontend D156; v5: a cohort drawn
- *  or listed, post-training D176). */
-export const TRAINING_WINDOW_SAMPLE_SCHEMA = "aeroviz-training-window-sample-v5";
+ *  or listed, post-training D176; v6: the vocabulary's `angleLeadS` and `speedLeadS`, a tube's and a speed span's
+ *  `firstRow`, executor design D7, D8). */
+export const TRAINING_WINDOW_SAMPLE_SCHEMA = "aeroviz-training-window-sample-v6";
 /** MIRROR of `training_files.SET_KIND`. */
 export const TRAINING_WINDOW_SET_KIND = "training-windows";
 /** MIRROR of `post_training_export.START`: the round that names the model at the start of the campaign. */

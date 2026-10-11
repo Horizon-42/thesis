@@ -28,10 +28,11 @@ from ts_transformer.instructions.training_files import TrainingFiles
 #: Index v3 (``index_prior_v3.json``) / sample v4 (D135, D136, 2026-10-06): each sentence's block is stage A's
 #: (`experiments.training_export.flown_sentence`), with the envelopes of its words. From 2026-10-08 a set's source
 #: names no speed readout (the user unbound it; no reader ever read it): sets written before keep an unread ``speed``,
-#: and the names stay.
+#: and the names stay. Sample v5 (executor design D7, D8): the vocabulary block's ``angleLeadS`` and ``speedLeadS``, a
+#: tube's and a speed span's ``firstRow``.
 INDEX_SCHEMA = "aeroviz-training-prior-index-v3"
 INDEX_FILE = "index_prior_v3.json"
-SAMPLE_SCHEMA = "aeroviz-training-prior-sample-v4"
+SAMPLE_SCHEMA = "aeroviz-training-prior-sample-v5"
 SAMPLE_FILE = "sample.json"
 SET_KIND = "prior-free-generation"
 #: The reader of the val days whose claim a set's ``validationClaim`` names (`checkpoint.claim_validation_read`): the
