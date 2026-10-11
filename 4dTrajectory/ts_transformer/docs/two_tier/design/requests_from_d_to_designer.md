@@ -8,9 +8,10 @@ census's sample: 18; D172: 46–48; D179, D180: 49–53; D181, O20: 54–62; D18
 71–77; D188: 78–79; D190: 80–84; D190, D191: 85, 87, 88; D191–D193 and the log: 86, 90–98; D193, D194 and the log: 89, 99–107), item 23 (it asked for 6 and
 7), item 20 (built: item 40) and the names of MC0–MC4 (written into the interfaces).
 
-State: 2026-10-11 (09:30): arms A and B done (readout `readouts/2026-10-11_stage_d_arms_ab.zh.md`); notes/stage_d.md's
+State: 2026-10-11 (13:30): arms A and B done (readout `readouts/2026-10-11_stage_d_arms_ab.zh.md`); notes/stage_d.md's
 order 1 (D194 (3) for every point tried) built and merged (d3dc3b26, 226ed303), order 2 checked; the formal campaign
-`multi_train_majority_formal_20261011` (arm A's settings, 8 rounds) runs (stage D's log §22). 108–111 are open.
+`multi_train_majority_formal_20261011` (arm A's settings, 8 rounds) runs, rounds 0 / 1 landed 81.9 / 81.6 %; the
+user's group weight built and merged (afb9aea2, item 112) (stage D's log §22). 108–112 are open.
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -192,3 +193,19 @@ order 1 (D194 (3) for every point tried) built and merged (d3dc3b26, 226ed303), 
     (item 109), now for more points; `_failed` now runs for every point tried at every step (its seconds against the
     rows saved are to be read in the formal campaign's records).
 
+112. **The group weight: a decision of the user to write as D195** (the user, 2026-10-11; built afb9aea2, merged into
+    dev-two-tier; the code and the intents already name it D195, the next free number). The user's words: weigh each
+    branch group so that a lucky group (one continuation better than the first sentence of 8) still counts but less,
+    and train every kind of group together. As built (`MultiSettings.group_weight`, `--group-weight`): `equal` (the
+    default, the behaviour before it; a record without it reads so) or `minority-side`: each group's advantages times
+    its minority side over the round's mean minority side. The minority side (`post.branches.Group.minority`) is the
+    smaller count of the group's sentences above and below its mean reward, a sentence within `SIDE_TOLERANCE` (1e-9)
+    of the mean on neither side; 1–4 with 8 continuations. The mean comes from each batch record's `group_minorities`
+    (written under `minority-side` only), the pass record holds it as `minority_mean`, and pass_gradients (R70) reads
+    with the campaign's weight; not profiled (no memory change); stage C unchanged. Why the minority side and not the
+    count of better continuations (the user chose it after both were shown): a group whose first sentence is its one
+    good sentence has the same one-against-eight form, and a mean difference is only as sure as its smaller side. On
+    round 2's groups the summed |advantage| share of one-against-eight groups falls from 19 to 7 %, the majority
+    groups' rises from 23 to 28 %. The user's plan: the control arm `multi_train_minority_side_20261011` (the formal
+    campaign's settings with `minority-side`, 3 rounds, compared with the formal campaign's rounds 0–2) if the formal
+    campaign's next two rounds stay flat. Please write D195 into multi_control.md and its arm into the plan.

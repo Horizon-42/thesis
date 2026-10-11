@@ -879,3 +879,19 @@ CPU) against 14e53df6: the same behaviour. Merged, 226ed303; the worktree and br
 `.claude/worktrees/run-formal` at 226ed303 (unit `majority-formal`): arm A's settings, 8 rounds, 3 GPU + 4 CPU
 workers, 8 of every 15 batches on the CPU (B's round 0: the GPU 2.44, the CPU 2.82 batches a minute, so an equal end
 at a CPU share of 0.54).
+
+**The group weight, D195** (the user, 2026-10-11, after the formal campaign's rounds 0 / 1 read 81.9 / 81.6 % landed).
+Round 2's 1,163 groups (a copy taken while it ran), by how many of the 8 continuations beat the first sentence:
+decision 714 groups, fine 245, majority 204; exactly one better in 364 decision and fine groups (31 % of all). The
+user asked to weigh a group by its count of better continuations; a group whose first sentence is its one good
+sentence (70 groups had none better, most of them a few worse) has the same one-against-eight form, so the weight
+became the minority side: the smaller count of the group's sentences above and below its mean (1–4). Over round 2's
+groups the summed |advantage| shares then move: decision 57 → 53 %, fine 20 → 19 %, majority 23 → 28 %, the
+one-against-eight groups 19 → 7 %. Built on `dev-group-weight`, afb9aea2: `Group.minority` (`SIDE_TOLERANCE` 1e-9),
+`samples(…, scale)`, each batch record's `group_minorities` under `minority-side`, `post_train.minority_mean` from
+the records (no group file read twice), the pass record's `minority_mean`, the same weight in pass_gradients; default
+`equal`, bit for bit the code before it. Review: no S1; S2 a test row with a wrong value, fixed, second round clean;
+S3s taken. Changed modules' tests: 174 passed and 3 failed (the wrong row, a parser test, a fixture), fixed, rerun
+12 passed. Fast-forward into dev-two-tier; worktree and branch removed. The control arm (intent in
+`docs/experiments/intents.json`): the formal campaign's settings with `--group-weight minority-side`, 3 rounds, the
+same start and seed, launched only if the formal campaign's next two rounds stay flat (the user's condition).
