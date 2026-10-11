@@ -820,3 +820,42 @@ MC6's rounds), 7 of every 10 batches on the CPU, the executor on the CPU (S1). R
 `MultiSettings.data_weight` (`--data-weight`, default `DATA_WEIGHT`), `update_step` / `update_gradients` /
 `train_pass` take it, `pass_gradients` reads at the campaign's weight; review: one S2 (no test of `train_pass`
 handing it on) fixed, second round clean. Arm B (the same at 0.25) after A, the full suite and the merge.
+
+**Arm A's stop in round 0 and the fix** (2026-10-11 00:00–00:36). A stopped in round 0 after 174 of 224 batches
+(Traceback: "a loop goes with others from its first predicted step on, a row said each tick since"): a joint loop of
+the backward search, rebuilt with the said flights of a window left (S6), had a tick in which no aircraft was said, and
+`Speaker.say` kept no row of records for it. Fix 14e53df6 (requests 104): the records have a row for every row from
+the first in which an aircraft is said. window_behaviour on A's campaign, c60f59c6 against 14e53df6: every digest the
+same, so the 174 batches were kept (D185); A resumed 00:36 at 14e53df6; round 0 done 01:20.
+
+**D194 (2), (3) merged into A's round 1** (the user's word of 2026-10-11 01:15). `dev-speed` merged, ca53c517;
+window_behaviour on A's campaign against 14e53df6: every digest the same. A stopped after round 0's checkpoint and
+resumed at ca53c517 for round 1. 8 and then 7 CPU workers were refused by the fit (8: 26.1 GiB needed, 24.1
+available; 7: a batch at the CPU profile's host peak with its margin, 2.77 GiB, has 2.14 GiB at the last level): the
+earlier count had read the host before the campaign's process opened. Round 1 ran with 6 (requests 107: D194 (4)
+dropped).
+
+**The CPU's levels in A's round 1.** With 6 CPU workers a worker's host share is 2.43 GiB (`host_budget`
+2,608,312,698; levels 3 at 2.78 GiB, 1 at 4.19 GiB). The first pass ended at 02:06 with 183 of 224 batches; about 40
+CPU batches, all but a few of span 1200 s, went past their share and were spoken again at the levels, most one at a
+time: 20 in 02:06–02:33. On the user's word A was stopped at 02:33 (203 batches kept, the same code) and resumed with
+4 CPU workers (a share of 3.64 GiB): the other 20 in 02:38–02:46. The CPU profile of D192 (batches 0 / 23 / 86)
+holds below the host peak of the majority's batches of 1200 s. Arm B runs with 4 CPU workers.
+
+**Arm A done** (02:57, `exit 0`; data read-only, `SHA256SUMS` of 452 files, the run logs and scripts in `run_logs/`).
+
+| | landed | lost separation | KL | groups | continuations to the event | search rows | search |
+|---|---|---|---|---|---|---|---|
+| MC6 rounds 0–4 | 82.1–82.9 % | 14.6–15.9 % | 0.046–0.049 | 1,409–1,477 | 29,008–33,832 | 13.2–13.9 M | 2.51–3.42 h |
+| A round 0 (14e53df6) | 82.2 % | 15.5 % | 0.044 | 1,735 | 47,048 | 12.0 M | 4.05 h |
+| A round 1 (ca53c517) | 83.3 % | 14.7 % | 0.049 | 1,732 | 44,688 | 11.0 M | 3.57 h |
+
+The select readout's 4,492 aircraft; round 1's 0.4 points above MC6's best round is inside one standard error
+(about 0.56 points). Round 1 spoke 01:29–02:46 (with the stop of 02:33–02:38); its pass and readout took 11 min.
+The work of a search: D192 tries more points, each with 8 continuations to the event + 60 s (+50–60 % against MC6);
+D194 (3) cut round 1's search rows and seconds against round 0's by 8 % and 12 % (the model differs too).
+
+**Arm B launched** 02:57 by the unit `chain-a-b` when A ended (the user: no stop between): `dev-data-weight` merged,
+e77bc220 (no conflicts; the changed modules' tests 135 passed; the full suite waits for a free machine); run worktree
+`.claude/worktrees/run-majority-b` at e77bc220; A's settings with `--data-weight 0.25` and 4 CPU workers; first batch
+03:00.

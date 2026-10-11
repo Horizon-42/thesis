@@ -77,10 +77,9 @@ the evidence is in §9.
 ### 0.3 Implementation
 
 Stage D's implementer keeps this table and its log, `readouts/2026-10-06_stage_d_implementation_log.md` (outline §5
-rule 10); its readings and requests go to `requests_from_d_to_designer.md`. State, 2026-10-10 (night): everything up
-to D191, R69, R70 and D193 (1) (2) merged into `dev-two-tier` (88b5d671); MC6's second launch stopped by the user in
-round 5; its two arms (lr × 3, traffic only) done; D193 (3) (4) and D192 merged (19d90d45), D192 profiled; nothing runs
-(log §22).
+rule 10); its readings and requests go to `requests_from_d_to_designer.md`. State, 2026-10-11 (03:00): everything up
+to D193 and D192 merged; D194 (1) (`dev-data-weight`, f81b5a13) and D194 (2), (3) (`dev-speed`, ce886c4a, 9bdbe6c5)
+merged (e77bc220, ca53c517); arm A done (2 rounds, landed 82.2 / 83.3 %); arm B runs (log §22).
 
 | Milestone | State |
 |---|---|
@@ -104,6 +103,9 @@ round 5; its two arms (lr × 3, traffic only) done; D193 (3) (4) and D192 merged
 | MC11 (D193 (3)) | Merged (19d90d45): 9d6886ec, stage C's digests repinned 6c5269af; window_behaviour on stage C's and D's windows and prior_behaviour the same bit for bit; batch 86 on the CPU 68.1 → 51.0 s, on the GPU 62.1 → 53.9 s; each flight's own permitted record (requests item 99) (log §22) |
 | MC11 (D193 (4)) | Merged (19d90d45): 22fd1031; a CPU batch past its host share spoken again at the CPU's levels (log §22) |
 | MC12 (D192) | Merged (19d90d45): 172bc07d, `--branching majority`; backward the same behaviour on MC6's windows; profiled at MC6's settings, `outputs/POOLED/multi/profile_d192_{gpu,cpu}_20261010` (3 GPU, 4 CPU workers fit); no campaign (log §22, requests item 103) |
+| MC11 (D194 (2), (3)) | Merged (ca53c517): ce886c4a, 9bdbe6c5 (the longest batches first; a majority point out of reach ends its continuations); window_behaviour on arm A's campaign against 14e53df6: every digest the same (log §22) |
+| MC12 (D194 (1)) | Merged (e77bc220): f81b5a13, `--data-weight` (default `DATA_WEIGHT`) (log §22) |
+| Arms A, B (D192, D194 (1)) | A, `outputs/POOLED/multi/multi_train_majority_20261010`: done 2026-10-11 02:57, rounds 0 / 1 landed 82.2 / 83.3 %, lost separation 15.5 / 14.7 % (MC6's rounds 0–4: 82.1–82.9 %, 14.6–15.9 %); read-only with its checksums. B (data weight 0.25), `…/multi_train_majority_data025_20261011`: launched 02:57 (log §22) |
 | MC8–MC10 | Not started |
 
 ### 0.4 Plan
