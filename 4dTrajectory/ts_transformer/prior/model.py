@@ -33,13 +33,13 @@ step keeps each layer's rotated keys and values (`Past`, allocated once for ever
 and encodes only the new rows — the same arithmetic as encoding every row again (`encode` is `extend` from nothing),
 to rounding of the attention's summation order.
 
-**Copies hold their front once** (multi-aircraft control D190 (2)). The copies of a line that a speaker takes (a
-branch point's continuations) are the same up to where they part, and so are the rows the cache keeps of them: those
-rows are held once, as a front of the lines (`Front`), and each line holds its rows from there on. Where the front ends
-is chosen whenever lines are taken (`Past.together`), as few rows as hold the cache smallest. A line reads its front
-copied back to it for one layer at a time (`COPIED`: the same tensors as a line held whole, bit for bit) or, as a
-campaign sets it, read once for all its lines and merged with its own rows' (`MERGED`: no copy, the last bits of the
-attention's sums may move), `Past.attend`.
+**Copies share their front.** A speaker can take several copies of one line (the continuations of a branch point).
+The copies are the same up to the row where they part, so their cache rows are the same too. The cache holds those
+rows once, as a front (`Front`). Each line holds only its own rows after the front. `Past.together` chooses the length
+of the front so that the cache holds the fewest rows. A line reads its front in one of two ways (`Past.attend`):
+`COPIED` copies the front back to the line, one layer at a time; the tensors are the same as for a line that holds all
+its rows, bit for bit. `MERGED` reads the front once for all its lines and merges it with each line's own rows; there
+is no copy, but the last bits of the attention sums can differ.
 """
 
 from __future__ import annotations
@@ -62,21 +62,27 @@ from ts_transformer.prior.batch import (
 #: The columns after the runway, whose words are classes of the vocabulary spec (`Words.class_counts`).
 WORD_COLUMNS = COLUMNS[1:]
 ROPE_BASE = 10_000.0
-#: The room a speaker's cache grows by, in rows, and the room a copy keeps past its rows written (multi-aircraft
-#: control D183: 256 s at Δ = 4 s; the attention reads only the rows written, so the room changes no number).
+#: The number of rows by which a speaker's cache grows when it is full (64 rows = 256 s at 4 s a row). The attention
+#: reads only the rows written, so the spare room changes no result.
 CACHE_STEP_ROWS = 64
-#: How a line reads a front it holds with other lines (`Past`; multi-aircraft control D190 (2), the user's choice as a
-#: campaign sets it): `COPIED`, the front copied to each of its lines for one layer's attention at a time (bit for bit
-#: a line that holds its rows whole); `MERGED`, the front read once for all its lines and the line's own rows apart,
-#: their scores normalised together (no copy; the last bits of a sum may move).
+#: How a line reads a front that it shares with other lines (`Past.attend`). `COPIED`: the front is copied to each
+#: line, one layer at a time; the result is the same, bit for bit, as for a line that holds all its rows. `MERGED`:
+#: the front is read once for all its lines, and the scores of the front and of the line's own rows are normalised
+#: together; there is no copy, but the last bits of a sum can differ.
 COPIED, MERGED = "copied", "merged"
 FRONT_ATTENTIONS = (COPIED, MERGED)
 
 
 @dataclass(frozen=True)
 class PriorConfig:
-    """The network's shape. ``word_values``: each of `WORD_COLUMNS`' values, "unchanged" not counted, from the
-    vocabulary spec (`from_words`), never a constant of the prior. Configuration A of D40 is the default."""
+    """The shape of the network.
+
+    ``word_values``: the number of classes in each of `WORD_COLUMNS`, "unchanged" not counted. It comes from the
+    vocabulary spec (`from_words`). It is never a constant of the prior.
+
+    ``variant``: the name of the candidate feature set (D39). `full` has the candidate features only.
+    `constants` adds the runway constant features.
+    """
 
     word_values: tuple[int, ...]
     variant: str
@@ -112,8 +118,11 @@ class PriorConfig:
 
 
 def rope_angles(time_s: torch.Tensor, head: int, base: float) -> tuple[torch.Tensor, torch.Tensor]:
-    """``(cos, sin)`` ``[..., T, head / 2]`` of the rotation at the times ``time_s`` [..., T] (seconds), in the
-    dtype of ``time_s``; computed in float64."""
+    """The RoPE rotation angles for the times ``time_s`` ``[..., T]`` (seconds): ``(cos, sin)``, each
+    ``[..., T, head / 2]``.
+
+    Pair i of a head turns at the frequency ``base ** (-i / (head / 2))`` rad/s. The angles are computed in float64
+    and returned in the dtype of ``time_s``."""
     half = head // 2
     frequency = base ** (-torch.arange(half, dtype=torch.float64, device=time_s.device) / half)
     angle = time_s.double()[..., None] * frequency
@@ -121,39 +130,61 @@ def rope_angles(time_s: torch.Tensor, head: int, base: float) -> tuple[torch.Ten
 
 
 def rotate(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
-    """``x`` [..., T, head] rotated pair by pair (the first half of the head against the second)."""
+    """Rotate ``x`` ``[..., T, head]`` by the angles ``cos`` and ``sin`` of `rope_angles`.
+
+    Element i of the first half of the head and element i of the second half make one pair. Each pair turns by its
+    own angle."""
     first, second = x.chunk(2, dim=-1)
     return torch.cat((first * cos - second * sin, first * sin + second * cos), dim=-1)
 
 
 class Front(NamedTuple):
-    """The rows a `Past` holds once for several of its lines (multi-aircraft control D190 (2)): each front's rows
-    (``keys``, ``values`` ``[F, heads, start, head]``, ``present`` ``[F, start]``), each line's front (``of`` ``[B]``),
-    and the fronts in runs of fronts that are each a front of n lines (``runs``: each run's first front, its n and the
-    lines of its fronts, front after front, n each), by which a `MERGED` attention reads them."""
+    """The first `start` rows that the continuations of a branch point share, stored once.
 
-    keys: torch.Tensor
-    values: torch.Tensor
-    present: torch.Tensor
-    of: torch.Tensor
+    At a branch point the speaker copies a window K times (K = 8) and speaks each copy on with other random draws.
+    Before the branch point the K copies are the same, so their cached keys and values of those rows are the same.
+    Without a front each copy holds them: K times the memory. With a front the cache holds them once, and each copy
+    holds only the rows it says after the branch point.
+
+    A line (one aircraft of one copy) that has no copy gets a front of its own. So every line uses one front: B lines
+    use F fronts (F <= B). Example: a window of 3 aircraft, copied 8 times, has B = 24 lines. The 8 copies of one
+    aircraft use one front, so F = 3. Training and plain speaking have no copies and no front (`Past.front` is None).
+
+    ``runs`` is for the `MERGED` attention. It reads the lines of a front in one batched product, which needs the same
+    number of lines n for every front in the product. ``runs`` has one group for each n: (the first front of the group,
+    n, the lines of the group's fronts, front after front). The groups follow each other in front order, the largest n
+    first. In the example there is one group, with n = 8.
+    """
+
+    keys: torch.Tensor      # [F, heads, start, head]: the rotated keys of the front's rows
+    values: torch.Tensor    # [F, heads, start, head]: the values of the front's rows
+    present: torch.Tensor   # [F, start] bool: which rows of the front exist
+    of: torch.Tensor        # [B] int: the front that each line uses
     runs: tuple[tuple[int, int, torch.Tensor], ...]
 
 
 class Past(NamedTuple):
-    """A layer's rotated time-attention keys and values of a batch of lines and which of their rows are present, of
-    which the first ``rows`` are encoded.
+    """The cache of one layer for B lines: the rotated keys and values of the time attention.
 
-    **A front held once** (multi-aircraft control D190 (2)). The copies of a line (a branch point's continuations) are
-    the same up to where they part, and so are the rows the speaker keeps of them. A line's first `start` rows are its
-    front's (``front``, held once for every line of that front; None: no row is, `start` 0), its rows from `start` on
-    its own (``keys``, ``values`` ``[B, heads, room, head]``, ``present`` ``[B, room]``: its row ``start + j`` at ``j``).
-    Which lines are the same up to which row is ``kin`` and ``kin_rows`` (``[B]`` each: a line's kin and the rows it is
-    the same as its kin to), which `together` reads to choose the front. A line reads its front as ``attention`` says
-    (`FRONT_ATTENTIONS`, `attend`).
+    A line is one aircraft's sequence of rows (one item of the batch). Its time attention reads only its own rows.
+    The rows of a line are in two places:
 
-    Written in place: one `Past` is one batch of lines. Two extends from the same `Past` share its storage (a branch
-    overwrites its sibling's rows: copy the tensors to branch), and a gradient cannot flow back through an extend
-    that a later one wrote over (the speaker extends without gradients; training encodes a sentence whole)."""
+    - The first `start` rows are in ``front``, shared with the copies of the line. None: no copies, `start` is 0.
+    - The other rows are in ``keys`` and ``values`` ``[B, heads, room, head]`` and ``present`` ``[B, room]``. Row
+      ``start + j`` of the line is at index ``j``. The indexes up to ``rows - start`` are written; the rest of
+      ``room`` is spare.
+
+    Example: a line has 250 rows and its branch point is at row 200. Then `start` is 200 and ``rows`` is 250. The 50
+    rows after the branch point are at indexes 0 to 49.
+
+    ``kin`` and ``kin_rows`` ``[B]`` say which lines are copies of one another. Lines with the same ``kin`` are
+    copies. ``kin_rows[i]`` is the number of leading rows that line i has in common with its copies (the rows up to
+    the branch point). `together` uses them to choose `start`. ``attention`` (`COPIED` or `MERGED`) is how `attend`
+    reads the front.
+
+    The tensors are written in place. To branch, make new storage with `together`: two extends from the same `Past`
+    overwrite each other's rows. A gradient cannot flow back through an extend that a later one overwrote. The speaker
+    extends without gradients, and training encodes a whole sentence at once."""
 
     keys: torch.Tensor
     values: torch.Tensor
@@ -170,8 +201,8 @@ class Past(NamedTuple):
         return 0 if self.front is None else self.front.keys.shape[2]
 
     def grown(self, capacity: int) -> Past:
-        """The same rows with room for ``capacity`` of a line's own (new storage: a line that outgrows its room is
-        moved, never cut; its front stays as it is)."""
+        """The same rows with room for ``capacity`` own rows in each line (new storage). A line that outgrows its room
+        is moved, never cut. The front does not change."""
         extra = capacity - self.keys.shape[2]
         pad = self.keys.new_zeros((*self.keys.shape[:2], extra, self.keys.shape[3]))
         return self._replace(keys=torch.cat((self.keys, pad), dim=2), values=torch.cat((self.values, pad), dim=2),
@@ -179,12 +210,14 @@ class Past(NamedTuple):
                                                dim=1))
 
     def attend(self, q: torch.Tensor, dropout_p: float) -> torch.Tensor:
-        """The time attention ``[B, heads, R, head]`` of the queries ``q`` of the last R rows written: each row reads
-        its line's rows present up to itself, and itself. A line with no front reads its own rows in one attention.
-        Over a front (D190 (2)), `COPIED`: the front copied to each of its lines for this layer alone, each line read
-        in one attention as a line that holds its rows whole is read (the same tensors, bit for bit); `MERGED`: each
-        front read once for all its lines (`Front.runs`) and each line's own rows apart, their scores normalised
-        together and their values summed (no copy; the order of a sum differs, its last bits may)."""
+        """The time attention ``[B, heads, R, head]`` for the queries ``q`` of the last R rows written. A row reads the
+        rows of its line that are present and not after it, and itself.
+
+        Without a front, one attention reads the line's own rows. With a front: `COPIED` copies the front to each line
+        for this layer and reads one attention for each line, as for a line that holds all its rows (the same tensors,
+        bit for bit). `MERGED` reads each front once for all its lines (`Front.runs`) and reads the own rows of each
+        line apart; the scores of both are normalised together and the values are summed. There is no copy, but the
+        order of the sums differs, so the last bits can differ."""
         count = q.shape[2]
         start, written = self.start, self.rows - self.start
         steps = torch.arange(start, self.rows, device=q.device)
@@ -197,7 +230,7 @@ class Past(NamedTuple):
         if dropout_p:
             raise ValueError("a front held once is read without dropout (the speaker reads in eval mode)")
         front = self.front
-        # a front's rows all come before the rows said: each reads those present
+        # every row of a front is before the rows written: a query reads the front rows that are present
         allowed = torch.cat((front.present.index_select(0, front.of)[:, None, :].expand(-1, count, -1), own), dim=2)
         if self.attention == COPIED:
             whole = []
@@ -235,9 +268,11 @@ class Past(NamedTuple):
 
     def _read(self, lines: torch.Tensor, first: int, last: int, keys: torch.Tensor, values: torch.Tensor,
               present: torch.Tensor) -> None:
-        """Rows [first, last) of the lines ``lines`` (on this past's device) written into ``keys``, ``values`` and
-        ``present`` (views of their rows, of these lines in order): from the front where they are in it, selected
-        into them by `torch.index_select` (D183 (2): no copy between) where they are on this past's device."""
+        """Write the rows [first, last) of the lines ``lines`` into ``keys``, ``values`` and ``present``.
+
+        The three are views of the rows of these lines, in order. A row inside the front is read from the front, any
+        other row from the line's own rows. ``lines`` is on this past's device. When the output is on the same device,
+        `torch.index_select` writes straight into it, with no copy between."""
         start = self.start
         pieces = []
         if first >= last:
@@ -263,17 +298,20 @@ class Past(NamedTuple):
     @staticmethod
     def together(parts: Sequence[tuple[Past, torch.Tensor, int]], room: int, device: torch.device,
                  attention: str) -> Past:
-        """Lines of several pasts as one past (multi-aircraft control D188), in new storage on ``device``: ``parts`` each
-        a past, its lines (``[K]``, repeats permitted, on its device) and the rows it moves later by (below 0: its first
-        rows, which none of its lines has present, are left out), so that every part's rows written end at one row. A
-        line reads the same: its rows present are the same rows at the same times (the rotation is by a row's time, not
-        its place), the rows moved in before them not present.
+        """Join the lines of several pasts into one past, in new storage on ``device``.
 
-        **The front** (D190 (2)). A line taken more than once and its copies are a kin, the same to every row written;
-        lines of one kin of a part taken once each stay a kin, to its rows moved. The front's rows are as many as hold
-        the past smallest: a front of S rows is held once for each kin of two lines or more that are the same to S rows
-        or more, and once for each other line; every line holds its rows from S on and ``room`` more. Its lines read
-        their front as ``attention`` says (`FRONT_ATTENTIONS`)."""
+        ``parts`` is a list of (past, lines, shift). ``lines`` ``[K]`` are the lines taken from the past (repeats are
+        allowed; on the past's device). ``shift`` is the number of rows by which the part moves later; below 0 the
+        first rows are left out, and none of the part's lines has them present. After the shift, the rows written of
+        every part end at one row. A line reads the same as before: its present rows are the same rows at the same
+        times (the rotation uses a row's time, not its place), and the rows moved in before them are not present.
+        ``room`` is the number of spare rows that each line keeps.
+
+        **The front.** A line taken more than once and its copies are a kin: they are the same up to every row
+        written. Lines of one kin in a part, each taken once, stay a kin up to the rows moved. The front has the
+        number of rows S that makes the past smallest. A front of S rows is held once for each kin of two lines or more
+        that are the same up to S rows or more, and once for each other line. Each line holds its own rows from S on.
+        ``attention`` is how the lines read their front (`FRONT_ATTENTIONS`)."""
         if attention not in FRONT_ATTENTIONS:
             raise ValueError(f"attention {attention!r} is none of {FRONT_ATTENTIONS}")
         ends = {past.rows + shift for past, _, shift in parts}
@@ -351,8 +389,8 @@ class Past(NamedTuple):
 
     @classmethod
     def nothing(cls, batch: int, heads: int, head: int, capacity: int, like: torch.Tensor) -> Past:
-        """No rows yet, room for ``capacity`` (``like``: a tensor of the device and dtype); no line its kin's but its
-        own, no front."""
+        """A past with no rows and room for ``capacity`` rows. ``like`` gives the device and dtype. Every line is its
+        own kin, and there is no front."""
         return cls(like.new_zeros((batch, heads, capacity, head)), like.new_zeros((batch, heads, capacity, head)),
                    torch.zeros((batch, capacity), dtype=torch.bool, device=like.device), 0, None,
                    np.arange(batch, dtype=np.int64), np.zeros(batch, dtype=np.int64), COPIED)
@@ -383,7 +421,7 @@ class Layer(nn.Module):
         head = d // self.heads
         start, end = past.rows - past.start, past.rows - past.start + rows       # in each line's own rows
         room = past.keys.shape[2]
-        if end > room:                               # a line longer than its room: grown by steps (D183)
+        if end > room:                               # a line longer than its room: grown by steps
             past = past.grown(room + CACHE_STEP_ROWS * math.ceil((end - room) / CACHE_STEP_ROWS))
         y = self.time_norm(x)
         q, k, v = self.time_qkv(y).reshape(batch, rows, 3, self.heads, head).permute(2, 0, 3, 1, 4)

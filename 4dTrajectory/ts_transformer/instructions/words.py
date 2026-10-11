@@ -60,9 +60,9 @@ class Words:
         "go-around")."""
         return {
             "heading": self.n_heading,
-            "altitude": self.n_altitude_levels + 1,
-            "angle": self.n_descent + 2,
-            "speed": self.n_speed_levels + 1,
+            "altitude": self.n_altitude_levels + 1, # + no level-off
+            "angle": self.n_descent + 2, # + level and lift
+            "speed": self.n_speed_levels + 1, # speeds and unspecified(in final course)
         }
 
     # ---- heading: relative to the course of the runway in force, degrees, clockwise (vocabulary §3.3)
