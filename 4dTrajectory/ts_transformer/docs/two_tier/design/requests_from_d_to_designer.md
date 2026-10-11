@@ -5,13 +5,12 @@ time. Each item is a reading the implementer made where the design says nothing,
 until the user decides. Paths are relative to `4dTrajectory/ts_transformer/`. The numbers are kept from the earlier
 notes; the items the user decided are deleted (D166: 6, 7, 19, 21, 22, 25, 29–35; O16: 36, written into D146; the
 census's sample: 18; D172: 46–48; D179, D180: 49–53; D181, O20: 54–62; D181–D186: 63–70; the interfaces and D182:
-71–77; D188: 78–79; D190: 80–84; D190, D191: 85, 87, 88; D191–D193 and the log: 86, 90–98), item 23 (it asked for 6 and
+71–77; D188: 78–79; D190: 80–84; D190, D191: 85, 87, 88; D191–D193 and the log: 86, 90–98; D193, D194 and the log: 89, 99–107), item 23 (it asked for 6 and
 7), item 20 (built: item 40) and the names of MC0–MC4 (written into the interfaces).
 
-State: 2026-10-11 (03:05): arm A (`multi_train_majority_20261010`, D192) done, rounds 0 / 1 landed 82.2 / 83.3 %;
-it stopped once in round 0 on a defect of S6 with join ticks, fixed (14e53df6, item 104). D194 (2), (3) merged
-(ca53c517) and ran in A's round 1; D194 (1) merged (e77bc220); arm B runs with 4 CPU workers (item 108) (stage D's log
-§22). 89 is a measure kept from D190; 99–103 are of 2026-10-10; 104–109 are new.
+State: 2026-10-11 (09:30): arms A and B done (readout `readouts/2026-10-11_stage_d_arms_ab.zh.md`); notes/stage_d.md's
+order 1 (D194 (3) for every point tried) built and merged (d3dc3b26, 226ed303), order 2 checked; the formal campaign
+`multi_train_majority_formal_20261011` (arm A's settings, 8 rounds) runs (stage D's log §22). 108–111 are open.
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -156,88 +155,8 @@ it stopped once in round 0 on a defect of S6 with join ticks, fixed (14e53df6, i
     the unit is an anchor (its windows of the spans are nested and share their aircraft); within a span, windows of
     other anchors may still share flights in a dense select set (stated).
 
-## D190, D191 (stage D's log §20, §21; 2026-10-10)
+## D194 and arms A, B (stage D's log §22; 2026-10-11)
 
-89. **The two ways' time** (measured, the profile at §18's settings on 7893d787). Copied: batches 0 / 23 / 86 in 56.8 /
-    68.0 / 63.0 s; merged: 55.5 / 63.5 / 59.9 s (D189: 55.3 / 64.9 / 61.0). The campaign of item 90 reads `merged`.
-
-## D193 on `dev-multi-s6` (stage D's log §22; 2026-10-10 night)
-
-The code says the details; read the two commits.
-
-99. **Each flight's own permitted record** (reading; changes D181 (63) at the loop's level). With S6 a flight that has
-    left the loop has no rows in the speaker, so a record padded to the most rows among the flights asked would depend
-    on which flights left. `SpeakingLoop.permitted(flights)` now gives a list, one record a flight: its sentence's rows
-    (`len` of its said words) and its airport's classes (`column_words`). The loss finds a record's row by its time and
-    reads a padded class as forbidden, so the loss is the same: checked on MC6's round 5 groups, 144 sentences, 143 cut
-    shorter, the log-probabilities equal bit for bit. `Speaker.permitted(indices)` (prior §7 item 3) is unchanged and
-    keeps D181 (63)'s padding. Stage C's pinned digests of D149 hash these records: two of them ("round real", the
-    batch scenario) changed, and d5cc5d6a with the record cut alone gives the same two, so they were written again
-    (6c5269af). Please write this into D193 (3) or D181 (63).
-100. **New and removed public names** (for prior §7 item 7, post-training §9 and the key-code index). `SpeakingLoop`:
-    `held` (the flights still in the engines), `left` (each left flight's frozen `Left` record), `inside` (the held
-    flights' places), `outcome(flight)`, `landings(flight)`, `in_force(flight)`, `permitted(flights)` (item 99); a left
-    flight's states, sentences and outcome come from its record. `WindowLoop`: `landings` removed (read
-    `speaking.landings(flight)`), `results(rows=None)` per row. A loop with no flight held has no speaker or executor.
-    The line numbers of `SpeakingLoop` and `SpeakingLoop.step` in prior §12's index moved.
-101. **S4's readings** (D193 (4), 22fd1031). (a) The cap reads the worker's own memory (`_own_memory`, as O15's
-    sampler) every `HOST_CAP_SAMPLE_S` = 1 s, a constant: one `smaps_rollup` read took 12–53 ms in a worker of 2.4 GB at
-    a load of 35, so O15's 0.2 s would cost 6–25 % of a core; a batch can grow for 1 s past its cap, and the stop waits
-    for the torch operation in progress. (b) The error is raised in the worker's main thread by a signal (SIGUSR1, the
-    worker's handler), so it comes where the batch is and the worker catches it as CUDA's out of memory. (c) A capped
-    CPU worker gives the heap's free pages back after each batch (glibc `malloc_trim`): without it the next batch
-    starts past its cap (tested). (d) The host's part for the CPU workers is the free host less the GPU workers' (at
-    their peak with the margin, and their series); a CPU worker holds between batches its profile's `now`, the reader's
-    model and the round's series. (e) The GPU's levels are spoken before the CPU's, one device after the other.
-102. **For the user: the measures of tonight** (stage D's log §22; no criterion). Batch 86 of MC6's round 0 on the
-    GPU: 62.1 s before S6, 53.9 s with S6, 48.8 s with S6 and the executor on the CPU (S1); on the CPU 68.1 → 51.0 s.
-    The rule of a mixed launch (`--cpu-batches`, `--cpu-period`) was set by the speeds before S1 and S6 and is to be set
-    again at the next launch. The traffic-only arm lands 82.4 / 82.5 %, inside MC6's rounds; R5 finds no sign that
-    the first rows after a point decide.
-103. **D192 as built** (172bc07d; please check against the row). (a) The count is `continuations // 2 + 1`, more than
-    half: 5 of D192's 8. (b) The kinds go into the record under `majority` only (`group_kinds`: decision, fine, majority),
-    not into backward's: the row says "a backward batch's record adds each group's kind", but a new key in backward's
-    record would change the records of MC6's campaign, which is to stay resumable; backward's record keys are pinned by
-    a test. (c) "The searches that found a majority point" are the length of `majority_depths_s` (each its span and
-    depth), the decision point counted when it is the majority point. (d) `branching` is a profiled setting, so a
-    campaign with `majority` needs its own profile.
-
-## A fix and the speed-ups of 2026-10-11 (D194 proposed)
-
-104. **A speaker keeps a row of records for each tick after its first said row** (fix, 14e53df6, merged; prior §7
-    item 3, D193 (3)). Arm A stopped in round 0: a joint loop of the backward search was rebuilt with the said flights
-    of a window left (S6), its other flight still in its observed rows; at the next tick no aircraft was said,
-    `Speaker.say` kept no row of records, and the next `SpeakingLoop.together` refused the loop (its rows said ≠ its
-    ticks). Now the records (`forbidden` … `drawn_probability`, `said_rows`) have a row for every row `say` says from the
-    first in which an aircraft is said, a row with no aircraft said included; the rows before it stay unrecorded, as
-    before. A flight's own records (`permitted`, the sentences) read its own said rows only: unchanged. The check on
-    fixed inputs (R68 on arm A's campaign, the code before and after) gave every digest equal, so A's 174 done
-    batches were kept (D185). Please write this into prior §7 item 3's records ("every row in which some aircraft is
-    said" → "every row from the first in which some aircraft is said").
-105. **D194 (2): a round's batches longest span first** (proposal; `dev-speed` ce886c4a, the user's choice of
-    2026-10-11: speed-ups that change no group). `speak_round` speaks the batches not done in the order of their span,
-    longest first, those of one span by index (stage C's windows have span 0: by index, as before). Why: the batches
-    were sent by index, which is by span ascending, so the 1200 s batches came last and the round's last ~10 min ran on
-    a few workers (MC6 round 4: 7 batches in its last 10 min, 33–47 in each 10 min before). The record still sums the
-    batches in batch order, a batch's device is still its rule's (by index, D191), and the pass reads the groups by
-    batch index, so nothing learned changes. The batches deferred to a level (D191) are still spoken last, by index.
-106. **D194 (3): a majority point out of reach ends its continuations early** (proposal; ce886c4a, 9bdbe6c5). In a
-    search for the majority point (D192), a point tried behind the decision point leaves the joint loop as soon as
-    fewer of its continuations are left than the majority (`multi.backward.out_of_reach`: K − failed < majority; 5 of
-    8: once 4 have failed). A failure is counted only where it stays to the judged tick (`_failed`): v answered for a
-    loss; for a loss event, the event's partner answered for one with v; for an end, v ended with the event's
-    outcome. A go-around said is read at the judged tick only (it would need v's sentence read at every step), so a
-    go-around event stops later, never wrongly. The search's answers (the points chosen, the groups, their kinds and
-    depths, the counts of points and continuations) are those of the search without the stop; only the steps, the
-    rows and the seconds of the search fall. The decision point and the fine point are never stopped early. Tested
-    (`test_multi_backward.py`: the rule; `_failed` against `_trials` on one state for each kind of event; on the
-    synthetic window the same answers with and without the stop). `continuations_to_event` keeps counting each
-    continuation of a point tried, also one that stopped before the event + 60 s.
-107. **D194 (4) dropped: more CPU workers do not fit** (measured 2026-10-11 01:23–01:25, no code). The profiles of
-    D192 fit 6 CPU workers beside the 3 on the GPU, not 7 or 8: with the campaign's process open (its context, about
-    3 GiB) the host had 24.1 GiB; 8 needed 26.1 GiB, and with 7 a batch at the profile's host peak (2.77 GiB with its
-    margin) had 2.14 GiB at the last level. The earlier count (3 + 8 fit) used the host free before the campaign's
-    process opened. Arms A (from round 1) and B run 6.
 108. **The CPU's levels and the CPU profile of D192** (measured in A's round 1; for D191, D193 (4) and O15). With 6 CPU
     workers a worker's host share was 2.43 GiB; about 40 CPU batches, nearly all of span 1200 s, went past it and were
     spoken again after the first pass, most one at a time (levels 3 at 2.78 GiB, 1 at 4.19 GiB): 20 of them took
@@ -262,4 +181,14 @@ The code says the details; read the two commits.
     alone at the end; no tail of the levels as in A's round 1. The CPU is now the slower device: 7 of every 10 batches
     go to it (`--cpu-batches 7 --cpu-period 10`, set before S1 and S6, item 102). A rule with fewer CPU batches would
     end the round earlier; arms compared keep one rule (D194), so it is for a next campaign.
+111. **D194 (3) for every point tried, as built** (notes/stage_d.md order 1; d3dc3b26, merged 226ed303). `_Part.need`:
+    1 for a point tried before the decision point, the fine point and point B, the majority behind the decision point
+    in a search for the majority point; `out_of_reach(failed, continuations, need)`; the decision point's copy is never
+    stopped. Order 2: window_behaviour on arm A's campaign (MC6's round 0 draw, batches 0 / 23 / 86, majority, the CPU,
+    one process) against 14e53df6 (no D194 (3)): "the same behaviour". Tests: a synthetic search whose points before
+    the decision point and fine point all fail stops them at their first step and finds the same; the batch test of
+    D188 allows a point judged early where every continuation failed. Review: no S1/S2; S3: point B's own early stop
+    has no test of its own (the same expression); on the GPU the answer is the same within the GPU's rounding only
+    (item 109), now for more points; `_failed` now runs for every point tried at every step (its seconds against the
+    rows saved are to be read in the formal campaign's records).
 

@@ -859,3 +859,23 @@ D194 (3) cut round 1's search rows and seconds against round 0's by 8 % and 12 %
 e77bc220 (no conflicts; the changed modules' tests 135 passed; the full suite waits for a free machine); run worktree
 `.claude/worktrees/run-majority-b` at e77bc220; A's settings with `--data-weight 0.25` and 4 CPU workers; first batch
 03:00.
+
+**Arm B done; the full suite** (05:10). B: rounds 0 / 1 landed 82.8 / 82.3 %, lost separation 15.4 / 15.3 %; data
+read-only, `SHA256SUMS` of 445 files, `run_logs/`. B's round 0 against A's: 223 of 224 batches the same groups, one GPU
+search differs (requests 109). Readout of both arms against MC6: `readouts/2026-10-11_stage_d_arms_ab.zh.md`
+(cb4fb422). The full ts suite at 68078c97 (after the merges of dev-speed and dev-data-weight), 16 workers: 2,146
+passed, 1 skipped, 1 failed — `test_the_stage_d_runners_take_only_the_names_of_the_interfaces` (`DATA_WEIGHT` not in
+post.loss's interface; post-training §9 row 10 names it): listed, 6780749f.
+
+**notes/stage_d.md orders 1 and 2 of 2026-10-11, and the formal campaign** (the user's words of 2026-10-11 05:40:
+"以A的设置 正式跑实验 把提速做了"). Order 1, d3dc3b26 on `dev-speed2`: every point tried leaves the joint loop once
+too few of its continuations are left to make the search choose it (`_Part.need`: 1 for the points before the
+decision point, the fine point and point B; the majority behind the decision point in a majority search); tests: the
+synthetic search with all failed points stopped at their first step and the same answers, D188's batch test allowing
+a point judged early where every continuation failed (34 and 148 passed in the changed and the surrounding modules);
+review: no S1/S2 (requests 111). Order 2: window_behaviour on arm A's campaign (batches 0 / 23 / 86, majority, the
+CPU) against 14e53df6: the same behaviour. Merged, 226ed303; the worktree and branch removed. The formal campaign
+`outputs/POOLED/multi/multi_train_majority_formal_20261011` (intent 1768336b), launched 09:25 from
+`.claude/worktrees/run-formal` at 226ed303 (unit `majority-formal`): arm A's settings, 8 rounds, 3 GPU + 4 CPU
+workers, 8 of every 15 batches on the CPU (B's round 0: the GPU 2.44, the CPU 2.82 batches a minute, so an equal end
+at a CPU share of 0.54).
