@@ -1395,8 +1395,8 @@ def test_a_setting_added_after_a_record_reads_as_its_default_and_a_resume_compar
 
 def test_stage_c_s_pass_clips_and_passes_as_its_settings_say(monkeypatch):
     """D168, D169: stage C's pass (`STAGE_C`, `STAGE_C_LANDED`) hands `Settings.clip_norm` to `post.loss.passes` and
-    makes `Settings.epochs` passes, each with its own numbers (`pass_orders`); stage D's (the skeleton's default pass:
-    its settings name neither) clips nothing and makes one pass."""
+    makes `Settings.epochs` passes, each with its own numbers (`pass_orders`); stage D's (its settings name neither,
+    only the data weight) clips nothing and makes one pass."""
     from ts_transformer.experiments.multi_train import stage_d
 
     seen, numbers = [], []
@@ -1417,8 +1417,8 @@ def test_stage_c_s_pass_clips_and_passes_as_its_settings_say(monkeypatch):
         assert stage.train(None, context, None, None, here, rng, part_width=0, round_=0, companion=None) == {
             "updates": 0, "passes": [{"updates": 0}, {"updates": 0}]}
         assert numbers[-2] is rng and numbers[-1] is not rng
-    stage_d().train(None, context, None, None, settings, np.random.default_rng(0), part_width=0, round_=0,
-                    companion=None)
+    stage_d().train(None, context, None, None, SimpleNamespace(data_weight=1.0), np.random.default_rng(0),
+                    part_width=0, round_=0, companion=None)
     assert seen == [(0.5, 2), (0.5, 2), (None, 1)]
     assert segments == [15, 15, None]          # D170: 60 s in 4 s rows, stage C's branch pass only; stage D's none
 
@@ -1784,3 +1784,16 @@ def test_a_batch_commands_each_flight_once_with_windows_of_several_aircraft():
         assert len(held) == len(set(held))
         assert [windows[p].signal_index for p in batch] == sorted(windows[p].signal_index for p in batch)
     assert out == [[0, 1, 3], [2, 4]]
+
+
+def test_a_pass_gives_its_data_weight_to_each_update(monkeypatch):
+    """R2 of stage D's plan: `train_pass`'s ``data_weight`` reaches `post.loss.update_step` of every update."""
+    taken, given = {}, {}
+    monkeypatch.setattr(post_train, "update_pairs", lambda *args, **kwargs: [])
+    monkeypatch.setattr(post_train, "pass_means", lambda each: {})
+    monkeypatch.setattr(post_train, "passes", lambda *args, step, clip_norm: taken.update(step=step) or [[]])
+    monkeypatch.setattr(post_train, "update_step", lambda *args, **kwargs: given.update(kwargs))
+    post_train.train_pass(None, SimpleNamespace(base=None, data=None, device=None), None, None, None,
+                          np.random.default_rng(0), part_width=0, data_weight=0.25)
+    taken["step"](1, 2, 3, 4, 5)
+    assert given == {"data_weight": 0.25}

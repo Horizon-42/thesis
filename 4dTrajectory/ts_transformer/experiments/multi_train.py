@@ -34,6 +34,8 @@ parts (`stage_d`):
   (``group_kinds``) and each majority point's span and depth (``majority_depths_s``). The readout's ``go_arounds`` and
   ``aircraft`` of each span give the go-arounds per aircraft that D182 asks to watch. ``--front-attention`` (`MultiSettings.front_attention`,
   D190 (2); `copied` the default): how a window's copies read the front of the speaker's cache they hold once.
+  ``--data-weight`` (`MultiSettings.data_weight`; R2 of stage D's plan, the user, 2026-10-10): the data term's weight in
+  each update (`post.loss.update_step`), `post.loss.DATA_WEIGHT` the default.
 - **The selection readout** (§5 item 2, `selection_windows`, `read_batch`, `selection_readout`): at most
   ``select_per_airport`` real windows of each span of each airport of the select days, their anchors in an order drawn
   once with the seed (D146's rule), the first pass only, each aircraft with its own numbers (the same every round). By
@@ -88,7 +90,7 @@ from ts_transformer.experiments.post_branches import Rules, backward_round, bran
 from ts_transformer.experiments.post_train import (
     Context, Speakers, Stage, available_memory, batches, cpu_workers_refused, done_rounds, open_campaign, open_context,
     round_start, run_campaign, save_batch_file, settings_of, source_campaign, speak_device_refused, speak_round,
-    start_checkpoint, start_model, start_of, workers_fit,
+    start_checkpoint, start_model, start_of, train_pass, workers_fit,
 )
 from ts_transformer.experiments.post_window_loop import LANDED, LOST_SEPARATION, WindowLoop, checked_edges
 from ts_transformer.multi import credit
@@ -101,6 +103,7 @@ from ts_transformer.multi.timing import (
 from ts_transformer.multi.tokens import PART_FEATURES, TOKENS_SCHEMA, TokenPart
 from ts_transformer.multi.windows import COMPRESSED, KINDS, REAL_KIND, Anchors, Drawn, compressed, left_out
 from ts_transformer.post.branches import CONTINUATIONS
+from ts_transformer.post.loss import DATA_WEIGHT
 from ts_transformer.post.scene import Window
 from ts_transformer.post.traffic_attention import add_token_part, parameter_groups
 from ts_transformer.prior.model import COPIED, FRONT_ATTENTIONS, Prior
@@ -165,6 +168,9 @@ class MultiSettings:
     #: batch on the speak device (the behaviour before it; a record without it reads so)
     cpu_batches: int = 0
     cpu_period: int = 1
+    #: the data term's weight in each update (R2 of stage D's plan, the user, 2026-10-10; `post.loss.update_step`); the
+    #: default `DATA_WEIGHT` (the behaviour before it; a record without it reads so)
+    data_weight: float = DATA_WEIGHT
 
     def __post_init__(self) -> None:
         if set(self.per_kind) != set(KINDS) or min(self.per_kind.values()) < 0 or not any(self.per_kind.values()):
@@ -188,6 +194,8 @@ class MultiSettings:
         if not 0 <= self.cpu_batches <= self.cpu_period or self.cpu_period < 1:
             raise ValueError(f"cpu_batches {self.cpu_batches} of every cpu_period {self.cpu_period}: a period of 1 or "
                              f"more, at most its batches on the CPU")
+        if not self.data_weight >= 0:
+            raise ValueError(f"data_weight must be 0 or more, not {self.data_weight}")
 
 
 def span_key(span_s: float) -> str:
@@ -648,7 +656,10 @@ def stage_d() -> Stage:
                  speak=lambda *args, stage, launch: speak_round(*args, stage=stage, launch=launch),
                  selection=lambda context, settings, split: selection_windows(context, settings, split),
                  readout=selection_readout, record=window_record, speak_batch=speak_batch, read_batch=read_batch,
-                 part_width=TokenPart.width, batches=span_batches)
+                 part_width=TokenPart.width, batches=span_batches,
+                 train=lambda model, context, optimizer, directory, settings, rng, *, part_width, round_, companion:
+                 train_pass(model, context, optimizer, directory, settings, rng, part_width=part_width,
+                            data_weight=settings.data_weight))
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -686,6 +697,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--cpu-batches", type=int, default=MultiSettings.cpu_batches,
                         help="D191: of every --cpu-period batches by index, the first this many on the CPU workers")
     parser.add_argument("--cpu-period", type=int, default=MultiSettings.cpu_period, help="D191: the rule's period")
+    parser.add_argument("--data-weight", type=float, default=MultiSettings.data_weight,
+                        help="R2: the data term's weight in each update (default: post.loss.DATA_WEIGHT)")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--speak-workers", type=int, default=1)
     parser.add_argument("--speak-device",
@@ -697,7 +710,7 @@ def settings_from(args: argparse.Namespace, start: dict[str, Any]) -> MultiSetti
     return MultiSettings(args.rounds, {kind: getattr(args, f"windows_{kind}") for kind in KINDS}, args.spans_s,
                          args.c_min, args.batch_rows, args.continuations, args.seed, args.prior_lr, args.traffic_lr,
                          args.weight_decay, args.update_groups, args.data_sentences, args.select_per_airport, start,
-                         args.branching, args.front_attention, args.cpu_batches, args.cpu_period)
+                         args.branching, args.front_attention, args.cpu_batches, args.cpu_period, args.data_weight)
 
 
 def main(argv: list[str] | None = None) -> int:

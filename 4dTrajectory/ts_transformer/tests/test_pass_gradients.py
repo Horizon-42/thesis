@@ -88,7 +88,7 @@ def world(tmp_path, monkeypatch):
     (campaign / "round_1" / "groups_0.pt").write_bytes(b"")
     (campaign / "campaign.json").write_text(json.dumps({"schema": "stub", "inputs": {
         "smoke": False, "prior": "p", "instructions": "i", "executor": "e", "windows": "w", "procedure_root": "c"}}))
-    settings = SimpleNamespace(seed=2035, prior_lr=1e-5, traffic_lr=1e-4)
+    settings = SimpleNamespace(seed=2035, prior_lr=1e-5, traffic_lr=1e-4, data_weight=0.5)
     asked, built = [], []
     stage = SimpleNamespace(part_width=5)                                  # stage D's: a token part
     monkeypatch.setattr(gradients.window_behaviour, "opened_campaign", lambda record: (settings, stage))
@@ -112,7 +112,8 @@ def world(tmp_path, monkeypatch):
 
 def test_the_read_takes_every_kth_update_at_the_model_that_spoke_the_round(world, tmp_path):
     """Round 1 read at round 0's model, every 2nd update (0 and 2 of 3), each update's parts the ones
-    `update_gradients` gives at that model with the round's dropout, the means and the learning rates written."""
+    `update_gradients` gives at that model with the round's dropout and the campaign's data weight, the means and the
+    learning rates written."""
     campaign, model, base, updates, asked, built = world
     out = tmp_path / "g.json"
     assert gradients.main(["--campaign", str(campaign), "--round", "1", "--out", str(out), "--every", "2"]) == 0
@@ -127,8 +128,8 @@ def test_the_read_takes_every_kth_update_at_the_model_that_spoke_the_round(world
               "traffic": range(len(named[0]["params"]), len(parameters))}
     torch.manual_seed(post_train.pass_seed(2035, 1))
     pieces, data = updates[0]
-    expected = gradients.measured(update_gradients(model, PassStart(model), base, pieces, data, parameters), groups,
-                                  parameters)
+    expected = gradients.measured(update_gradients(model, PassStart(model), base, pieces, data, parameters,
+                                                   data_weight=0.5), groups, parameters)
     assert _close(held["updates"][0]["parts"], json.loads(json.dumps(expected)))
     for update in held["updates"]:
         for name in ("prior", "traffic", "all"):

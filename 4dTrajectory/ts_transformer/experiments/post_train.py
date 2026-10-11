@@ -127,7 +127,8 @@ from ts_transformer.post.branches import (
     samples,
 )
 from ts_transformer.post.fault_census import fault_rows
-from ts_transformer.post.loss import LossParts, PassStart, Samples, clipped_step, landed_step, passes, stacked, update_step
+from ts_transformer.post.loss import (DATA_WEIGHT, LossParts, PassStart, Samples, clipped_step, landed_step, passes,
+                                      stacked, update_step)
 from ts_transformer.post.value import (
     VALUE_FEATURES, VALUE_SCHEMA, Value, ValueBatch, ValueSample, advantages, time_left, value_batch, value_loss,
     value_part,
@@ -1516,17 +1517,19 @@ def pass_means(each: Sequence[Sequence[LossParts]]) -> dict[str, Any]:
 
 def train_pass(model: Prior, context: Context, optimizer: torch.optim.Optimizer, directory: Path, settings: Settings,
                rng: np.random.Generator, *, part_width: int, clip_norm: float | None = None, epochs: int = 1,
-               segment_rows: int | None = None) -> dict[str, Any]:
+               segment_rows: int | None = None, data_weight: float = DATA_WEIGHT) -> dict[str, Any]:
     """Step 4 of a round: ``epochs`` passes (`post.loss.passes`: the model at the first's start is the one that spoke
     the groups, every pass's ratio against it; D169) over `update_pairs` (``part_width``: the stage's token part), each
     in its own order (`pass_orders`), each update's gradient clipped to ``clip_norm`` (D168). Stage C's
     `Settings.clip_norm` and `Settings.epochs` (`STAGE_C`); None and 1 — not clipped, one pass — for a stage whose
     settings do not name them. ``segment_rows``: each group's rows counted up to the next branch point (P55,
-    `segment_rows_of`); None: up to the event. Its means (`pass_means`), or no update where the round has no informative group."""
+    `segment_rows_of`); None: up to the event. ``data_weight``: the data term's weight (`post.loss.update_step`; stage
+    D's `MultiSettings.data_weight`). Its means (`pass_means`), or no update where the round has no informative group."""
     each = passes(model, context.base, optimizer,
                   [update_pairs(directory, context.data, settings, numbers, context.device, part_width=part_width,
                                 segment_rows=segment_rows)
-                   for numbers in pass_orders(rng, epochs)], clip_norm=clip_norm)
+                   for numbers in pass_orders(rng, epochs)],
+                  step=lambda *args: update_step(*args, data_weight=data_weight), clip_norm=clip_norm)
     return pass_means(each)
 
 

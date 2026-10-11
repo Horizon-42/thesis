@@ -83,6 +83,25 @@ def test_the_settings_refuse_what_is_not_a_campaign_of_stage_d():
             _multi_settings(**wrong)
 
 
+def test_the_data_weight_defaults_to_the_code_before_it_and_reaches_the_pass(monkeypatch):
+    """R2 of stage D's plan: `MultiSettings.data_weight` defaults to `post.loss.DATA_WEIGHT` (a record without it reads
+    so), is refused below 0, and stage D's pass gives it to `post_train.train_pass`."""
+    from ts_transformer.post.loss import DATA_WEIGHT
+
+    settings = _multi_settings()
+    assert settings.data_weight == DATA_WEIGHT
+    recorded = asdict(settings)
+    del recorded["data_weight"]
+    assert MultiSettings(**recorded) == settings
+    with pytest.raises(ValueError, match="data_weight"):
+        _multi_settings(data_weight=-0.5)
+    seen = {}
+    monkeypatch.setattr(multi_train, "train_pass", lambda *args, **kwargs: seen.update(kwargs) or {})
+    multi_train.stage_d().train("model", "context", "optimizer", "directory", _multi_settings(data_weight=0.25), "rng",
+                                part_width=7, round_=0, companion=None)
+    assert seen == {"part_width": 7, "data_weight": 0.25}
+
+
 def test_each_kinds_count_is_split_equally_by_span():
     """D146: each kind's windows of a round in equal parts of the spans, the remainder one each to the first spans."""
     settings = _multi_settings(per_kind={REAL_KIND: 1000, COMPRESSED: 1000}, spans_s=[300.0, 600.0, 1200.0])
