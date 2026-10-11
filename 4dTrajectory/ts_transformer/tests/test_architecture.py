@@ -1117,6 +1117,7 @@ POST_INTERFACE = {
                       "BRANCH_EVERY_S", "CONTINUATIONS", "EQUAL", "MINORITY_SIDE", "GROUP_WEIGHTS"},   # D195
     "post.loss": {"Samples", "surrogate", "pull_to_base", "data_term", "update_step", "update_loss", "one_pass",
                   "passes", "DATA_WEIGHT"},                                    # D194 (1): `update_step`'s default
+    "post.window_lists": {"identity_of"},                     # §9 item 13 (frontend D178 (6)): a window's identity
 }
 
 
