@@ -249,7 +249,7 @@ The code says the details; read the two commits.
     its round 0 measures the first pass and the tail with 4.
 109. **D194 (3) on the GPU: one search of 224 batches differs** (measured; please write the bound into D194 (3)). Arm B's
     round 0 speaks from A's start with A's settings (the data weight acts in the pass only), so its groups are A round
-    0's where the code behaves the same. Of 224 batch records, 220 differ only in the search's seconds, steps and rows
+    0's where the code behaves the same. Of 224 batch records, 4 are the same and 219 differ only in the search's seconds, steps or rows
     (D194 (3)); batch 147, on the GPU, differs in one search: A (c60f59c6) chose the decision point at 128 s with its
     majority point at 224 s, B (e77bc220) found no avoiding continuation at 128 s and chose 160 s, its fine point at
     144 s and the majority point at 224 s (12 → 13 groups). The search's own stop acts only behind its decision point,
