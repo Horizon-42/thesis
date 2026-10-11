@@ -118,6 +118,22 @@ Why attention, and not a sum or a list. A sum of the tokens would grow with the 
 <li>the <b>masks of a caller</b>: a set of forbidden words for each column that the prior does not understand. Free generation gives one: “go-around” after the second go-around (<span class="pill d">D68</span>).</li>
 </ol>
 <p><b>The draw.</b> The caller gives one uniform random number for each aircraft, row and column. The speaker takes the word where the cumulative probability, in the class order of the heads, first passes the number (<span class="pill d">D96</span>). So the words of an aircraft depend only on its own numbers and inputs. This is what branch training needs (section 10.3). The speaker also records the words that all masks permitted, so that a later loss can score the <em>same masked distribution</em> that the speaker drew from.</p>
+
+<h4>Why a draw, and not the most probable word</h4>
+<p>The prior does not say a word. For each column of each row it gives <b>probabilities</b>, for example 55 % for “unchanged” and 25 % for 70 m/s. The speaker could take the word with the highest probability in each column. It does not. It <b>draws</b> a word by chance, with its probability. This is the usual way to use a language model and a policy in reinforcement learning, and in this design it is a decision: the speaker draws from the model’s own distribution, at a temperature of 1 (<span class="pill d">D121</span>).</p>
+<p><b>How a draw works.</b> The speaker needs a random number <i>u</i>, a number between 0 and 1. It lays the words of the column on a line from 0 to 1, and gives each word a piece as long as its probability. The word whose piece holds <i>u</i> is said (Figure 21).</p>
+<figure class="paper" data-fig="fig21_random_number"></figure>
+<ul>
+<li><b>The same number, the same situation, the same word.</b> If the probabilities are the same, the same <i>u</i> gives the same word.</li>
+<li><b>The same number, a different situation, perhaps another word.</b> If the inputs change (for example another aircraft moved differently), the probabilities change, the pieces move, and the same <i>u</i> can fall in another word.</li>
+</ul>
+<p><b>Why not the most probable word.</b></p>
+<ol>
+<li><b>The most probable word is “unchanged” in most rows.</b> A row lasts 4 s, and in most rows nothing happens: “unchanged” has the largest probability, and each new word (a turn, a descent, a go-around) has a smaller one. If the speaker always took the largest, no aircraft would ever start a turn or a descent. Drawing makes these events happen at about the rate that the data has. This is my reading of the mechanism. The project has no run that takes the most probable word, so it is not measured.</li>
+<li><b>The training needs sentences that differ.</b> The post-training compares the rewards of different sentences of one window (section 10.3). If every sentence were the same, all the rewards would be the same, the advantages would be 0, and nothing could be learnt. The draw makes the sentences differ. The ceiling readout shows how much: for the same model and the same windows, one draw lands in 79.5 % to 85.7 % of the windows, and 32 draws land at least once in 99.3 % of them.</li>
+<li><b>A probability says that several instructions are reasonable.</b> In the same situation, controllers say different things. The largest probability alone would hide that.</li>
+</ol>
+<p><b>Who gives the numbers.</b> When the prior is used for real, the numbers are simply random. In the training and in the readouts, they are the <b>caller’s</b> and are fixed on purpose, so that a run can be repeated and two runs can be compared (the selection readout speaks the same windows with the same numbers every round). In the post-training, each aircraft has a stream of numbers of its own (section 10.7).</p>
 <div data-demo="speaker" data-title="Say a row: model, masks, draw"></div>
 <figure class="paper" data-fig="fig10_decoding"></figure>
 
