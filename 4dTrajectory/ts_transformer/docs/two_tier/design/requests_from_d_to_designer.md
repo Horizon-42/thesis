@@ -11,7 +11,7 @@ census's sample: 18; D172: 46–48; D179, D180: 49–53; D181, O20: 54–62; D18
 State: 2026-10-11 (03:05): arm A (`multi_train_majority_20261010`, D192) done, rounds 0 / 1 landed 82.2 / 83.3 %;
 it stopped once in round 0 on a defect of S6 with join ticks, fixed (14e53df6, item 104). D194 (2), (3) merged
 (ca53c517) and ran in A's round 1; D194 (1) merged (e77bc220); arm B runs with 4 CPU workers (item 108) (stage D's log
-§22). 89 is a measure kept from D190; 99–103 are of 2026-10-10; 104–108 are new.
+§22). 89 is a measure kept from D190; 99–103 are of 2026-10-10; 104–109 are new.
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -247,4 +247,19 @@ The code says the details; read the two commits.
     for the user: (a) a CPU profile of D192 on the batches of 1200 s with the most aircraft, or (b) a batch spoken again
     goes to the level whose budget holds the peak it reached, not to each level in turn. B runs with 4 CPU workers;
     its round 0 measures the first pass and the tail with 4.
+109. **D194 (3) on the GPU: one search of 224 batches differs** (measured; please write the bound into D194 (3)). Arm B's
+    round 0 speaks from A's start with A's settings (the data weight acts in the pass only), so its groups are A round
+    0's where the code behaves the same. Of 224 batch records, 220 differ only in the search's seconds, steps and rows
+    (D194 (3)); batch 147, on the GPU, differs in one search: A (c60f59c6) chose the decision point at 128 s with its
+    majority point at 224 s, B (e77bc220) found no avoiding continuation at 128 s and chose 160 s, its fine point at
+    144 s and the majority point at 224 s (12 → 13 groups). The search's own stop acts only behind its decision point,
+    so this is the other searches' stop: the joint loop's rows fall earlier, and on the GPU a row's rounding depends
+    on the batch's shape. Every CPU batch (158) is the same; window_behaviour (CPU) found every digest equal. Reading:
+    D194 (3) keeps the answers on the CPU bit for bit, on the GPU within the GPU's rounding (as D193 S1: states within
+    2.2e-8 m), here 1 search in 224 batches.
+110. **For the user: B's round 0 with 4 CPU workers** (D194 (4)'s measure). Spoken 03:00–03:56 (A round 0: 69 min
+    with its stop). The GPU's 66 batches were done by 03:27; the CPU's 158 batches took to 03:56, the last 1200 s batch
+    alone at the end; no tail of the levels as in A's round 1. The CPU is now the slower device: 7 of every 10 batches
+    go to it (`--cpu-batches 7 --cpu-period 10`, set before S1 and S6, item 102). A rule with fewer CPU batches would
+    end the round earlier; arms compared keep one rule (D194), so it is for a next campaign.
 
