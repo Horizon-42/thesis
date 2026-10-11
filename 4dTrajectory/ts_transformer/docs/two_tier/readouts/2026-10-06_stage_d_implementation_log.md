@@ -928,3 +928,16 @@ The control arm continues to 5 rounds (the user, 2026-10-11 evening: its rounds 
 82.8 % landed, 716 / 694 / 676 lost separation, with smaller swings by span than the formal campaign's): from
 `.claude/worktrees/run-gw` moved to 7c1431bf, after window_behaviour against d3dc3b26's record, rounds 3 and 4 compared
 with the formal campaign's (83.1 / 82.8 %).
+
+**The batches by their aircraft squared, and the control arm's rates times 3** (2026-10-11 evening). The user ordered
+the batching and placement change proposed after batch 186: ae3839bd (`--batch-squares`, a bound a span on a batch's
+sum of commanded aircraft squared, a campaign setting in `PROFILED_SETTINGS`; `--gpu-squares`, a batch whose sum
+reaches it on the speak device, a setting a resume may change; both off by default; over rounds 0–5 the sum of squares
+follows a batch's search rows at r = 0.47, the sum of rows at 0.03; review: S2 the profile's settings and a default
+test, fixed, second round clean). Their values wait for single batches' peaks measured on the CPU (seven batches of
+round 5, sums 60 to the most, after the control arm). The control arm's round 3: 82.6 % landed, 674 lost separation (the
+formal campaign's round 3: 83.1 %, 648). The user then ordered its learning rates times 3 after round 4 for some rounds:
+16bacde0 (a resume may change `prior_lr` and `traffic_lr`; the next round's optimizer is the checkpoint's state with each
+group at its setting's rate; each resume entry holds the rates before and after and the round they act from; small
+change). The control arm goes on to 8 rounds at 3e-5 / 3e-4 after the behaviour check at 16bacde0; the calibration
+follows it.
