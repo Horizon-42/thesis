@@ -605,6 +605,7 @@ def test_each_devices_workers_take_its_batches_in_order(tmp_path):
     speakers = object.__new__(Speakers)
     speakers.pools = {"cuda": Pool(), "cpu": Pool()}
     speakers.device, speakers.cpu_batches, speakers.cpu_period = torch.device("cuda"), 2, 5
+    speakers.gpu_squares = 0
     speakers.stage, speakers.readings = SimpleNamespace(record=lambda w: w), 0
     speakers.deferred = {"cuda": [], "cpu": []}
     windows, places = list(range(7)), [[k] for k in range(7)]
@@ -613,6 +614,25 @@ def test_each_devices_workers_take_its_batches_in_order(tmp_path):
     assert speakers.pools["cpu"].places == [0, 1, 5, 6] and speakers.pools["cuda"].places == [2, 3, 4]
     assert speakers.read(model, windows, places, "select") == list(range(7))       # the readout's on the speak device
     assert speakers.pools["cpu"].places == [0, 1, 5, 6] and speakers.pools["cuda"].places == [2, 3, 4, *range(7)]
+    speakers.pools = {"cuda": Pool(), "cpu": Pool()}                     # batches 1 and 5 heavy: on the speak device
+    speakers.gpu_squares = 9
+    heavy = [SimpleNamespace(signal_indices=range(3 if k in (1, 5) else 2)) for k in range(7)]
+    assert speakers.speak(model, heavy, places, 0, tmp_path, list(range(7)), {}) == list(range(7))
+    assert speakers.pools["cpu"].places == [0, 6] and speakers.pools["cuda"].places == [1, 2, 3, 4, 5]
+
+
+def test_a_batch_whose_squares_reach_the_bound_goes_to_the_speak_device_whatever_its_place():
+    """The user (2026-10-11, after batch 186 of stage D's formal round 5): `batch_kinds` gives each batch the rule's
+    device (`batch_device`), but a batch whose sum of commanded aircraft squared (`window_squares`) reaches
+    ``gpu_squares`` the speak device's; 0 moves no batch."""
+    windows = [SimpleNamespace(signal_indices=range(n)) for n in (13, 6, 3, 2, 1)]
+    places = [[0], [1, 2], [3, 4], [2, 3, 4]]                            # squares 169, 45, 5, 14
+    assert [post_train.window_squares(windows, p) for p in places] == [169, 45, 5, 14]
+    assert post_train.batch_kinds(windows, places, 4, 4, 0, "cuda") == ["cpu"] * 4
+    assert post_train.batch_kinds(windows, places, 4, 4, 45, "cuda") == ["cuda", "cuda", "cpu", "cpu"]
+    assert post_train.batch_kinds(windows, places, 1, 2, 170, "cuda") == ["cpu", "cuda", "cpu", "cuda"]
+    with pytest.raises(ValueError, match="gpu_squares"):
+        _settings(gpu_squares=-1)
 
 
 def _held_device(_):
@@ -746,7 +766,7 @@ def test_a_batch_past_its_workers_share_is_spoken_again_after_the_others_at_fewe
     fails = {1: (None,), 3: (None, 2 * gib), 4: (None,), 5: (None,)}  # the budgets each batch runs out of
     speakers = object.__new__(Speakers)
     speakers.pools, speakers.device = {"cuda": _LevelPool(fails, torch.OutOfMemoryError)}, torch.device("cuda")
-    speakers.cpu_batches, speakers.cpu_period = 0, 1
+    speakers.cpu_batches, speakers.cpu_period, speakers.gpu_squares = 0, 1, 0
     speakers.deferred = {"cuda": [(2, 2 * gib), (1, 4 * gib)]}
     speakers.stage, speakers.readings = SimpleNamespace(record=lambda w: w), 0
     windows, places = list(range(6)), [[k] for k in range(6)]
@@ -774,6 +794,7 @@ def test_a_cpu_batch_past_its_host_share_is_spoken_again_at_the_cpus_levels_on_t
     speakers.pools = {"cuda": _LevelPool(gpu_fails, torch.OutOfMemoryError),
                       "cpu": _LevelPool(cpu_fails, post_train.HostMemoryError)}
     speakers.device, speakers.cpu_batches, speakers.cpu_period = torch.device("cuda"), 2, 5    # the CPU: 0, 1, 5, 6
+    speakers.gpu_squares = 0
     speakers.deferred = {"cuda": [(2, 2 * gib), (1, 4 * gib)], "cpu": [(2, 3 * gib), (1, 5 * gib)]}
     speakers.stage, speakers.readings = SimpleNamespace(record=lambda w: w), 0
     windows, places = list(range(7)), [[k] for k in range(7)]
@@ -1353,19 +1374,19 @@ def test_a_resume_may_change_the_rule_of_the_cpus_batches_and_records_it(tmp_pat
     out = tmp_path / "campaign"
     open_campaign(out, _inputs(_settings(), tmp_path), git, {})
     record = json.loads((out / "campaign.json").read_text())
-    for added in ("cpu_batches", "cpu_period"):                             # a record from before D191
+    for added in ("cpu_batches", "cpu_period", "gpu_squares"):              # a record from before D191
         del record["inputs"]["settings"][added]
     (out / "campaign.json").write_text(json.dumps(record))
     held = open_campaign(out, _inputs(_settings(), tmp_path), git, {})
-    assert "cpu_batches" not in held["inputs"]["settings"] and held["resumed"][-1]["rule"] == {"before": [0, 1],
-                                                                                              "after": [0, 1]}
-    mixed = open_campaign(out, _inputs(_settings(cpu_batches=6, cpu_period=13), tmp_path), git, {})
-    assert (mixed["inputs"]["settings"]["cpu_batches"], mixed["inputs"]["settings"]["cpu_period"]) == (6, 13)
-    assert mixed["resumed"][-1]["rule"] == {"before": [0, 1], "after": [6, 13]}
-    assert post_train.settings_of(json.loads((out / "campaign.json").read_text())) == _settings(cpu_batches=6,
-                                                                                                 cpu_period=13)
+    assert "cpu_batches" not in held["inputs"]["settings"] and held["resumed"][-1]["rule"] == {"before": [0, 1, 0],
+                                                                                              "after": [0, 1, 0]}
+    mixed = open_campaign(out, _inputs(_settings(cpu_batches=6, cpu_period=13, gpu_squares=150), tmp_path), git, {})
+    assert [mixed["inputs"]["settings"][name] for name in post_train.RULE] == [6, 13, 150]
+    assert mixed["resumed"][-1]["rule"] == {"before": [0, 1, 0], "after": [6, 13, 150]}
+    assert post_train.settings_of(json.loads((out / "campaign.json").read_text())) == _settings(
+        cpu_batches=6, cpu_period=13, gpu_squares=150)
     back = open_campaign(out, _inputs(_settings(), tmp_path), git, {})
-    assert back["resumed"][-1]["rule"] == {"before": [6, 13], "after": [0, 1]}
+    assert back["resumed"][-1]["rule"] == {"before": [6, 13, 150], "after": [0, 1, 0]}
     written = (out / "campaign.json").read_text()
     with pytest.raises(SystemExit, match="other inputs or settings"):
         open_campaign(out, _inputs(_settings(cpu_batches=1, cpu_period=2, seed=1), tmp_path), git, {})

@@ -163,7 +163,8 @@ def read_start(campaign: Path, record: Mapping[str, Any], out: Path, device: tor
     context = open_context(Path(inputs["prior"]), instructions, executor, edges_reference,
                            torch.device("cpu") if workers > 1 else device, Path(inputs["procedure_root"]),
                            formal=not smoke, data=False, splits=("select",))
-    speakers = (Speakers(context, replace(settings, cpu_batches=0, cpu_period=1), workers, device, stage=stage)
+    speakers = (Speakers(context, replace(settings, cpu_batches=0, cpu_period=1,
+                                         gpu_squares=0), workers, device, stage=stage)
                 if workers > 1 else None)
     checked = done_rounds(campaign) - 1
     try:

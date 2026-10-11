@@ -115,7 +115,8 @@ def main(argv: list[str] | None = None) -> int:
     stage = stage_d()
     stage.start(context, settings)                        # refused by name before the workers and the output (D164)
     # one worker is measured: the campaign's rule of where batches are spoken (D191) does not reach it
-    speakers = Speakers(context, replace(settings, cpu_batches=0, cpu_period=1), args.speak_workers,
+    speakers = Speakers(context, replace(settings, cpu_batches=0, cpu_period=1, gpu_squares=0),
+                        args.speak_workers,
                         torch.device(args.speak_device or args.device),
                         stage=stage)
     context = replace(context, device=device, base=context.base.to(device).eval())

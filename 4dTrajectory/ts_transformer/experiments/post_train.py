@@ -229,6 +229,10 @@ class Settings:
     #: default: every batch on the speak device).
     cpu_batches: int = 0
     cpu_period: int = 1
+    #: the user, 2026-10-11 (after batch 186 of stage D's formal round 5): a batch whose `window_squares` reach this
+    #: number is spoken on the speak device whatever the rule gives it (`batch_kinds`); a resume may change it as the
+    #: rule. The default 0: no batch moved (the behaviour before it; a record without it reads so).
+    gpu_squares: int = 0
 
     def __post_init__(self) -> None:
         if set(self.per_kind) != set(KINDS) or min(self.per_kind.values()) < 0 or not any(self.per_kind.values()):
@@ -266,6 +270,8 @@ class Settings:
         if not 0 <= self.cpu_batches <= self.cpu_period or self.cpu_period < 1:
             raise ValueError(f"cpu_batches {self.cpu_batches} of every cpu_period {self.cpu_period}: a period of 1 or "
                              f"more, at most its batches on the CPU")
+        if self.gpu_squares < 0:
+            raise ValueError(f"gpu_squares {self.gpu_squares}: 0 (off) or more")
 
 
 @dataclass
@@ -518,26 +524,39 @@ def draw_round(context: Context, per_kind: Mapping[str, int], rng: np.random.Gen
         "shortfall": {kind: per_kind[kind] - len(drawn) for kind, drawn in out.items() if len(drawn) < per_kind[kind]}}
 
 
-def batches(windows: Sequence[Window], size: int) -> list[list[int]]:
+def batches(windows: Sequence[Window], size: int, squares: int | None = None) -> list[list[int]]:
     """The windows' places in batches of at most ``size`` rows (a window's rows are its commanded aircraft: stage C's
     window one, so ``size`` windows), each of one span L, that command each flight once (the first batch of the
     window's span with room for its rows and without any of its commanded flights; multi-aircraft control D146: a
     batch's rows and ticks alike), each in the order of its anchors' places in the signals (`branch_round`'s rule). A
-    window of more rows than ``size`` is a batch alone."""
+    window of more rows than ``size`` is a batch alone. ``squares``: also at most this sum of each window's rows
+    squared (`window_squares`; the user, 2026-10-11: a window's searches fly every one of its aircraft for each
+    continuation, so its memory grows with its rows squared); a window above it is a batch alone. None: no such bound
+    (the behaviour before it)."""
     out: list[list[int]] = []
     rows: list[int] = []
+    held: list[int] = []
     for place, window in enumerate(windows):
         mine = set(window.signal_indices)
         home = next((k for k, b in enumerate(out)
                      if windows[b[0]].span_s == window.span_s and rows[k] + len(mine) <= size
+                     and (squares is None or held[k] + len(mine) ** 2 <= squares)
                      and all(not mine & set(windows[p].signal_indices) for p in b)), None)
         if home is None:
             out.append([place])
             rows.append(len(mine))
+            held.append(len(mine) ** 2)
         else:
             out[home].append(place)
             rows[home] += len(mine)
+            held[home] += len(mine) ** 2
     return [sorted(b, key=lambda p: windows[p].signal_index) for b in out]
+
+
+def window_squares(windows: Sequence[Window], places: Sequence[int]) -> int:
+    """The sum of the rows squared of the windows at ``places`` (a window's rows are its commanded aircraft): what a
+    batch's searches hold grows with it (`batches`' ``squares``, `batch_kinds`)."""
+    return sum(len(windows[p].signal_indices) ** 2 for p in places)
 
 
 # ---- the speaking
@@ -627,6 +646,15 @@ def batch_device(k: int, cpu_batches: int, cpu_period: int, speak: str) -> str:
     return "cpu" if k % cpu_period < cpu_batches else speak
 
 
+def batch_kinds(windows: Sequence[Window], places: Sequence[Sequence[int]], cpu_batches: int, cpu_period: int,
+                gpu_squares: int, speak: str) -> list[str]:
+    """The kind of device of each batch of a round (``places``): `batch_device`'s, but a batch whose `window_squares`
+    reach ``gpu_squares`` (above 0) on the speak device's kind ``speak`` (the user, 2026-10-11); a rule of the batch's
+    windows and place, so a round is the same whatever the workers' timing."""
+    return [speak if gpu_squares and window_squares(windows, batch) >= gpu_squares
+            else batch_device(k, cpu_batches, cpu_period, speak) for k, batch in enumerate(places)]
+
+
 def spoken_batch(stage: Stage, model: Prior, context: Context, windows: Sequence[Window], places: Sequence[int],
                  settings: Settings, round_: int, directory: Path, k: int, launch: Mapping[str, Any]
                  ) -> dict[str, Any]:
@@ -677,10 +705,8 @@ def speak_round(model: Prior, context: Context, windows: Sequence[Window], setti
     places = stage.batches(windows, settings)
     speak = (speakers.device if speakers is not None else context.device).type
 
-    def device_of(k: int) -> str:
-        return batch_device(k, settings.cpu_batches, settings.cpu_period, speak)
-
-    if speakers is None and any(device_of(k) != speak for k in range(len(places))):
+    kinds = batch_kinds(windows, places, settings.cpu_batches, settings.cpu_period, settings.gpu_squares, speak)
+    if speakers is None and any(kind != speak for kind in kinds):
         raise ValueError("a rule that speaks batches on the CPU beside another device needs CPU speaking workers "
                          "(Speakers(cpu_workers=); D191)")
     done = done_batches(directory, windows, places, stage)
@@ -813,16 +839,13 @@ class Speakers:
             list(self.pools[kind].map(_started, range(count)))   # every worker forked now, before the GPU is used
         self.workers, self.cpu_workers = workers, cpu_workers
         self.device = device
-        self.cpu_batches, self.cpu_period = settings.cpu_batches, settings.cpu_period
+        self.cpu_batches, self.cpu_period, self.gpu_squares = (settings.cpu_batches, settings.cpu_period,
+                                                               settings.gpu_squares)
         #: each device's levels by its kind (the class docstring); CPU workers never speak beside a CPU speak device
         self.deferred = {device.type: [tuple(level) for level in deferred]}
         if cpu_workers:
             self.deferred["cpu"] = [tuple(level) for level in cpu_deferred]
         self.readings = 0
-
-    def _kind(self, k: int) -> str:
-        """The kind of the device that batch ``k`` of a round is spoken on (`batch_device`)."""
-        return batch_device(k, self.cpu_batches, self.cpu_period, self.device.type)
 
     def speak(self, model: Prior, windows: Sequence[Window], places: Sequence[Sequence[int]], round_: int,
               directory: Path, batches: Sequence[int], launch: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -830,14 +853,14 @@ class Speakers:
         (`spoken_batch`), in that order; on a failure the batches not started are cancelled."""
         state = directory / "speaking_model.pt"
         torch.save(model.state_dict(), state)
+        kinds = batch_kinds(windows, places, self.cpu_batches, self.cpu_period, self.gpu_squares, self.device.type)
 
         def submit(k: int, budget: int | None = None, kind: str | None = None) -> Any:
-            return self.pools[kind or self._kind(k)].submit(_speak, round_, str(state), str(directory), k,
-                                                            list(places[k]),
-                                                            [self.stage.record(windows[i]) for i in places[k]],
-                                                            dict(launch), budget)
+            return self.pools[kind or kinds[k]].submit(_speak, round_, str(state), str(directory), k, list(places[k]),
+                                                        [self.stage.record(windows[i]) for i in places[k]],
+                                                        dict(launch), budget)
 
-        return self._results(state, list(batches), submit, self._kind)
+        return self._results(state, list(batches), submit, kinds.__getitem__)
 
     def read(self, model: Prior, windows: Sequence[Window], places: Sequence[Sequence[int]], split: str,
              draw: int = 0) -> list[list[WindowResult]]:
@@ -1981,12 +2004,14 @@ def inputs_here(inputs: Mapping[str, Any]) -> dict[str, Any]:
 #: The settings added after campaigns were recorded, each with its default: the code's behaviour before it (the user's
 #: standing permission, 2026-10-07): a record without one reads as its default, and no record is edited.
 SETTINGS_ADDED = ("clip_norm", "epochs", "segment_only", "branch_every_s", "value_lr", "value_warmup",
-                  "advantage_centering", "value_epochs", "front_attention", "cpu_batches", "cpu_period")
+                  "advantage_centering", "value_epochs", "front_attention", "cpu_batches", "cpu_period", "gpu_squares")
 
 
 #: The settings a resume may change: the rounds (D157, raised only) and the rule of the batches spoken on the CPU
-#: (multi-aircraft control D191, the user 2026-10-10: a speed choice, each batch's record holding its device).
-RESUME_MAY_CHANGE = ("rounds", "cpu_batches", "cpu_period")
+#: (multi-aircraft control D191, the user 2026-10-10: a speed choice, each batch's record holding its device; with
+#: ``gpu_squares``, the user 2026-10-11).
+RULE = ("cpu_batches", "cpu_period", "gpu_squares")
+RESUME_MAY_CHANGE = ("rounds", *RULE)
 
 
 def but_resumable(inputs: Mapping[str, Any]) -> dict[str, Any]:
@@ -2030,9 +2055,9 @@ def open_campaign(out: Path, inputs: dict[str, Any], git: dict[str, Any], checks
             left.rename(aborted)
             record["aborted"].append(aborted.name)
         record["inputs"]["settings"]["rounds"] = after
-        rule = [[held["settings"][name] for name in ("cpu_batches", "cpu_period")] for held in (recorded, asked)]
+        rule = [[held["settings"][name] for name in RULE] for held in (recorded, asked)]
         if rule[0] != rule[1]:                       # a record without the rule left as it was while it holds (D191)
-            record["inputs"]["settings"].update(cpu_batches=rule[1][0], cpu_period=rule[1][1])
+            record["inputs"]["settings"].update(zip(RULE, rule[1]))
         record["resumed"].append({"utc": utc_now(), "git": git, "checks": checks,
                                   "inputs": {key: asked[key] for key in INPUT_PATHS},
                                   "rounds": {"before": before, "after": after},
@@ -2275,6 +2300,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cpu-batches", type=int, default=Settings.cpu_batches,
                         help="D191: of every --cpu-period batches by index, the first this many on the CPU workers")
     parser.add_argument("--cpu-period", type=int, default=Settings.cpu_period, help="D191: the rule's period, batches")
+    parser.add_argument("--gpu-squares", type=int, default=Settings.gpu_squares,
+                        help="a batch whose sum of commanded aircraft squared reaches this is spoken on the speak device "
+                             "(default 0: off)")
     parser.add_argument("--restart-round", action="store_true",
                         help="D185: a resume moves the round left half done aside and speaks it whole (default: its "
                              "done batches kept; on changed code, keep them only after a behaviour check)")
@@ -2303,7 +2331,7 @@ def main(argv: list[str] | None = None) -> int:
                             args.traffic_hidden, args.traffic_heads, start, args.method, args.select_seed,
                             args.clip_norm, args.epochs, args.segment_only, args.branch_every_s, args.value_lr,
                             args.value_warmup, args.advantage_centering, args.value_epochs, args.front_attention,
-                            args.cpu_batches, args.cpu_period)
+                            args.cpu_batches, args.cpu_period, args.gpu_squares)
     except ValueError as refused:                   # a setting refused by name (`Settings`), before anything opens
         parser.error(str(refused))
     speak_device = torch.device(args.speak_device or args.device)

@@ -104,6 +104,19 @@ def test_the_data_weight_defaults_to_the_code_before_it_and_reaches_the_pass(mon
     assert seen == {"part_width": 7, "data_weight": 0.25, "group_weight": EQUAL}
 
 
+def test_the_batch_bounds_default_to_the_code_before_them_and_are_refused_out_of_range():
+    """The user (2026-10-11): `MultiSettings.batch_squares` (no bound) and `gpu_squares` (0, no batch moved) default to
+    the code before them (a record without them reads so); a negative gpu_squares is refused by name (stage C's
+    `Settings` too: test_post_train; the bounds of the spans: the span test)."""
+    settings = _multi_settings()
+    assert (settings.batch_squares, settings.gpu_squares) == ([], 0)
+    recorded = asdict(settings)
+    del recorded["batch_squares"], recorded["gpu_squares"]
+    assert MultiSettings(**recorded) == settings
+    with pytest.raises(ValueError, match="gpu_squares"):
+        _multi_settings(gpu_squares=-1)
+
+
 def test_the_group_weight_defaults_to_the_code_before_it_and_reaches_the_pass(monkeypatch):
     """D195: `MultiSettings.group_weight` defaults to `EQUAL` (a record without it reads so), is refused outside
     `GROUP_WEIGHTS`, is read from ``--group-weight`` and stage D's pass gives it to `post_train.train_pass`."""
@@ -186,6 +199,19 @@ def test_a_batch_holds_windows_of_one_span_up_to_its_rows_each_flight_once():
     assert post_train.batches(stage_c, 2) == [[0, 1], [2, 3], [4]]
 
 
+def test_a_batch_holds_at_most_its_sum_of_rows_squared_where_given():
+    """The user (2026-10-11, after batch 186 of stage D's formal round 5): with ``squares``, a batch also holds at most
+    that sum of its windows' rows squared, a window above it a batch alone; without it, the batches of before."""
+    def window(span_s, *flights):
+        return SimpleNamespace(span_s=span_s, signal_indices=flights, signal_index=flights[0])
+
+    windows = [window(1200.0, *range(0, 3)), window(1200.0, *range(10, 16)), window(1200.0, 20, 21),
+               window(1200.0, *range(30, 43))]                           # 3, 6, 2 and 13 rows: batch 186's windows
+    assert post_train.batches(windows, 24) == [[0, 1, 2, 3]]              # 24 rows; 218 squared
+    assert post_train.batches(windows, 24, 150) == [[0, 1, 2], [3]]       # 49 squared, and 169 alone
+    assert post_train.batches(windows, 24, 45) == [[0, 1], [2], [3]]      # 45 (at the bound), 4, and 169 alone
+
+
 def test_each_spans_windows_are_batched_with_that_spans_rows():
     """The user (2026-10-07, after MC5's profile): a batch of each span holds at most that span's rows (a batch's
     memory grows with its ticks too); the batches of each span are `post_train.batches` of its windows; a window of
@@ -200,6 +226,11 @@ def test_each_spans_windows_are_batched_with_that_spans_rows():
     assert stage_d().batches(windows, settings) == found
     with pytest.raises(ValueError, match=r"windows of spans \[600.0\] s"):
         multi_train.span_batches(windows + [window(600.0, 9)], settings)
+    bounded = _multi_settings(spans_s=[300.0, 1200.0], batch_rows=[4, 4], batch_squares=[4, 5])
+    assert multi_train.span_batches(windows, bounded) == [[1], [3], [0, 2], [4]]       # 300 s: 4 squared; 1200 s: 5
+    for wrong in ([4], [4, 0]):                                          # a bound a span, each positive
+        with pytest.raises(ValueError, match="batch_squares"):
+            _multi_settings(spans_s=[300.0, 1200.0], batch_rows=[4, 2], batch_squares=wrong)
 
 
 def test_the_select_windows_are_drawn_once_per_airport_and_span_and_never_left_out(built):
