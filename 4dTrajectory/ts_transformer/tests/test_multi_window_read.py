@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import stat
@@ -14,6 +15,7 @@ from ts_transformer.experiments import multi_window_read as reader
 from ts_transformer.experiments import window_list as lister
 from ts_transformer.experiments.multi_train import stage_d
 from ts_transformer.experiments.multi_training_export import STAGE_D
+from ts_transformer.experiments.post_training_export import listed_windows
 from ts_transformer.experiments.post_window_loop import LANDED, LOST_SEPARATION
 from ts_transformer.post.window_lists import identity_of, read_window_list
 from ts_transformer.tests.test_multi_compare import GIT, campaign  # noqa: F401
@@ -61,14 +63,23 @@ def test_a_read_is_the_rounds_readout_a_line_a_window_and_sealed(read_world, tmp
     assert all(not os.stat(p).st_mode & (stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH) for p in (read, *read.iterdir()))
     with pytest.raises(SystemExit):
         reader.main(["--campaign", str(out), "--round", "0", "--out", str(read), "--device", "cpu"])
+    # the list written from it is one the Training export takes: its selection and each window's identity at its place
+    given = sorted({outcome for line in lines for outcome in line["outcomes"]})
+    assert lister.main(["--multi", str(read), "--outcomes", *given, "--out", str(tmp_path / "list")]) == 0
+    stage = stage_d()
+    taken = listed_windows(argparse.ArgumentParser(), STAGE_D, read_window_list(tmp_path / "list" / "list.json"),
+                           "select", stage.selection(context, settings), STAGE_D.selection_fields(settings))
+    assert [place for place, _ in taken] == list(range(len(lines)))
 
 
-def test_a_read_stops_unless_this_code_reads_the_round_as_its_readout(read_world, tmp_path):
+def test_a_read_stops_unless_this_code_reads_the_round_as_its_readout(read_world, tmp_path, monkeypatch):
     """The behaviour check: a round whose recorded readout this code does not give again stops the read, nothing
-    written; a round not done, and a formal read of a smoke campaign, are refused before anything opens."""
+    written; a round not done, a formal read of a smoke campaign and a formal read from a tree with changes are refused
+    before anything opens; with ``--smoke`` the read runs from that tree and says so."""
     out, _, _, opened = read_world
     path = out / "round_0" / "round.json"
-    held = json.loads(path.read_text())
+    original = path.read_text()
+    held = json.loads(original)
     (airport,) = held["selection_readout"].values()
     airport["all"]["all"]["reward_sum"] += 1.0
     path.write_text(json.dumps(held))
@@ -84,6 +95,16 @@ def test_a_read_stops_unless_this_code_reads_the_round_as_its_readout(read_world
     with pytest.raises(SystemExit):
         reader.main(["--campaign", str(out), "--round", "0", "--out", str(tmp_path / "read"), "--device", "cpu"])
     assert opened == [] and not (tmp_path / "read").exists()
+    record["inputs"]["smoke"] = False
+    (out / "campaign.json").write_text(json.dumps(record))
+    path.write_text(original)
+    monkeypatch.setattr(reader, "git_state", lambda: {**GIT, "dirty": True})
+    with pytest.raises(SystemExit):                                       # a tree with changes: a formal read refused
+        reader.main(["--campaign", str(out), "--round", "0", "--out", str(tmp_path / "read"), "--device", "cpu"])
+    assert opened == [] and not (tmp_path / "read").exists()
+    assert reader.main(["--campaign", str(out), "--round", "0", "--out", str(tmp_path / "read"), "--device", "cpu",
+                        "--smoke"]) == 0
+    assert json.loads((tmp_path / "read" / reader.CONFIG).read_text())["smoke"] is True
 
 
 SELECTION = {"select_seed": 1337, "per_airport": 50, "spans_s": [300.0, 600.0]}

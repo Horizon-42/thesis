@@ -21,7 +21,7 @@ D175's fields) and ``SHA256SUMS``; the directory read-only. The readouts are nam
     python run_ts.py window_list --diagnose 4dTrajectory/outputs/POOLED/post/<diagnose id> on \\
         --ceiling 4dTrajectory/outputs/POOLED/post/<ceiling id> start --outcomes lost_separation \\
         --out 4dTrajectory/outputs/POOLED/post/<list id> [--all]
-    python run_ts.py window_list --multi 4dTrajectory/outputs/POOLED/multi/<read id> \
+    python run_ts.py window_list --multi 4dTrajectory/outputs/POOLED/multi/<read id> \\
         --outcomes lost_separation timeout … --out 4dTrajectory/outputs/POOLED/multi/<list id>
 """
 
