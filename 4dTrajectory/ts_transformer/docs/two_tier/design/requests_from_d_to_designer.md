@@ -8,10 +8,13 @@ census's sample: 18; D172: 46–48; D179, D180: 49–53; D181, O20: 54–62; D18
 71–77; D188: 78–79; D190: 80–84; D190, D191: 85, 87, 88; D191–D193 and the log: 86, 90–98; D193, D194 and the log: 89, 99–107), item 23 (it asked for 6 and
 7), item 20 (built: item 40) and the names of MC0–MC4 (written into the interfaces).
 
-State: 2026-10-11 (13:30): arms A and B done (readout `readouts/2026-10-11_stage_d_arms_ab.zh.md`); notes/stage_d.md's
+State: 2026-10-11 (17:30): arms A and B done (readout `readouts/2026-10-11_stage_d_arms_ab.zh.md`); notes/stage_d.md's
 order 1 (D194 (3) for every point tried) built and merged (d3dc3b26, 226ed303), order 2 checked; the formal campaign
-`multi_train_majority_formal_20261011` (arm A's settings, 8 rounds) runs, rounds 0 / 1 landed 81.9 / 81.6 %; the
-user's group weight built and merged (afb9aea2, item 112) (stage D's log §22). 108–112 are open.
+`multi_train_majority_formal_20261011` (arm A's settings) landed 81.9 / 81.6 / 82.5 / 83.1 / 82.8 % in rounds 0–4 and
+stopped in round 5 at a CPU batch past the CPU's last level; it is paused (the user). The user's group weight built and
+merged (afb9aea2, item 112); its control arm `multi_train_minority_side_20261011` runs (3 rounds). The user's three
+changes of the afternoon built and merged (1efca2f8, 67e45506, 9f50be58; items 113, 114) (stage D's log §22). 108–114
+are open.
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -209,3 +212,22 @@ user's group weight built and merged (afb9aea2, item 112) (stage D's log §22). 
     groups' rises from 23 to 28 %. The user's plan: the control arm `multi_train_minority_side_20261011` (the formal
     campaign's settings with `minority-side`, 3 rounds, compared with the formal campaign's rounds 0–2) if the formal
     campaign's next two rounds stay flat. Please write D195 into multi_control.md and its arm into the plan.
+
+## The formal campaign's stop in round 5 (stage D's log §22; 2026-10-11)
+
+113. **A resume keeps each done batch whatever device spoke it: a decision of the user that reverses part of D185 and
+    D191** (the user, 2026-10-11: "works数目改一下，不应该成为从中途resume 某一round的障碍"; built 67e45506). D185 / D191
+    as built refused a done batch spoken on another kind of device than the launch's rule gives it, so a resume with
+    another number of workers or another rule had to speak the round again. Now `done_batches(directory, windows, places,
+    stage)` keeps each done batch; each batch record still holds its device; the launch's rule and workers place only the
+    batches not done; a batch of another draw is still refused. A round so resumed has batches spoken on both kinds of
+    device in other places than one rule gives (D194 (3): the answers are the same on the CPU bit for bit, on the GPU
+    within its rounding). Please write it into D185 / D191.
+114. **A CPU batch past the CPU's last level is spoken once more on the speak device: a decision of the user for D191 /
+    D193 (4)** (the user, 2026-10-11: "CPU 超了自动换到 GPU 再说一次"; built 9f50be58). After the GPU's own levels and
+    the CPU's levels, a CPU batch still past its share goes once to the speak device's pool at that device's last level
+    (`Speakers._results`); only a batch past that too fails the round; no GPU level or a CPU speak device: no second try.
+    The batch's record holds the GPU. Whether a batch goes there depends on its sampled host peak, so its device can
+    differ between two runs of the same round. Also built the same afternoon (small change): every worker, GPU workers
+    too, calls `malloc_trim(0)` after a task (1efca2f8). Open: why batch 186 of round 5 needed more than 8.74 GB; it is
+    spoken alone with its peak recorded once the control arm has ended. Please write both into D191 / D193 (4).

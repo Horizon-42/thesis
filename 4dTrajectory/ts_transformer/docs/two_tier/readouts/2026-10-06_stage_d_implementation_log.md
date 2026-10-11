@@ -895,3 +895,24 @@ S3s taken. Changed modules' tests: 174 passed and 3 failed (the wrong row, a par
 12 passed. Fast-forward into dev-two-tier; worktree and branch removed. The control arm (intent in
 `docs/experiments/intents.json`): the formal campaign's settings with `--group-weight minority-side`, 3 rounds, the
 same start and seed, launched only if the formal campaign's next two rounds stay flat (the user's condition).
+
+**Round 5's stop, the pause and the control arm** (2026-10-11 afternoon). The formal campaign's rounds 2 / 3 / 4 landed
+82.5 / 83.1 / 82.8 %, lost separation 690 / 648 / 663 of 4,492 flights (15.4 / 14.4 / 14.8 %; rounds 0 / 1: 720 /
+730). Round 5 stopped at 16:42: batch 186, a CPU batch, went past the CPU's last level (one at a time, 8.74 GB) with
+`HostMemoryError`; 216 of its 217 batch records were written. A resume was refused, because `done_batches` refused a done
+batch spoken on another kind of device than the launch's rule gives it. Memory before the stop: the swap (7.6 GB) was
+full, 5.9 GB of it the campaign's own cold pages from the fork, with about 40 kB/s of swap traffic (no thrash); the GPU
+workers held 4.7–5.6 GB each, as they did not give the heap's free pages back. The user's decisions: the formal campaign
+pauses after round 4 and the control arm runs first; find why batch 186 needed more; the number of workers must not
+stop a resume in the middle of a round; a CPU batch past the CPU's last level is spoken again on the GPU. Built, each
+merged into dev-two-tier: 1efca2f8 (every worker, GPU workers too, calls `malloc_trim(0)` after a task; small change),
+67e45506 (a resume keeps each done batch whatever device spoke it; a batch of another draw is still refused; small
+change), 9f50be58 (a CPU batch past the CPU's last level is spoken once more on the speak device at its last level;
+review: S2 a test that could not tell the last level from the first, fixed, second round clean). The control arm
+`outputs/POOLED/multi/multi_train_minority_side_20261011` was launched at 16:58 from `.claude/worktrees/run-gw` at
+1efca2f8 (unit `minority-side`), after window_behaviour on arm A's campaign against d3dc3b26's record gave the same
+behaviour (a first try was refused only because one record held the campaign's path relative and the other absolute).
+It does not have 67e45506 and 9f50be58; its rounds 0–2 draw the formal campaign's windows of rounds 0–2, which spoke
+without a stop. Why batch 186 needed more than 8.74 GB is not known yet: its record was not written. It is spoken alone,
+with its peak memory recorded, once the control arm has ended; the formal campaign then resumes round 5 from a run
+worktree at 9f50be58 or later.
