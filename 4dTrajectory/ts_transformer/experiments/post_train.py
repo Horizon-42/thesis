@@ -2011,7 +2011,10 @@ SETTINGS_ADDED = ("clip_norm", "epochs", "segment_only", "branch_every_s", "valu
 #: (multi-aircraft control D191, the user 2026-10-10: a speed choice, each batch's record holding its device; with
 #: ``gpu_squares``, the user 2026-10-11).
 RULE = ("cpu_batches", "cpu_period", "gpu_squares")
-RESUME_MAY_CHANGE = ("rounds", *RULE)
+#: The learning rates a resume may change (the user, 2026-10-11: the control arm of D195 goes on with its rates times
+#: 3): from the round the resume starts, each optimizer group's rate is its setting's (`campaign_model`).
+LEARNING_RATES = ("prior_lr", "traffic_lr")
+RESUME_MAY_CHANGE = ("rounds", *RULE, *LEARNING_RATES)
 
 
 def but_resumable(inputs: Mapping[str, Any]) -> dict[str, Any]:
@@ -2058,10 +2061,16 @@ def open_campaign(out: Path, inputs: dict[str, Any], git: dict[str, Any], checks
         rule = [[held["settings"][name] for name in RULE] for held in (recorded, asked)]
         if rule[0] != rule[1]:                       # a record without the rule left as it was while it holds (D191)
             record["inputs"]["settings"].update(zip(RULE, rule[1]))
+        rates = [[held["settings"][name] for name in LEARNING_RATES] for held in (recorded, asked)]
+        if rates[0] != rates[1]:
+            record["inputs"]["settings"].update(zip(LEARNING_RATES, rates[1]))
         record["resumed"].append({"utc": utc_now(), "git": git, "checks": checks,
                                   "inputs": {key: asked[key] for key in INPUT_PATHS},
                                   "rounds": {"before": before, "after": after},
-                                  "rule": {"before": rule[0], "after": rule[1]}, "restart_round": restart_round})
+                                  "rule": {"before": rule[0], "after": rule[1]},
+                                  "learning_rates": {"before": rates[0], "after": rates[1],
+                                                     "from_round": done_rounds(out)},
+                                  "restart_round": restart_round})
         write_json_atomic(path, record)
         return record
     if out.exists():
@@ -2181,13 +2190,18 @@ def round_model(context: Context, settings: Settings, out: Path, round_: int | N
 def campaign_model(out: Path, context: Context, settings: Settings, stage: Stage = STAGE_C
                    ) -> tuple[Prior, torch.optim.Optimizer]:
     """The model and optimizer that campaign ``out``'s next round starts from: a new campaign's the stage's start
-    (`Stage.start`), a resumed one's its last checkpoint loaded into the stage's model (`Stage.start_model`)."""
+    (`Stage.start`), a resumed one's its last checkpoint loaded into the stage's model (`Stage.start_model`), each
+    optimizer group's rate then its setting's (`LEARNING_RATES`: a resume may change them; the same rates leave the
+    state as loaded)."""
     first = done_rounds(out)
     model, optimizer = stage.start_model(context, settings) if first else stage.start(context, settings)
     if first:
         state = torch.load(out / f"round_{first - 1}" / "checkpoint.pt", weights_only=False, map_location=context.device)
         model.load_state_dict(state["model"])
         optimizer.load_state_dict(state["optimizer"])
+        rates = {"prior": settings.prior_lr, "traffic": settings.traffic_lr}
+        for group in optimizer.param_groups:
+            group["lr"] = rates[group["name"]]
     return model, optimizer
 
 

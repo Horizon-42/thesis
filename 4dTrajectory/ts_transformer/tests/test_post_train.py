@@ -1393,6 +1393,40 @@ def test_a_resume_may_change_the_rule_of_the_cpus_batches_and_records_it(tmp_pat
     assert (out / "campaign.json").read_text() == written
 
 
+def test_a_resume_may_change_the_learning_rates_and_the_next_round_steps_at_them(tmp_path):
+    """The user (2026-10-11: the control arm of D195 goes on with its rates times 3): a resume may change the two
+    learning rates (`LEARNING_RATES`), the record's from then on, each entry holding them before and after and the
+    round they act from; the next round's optimizer (`campaign_model`) is the last checkpoint's state with each group at
+    its setting's rate; the same rates leave the loaded state as it was."""
+    git = {"head": "x", "dirty": False}
+    out = tmp_path / "campaign"
+    open_campaign(out, _inputs(_settings(), tmp_path), git, {})
+    model = torch.nn.Linear(2, 2)
+    groups = [{"params": [model.weight], "lr": 1e-4, "name": "prior"}, {"params": [model.bias], "lr": 1e-3,
+                                                                         "name": "traffic"}]
+    optimizer = torch.optim.AdamW(groups)
+    model(torch.ones(1, 2)).sum().backward()
+    optimizer.step()
+    (out / "round_0").mkdir()
+    torch.save({"model": model.state_dict(), "optimizer": optimizer.state_dict()}, out / "round_0" / "checkpoint.pt")
+    raised = open_campaign(out, _inputs(_settings(prior_lr=3e-4, traffic_lr=3e-3), tmp_path), git, {})
+    assert (raised["inputs"]["settings"]["prior_lr"], raised["inputs"]["settings"]["traffic_lr"]) == (3e-4, 3e-3)
+    assert raised["resumed"][-1]["learning_rates"] == {"before": [1e-4, 1e-3], "after": [3e-4, 3e-3], "from_round": 1}
+
+    def fresh(context, settings):
+        net = torch.nn.Linear(2, 2)
+        return net, torch.optim.AdamW([{"params": [net.weight], "lr": settings.prior_lr, "name": "prior"},
+                                       {"params": [net.bias], "lr": settings.traffic_lr, "name": "traffic"}])
+
+    stage = SimpleNamespace(start_model=fresh)
+    for rates in ((3e-4, 3e-3), (1e-4, 1e-3)):
+        _, loaded = post_train.campaign_model(out, SimpleNamespace(device=CPU), _settings(prior_lr=rates[0],
+                                                                                           traffic_lr=rates[1]), stage)
+        assert [g["lr"] for g in loaded.param_groups] == list(rates)
+        held = loaded.state_dict()["state"]
+        assert torch.equal(held[0]["exp_avg"], optimizer.state_dict()["state"][0]["exp_avg"])    # Adam's moments kept
+
+
 def test_a_setting_added_after_a_record_reads_as_its_default_and_a_resume_compares_it(tmp_path):
     """D168 under the user's standing permission (2026-10-07): a campaign recorded before `Settings.clip_norm` (its
     record without the field, left as it was) opens with the default, None, and resumes with it; another value is
