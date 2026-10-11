@@ -318,9 +318,10 @@ class _Part:
     streams: list[np.random.Generator]
     base: bool = False
     chosen: int | None = None
-    #: a point behind the decision point in a search for the majority point (D194 (3)): the majority its continuations
-    #: must reach; the part ends once that is out of reach (`multi.backward.out_of_reach`). None: flown to the judged tick
-    majority: int | None = None
+    #: a point tried (D194 (3)): the continuations that must avoid the event for the search to choose it (the majority
+    #: behind the decision point in a search for the majority point, else 1); the part ends once that is out of reach
+    #: (`multi.backward.out_of_reach`). None: the decision point's copy (``base``)
+    need: int | None = None
 
 
 def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop, list[int], dict[int, np.ndarray]]],
@@ -343,9 +344,10 @@ def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loo
       window, v on numbers of its own, the other aircraft on their first-sentence numbers from the point. A step says
       and flies one row of every window in it, each window at its own tick (`WindowLoop.together`).
     - **When a continuation stops.** A point's continuations are flown to the event + 60 s (or their end, if earlier),
-      then judged (`_trials`) and the search sent their trials; a point not chosen leaves the loop there. A point
-      behind the decision point in a search for the majority point is judged as soon as its majority is out of reach
-      (D194 (3), `_failed`): the search's answer is the same.
+      then judged (`_trials`) and the search sent their trials; a point not chosen leaves the loop there. A point is
+      judged as soon as too few of its continuations are left to choose it (D194 (3), `_failed`): every one failed,
+      or, behind the decision point in a search for the majority point, the majority out of reach. The search's
+      answer is the same.
     - **A point chosen** goes on in the same loop to its window's end, beside the points then tried, and its group is
       made when its windows end (D142: its W of D141, v's rows from the point).
     - **Joining.** Before a step, the parts that ended leave and the searches' next points join: a point from its held
@@ -422,7 +424,7 @@ def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loo
         drawn = [rules.continuation(places[s.w], m, s.v, point, j) if m == s.v else copying.deepcopy(streams[m])
                  for j in range(continuations) for m in range(len(streams))]
         behind = majority is not None and s.decision is not None and point < s.decision
-        s.trying = _Part(s, point, continuations, drawn, majority=majority if behind else None)
+        s.trying = _Part(s, point, continuations, drawn, need=majority if behind else 1)
         joining.append((s.trying, source, [window] * continuations))
         counted["to_event"] += continuations
 
@@ -494,8 +496,7 @@ def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loo
                     tried(s, part.point, part.streams, joint, own[0])
                 continue
             if part.chosen is None:
-                hopeless = part.majority is not None and backward.out_of_reach(
-                    _failed(joint, own, part), continuations, part.majority)
+                hopeless = backward.out_of_reach(_failed(joint, own, part), continuations, part.need)
                 if alive and tick < s.until and not hopeless:
                     out.append((part, own))
                     continue
