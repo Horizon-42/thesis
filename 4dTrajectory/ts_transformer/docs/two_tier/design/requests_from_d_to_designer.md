@@ -8,11 +8,10 @@ census's sample: 18; D172: 46–48; D179, D180: 49–53; D181, O20: 54–62; D18
 71–77; D188: 78–79; D190: 80–84; D190, D191: 85, 87, 88; D191–D193 and the log: 86, 90–98), item 23 (it asked for 6 and
 7), item 20 (built: item 40) and the names of MC0–MC4 (written into the interfaces).
 
-State: 2026-10-11 (01:15): arm A (`multi_train_majority_20261010`, D192, 2 rounds) runs; it stopped once in round 0
-on a defect of S6 with join ticks, fixed (14e53df6, merged) and resumed with its done batches kept (item 104). D194
-(2), (3) built on `dev-speed` (ce886c4a, 9bdbe6c5; reviewed, the second round clean), merged (ca53c517); arm A's round 1
-runs them (the check on fixed inputs equal), and arm B will.
-89 is a measure kept from D190; 99–103 are of the night before; 104–107 are new.
+State: 2026-10-11 (03:05): arm A (`multi_train_majority_20261010`, D192) done, rounds 0 / 1 landed 82.2 / 83.3 %;
+it stopped once in round 0 on a defect of S6 with join ticks, fixed (14e53df6, item 104). D194 (2), (3) merged
+(ca53c517) and ran in A's round 1; D194 (1) merged (e77bc220); arm B runs with 4 CPU workers (item 108) (stage D's log
+§22). 89 is a measure kept from D190; 99–103 are of 2026-10-10; 104–108 are new.
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -239,3 +238,13 @@ The code says the details; read the two commits.
     3 GiB) the host had 24.1 GiB; 8 needed 26.1 GiB, and with 7 a batch at the profile's host peak (2.77 GiB with its
     margin) had 2.14 GiB at the last level. The earlier count (3 + 8 fit) used the host free before the campaign's
     process opened. Arms A (from round 1) and B run 6.
+108. **The CPU's levels and the CPU profile of D192** (measured in A's round 1; for D191, D193 (4) and O15). With 6 CPU
+    workers a worker's host share was 2.43 GiB; about 40 CPU batches, nearly all of span 1200 s, went past it and were
+    spoken again after the first pass, most one at a time (levels 3 at 2.78 GiB, 1 at 4.19 GiB): 20 of them took
+    02:06–02:33, while the first pass took 37 min for 183 batches. With 4 workers (a share of 3.64 GiB; the user's
+    word, A resumed with its batches kept) the other 20 took 8 min. The CPU profile (batches 0 / 23 / 86) holds below
+    the host peak of the majority's batches of 1200 s, so the fit's levels assume a tail that does not happen. Proposal,
+    for the user: (a) a CPU profile of D192 on the batches of 1200 s with the most aircraft, or (b) a batch spoken again
+    goes to the level whose budget holds the peak it reached, not to each level in turn. B runs with 4 CPU workers;
+    its round 0 measures the first pass and the tail with 4.
+
