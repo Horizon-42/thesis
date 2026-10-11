@@ -967,12 +967,12 @@ def _worker_context() -> tuple[Context, Settings, Stage]:
 def _freed(context: Context, budget: int | None) -> None:
     """After a task: a worker's GPU cache freed (its batch's tensors gone: an out of memory is raised again without
     the batch's frames, `_speak`) and its share capped again where the task had a budget of its own (``budget``: the
-    share; None: unchanged). A CPU worker with a host share gives the heap's free pages back to the host, so that the
-    next batch's cap reads only what the worker holds (D193 (4); glibc's ``malloc_trim``)."""
+    share; None: unchanged). Every worker gives the heap's free pages back to the host (glibc's ``malloc_trim``): a CPU
+    worker's next batch's cap then reads only what the worker holds (D193 (4)), and a GPU worker does not keep the host
+    memory of its largest batch to the campaign's end (the user, 2026-10-11)."""
     if context.device.type == "cuda":
         torch.cuda.empty_cache()
-    elif _SPEAKER["host_budget"] is not None:
-        ctypes.CDLL(None).malloc_trim(0)
+    ctypes.CDLL(None).malloc_trim(0)
     _budget(context, budget)
 
 

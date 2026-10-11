@@ -788,6 +788,19 @@ def test_a_cpu_batch_past_its_host_share_is_spoken_again_at_the_cpus_levels_on_t
         speakers.speak(torch.nn.Linear(1, 1), windows, places, 0, tmp_path, list(range(7)), {})
 
 
+@pytest.mark.parametrize("device", ["cuda", "cpu"])
+def test_every_worker_gives_the_heap_s_free_pages_back_after_a_task(device, monkeypatch):
+    """The user, 2026-10-11: a GPU worker, as a CPU worker (D193 (4)), calls ``malloc_trim`` after each task; a GPU
+    worker frees its GPU cache too."""
+    calls = []
+    monkeypatch.setattr(post_train.ctypes, "CDLL", lambda name: SimpleNamespace(malloc_trim=lambda pad: calls.append(
+        ("trim", pad))))
+    monkeypatch.setattr(post_train.torch.cuda, "empty_cache", lambda: calls.append(("cache", None)))
+    monkeypatch.setitem(post_train._SPEAKER, "host_budget", None)
+    post_train._freed(SimpleNamespace(device=torch.device(device)), None)
+    assert calls == ([("cache", None)] if device == "cuda" else []) + [("trim", 0)]
+
+
 def test_a_host_cap_stops_the_block_where_it_is_and_a_worker_s_next_batch_starts_below_it(tmp_path, monkeypatch):
     """D193 (4): under a host cap the sampler's signal stops a growing block with `HostMemoryError` where it is (raised
     in the main thread by the worker's handler), soon after the cap; a block that starts past the cap stops at once.
