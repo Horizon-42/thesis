@@ -109,11 +109,31 @@ def test_a_round_gives_groups_after_each_branch_point_and_their_samples(setup):
     expected = torch.tensor([0.0, 1.0, 0.0]) - 1.0 / 3.0
     assert torch.allclose(batch.advantage[:, start], expected)
     assert (batch.advantage[~batch.counted] == 0).all()
+    assert torch.equal(samples([rewarded], CPU, scale=0.25).advantage, batch.advantage * 0.25)    # D195: a group's weight
     # the samples go through the loss of C7
     optimizer = torch.optim.AdamW(parameter_groups(model, prior_lr=1e-4, traffic_lr=1e-3))
     data = batch.rows
     (parts,) = one_pass(model, s["base"], optimizer, [([batch], data)])
     assert torch.isfinite(parts.loss)
+
+
+@pytest.mark.parametrize("first, continuations, side", [
+    (0.0, [0.0] * 7 + [1.0], 1),              # one lucky continuation against eight
+    (4.0, [3.0] * 8, 1),                      # the first sentence the one good one
+    (5.0, [5.0, 4.0, 5.0, 4.0, 5.0, 5.0, 5.0, 5.0], 2),
+    (0.0, [1.0] * 6 + [0.0] * 2, 3),
+    (0.0, [1.0] * 4 + [0.0] * 4, 4),
+    (0.9, [0.9] * 8, 0),                      # all the same: no side
+    (7.0, [1.0, 1.0] + [0.0] * 6, 1),         # the two at the mean (1) are on neither side: 1 above, 6 below
+    (0.1, [0.3, 0.4, 0.4], 1),                # 0.3 at the mean within SIDE_TOLERANCE (computed 0.30000000000000004)
+])
+def test_a_group_s_minority_side_is_the_smaller_count_either_side_of_its_mean(first, continuations, side):
+    """D195: `Group.minority`, the count of the sentences on the smaller side of the group's mean reward."""
+    def sentence(reward):
+        return Sentence(rows=None, permitted=None, tokens=[], reward=reward)
+
+    group = Group(window=0, branch=0, first=sentence(first), continuations=tuple(sentence(r) for r in continuations))
+    assert group.minority == side
 
 
 def test_a_window_whose_second_pass_differs_is_counted_and_gives_no_sample(setup, monkeypatch):

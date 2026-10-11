@@ -19,6 +19,7 @@ from ts_transformer.experiments.post_window_loop import WindowLoop, start_move_o
 from ts_transformer.multi import backward, credit
 from ts_transformer.multi.backward import END, GO_AROUND, LOSS, Event, Trial, TRY, avoids, event, points, search
 from ts_transformer.multi.credit import Aircraft
+from ts_transformer.post.branches import EQUAL, MINORITY_SIDE
 from ts_transformer.tests.test_post_window_loop import CPU, DELTA, _with_module, setup  # noqa: F401
 
 STEP = 8                    # 32 s at Δ = 4 s
@@ -513,7 +514,8 @@ def test_stage_ds_batch_record_holds_the_searches_found_backward_only(setup, tmp
     model = stage.start(context, settings)[0].eval()
     records = {}
     for branching in backward.BRANCHINGS:
-        chosen = replace(settings, branching=branching)
+        chosen = replace(settings, branching=branching,              # D195's record beside the majority point's
+                         group_weight=MINORITY_SIDE if branching == backward.MAJORITY else EQUAL)
         windows, _ = stage.draw(context, chosen, 0)
         (tmp_path / branching).mkdir()
         with window_behaviour.captured_rounds() as found:
@@ -531,7 +533,9 @@ def test_stage_ds_batch_record_holds_the_searches_found_backward_only(setup, tmp
     assert all(span == 1.0 for span, _ in searched["group_depths_s"])
     assert searched["continuations_to_end"] == 2 * searched["groups"]
     majority = records[backward.MAJORITY]
-    assert set(majority) == set(searched) | {"group_kinds", "majority_depths_s"}
+    assert set(majority) == set(searched) | {"group_kinds", "majority_depths_s", "group_minorities"}
+    written = torch.load(tmp_path / backward.MAJORITY / "groups_0.pt", weights_only=False)
+    assert majority["group_minorities"] == [g.minority for g in written] and len(written) == majority["informative_groups"]
     assert len(majority["group_kinds"]) == majority["groups"]
     assert majority["group_kinds"].count(backward.DECISION) == majority["searches_found"] == searched["searches_found"]
     assert len(majority["majority_depths_s"]) <= majority["searches_found"]

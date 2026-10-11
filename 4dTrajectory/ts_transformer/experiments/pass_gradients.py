@@ -39,6 +39,7 @@ from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
 from ts_transformer.experiments import post_train, window_behaviour
 from ts_transformer.experiments.post_window_loop import checked_edges
 from ts_transformer.io_utils import utc_now, write_json_atomic
+from ts_transformer.post.branches import MINORITY_SIDE
 from ts_transformer.post.loss import DATA_WEIGHT, PassStart, update_gradients
 from ts_transformer.post.traffic_attention import parameter_groups
 from ts_transformer.repo_layout import REPO_ROOT, git_state
@@ -207,14 +208,16 @@ def main(argv: list[str] | None = None) -> int:
         groups[group["name"]] = range(at, at + len(group["params"]))
         at += len(group["params"])
     start = PassStart(model)
-    # MIRROR of `post_train.run_campaign` and the stages' `train` (`STAGE_C.train`; stage D's `train_pass` with its data weight):
-    # the pass's numbers, its dropout's seed and the rows a group counts
+    # MIRROR of `post_train.run_campaign` and the stages' `train` (`STAGE_C.train`; stage D's `train_pass` with its data and
+    # group weights): the pass's numbers, its dropout's seed, the rows a group counts and each group's weight
     segment_rows = (post_train.segment_rows_of(settings, context.interval_s) if stage is post_train.STAGE_C else None)
     data_weight = DATA_WEIGHT if stage is post_train.STAGE_C else settings.data_weight          # the stage's pass
+    weighted = stage is not post_train.STAGE_C and settings.group_weight == MINORITY_SIDE
     torch.manual_seed(post_train.pass_seed(settings.seed, args.round))             # the data term's dropout
     pairs = post_train.update_pairs(directory, context.data, settings, np.random.default_rng([settings.seed,
                                                                                                args.round, 1]),
-                                    device, part_width=stage.part_width, segment_rows=segment_rows)
+                                    device, part_width=stage.part_width, segment_rows=segment_rows,
+                                    minority_mean=post_train.minority_mean(directory) if weighted else None)
     updates = []
     consistency = Consistency(spans_of(groups, parameters))
     for u, (pieces, data) in enumerate(pairs):

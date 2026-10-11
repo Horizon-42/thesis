@@ -4,6 +4,7 @@ the synthetic artefact of stage C's campaign tests."""
 
 from __future__ import annotations
 
+import argparse
 import json
 from dataclasses import asdict, replace
 from types import SimpleNamespace
@@ -20,6 +21,7 @@ from ts_transformer.experiments.multi_train import (
 from ts_transformer.multi.separation import PAIRS
 from ts_transformer.multi.tokens import PART_FEATURES, TOKENS_SCHEMA
 from ts_transformer.multi.windows import COMPRESSED, REAL_KIND, left_out
+from ts_transformer.post.branches import EQUAL, GROUP_WEIGHTS, MINORITY_SIDE
 from ts_transformer.tests.support import INSTRUCTION_STEP_S
 from ts_transformer.tests.test_multi_windows import built  # noqa: F401
 from ts_transformer.tests.test_post_branches import _ahead
@@ -99,7 +101,29 @@ def test_the_data_weight_defaults_to_the_code_before_it_and_reaches_the_pass(mon
     monkeypatch.setattr(multi_train, "train_pass", lambda *args, **kwargs: seen.update(kwargs) or {})
     multi_train.stage_d().train("model", "context", "optimizer", "directory", _multi_settings(data_weight=0.25), "rng",
                                 part_width=7, round_=0, companion=None)
-    assert seen == {"part_width": 7, "data_weight": 0.25}
+    assert seen == {"part_width": 7, "data_weight": 0.25, "group_weight": EQUAL}
+
+
+def test_the_group_weight_defaults_to_the_code_before_it_and_reaches_the_pass(monkeypatch):
+    """D195: `MultiSettings.group_weight` defaults to `EQUAL` (a record without it reads so), is refused outside
+    `GROUP_WEIGHTS`, is read from ``--group-weight`` and stage D's pass gives it to `post_train.train_pass`."""
+    settings = _multi_settings()
+    assert settings.group_weight == EQUAL
+    recorded = asdict(settings)
+    del recorded["group_weight"]
+    assert MultiSettings(**recorded) == settings
+    with pytest.raises(ValueError, match="group_weight"):
+        _multi_settings(group_weight="kind")
+    parser = argparse.ArgumentParser()
+    multi_train.add_arguments(parser)
+    (option,) = [a for a in parser._actions if a.dest == "group_weight"]
+    assert option.option_strings == ["--group-weight"] and option.default == EQUAL
+    assert tuple(option.choices) == GROUP_WEIGHTS
+    seen = {}
+    monkeypatch.setattr(multi_train, "train_pass", lambda *args, **kwargs: seen.update(kwargs) or {})
+    multi_train.stage_d().train("model", "context", "optimizer", "directory", _multi_settings(group_weight=MINORITY_SIDE),
+                                "rng", part_width=7, round_=0, companion=None)
+    assert seen["group_weight"] == MINORITY_SIDE
 
 
 def test_each_kinds_count_is_split_equally_by_span():

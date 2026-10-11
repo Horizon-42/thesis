@@ -23,7 +23,7 @@ from ts_transformer.experiments.post_train import (
 )
 from ts_transformer.autopilot.start import Start, start_moved
 from ts_transformer.instructions.artefact import closed_loop_sentences
-from ts_transformer.post.branches import continuation_numbers, first_numbers
+from ts_transformer.post.branches import EQUAL, MINORITY_SIDE, continuation_numbers, first_numbers
 from ts_transformer.post.scene import INSERTED, LEADER_MOVED, MOVED_START, NO_START_MOVE, REAL
 from ts_transformer.prior.checkpoint import claim_validation_read
 from ts_transformer.prior.source import ArtefactSource
@@ -193,7 +193,7 @@ def test_the_pass_shuffles_each_file_s_groups_by_the_round_s_numbers(tmp_path, m
     torch.save(list(range(8)), directory / "groups_0.pt")
     torch.save(list(range(10, 15)), directory / "groups_1.pt")
     segments = []
-    monkeypatch.setattr(post_train, "samples", lambda groups, device, part_width, segment_rows: (
+    monkeypatch.setattr(post_train, "samples", lambda groups, device, part_width, segment_rows, scale: (
         segments.append(segment_rows), list(groups))[1])
     monkeypatch.setattr(post_train, "collate", lambda sentences, device: None)
     settings = _settings(update_groups=3)
@@ -1393,6 +1393,39 @@ def test_a_setting_added_after_a_record_reads_as_its_default_and_a_resume_compar
         open_campaign(out, _inputs(_settings(segment_only=True), tmp_path), git, {})
 
 
+def test_the_minority_side_weight_scales_each_group_by_its_side_over_the_round_s_mean(tmp_path, monkeypatch):
+    """D195: `minority_mean` is the mean of the batch records' ``group_minorities``; `update_pairs` scales each group's
+    advantages by its minority side over it (1 without it); `train_pass` reads it only with `MINORITY_SIDE` and adds it
+    to the pass record."""
+    directory = tmp_path / "round"
+    directory.mkdir()
+    groups = [SimpleNamespace(minority=m) for m in (1, 4, 2, 1)]
+    torch.save(groups[:3], directory / "groups_0.pt")
+    torch.save(groups[3:], directory / "groups_1.pt")
+    for k, sides in enumerate(([1, 4, 2], [1])):
+        (directory / f"record_{k}.json").write_text(json.dumps({"batch": k, "record": {"group_minorities": sides}}))
+    assert post_train.minority_mean(directory) == 2.0
+    assert post_train.minority_mean(tmp_path) is None
+    scales = []
+    monkeypatch.setattr(post_train, "samples", lambda groups, device, part_width, segment_rows, scale: (
+        scales.append((groups[0].minority, scale)), None)[1])
+    monkeypatch.setattr(post_train, "collate", lambda sentences, device: None)
+    settings = _settings(update_groups=3)
+    for mean in (2.0, None):
+        scales.clear()
+        list(update_pairs(directory, [0], settings, np.random.default_rng(0), CPU, part_width=0, minority_mean=mean))
+        assert sorted(scales) == sorted((g.minority, 1.0 if mean is None else g.minority / 2.0) for g in groups)
+    given = []
+    monkeypatch.setattr(post_train, "update_pairs", lambda *args, **kwargs: given.append(kwargs["minority_mean"]) or [])
+    monkeypatch.setattr(post_train, "passes", lambda model, base, optimizer, each, step, clip_norm: [list(p) for p in each])
+    context = SimpleNamespace(base=None, data=None, device=CPU)
+    assert "minority_mean" not in post_train.train_pass(None, context, None, directory, None, np.random.default_rng(0),
+                                                       part_width=0)
+    assert post_train.train_pass(None, context, None, directory, None, np.random.default_rng(0), part_width=0,
+                                 group_weight=MINORITY_SIDE)["minority_mean"] == 2.0
+    assert given == [None, 2.0]
+
+
 def test_stage_c_s_pass_clips_and_passes_as_its_settings_say(monkeypatch):
     """D168, D169: stage C's pass (`STAGE_C`, `STAGE_C_LANDED`) hands `Settings.clip_norm` to `post.loss.passes` and
     makes `Settings.epochs` passes, each with its own numbers (`pass_orders`); stage D's (its settings name neither,
@@ -1417,7 +1450,8 @@ def test_stage_c_s_pass_clips_and_passes_as_its_settings_say(monkeypatch):
         assert stage.train(None, context, None, None, here, rng, part_width=0, round_=0, companion=None) == {
             "updates": 0, "passes": [{"updates": 0}, {"updates": 0}]}
         assert numbers[-2] is rng and numbers[-1] is not rng
-    stage_d().train(None, context, None, None, SimpleNamespace(data_weight=1.0), np.random.default_rng(0),
+    stage_d().train(None, context, None, None, SimpleNamespace(data_weight=1.0, group_weight=EQUAL),
+                    np.random.default_rng(0),
                     part_width=0, round_=0, companion=None)
     assert seen == [(0.5, 2), (0.5, 2), (None, 1)]
     assert segments == [15, 15, None]          # D170: 60 s in 4 s rows, stage C's branch pass only; stage D's none

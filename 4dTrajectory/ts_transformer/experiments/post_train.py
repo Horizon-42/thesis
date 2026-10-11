@@ -123,8 +123,8 @@ from ts_transformer.instructions.faults import faulty_flights
 from ts_transformer.instructions.words import Words
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.post.branches import (
-    BRANCH_EVERY_S, CONTINUATIONS, Group, Landed, Sentence, branch_rows, first_numbers, landed_numbers, landed_samples,
-    samples,
+    BRANCH_EVERY_S, CONTINUATIONS, EQUAL, MINORITY_SIDE, Group, Landed, Sentence, branch_rows, first_numbers,
+    landed_numbers, landed_samples, samples,
 )
 from ts_transformer.post.fault_census import fault_rows
 from ts_transformer.post.loss import (DATA_WEIGHT, LossParts, PassStart, Samples, clipped_step, landed_step, passes,
@@ -1453,20 +1453,23 @@ def name_fit(out: Path, fit: dict[str, Any] | None) -> None:
 
 # ---- the training pass
 def update_pairs(directory: Path, data: Sequence[Any], settings: Settings, rng: np.random.Generator,
-                 device: torch.device, *, part_width: int, segment_rows: int | None = None
-                 ) -> Iterator[tuple[list[Samples], RowTensors]]:
+                 device: torch.device, *, part_width: int, segment_rows: int | None = None,
+                 minority_mean: float | None = None) -> Iterator[tuple[list[Samples], RowTensors]]:
     """The updates of a round's pass (module docstring, step 4): its written groups, file by file in the order they were
     spoken, each file's groups in an order shuffled by ``rng`` (the round's numbers; D130: an update mixes branch points
     and windows), `Settings.update_groups` at a time (a file's last update may hold fewer; each group a piece of it,
     `post.loss.update_step`: its memory a group's), each paired with
     `Settings.data_sentences` sentences of ``data`` drawn by ``rng``. A file is read when its first update is drawn.
-    ``part_width``: the stage's token part (`Stage.part_width`)."""
+    ``part_width``: the stage's token part (`Stage.part_width`). ``minority_mean``: the round's mean minority side
+    (`minority_mean`), each group's advantages times its own divided by it (D195, `post.branches.MINORITY_SIDE`); None:
+    every group's as they are (`post.branches.EQUAL`)."""
     for path in sorted(directory.glob("groups_*.pt"), key=lambda p: int(p.stem.split("_")[1])):
         loaded: list[Group] = torch.load(path, weights_only=False)
         groups = [loaded[int(i)] for i in rng.permutation(len(loaded))]
         for k in range(0, len(groups), settings.update_groups):
             chosen = rng.choice(len(data), size=min(settings.data_sentences, len(data)), replace=False)
-            yield ([samples([group], device, part_width, segment_rows)  # a piece a group
+            yield ([samples([group], device, part_width, segment_rows,  # a piece a group
+                            1.0 if minority_mean is None else group.minority / minority_mean)
                     for group in groups[k:k + settings.update_groups]],
                    collate([data[int(i)] for i in chosen], device))
 
@@ -1515,22 +1518,35 @@ def pass_means(each: Sequence[Sequence[LossParts]]) -> dict[str, Any]:
             "passes": [{"updates": len(parts), **(stacked(parts) if parts else {})} for parts in each]}
 
 
+def minority_mean(directory: Path) -> float | None:
+    """The mean minority side (`post.branches.Group.minority`, D195) of the groups a round wrote in ``directory``, from
+    its batch records' ``group_minorities`` (a group file is not read for it); None where the round wrote no group."""
+    sides = [side for path in directory.glob("record_*.json")
+             for side in json.loads(path.read_text(encoding="utf-8"))["record"]["group_minorities"]]
+    return float(np.mean(sides)) if sides else None
+
+
 def train_pass(model: Prior, context: Context, optimizer: torch.optim.Optimizer, directory: Path, settings: Settings,
                rng: np.random.Generator, *, part_width: int, clip_norm: float | None = None, epochs: int = 1,
-               segment_rows: int | None = None, data_weight: float = DATA_WEIGHT) -> dict[str, Any]:
+               segment_rows: int | None = None, data_weight: float = DATA_WEIGHT, group_weight: str = EQUAL
+               ) -> dict[str, Any]:
     """Step 4 of a round: ``epochs`` passes (`post.loss.passes`: the model at the first's start is the one that spoke
     the groups, every pass's ratio against it; D169) over `update_pairs` (``part_width``: the stage's token part), each
     in its own order (`pass_orders`), each update's gradient clipped to ``clip_norm`` (D168). Stage C's
     `Settings.clip_norm` and `Settings.epochs` (`STAGE_C`); None and 1 — not clipped, one pass — for a stage whose
     settings do not name them. ``segment_rows``: each group's rows counted up to the next branch point (P55,
     `segment_rows_of`); None: up to the event. ``data_weight``: the data term's weight (`post.loss.update_step`; stage
-    D's `MultiSettings.data_weight`). Its means (`pass_means`), or no update where the round has no informative group."""
+    D's `MultiSettings.data_weight`). ``group_weight``: each group's weight (`post.branches.GROUP_WEIGHTS`, D195; stage
+    D's `MultiSettings.group_weight`; `MINORITY_SIDE` reads the batch records' ``group_minorities``). Its means
+    (`pass_means`; with `MINORITY_SIDE` and a group written, besides, the round's ``minority_mean``), or no update where
+    the round has no informative group."""
+    mean = minority_mean(directory) if group_weight == MINORITY_SIDE else None
     each = passes(model, context.base, optimizer,
                   [update_pairs(directory, context.data, settings, numbers, context.device, part_width=part_width,
-                                segment_rows=segment_rows)
+                                segment_rows=segment_rows, minority_mean=mean)
                    for numbers in pass_orders(rng, epochs)],
                   step=lambda *args: update_step(*args, data_weight=data_weight), clip_norm=clip_norm)
-    return pass_means(each)
+    return pass_means(each) | ({} if mean is None else {"minority_mean": mean})
 
 
 def landed_train_pass(model: Prior, context: Context, optimizer: torch.optim.Optimizer, directory: Path,

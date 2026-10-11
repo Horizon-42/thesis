@@ -35,7 +35,10 @@ parts (`stage_d`):
   ``aircraft`` of each span give the go-arounds per aircraft that D182 asks to watch. ``--front-attention`` (`MultiSettings.front_attention`,
   D190 (2); `copied` the default): how a window's copies read the front of the speaker's cache they hold once.
   ``--data-weight`` (`MultiSettings.data_weight`; R2 of stage D's plan, the user, 2026-10-10): the data term's weight in
-  each update (`post.loss.update_step`), `post.loss.DATA_WEIGHT` the default.
+  each update (`post.loss.update_step`), `post.loss.DATA_WEIGHT` the default. ``--group-weight``
+  (`MultiSettings.group_weight`, D195; the user, 2026-10-11): each group's weight in the pass
+  (`post.branches.GROUP_WEIGHTS`), `EQUAL` the default; with `MINORITY_SIDE` each batch's record holds its groups'
+  minority sides (``group_minorities``), from which the pass takes the round's mean.
 - **The selection readout** (§5 item 2, `selection_windows`, `read_batch`, `selection_readout`): at most
   ``select_per_airport`` real windows of each span of each airport of the select days, their anchors in an order drawn
   once with the seed (D146's rule), the first pass only, each aircraft with its own numbers (the same every round). By
@@ -102,7 +105,7 @@ from ts_transformer.multi.timing import (
 )
 from ts_transformer.multi.tokens import PART_FEATURES, TOKENS_SCHEMA, TokenPart
 from ts_transformer.multi.windows import COMPRESSED, KINDS, REAL_KIND, Anchors, Drawn, compressed, left_out
-from ts_transformer.post.branches import CONTINUATIONS
+from ts_transformer.post.branches import CONTINUATIONS, EQUAL, GROUP_WEIGHTS, MINORITY_SIDE
 from ts_transformer.post.loss import DATA_WEIGHT
 from ts_transformer.post.scene import Window
 from ts_transformer.post.traffic_attention import add_token_part, parameter_groups
@@ -171,6 +174,9 @@ class MultiSettings:
     #: the data term's weight in each update (R2 of stage D's plan, the user, 2026-10-10; `post.loss.update_step`); the
     #: default `DATA_WEIGHT` (the behaviour before it; a record without it reads so)
     data_weight: float = DATA_WEIGHT
+    #: each group's weight in the pass (D195, the user, 2026-10-11; `post.branches.GROUP_WEIGHTS`); the default `EQUAL`
+    #: (the behaviour before it; a record without it reads so)
+    group_weight: str = EQUAL
 
     def __post_init__(self) -> None:
         if set(self.per_kind) != set(KINDS) or min(self.per_kind.values()) < 0 or not any(self.per_kind.values()):
@@ -196,6 +202,8 @@ class MultiSettings:
                              f"more, at most its batches on the CPU")
         if not self.data_weight >= 0:
             raise ValueError(f"data_weight must be 0 or more, not {self.data_weight}")
+        if self.group_weight not in GROUP_WEIGHTS:
+            raise ValueError(f"group_weight {self.group_weight!r} is none of {GROUP_WEIGHTS}")
 
 
 def span_key(span_s: float) -> str:
@@ -295,7 +303,8 @@ def speak_batch(model: Prior, context: Context, windows: Sequence[Window], place
     backward_round`), its informative groups written to ``groups_<k>.pt``, and its record (`post_train.speak_round`'s
     sums, of every commanded aircraft; backward, besides: each group's span and depth, the searches and those that found
     a decision point, the continuations flown to the event + 60 s only and those flown to their window's end, and the
-    search's seconds, steps and rows; majority, besides: each group's kind and each majority point's span and depth).
+    search's seconds, steps and rows; majority, besides: each group's kind and each majority point's span and depth;
+    with `MINORITY_SIDE`, its informative groups' minority sides, in the order written).
     The majority point needs more than half of the ``continuations`` avoiding (D192: 5 of 8)."""
     train = context.splits["train"]
     batch = [windows[p] for p in places]
@@ -318,6 +327,8 @@ def speak_batch(model: Prior, context: Context, windows: Sequence[Window], place
     if settings.branching == MAJORITY:
         searched |= {"group_kinds": found.kinds,
                      "majority_depths_s": [[batch[0].span_s, depth] for depth in found.majority_depths_s]}
+    if settings.group_weight == MINORITY_SIDE:
+        searched |= {"group_minorities": [g.minority for g in informative]}
     return {"groups": len(found.groups), "informative_groups": len(informative),
             "spoken_again": len(found.spoken_again), "differed": list(found.differed),
             "reward_sum": sum(r.reward for r in found.first),
@@ -659,7 +670,7 @@ def stage_d() -> Stage:
                  part_width=TokenPart.width, batches=span_batches,
                  train=lambda model, context, optimizer, directory, settings, rng, *, part_width, round_, companion:
                  train_pass(model, context, optimizer, directory, settings, rng, part_width=part_width,
-                            data_weight=settings.data_weight))
+                            data_weight=settings.data_weight, group_weight=settings.group_weight))
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -699,6 +710,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--cpu-period", type=int, default=MultiSettings.cpu_period, help="D191: the rule's period")
     parser.add_argument("--data-weight", type=float, default=MultiSettings.data_weight,
                         help="R2: the data term's weight in each update (default: post.loss.DATA_WEIGHT)")
+    parser.add_argument("--group-weight", choices=GROUP_WEIGHTS, default=MultiSettings.group_weight,
+                        help="D195: each group's weight in the pass (default: every group's advantages as they are)")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--speak-workers", type=int, default=1)
     parser.add_argument("--speak-device",
@@ -710,7 +723,8 @@ def settings_from(args: argparse.Namespace, start: dict[str, Any]) -> MultiSetti
     return MultiSettings(args.rounds, {kind: getattr(args, f"windows_{kind}") for kind in KINDS}, args.spans_s,
                          args.c_min, args.batch_rows, args.continuations, args.seed, args.prior_lr, args.traffic_lr,
                          args.weight_decay, args.update_groups, args.data_sentences, args.select_per_airport, start,
-                         args.branching, args.front_attention, args.cpu_batches, args.cpu_period, args.data_weight)
+                         args.branching, args.front_attention, args.cpu_batches, args.cpu_period, args.data_weight,
+                         args.group_weight)
 
 
 def main(argv: list[str] | None = None) -> int:

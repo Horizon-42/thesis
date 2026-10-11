@@ -12,6 +12,7 @@ import torch
 
 from ts_transformer.experiments import pass_gradients as gradients
 from ts_transformer.experiments import post_train
+from ts_transformer.post.branches import EQUAL, MINORITY_SIDE
 from ts_transformer.post.loss import PassStart, update_gradients
 from ts_transformer.post.traffic_attention import parameter_groups
 from ts_transformer.prior.batch import collate
@@ -88,7 +89,7 @@ def world(tmp_path, monkeypatch):
     (campaign / "round_1" / "groups_0.pt").write_bytes(b"")
     (campaign / "campaign.json").write_text(json.dumps({"schema": "stub", "inputs": {
         "smoke": False, "prior": "p", "instructions": "i", "executor": "e", "windows": "w", "procedure_root": "c"}}))
-    settings = SimpleNamespace(seed=2035, prior_lr=1e-5, traffic_lr=1e-4, data_weight=0.5)
+    settings = SimpleNamespace(seed=2035, prior_lr=1e-5, traffic_lr=1e-4, data_weight=0.5, group_weight=EQUAL)
     asked, built = [], []
     stage = SimpleNamespace(part_width=5)                                  # stage D's: a token part
     monkeypatch.setattr(gradients.window_behaviour, "opened_campaign", lambda record: (settings, stage))
@@ -110,6 +111,18 @@ def world(tmp_path, monkeypatch):
     return campaign, model, base, updates, asked, built
 
 
+def test_the_read_weighs_the_groups_as_the_campaign_s_pass_does(world, tmp_path, monkeypatch):
+    """D195: a campaign with `MINORITY_SIDE` is read with the round's mean minority side (`post_train.minority_mean`),
+    as its pass took it."""
+    campaign, model, base, updates, asked, built = world
+    (campaign / "round_1" / "record_0.json").write_text(json.dumps({"record": {"group_minorities": [1, 2]}}))
+    settings = SimpleNamespace(seed=2035, prior_lr=1e-5, traffic_lr=1e-4, data_weight=0.5, group_weight=MINORITY_SIDE)
+    monkeypatch.setattr(gradients.window_behaviour, "opened_campaign",
+                        lambda record: (settings, SimpleNamespace(part_width=5)))
+    assert gradients.main(["--campaign", str(campaign), "--round", "1", "--out", str(tmp_path / "g.json")]) == 0
+    assert [b["minority_mean"] for b in built] == [1.5]
+
+
 def test_the_read_takes_every_kth_update_at_the_model_that_spoke_the_round(world, tmp_path):
     """Round 1 read at round 0's model, every 2nd update (0 and 2 of 3), each update's parts the ones
     `update_gradients` gives at that model with the round's dropout and the campaign's data weight, the means and the
@@ -119,7 +132,8 @@ def test_the_read_takes_every_kth_update_at_the_model_that_spoke_the_round(world
     assert gradients.main(["--campaign", str(campaign), "--round", "1", "--out", str(out), "--every", "2"]) == 0
     held = json.loads(out.read_text())
     assert asked == [0] and held["model_round"] == 0 and held["schema"] == gradients.PASS_GRADIENTS_SCHEMA
-    assert built == [{"directory": "round_1", "words": [2035, 1, 1], "part_width": 5, "segment_rows": None}]
+    assert built == [{"directory": "round_1", "words": [2035, 1, 1], "part_width": 5, "segment_rows": None,
+                      "minority_mean": None}]
     assert [u["update"] for u in held["updates"]] == [0, 2] and held["updates_read"] == 2 and held["updates_seen"] == 3
     assert held["learning_rates"] == {"prior": 1e-5, "traffic": 1e-4} and held["checks"] == {"stub": True}
     named = parameter_groups(model, 1e-5, 1e-4)
@@ -179,4 +193,5 @@ def test_a_stage_c_campaign_s_updates_count_its_rows_as_its_pass_does(world, tmp
     settings = SimpleNamespace(seed=11, prior_lr=1e-5, traffic_lr=1e-4)
     monkeypatch.setattr(gradients.window_behaviour, "opened_campaign", lambda record: (settings, post_train.STAGE_C))
     assert gradients.main(["--campaign", str(campaign), "--round", "1", "--out", str(tmp_path / "c.json")]) == 0
-    assert built == [{"directory": "round_1", "words": [11, 1, 1], "part_width": 0, "segment_rows": 7}]
+    assert built == [{"directory": "round_1", "words": [11, 1, 1], "part_width": 0, "segment_rows": 7,
+                      "minority_mean": None}]                              # stage C: every group as it is (D195)
