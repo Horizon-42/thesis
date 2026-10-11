@@ -109,6 +109,7 @@ from ts_transformer.multi.windows import COMPRESSED, KINDS, REAL_KIND, Anchors, 
 from ts_transformer.post.branches import CONTINUATIONS, EQUAL, GROUP_WEIGHTS, MINORITY_SIDE
 from ts_transformer.post.loss import DATA_WEIGHT
 from ts_transformer.post.scene import Window
+from ts_transformer.post.window_lists import identity_of
 from ts_transformer.post.traffic_attention import add_token_part, parameter_groups
 from ts_transformer.prior.model import COPIED, FRONT_ATTENTIONS, Prior
 from ts_transformer.prior.procedure import PROCEDURE_MASKS
@@ -431,19 +432,35 @@ def window_losses_of(window: Window, ends: Sequence[Any], start: int, context: A
     return dict(count.loss_steps), count.steps
 
 
+def window_line(place: int, window: Window, ends: Sequence[Any], losses: Mapping[str, int]) -> dict[str, Any]:
+    """The readout's line of one window (post-training D176 (2): what a window list reads of stage D): its place among
+    the readout's windows, its airport, its identity (`post.window_lists.identity_of`), span and kind, and each
+    commanded aircraft's key, outcome, reward and go-arounds in the window's order, with its steps of loss by pair."""
+    return {"place": place, "airport": window.scene.geometry.code, "identity": identity_of("D", window),
+            "span": span_key(window.span_s), "kind": kind_of(window),
+            "aircraft": [record.key for record in window.commanded_all], "outcomes": [e.outcome for e in ends],
+            "rewards": [e.reward for e in ends], "go_arounds": [e.go_arounds for e in ends], "loss_steps": dict(losses)}
+
+
 def selection_readout(model: Prior, context: Context, windows: Sequence[Window], settings: MultiSettings,
-                      speakers: Speakers | None, *, stage: Stage, split: str = "select") -> dict[str, Any]:
+                      speakers: Speakers | None, *, stage: Stage, split: str = "select",
+                      lines: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """The readout of ``windows`` of ``split`` (module docstring; `multi_validation`: the val days): its batches read
     here (``stage``'s `Stage.read_batch`) or by ``speakers`` (refused unless they run ``stage``), summed by airport,
-    span (`span_key`) and kind, each with its ``all``; an airport's ``reward_mean`` is its ``all`` of both."""
+    span (`span_key`) and kind, each with its ``all``; an airport's ``reward_mean`` is its ``all`` of both. ``lines``,
+    when given, gets each window's line (`window_line`) in place order."""
     if speakers is not None and speakers.stage is not stage:
         raise ValueError("the speaking workers run another stage's parts than the one given (Speakers(..., stage=))")
     places = stage.batches(windows, settings)
     read = (speakers.read(model, windows, places, split) if speakers is not None else
             [stage.read_batch(model, context, windows, p, settings, split) for p in places])
     counted: dict[str, dict[str, dict[str, dict[str, Any]]]] = {}
+    read_lines = []
     for batch, parts in zip(places, read, strict=True):
-        for window, (ends, losses, steps, timing) in zip((windows[p] for p in batch), parts, strict=True):
+        for place, (ends, losses, steps, timing) in zip(batch, parts, strict=True):
+            window = windows[place]
+            if lines is not None:
+                read_lines.append(window_line(place, window, ends, losses))
             for span, kind in product((span_key(window.span_s), "all"), (kind_of(window), "all")):
                 c = counted.setdefault(window.scene.geometry.code, {}).setdefault(span, {}).setdefault(kind, _empty())
                 c["windows"] += 1
@@ -462,6 +479,8 @@ def selection_readout(model: Prior, context: Context, windows: Sequence[Window],
                 for key in ("delays_s", "spacing_s", "record_spacing_s"):
                     c[key] += timing[key]
                 c["order"] = [c["order"][0] + timing["order"][0], c["order"][1] + timing["order"][1]]
+    if lines is not None:
+        lines += sorted(read_lines, key=lambda line: line["place"])
     out: dict[str, Any] = {}
     for code, spans in sorted(counted.items()):
         out[code] = {span: {kind: _summed(c) for kind, c in kinds.items()} for span, kinds in spans.items()}

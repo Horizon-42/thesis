@@ -1,23 +1,28 @@
 """D176 (2): a window list from per-window readouts by one rule (post-training C25) — the select windows whose outcome
-is one of ``--outcomes`` in any of the reads given, or with ``--all`` in every one.
+is one of ``--outcomes`` in any of the reads given, or with ``--all`` in every one; in stage D, a window whose
+outcome of any commanded aircraft is one of them.
 
-THE READS: ``--diagnose DIR READ`` (a D175 readout, `post_diagnose`: its lines of read ``on`` or ``off`` in
+THE READS: stage C's ``--diagnose DIR READ`` (a D175 readout, `post_diagnose`: its lines of read ``on`` or ``off`` in
 ``per_window.jsonl``) and ``--ceiling DIR MODEL`` (a D161 readout, `post_ceiling`: draw 0 of ``model_<MODEL>.json``, the
-readout's own numbers), each any number of times, at least one in all. Every read must index the same selection
-windows — the same windows in the same places (flight, start time, kind) under the same select seed and windows an
-airport — refused by name otherwise. A diagnose readout's selection is its ``config.json``'s settings; a ceiling's is
+readout's own numbers); stage D's ``--multi DIR`` (a per-window read, `multi_window_read`: its ``per_window.jsonl``,
+the round's own readout); each any number of times, at least one in all, all of one stage. Every read must index the
+same selection windows — the same windows in the same places (stage C: flight, start time, kind; stage D: anchor
+flight, start time, span) under the same select seed and windows an airport (and spans, in stage D) — refused by name
+otherwise. A diagnose readout's selection is its ``config.json``'s settings; a ceiling's is
 its campaign's (``campaign.json`` of the campaign its ``config.json`` names, as this checkout reads that path,
 `training_export.this_checkout`: a ceiling may predate the select seed as a setting). A smoke readout is refused, and
 an outcome that no read gives (a mistyped name would choose nothing).
 
-WRITES, into a new directory, ``list.json`` (`post.window_lists`, ``ts-window-list-v1``, stage C: each window's place,
-airport and identity; its information fields, which no reader acts on, are each read's outcome and, for a diagnose read
-that lost separation, D175's fields) and ``SHA256SUMS``; the directory read-only. The readouts are named by path and
-sha256 (the files read). Stage D's readouts join once they write a line per window (D176 (2)).
+WRITES, into a new directory, ``list.json`` (`post.window_lists`, ``ts-window-list-v1``, of the reads' stage: each
+window's place, airport and identity; its information fields, which no reader acts on, are each read's outcome — in
+stage D the commanded aircraft's outcomes in the window's order — and, for a diagnose read that lost separation,
+D175's fields) and ``SHA256SUMS``; the directory read-only. The readouts are named by path and sha256 (the files read).
 
     python run_ts.py window_list --diagnose 4dTrajectory/outputs/POOLED/post/<diagnose id> on \\
         --ceiling 4dTrajectory/outputs/POOLED/post/<ceiling id> start --outcomes lost_separation \\
         --out 4dTrajectory/outputs/POOLED/post/<list id> [--all]
+    python run_ts.py window_list --multi 4dTrajectory/outputs/POOLED/multi/<read id> \
+        --outcomes lost_separation timeout … --out 4dTrajectory/outputs/POOLED/multi/<list id>
 """
 
 from __future__ import annotations
@@ -28,6 +33,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from ts_transformer.experiments.multi_window_read import CONFIG, LINES, WINDOW_READ_SCHEMA
 from ts_transformer.experiments.post_ceiling import CEILING_SCHEMA
 from ts_transformer.experiments.post_diagnose import DIAGNOSE_SCHEMA, OFF, ON, seal
 from ts_transformer.experiments.training_export import this_checkout
@@ -35,27 +41,28 @@ from ts_transformer.io_utils import file_sha256
 from ts_transformer.post.window_lists import IDENTITY_FIELDS, SPLIT, ListedWindow, WindowList, write_window_list
 from ts_transformer.repo_layout import REPO_ROOT, repo_relative
 
-#: The stage whose readouts this runner reads (D176 (2): stage D's join once they write a line per window).
-STAGE = "C"
 
 
 @dataclass(frozen=True)
 class Read:
-    """One read of the select windows: its name, the selection it indexes (select seed, windows an airport), the
-    windows' identities in place order, each window's outcome and fields, and the file read."""
+    """One read of the select windows: its name, its stage, the selection it indexes (select seed, windows an airport;
+    in stage D the spans too), the windows' identities in place order, each window's outcomes (stage C: one; stage D:
+    one a commanded aircraft) and fields, and the file read."""
 
     name: str
-    selection: Mapping[str, int]
+    stage: str
+    selection: Mapping[str, Any]
     identities: tuple[tuple[Any, ...], ...]
-    outcomes: tuple[str, ...]
+    outcomes: tuple[tuple[str, ...], ...]
     fields: Mapping[int, Mapping[str, Any]]
     path: Path
 
 
 def _identities(config: Mapping[str, Any]) -> tuple[tuple[Any, ...], ...]:
-    """Each recorded window's identity (`IDENTITY_FIELDS`, as `post.window_lists.identity_of` gives it of a window:
-    the readouts record their windows by `post_train.window_record`, which writes those fields), in place order."""
-    return tuple(tuple(w[name] for name in IDENTITY_FIELDS[STAGE]) for w in config["windows"])
+    """Each recorded window's identity of stage C (`IDENTITY_FIELDS`, as `post.window_lists.identity_of` gives it of a
+    window: the readouts record their windows by `post_train.window_record`, which writes those fields), in place
+    order."""
+    return tuple(tuple(w[name] for name in IDENTITY_FIELDS["C"]) for w in config["windows"])
 
 
 def diagnose_read(directory: Path, read: str) -> Read:
@@ -73,9 +80,9 @@ def diagnose_read(directory: Path, read: str) -> Read:
     if [line["place"] for line in lines] != list(range(len(identities))):
         raise SystemExit(f"{path}: the lines of read {read} are not one a window, in place order")
     settings = config["settings"]
-    return Read(f"{directory.name}:{read}", {"select_seed": settings["select_seed"],
-                                             "per_airport": settings["select_per_airport"]},
-                identities, tuple(line["outcome"] for line in lines),
+    return Read(f"{directory.name}:{read}", "C", {"select_seed": settings["select_seed"],
+                                                  "per_airport": settings["select_per_airport"]},
+                identities, tuple((line["outcome"],) for line in lines),
                 {line["place"]: line["fields"] for line in lines if "fields" in line}, path)
 
 
@@ -97,9 +104,25 @@ def ceiling_read(directory: Path, model: str) -> Read:
     identities = _identities(config)
     if len(held["outcomes"]) != len(identities):
         raise SystemExit(f"{path}: {len(held['outcomes'])} windows' draws for {len(identities)} windows")
-    return Read(f"{directory.name}:{model}", {"select_seed": settings["select_seed"],
-                                              "per_airport": settings["select_per_airport"]},
-                identities, tuple(row[0] for row in held["outcomes"]), {}, path)
+    return Read(f"{directory.name}:{model}", "C", {"select_seed": settings["select_seed"],
+                                                   "per_airport": settings["select_per_airport"]},
+                identities, tuple((row[0],) for row in held["outcomes"]), {}, path)
+
+
+def multi_read(directory: Path) -> Read:
+    """The stage D per-window read ``directory`` (`multi_window_read`: a round's own readout, a line a window)."""
+    config = json.loads((directory / CONFIG).read_text(encoding="utf-8"))
+    if config["schema"] != WINDOW_READ_SCHEMA:
+        raise SystemExit(f"{directory} is a {config['schema']} readout, not {WINDOW_READ_SCHEMA}")
+    if config["smoke"]:
+        raise SystemExit(f"{directory} is a smoke readout: no list is written from it")
+    path = directory / LINES
+    lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    if [line["place"] for line in lines] != list(range(config["windows"])):
+        raise SystemExit(f"{path}: the lines are not one a window, in place order")
+    return Read(f"{directory.name}:round_{config['round']}", "D", config["selection"],
+                tuple(tuple(line["identity"][name] for name in IDENTITY_FIELDS["D"]) for line in lines),
+                tuple(tuple(line["outcomes"]) for line in lines), {}, path)
 
 
 def chosen(reads: Sequence[Read], outcomes: Sequence[str], every: bool) -> list[int]:
@@ -107,12 +130,15 @@ def chosen(reads: Sequence[Read], outcomes: Sequence[str], every: bool) -> list[
     name unless every read indexes the same selection windows."""
     first = reads[0]
     for read in reads[1:]:
+        if read.stage != first.stage:
+            raise SystemExit(f"{read.name} is a read of stage {read.stage}, {first.name} of stage {first.stage}")
         if read.selection != first.selection or read.identities != first.identities:
             raise SystemExit(f"{read.name} indexes other selection windows than {first.name}")
-    given = {outcome for read in reads for outcome in read.outcomes}
+    given = {outcome for read in reads for window in read.outcomes for outcome in window}
     if not set(outcomes) <= given:
         raise SystemExit(f"--outcomes {sorted(set(outcomes) - given)}: no read gives it (the reads give {sorted(given)})")
-    hits = [[read.outcomes[place] in outcomes for read in reads] for place in range(len(first.identities))]
+    hits = [[any(outcome in outcomes for outcome in read.outcomes[place]) for read in reads]
+            for place in range(len(first.identities))]
     return [place for place, hit in enumerate(hits) if (all(hit) if every else any(hit))]
 
 
@@ -121,8 +147,10 @@ def window_list(reads: Sequence[Read], outcomes: Sequence[str], every: bool) -> 
     first = reads[0]
     windows = []
     for place in chosen(reads, outcomes, every):
-        identity = dict(zip(IDENTITY_FIELDS[STAGE], first.identities[place]))
-        info: dict[str, Any] = {"outcomes": {read.name: read.outcomes[place] for read in reads}}
+        identity = dict(zip(IDENTITY_FIELDS[first.stage], first.identities[place]))
+        # stage C: a window's one outcome; stage D: its commanded aircraft's, in the window's order
+        info: dict[str, Any] = {"outcomes": {read.name: read.outcomes[place][0] if read.stage == "C"
+                                             else list(read.outcomes[place]) for read in reads}}
         fields = {read.name: read.fields[place] for read in reads if place in read.fields}
         if fields:
             info["fields"] = fields
@@ -130,7 +158,7 @@ def window_list(reads: Sequence[Read], outcomes: Sequence[str], every: bool) -> 
                                     info))
     rule = f"whose outcome is one of {list(outcomes)} in {'every one' if every else 'any'} of the reads " \
            f"{[read.name for read in reads]}"
-    return WindowList(STAGE, SPLIT, dict(first.selection), f"the {SPLIT} windows {rule}",
+    return WindowList(first.stage, SPLIT, dict(first.selection), f"the {SPLIT} windows {rule}",
                       tuple({"path": repo_relative(this_checkout(read.path)), "sha256": file_sha256(read.path)}
                             for read in reads), tuple(windows))
 
@@ -141,6 +169,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="a D175 readout and its read (on, off)")
     parser.add_argument("--ceiling", nargs=2, action="append", default=[], metavar=("DIR", "MODEL"),
                         help="a D161 readout and a model it read (draw 0)")
+    parser.add_argument("--multi", type=Path, action="append", default=[], metavar="DIR",
+                        help="a stage D per-window read (multi_window_read)")
     parser.add_argument("--outcomes", nargs="+", required=True, help="the outcomes that choose a window")
     parser.add_argument("--all", action="store_true", help="chosen in every read (default: in any)")
     parser.add_argument("--out", type=Path, required=True, help="a new directory")
@@ -150,12 +180,13 @@ def main(argv: list[str] | None = None) -> int:
         p = Path(path)
         return p if p.is_absolute() else REPO_ROOT / p
 
-    if not args.diagnose and not args.ceiling:
-        parser.error("give at least one read (--diagnose or --ceiling)")
+    if not args.diagnose and not args.ceiling and not args.multi:
+        parser.error("give at least one read (--diagnose, --ceiling or --multi)")
     out = here(str(args.out))
     if out.exists():
         parser.error(f"{out} exists: the list is written into a new directory")
-    reads = [diagnose_read(here(d), r) for d, r in args.diagnose] + [ceiling_read(here(d), m) for d, m in args.ceiling]
+    reads = ([diagnose_read(here(d), r) for d, r in args.diagnose] + [ceiling_read(here(d), m) for d, m in args.ceiling]
+             + [multi_read(here(str(d))) for d in args.multi])
     if len({read.name for read in reads}) != len(reads):
         parser.error("each read once")
     listed = window_list(reads, args.outcomes, args.all)
