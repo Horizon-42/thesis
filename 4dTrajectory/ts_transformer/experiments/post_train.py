@@ -53,14 +53,16 @@ here (the user, 2026-10-07). RESUMABLE: a round is done when its checkpoint is t
 with the same inputs and settings continues from the last checkpoint; a round left half done keeps the batches it spoke
 and speaks the others (D185: a batch is done when its record ``record_<k>.json`` is there, written after its files, each
 under a temporary name renamed when complete; a batch with files and no record is spoken again; done batches of another
-draw, or spoken on another kind of device than this launch's rule gives them, are refused by name), or with
+draw are refused by name; a done batch keeps the device that spoke it, whatever this launch's rule and workers: the
+user, 2026-10-11), or with
 ``--restart-round`` is moved aside as ``round_<r>.aborted-<UTC>`` (outline E8) and run again whole. On changed code the
 operator chooses: restart, or keep the done batches after a behaviour check on fixed inputs (`window_behaviour`, a few
 windows of each span with the code before and after); each batch's record holds the commit of its launch as information,
 never compared (outline D21). Other inputs are refused. A rerun may raise the rounds (D157): the
 campaign goes on to the new count, unless its val read is claimed (P47: the round would then be chosen after the val
 days were read); and it may change the rule of the batches spoken on the CPU (D191, the user 2026-10-10:
-`RESUME_MAY_CHANGE`), each round's batch records holding the device that spoke them. The recorded paths
+`RESUME_MAY_CHANGE`) and the workers, also in a round left half done (the rule then places only the batches not done;
+the user, 2026-10-11), each round's batch records holding the device that spoke them. The recorded paths
 are compared as this checkout reads them (`inputs_here`: a campaign recorded in a worktree resumes from another
 checkout), the recorded settings as the stage's settings read them (a setting added after the record, its default,
 `SETTINGS_ADDED`). Every random number of a round comes from the seed and the round (the draw, the speaking's, the data term's
@@ -639,12 +641,14 @@ def spoken_batch(stage: Stage, model: Prior, context: Context, windows: Sequence
     return part
 
 
-def done_batches(directory: Path, windows: Sequence[Window], places: Sequence[Sequence[int]], stage: Stage,
-                 device_of: Callable[[int], str]) -> dict[int, dict[str, Any]]:
+def done_batches(directory: Path, windows: Sequence[Window], places: Sequence[Sequence[int]], stage: Stage
+                 ) -> dict[int, dict[str, Any]]:
     """The batches of a round left half done that are done (D185: their records, ``record_<k>.json``), by batch: their
-    own records. Refused by name: a record of another draw of the round (its windows not the batch's), of a batch the
-    round has not, or spoken on another kind of device than ``device_of`` gives the batch (the campaign's rule,
-    `batch_device`; multi-aircraft control D191). Files under a temporary name are removed (never read)."""
+    own records. Refused by name: a record of another draw of the round (its windows not the batch's) or of a batch the
+    round has not. A done batch is kept whatever device spoke it (its record holds the device): the launch's rule
+    (`batch_device`, multi-aircraft control D191) and its workers place only the batches not done (the user, 2026-10-11:
+    the workers must not stop a resume in the middle of a round). Files under a temporary name are removed (never
+    read)."""
     for path in directory.glob("*.tmp"):
         path.unlink()
     out = {}
@@ -655,9 +659,6 @@ def done_batches(directory: Path, windows: Sequence[Window], places: Sequence[Se
             raise SystemExit(f"{path}: a record of a batch this round has not (it has {len(places)})")
         if held["windows"] != [stage.record(windows[p]) for p in places[k]]:
             raise SystemExit(f"{path}: batch {k} of another draw of the round; restart the round (--restart-round)")
-        if held["device"] != device_of(k):
-            raise SystemExit(f"{path}: batch {k} spoken on {held['device']}, its round's rule speaks it on "
-                             f"{device_of(k)} (D185, D191; --restart-round)")
         out[k] = held["record"]
     return out
 
@@ -682,7 +683,7 @@ def speak_round(model: Prior, context: Context, windows: Sequence[Window], setti
     if speakers is None and any(device_of(k) != speak for k in range(len(places))):
         raise ValueError("a rule that speaks batches on the CPU beside another device needs CPU speaking workers "
                          "(Speakers(cpu_workers=); D191)")
-    done = done_batches(directory, windows, places, stage, device_of)
+    done = done_batches(directory, windows, places, stage)
     if done:
         commits = sorted({json.loads(batch_record_path(directory, k).read_text(encoding="utf-8"))["launch"]["commit"]
                           for k in done})

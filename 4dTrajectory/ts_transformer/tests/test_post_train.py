@@ -857,24 +857,21 @@ def test_a_host_cap_stops_the_block_where_it_is_and_a_worker_s_next_batch_starts
         signal.signal(signal.SIGUSR1, previous)
 
 
-def test_a_resume_reads_back_each_batch_spoken_on_its_rules_device_and_refuses_another(tmp_path):
-    """D191 (D185's resume): each done batch's device is the one the rule gives it, refused by name otherwise."""
+def test_a_resume_reads_back_each_done_batch_whatever_device_spoke_it(tmp_path):
+    """D185's resume (the user, 2026-10-11): a done batch is read back whatever device spoke it, so that a resume may
+    change the rule and the workers in the middle of a round; a batch of another draw is still refused."""
     from ts_transformer.io_utils import write_json_atomic
 
     stage = SimpleNamespace(record=lambda w: w)
     windows, places = list(range(4)), [[k] for k in range(4)]
-
-    def device_of(k):
-        return post_train.batch_device(k, 1, 2, "cuda")                           # 0 and 2 on the CPU
-
-    for k, device in ((0, "cpu"), (1, "cuda")):
+    for k, device in ((0, "cpu"), (1, "cuda"), (2, "cuda"), (3, "cpu")):
         write_json_atomic(post_train.batch_record_path(tmp_path, k),
                           {"batch": k, "record": {"k": k}, "windows": [k], "launch": {}, "device": device})
-    assert post_train.done_batches(tmp_path, windows, places, stage, device_of) == {0: {"k": 0}, 1: {"k": 1}}
-    write_json_atomic(post_train.batch_record_path(tmp_path, 2),
-                      {"batch": 2, "record": {"k": 2}, "windows": [2], "launch": {}, "device": "cuda"})
-    with pytest.raises(SystemExit, match="batch 2 spoken on cuda, its round's rule speaks it on cpu"):
-        post_train.done_batches(tmp_path, windows, places, stage, device_of)
+    assert post_train.done_batches(tmp_path, windows, places, stage) == {k: {"k": k} for k in range(4)}
+    write_json_atomic(post_train.batch_record_path(tmp_path, 3),
+                      {"batch": 3, "record": {"k": 3}, "windows": [9], "launch": {}, "device": "cpu"})
+    with pytest.raises(SystemExit, match="batch 3 of another draw"):
+        post_train.done_batches(tmp_path, windows, places, stage)
 
 
 def test_cpu_workers_count_in_the_host_budget_alone():
@@ -1066,13 +1063,14 @@ def test_a_round_stopped_after_some_batches_resumes_by_its_batches(setup, tmp_pa
         assert (stopped / name).read_bytes() == (whole / name).read_bytes()
     spoken.clear()
     assert speak_round(model, context, windows, settings, 0, stopped) == record and spoken == []   # all read back
-    for change, message in (({"windows": [{"other": 1}]}, "another draw"), ({"device": "cuda"}, "its round's rule")):
-        path = stopped / "record_0.json"
-        kept = path.read_text()
-        path.write_text(json.dumps({**json.loads(kept), **change}))
-        with pytest.raises(SystemExit, match=message):
-            speak_round(model, context, windows, settings, 0, stopped)
-        path.write_text(kept)
+    path = stopped / "record_0.json"
+    kept = path.read_text()
+    path.write_text(json.dumps({**json.loads(kept), "device": "cuda"}))      # another device: kept (the user, 2026-10-11)
+    assert speak_round(model, context, windows, settings, 0, stopped) == record and spoken == []
+    path.write_text(json.dumps({**json.loads(kept), "windows": [{"other": 1}]}))
+    with pytest.raises(SystemExit, match="another draw"):
+        speak_round(model, context, windows, settings, 0, stopped)
+    path.write_text(kept)
 
 
 def test_a_round_resumed_through_the_speaking_workers_is_the_round_spoken_whole(setup, tmp_path, monkeypatch):
