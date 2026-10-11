@@ -913,6 +913,18 @@ review: S2 a test that could not tell the last level from the first, fixed, seco
 1efca2f8 (unit `minority-side`), after window_behaviour on arm A's campaign against d3dc3b26's record gave the same
 behaviour (a first try was refused only because one record held the campaign's path relative and the other absolute).
 It does not have 67e45506 and 9f50be58; its rounds 0–2 draw the formal campaign's windows of rounds 0–2, which spoke
-without a stop. Why batch 186 needed more than 8.74 GB is not known yet: its record was not written. It is spoken alone,
-with its peak memory recorded, once the control arm has ended; the formal campaign then resumes round 5 from a run
-worktree at 9f50be58 or later.
+without a stop. Why batch 186 needed more than 8.74 GB: spoken alone on the CPU after the control arm's round 2 (round 5's draw,
+round 4's model, one process, `/proc/self/status` VmHWM reset before the batch), it took 466 s and its peak was 12.0 GB,
+9.5 GB above the 2.5 GB the process held before. Its four windows hold 24 commanded aircraft, the usual count of a
+1200 s batch (median 24); one of them, at KSTL, has 13 commanded aircraft and 12 joined. Its 14 searches stepped 433,231
+rows: the most of all 1,309 batches of rounds 0–5 (median 38,868, p99 155,400; the most before, 325,059, a GPU batch of
+round 2 with a 14-aircraft window; the most on the CPU, 206,808). The peak follows the search's rows, not the batch's
+rows: the batching counts commanded aircraft, but a search steps every aircraft of its window for every continuation,
+so one window of many aircraft with many searches makes the batch. The answer depends only on the inputs and the
+device's kind, so on the CPU this batch goes past the last level every time. With 9f50be58 it goes to the GPU's last
+level (6.81 GB); whether it fits there is not measured.
+
+The control arm continues to 5 rounds (the user, 2026-10-11 evening: its rounds 0–2 rose each round, 81.9 / 82.1 /
+82.8 % landed, 716 / 694 / 676 lost separation, with smaller swings by span than the formal campaign's): from
+`.claude/worktrees/run-gw` moved to 7c1431bf, after window_behaviour against d3dc3b26's record, rounds 3 and 4 compared
+with the formal campaign's (83.1 / 82.8 %).

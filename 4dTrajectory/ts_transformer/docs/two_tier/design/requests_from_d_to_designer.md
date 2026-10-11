@@ -229,5 +229,8 @@ are open.
     (`Speakers._results`); only a batch past that too fails the round; no GPU level or a CPU speak device: no second try.
     The batch's record holds the GPU. Whether a batch goes there depends on its sampled host peak, so its device can
     differ between two runs of the same round. Also built the same afternoon (small change): every worker, GPU workers
-    too, calls `malloc_trim(0)` after a task (1efca2f8). Open: why batch 186 of round 5 needed more than 8.74 GB; it is
-    spoken alone with its peak recorded once the control arm has ended. Please write both into D191 / D193 (4).
+    too, calls `malloc_trim(0)` after a task (1efca2f8). Batch 186 (measured alone on the CPU): a peak
+    of 12.0 GB, 9.5 GB for the batch; its 14 searches stepped 433,231 rows, the most of all 1,309 batches (p99 155,400),
+    from one KSTL window of 13 commanded and 12 joined aircraft. A batch's memory follows its search rows, which the
+    batching (by commanded aircraft) does not see. Proposal, for the user: count a window's aircraft (commanded and
+    joined) when batches are made or placed, so such a window goes to the GPU or into a smaller batch from the start. Please write both into D191 / D193 (4).
