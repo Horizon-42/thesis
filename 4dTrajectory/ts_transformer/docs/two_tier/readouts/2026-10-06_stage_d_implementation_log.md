@@ -981,7 +981,7 @@ rows; review: S2 the single-aircraft tooltip and S3 a bound that could not bind,
 round and would draw rounds 0–3's windows again (`[seed, round]`), so the formal campaign is extended in place to 12
 rounds at 70d87089, after window_behaviour gave the same behaviour (09:20, unit `formal-extend`). Stop rules: two rounds
 in a row not above 3727.2, KL above 0.10, or other failures above 150. Round 8: 83.6 % / 613 / 3726.9, KL 0.075, other
-failures 123 (58 min).
+failures 123 (58 min). Round 9: 83.4 % / 610 / 3714.9, KL 0.070, other failures 136 (unstable at minimums 43, timeout 44); by span 300 s 84.1 % / 120, 600 s 84.5 % / 174, 1200 s 82.4 % / 316. Rounds 8 and 9 did not beat 3727.2: the unit was stopped at 11:11 at the start of round 10 (its directory holds only its speaking model); the campaign read-only again with its SHA256SUMS (2,205 files) and run3's script and log in `run_logs/`. Round 7 stays the chosen round.
 
 **notes/stage_d.md of 2026-10-12** (requests 108–120 decided). Order 1: §0.3 (D195's milestone MC14, the state;
 76cf287c). Order 2 (41a65026): `multi_training_export`'s window identity is `partial(identity_of, "D")` (`post.window_lists`)
