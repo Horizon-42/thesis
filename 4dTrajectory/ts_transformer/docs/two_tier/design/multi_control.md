@@ -78,10 +78,10 @@ the evidence is in §9.
 ### 0.3 Implementation
 
 Stage D's implementer keeps this table and its log, `readouts/2026-10-06_stage_d_implementation_log.md` (outline §5
-rule 10); its readings and requests go to `requests_from_d_to_designer.md`. State, 2026-10-12 (10:30): everything up
+rule 10); its readings and requests go to `requests_from_d_to_designer.md`. State, 2026-10-12 (15:30): everything up
 to D195 merged, and D191's second try and squares, D185's rates and §5 item 5 (cf7e21f0); the formal campaign
 `multi_train_majority_formal_20261011` ended its 8 rounds (round 7: select landed 83.7 %, reward 3727.2, the best of
-both arms); extended in place, it stopped after round 9 by the stop rule (rounds 8–9: 3726.9, 3714.9); round 7 published to the Training view; D195's
+both arms); extended in place to 12 rounds, it ended round 11 on 2026-10-12 (rounds 8–11: 3726.9, 3714.9, 3703.8, 3734.5; round 7 stays the chosen round, the user); round 7's val read (by the user's exception, `--unfinished`): landed 83.9 %; round 7 published to the Training view; D195's
 control arm ended its 8 rounds (log §22).
 
 | Milestone | State |

@@ -988,3 +988,16 @@ failures 123 (58 min). Round 9: 83.4 % / 610 / 3714.9, KL 0.070, other failures 
 instead of its own lambda; checked once on round 7's list: the 1,500 selection windows' identities the same, the list's
 453 windows the same places and windows before and after. The two settings namespaces of `tests/test_multi_training_export.py` lacked `batch_squares`
 (read since ae3839bd; 2 tests failed since then) and gained it in the same commit. Order 3: this log and the requests.
+
+**Rounds 10–11 and round 7's val read (the user, 2026-10-12).** The user ordered rounds 10–11 run so that the campaign
+had done every round before round 7's val read (b7fc0048, unit `formal-close` at 70d87089), then paused round 10 at 11:36
+before its first batch (no resume entry written) and made an exception: `multi_validation --unfinished` (9b1da192; the
+claim's options and `config.json` hold `rounds_done` and `of_rounds`; small change, no agent review, test_multi_validation 4
+passed) reads a campaign not done. Round 7's val read (`val_majority_formal_r7_20261012`, 10 of 12 rounds done, read-only
+with its SHA256SUMS): landed 3,803 of 4,534 = 83.9 %, lost separation 606, other failures 125 (unstable at minimums 43,
+ground contact 37, timeout 31); KMSY 87.8 %, KRDU 81.2 %, KSJC 90.3 %, KSMF 77.5 %, KSTL 83.9 %; spans 300 / 600 / 1200 s
+84.3 / 84.9 / 83.1 %. The user then said "继续跑 10-12 轮": rounds 10–11 ran from 13:03 to 15:11 (run5.sh, the settings of
+rounds 8–9). Round 10: 83.0 % / 638 / 3703.8, KL 0.073, other failures 127. Round 11: 83.7 % / 593 / 3734.5, KL 0.075, other
+failures 137; by span 300 s 84.5 % / 114, 600 s 83.7 % / 181, 1200 s 83.5 % / 298. Round 11's reward is 7.3 above round 7's,
+inside the rounds' spread; the val claim is spent, so round 11 has no val number. The user chose round 7 to stay the
+chosen round. The campaign is read-only again with its SHA256SUMS (2,650 files) and run5's script and log in `run_logs/`.
