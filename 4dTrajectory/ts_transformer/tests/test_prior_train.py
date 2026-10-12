@@ -257,7 +257,7 @@ def test_a_landed_run_trains_on_the_landed_sentences_and_a_run_under_another_rul
     from ts_transformer.prior.source import artefact_identity
 
     artefact, landings, out, _, _ = run_runner(tmp_path, monkeypatch, "--sample", "2",
-                                               outcomes=("landed", "crossed_too_high"))
+                                               outcomes=("landed", "landing_failed"))
     config = json.loads((out / "config.json").read_text())
     assert config["sentences"] == {"train": 1, "select": 1}
     assert config["identity"]["selection"]["rule"] == "landed"
@@ -325,7 +325,7 @@ def test_the_memory_check_takes_the_batch_of_the_most_row_candidates(words):
 def test_the_runner_prints_the_selection_of_train_and_select_only(tmp_path, monkeypatch, capsys):
     """D85, D120: the run counts the selection of every split for its identity, and prints train's and select's alone —
     nothing of val is shown before the base's one validation readout."""
-    run_runner(tmp_path, monkeypatch, outcomes=("landed", "crossed_too_high"))
+    run_runner(tmp_path, monkeypatch, outcomes=("landed", "landing_failed"))
     printed = capsys.readouterr().out
     (line,) = [json.loads(text) for text in printed.splitlines() if text.startswith('{"artefact_selection"')]
     assert set(line["artefact_selection"]) == {"train", "select"}

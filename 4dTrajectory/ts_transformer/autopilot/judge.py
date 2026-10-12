@@ -1,4 +1,5 @@
-"""Did the executor fly the sentence? (vocabulary §5.8; executor design §8) — three layers, read off what it flew.
+"""Did the executor fly the sentence? (vocabulary §5.8; executor design §8) — three layers, read off what it flew; a
+landing is the evaluation package's verdict (THE LANDING).
 
 Layer 1, every cycle: which limit bound, and by how much the rate the laws wanted differs from the rate the dynamics
 gave (the rate each limit costs: bank → track rate, load factor and the path-angle rate limit → path-angle rate, thrust
@@ -14,22 +15,27 @@ which is the outcome (at one row, in `EVENT_ORDER`, the table's order):
 
 - ``dynamics_failure``: a non-finite state, no airspeed, or a cycle the dynamics' own stall cut-off bound;
 - ``ground_contact``: below R's threshold elevation while before R's threshold;
-- ``crossed_too_high``: an approach crossing higher than the landing screen's height (100 m) above the threshold;
-- ``crossed_off_runway``: an approach crossing at most that high, outside the runway limit (`runway_lateral_limit_m`:
-  the final approach segment's full-scale half-width at the threshold, 106.7 m, never beyond half the spacing to a
-  parallel);
-- ``unstable_at_minimums``: an approach crossing at most that high, inside the runway limit, after a failed decision-
-  altitude check — or with no DA point (the aircraft crossed above the DA);
-- ``landed``: such a crossing after a DA check that passed;
+- ``landed``: an approach crossing that the evaluation package passes (THE LANDING, below);
+- ``landing_failed``: an approach crossing that the evaluation package fails;
 - ``crossed_other_runway``: G false, the threshold plane of a candidate other than R crossed lined up with it, inside that
-  runway's own limit, at any height (the flight ends there; what it flew after is not the flight's);
+  runway's own limit (`runway_lateral_limit_m`: the final approach segment's full-scale half-width at the threshold,
+  106.7 m, never beyond half the spacing to a parallel), at any height (the flight ends there; what it flew after is not
+  the flight's);
 - ``timeout``: none of these within the flight's time limit.
 
 A crossing that is not lined up (abeam a threshold on a downwind) is not an event, and while G is true no crossing is one,
 of R or of another candidate (D33): the flight flies on.
 
-THE DECISION-ALTITUDE CHECK (D3, D38). The approach of an approach crossing is the run of cycles before it with R the
-crossed runway and G false; its DA POINT is the first state row of that run where the aircraft, on R's final (before the
+THE LANDING (the user, 2026-10-12: one landing judgement, the evaluation package's). The judge does not decide where a
+flight ends by the evaluation: `ends` does, as above. At an approach crossing, the evaluation decides if it is a landing
+(`landing_verdict`): `evaluation.metrics.evaluate_record` on the flown state at the interpolated crossing, against the
+runway's assessment context (the candidate's ``evaluation``, built by `evaluation.context.assessment_for_runway`). The
+verdict passes when the lateral offset is in half the runway's width, the height is in ±22 m of LTP + TCH, and the speed
+is in the flown type's published window. The judge adds no bound of its own.
+
+THE DECISION-ALTITUDE CHECK (D3, D38): a record on every approach crossing; it decides no outcome (the user,
+2026-10-12: a landing is the evaluation's verdict alone, THE LANDING). The approach of an approach crossing is the run
+of cycles before it with R the crossed runway and G false; its DA POINT is the first state row of that run where the aircraft, on R's final (before the
 threshold, lined up, within the landing screen's lateral limit), descends through the decision altitude (the row before
 it above, this one at or below; the candidate's `VerticalPath.decision_height_m`, from `candidates.json`, D61). There the lateral offset must lie inside
 the FAS cone at that distance (`flight_scenarios.fas_geometry`, FAA Order 8260.58D Formula 3-1-1) and the height within
@@ -52,14 +58,17 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from evaluation.thresholds import RNAV_TERMINAL_VERTICAL_BOUND_M
-from final_approach.crossing import bracket_fraction
+from evaluation.metrics import evaluate_record
+from evaluation.records import STATE_KEYS, record_from_dict
+from evaluation.thresholds import RNAV_TERMINAL_VERTICAL_BOUND_M, AssessmentContext
+from final_approach.crossing import bracket_fraction, interpolate_channels
 from flight_scenarios.fas_geometry import course_halfwidth_m, fas_course_geometry
 from ts_transformer.autopilot.ends import (
     crossing_ends, dynamics_failure, ground_contact, plane_crossed, runway_lateral_limit_m,
 )
 from ts_transformer.autopilot.executor import LIMITS, Flown
 from ts_transformer.autopilot.frame import ALT, GAMMA, LAT, LON, MASS, PSI, SPEED
+from ts_transformer.autopilot.plant import EXECUTOR_DYNAMICS
 from ts_transformer.autopilot.sentence import row_at
 from ts_transformer.instructions import envelope
 from ts_transformer.instructions.airport import (
@@ -71,16 +80,25 @@ from ts_transformer.instructions.labeller.speed import span_checks
 from ts_transformer.instructions.labeller.vertical import tube_checks
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import VocabularySpec
-from ts_transformer.instructions.words import HEADING, Words, compass_from_math_rad
+from ts_transformer.instructions.words import HEADING, Words, compass_from_math_rad, math_rad_from_compass
+from ts_transformer.outputs.envelope import control_contract
 
 #: The outcome of a flight with no event before its executor was done (§5.8): it reached its time limit.
 TIMEOUT = "timeout"
-OUTCOMES = ("landed", "unstable_at_minimums", "crossed_too_high", "crossed_off_runway", "crossed_other_runway",
-            "ground_contact", TIMEOUT, "dynamics_failure")
+#: An approach crossing, by the evaluation's verdict on it (THE LANDING).
+LANDED, LANDING_FAILED = "landed", "landing_failed"
+OUTCOMES = (LANDED, LANDING_FAILED, "crossed_other_runway", "ground_contact", TIMEOUT, "dynamics_failure")
 #: Which event is the outcome when two happen at the same row: the order of the design's table (§5.8).
-EVENT_ORDER = ("dynamics_failure", "ground_contact", "crossed_too_high", "crossed_off_runway", "unstable_at_minimums",
-               "landed", "crossed_other_runway")
-CROSSINGS = ("landed", "unstable_at_minimums", "crossed_too_high", "crossed_off_runway", "crossed_other_runway")
+EVENT_ORDER = ("dynamics_failure", "ground_contact", LANDING_FAILED, LANDED, "crossed_other_runway")
+CROSSINGS = (LANDED, LANDING_FAILED, "crossed_other_runway")
+#: The gates of the evaluation's landing verdict, as its violations name them. MIRROR of the names
+#: `evaluation.metrics.evaluate_record` writes inline (it has no constant to import).
+LANDING_GATES = ("lateral", "vertical", "speed")
+#: The flown state's column of each state channel of an evaluation record.
+RECORD_COLUMNS = {"lat": LAT, "lon": LON, "alt": ALT, "V": SPEED, "psi": PSI, "gamma": GAMMA, "m": MASS}
+assert tuple(RECORD_COLUMNS) == STATE_KEYS
+#: The actuators' column of the load factor, the one control the evaluation reads (its speed gate).
+LOAD_FACTOR = control_contract(EXECUTOR_DYNAMICS.control_thrust_parameterization).names.index("load_factor")
 #: Which wanted rate (track, path angle, speed) a limit costs.
 LIMIT_RATE = {"bank_cap": 0, "bank_rate": 0, "load_factor": 1, "stall_floor": 2, "thrust_max": 2, "thrust_min": 2,
               "stall": 2}
@@ -93,8 +111,9 @@ class Verdict:
     #: the state row the outcome is read at (a crossing's first row past the plane)
     end_row: int
     #: at the interpolated threshold crossing, for a crossing outcome: metres right of the centreline and above the
-    #: threshold, the (fractional) state row, the candidate crossed (``runway_index``) and, for an approach crossing at
-    #: most the landing screen's height, its decision-altitude check (``decision``, None without a DA point)
+    #: threshold, the (fractional) state row, the candidate crossed (``runway_index``) and, for an approach crossing,
+    #: its decision-altitude check (``decision``, None without a DA point; a record) and the evaluation's verdict on it
+    #: (``evaluation``, `landing_verdict`)
     crossing: dict[str, Any] | None
     #: layer 1: per limit, the cycles it bound and the mean |wanted − given| of the rate it costs then
     limits: dict[str, dict[str, float]]
@@ -104,7 +123,7 @@ class Verdict:
 
     @property
     def flew_the_sentence(self) -> bool:
-        """Landed (a DA check that passed included), every word said to it inside its envelope (a word after the
+        """Landed (the evaluation's verdict passed), every word said to it inside its envelope (a word after the
         landing was never said: `not_reached`), no dynamics failure."""
         return self.outcome == "landed" and self.words is not None and self.words["all_contained"]
 
@@ -118,13 +137,14 @@ def flown_track(states: np.ndarray, geometry: AirportGeometry) -> dict[str, np.n
             "ground_speed": speed * np.cos(gamma), "vertical_rate": speed * np.sin(gamma)}
 
 
-def _crossing(relative: RunwayRelative, row: int, runway_index: int) -> dict[str, Any]:
-    """The crossing of ``relative``'s threshold plane between state rows ``row − 1`` and ``row``, interpolated."""
+def _crossing(relative: RunwayRelative, row: int, runway_index: int) -> tuple[dict[str, Any], float]:
+    """The crossing of ``relative``'s threshold plane between state rows ``row − 1`` and ``row``, interpolated, and the
+    fraction of the way from ``row − 1`` to ``row`` it lies at."""
     before, right, height = relative.before_threshold_m, relative.right_of_course_m, relative.height_above_threshold_m
     fraction = bracket_fraction(-float(before[row - 1]), -float(before[row]))
     return {"cross_m": float(right[row - 1] + fraction * (right[row] - right[row - 1])),
             "height_m": float(height[row - 1] + fraction * (height[row] - height[row - 1])),
-            "at_row": float(row - 1 + fraction), "runway_index": runway_index}
+            "at_row": float(row - 1 + fraction), "runway_index": runway_index}, fraction
 
 
 def decision_check(relative: RunwayRelative, rows: range, geometry: AirportGeometry, index: int,
@@ -150,12 +170,53 @@ def decision_check(relative: RunwayRelative, rows: range, geometry: AirportGeome
     return None
 
 
-def _outcome(states: np.ndarray, track: dict[str, np.ndarray], runway_cycle: np.ndarray, go_around_cycle: np.ndarray,
-             stalled: np.ndarray, geometry: AirportGeometry, spec: VocabularySpec,
-             ) -> tuple[str, int, dict[str, Any] | None]:
-    """``runway_cycle`` / ``go_around_cycle``: R and G during each cycle (one fewer than the state rows); ``stalled``
-    per state row: the dynamics' stall cut-off having bound in the cycle that ended at the row. The events (module
-    docstring; their tests `ends`, which the executor reads too, D79), the earliest the outcome."""
+def landing_verdict(states: np.ndarray, actuators: np.ndarray, row: int, fraction: float, cycle_s: float,
+                    context: AssessmentContext, typecode: str) -> dict[str, Any]:
+    """The evaluation's verdict on an approach crossing of ``context``'s runway at ``fraction`` of the way from state row
+    ``row − 1`` to ``row`` (module docstring, THE LANDING); ``states`` ``[T, 7]`` and ``actuators`` ``[T, 3]`` from the
+    flight's first cycle, ``cycle_s`` apart; ``typecode`` the airframe flown.
+
+    The record is the flight's first state and its state at the crossing, blended as the evaluation blends a crossing
+    (`final_approach.crossing.interpolate_channels`, ψ on the short arc), so that the evaluation reads its terminal
+    state. Its load factor is the actuators' at the start of the crossing's cycle, as in a replay record's controls
+    (`experiments.executor_replay.executor_forecast`). Its target is the threshold at LTP + TCH; the target's speed,
+    path angle and mass are the crossing's own, because the evaluation grades none of them. A verdict other than pass or
+    fail, or a crossing the evaluation does not read as the terminal state, is refused."""
+    def state(k: int) -> dict[str, float]:
+        return {"t": k * cycle_s, **{key: float(states[k, column]) for key, column in RECORD_COLUMNS.items()}}
+
+    crossing = interpolate_channels(state(row - 1), state(row), fraction, keys=("t", *STATE_KEYS), angular_keys=("psi",))
+    target = {"lat": context.threshold_lat, "lon": context.threshold_lon,
+              "alt": context.desired_threshold_altitude_msl_m, "V": crossing["V"],
+              "psi": float(math_rad_from_compass(context.runway_course_deg)), "gamma": crossing["gamma"],
+              "m": crossing["m"]}
+    first = state(0)
+    del first["t"]
+    record = record_from_dict({
+        "source": {"subject": "predicted", "arr_airport": context.airport, "runway": context.runway,
+                   "target_source": "runway_threshold", "dynamics_typecode": typecode},
+        "initial_state": first, "target_state": target, "final_time_s": crossing["t"], "states": [crossing],
+        "controls": [{"load_factor": float(actuators[row - 1, LOAD_FACTOR])}]})
+    graded = evaluate_record(record, context=context)
+    if graded.event_status != "terminal_state" or graded.verdict not in ("pass", "fail"):
+        raise ValueError(f"{context.airport} {context.runway}: the evaluation reads the crossing at row "
+                         f"{row - 1 + fraction:.3f} as {graded.event_status}, verdict {graded.verdict} ({graded.reason})")
+    deviation, bounds = graded.deviation, graded.speed_bounds
+    return {"verdict": graded.verdict, "violations": list(graded.violations),
+            "lateral_m": deviation.cross_track_m, "lateral_bound_m": graded.lateral_bound_m,
+            "vertical_m": deviation.vertical_m,
+            "vertical_bounds_m": [graded.vertical_lower_bound_m, graded.vertical_upper_bound_m],
+            "speed_mps": deviation.crossing_speed_ms, "speed_bounds_mps": [bounds.lower_ms, bounds.upper_ms],
+            "load_factor": deviation.crossing_load_factor}
+
+
+def _outcome(states: np.ndarray, actuators: np.ndarray, cycle_s: float, track: dict[str, np.ndarray],
+             runway_cycle: np.ndarray, go_around_cycle: np.ndarray, stalled: np.ndarray, geometry: AirportGeometry,
+             spec: VocabularySpec, typecode: str) -> tuple[str, int, dict[str, Any] | None]:
+    """``actuators`` per state row (`landing_verdict`); ``runway_cycle`` / ``go_around_cycle``: R and G during each
+    cycle (one fewer than the state rows); ``stalled`` per state row: the dynamics' stall cut-off having bound in the
+    cycle that ended at the row; ``typecode`` the airframe flown. The events (module docstring; their tests `ends`,
+    which the executor reads too, D79), the earliest the outcome."""
     rows = len(states)
     runway_row = np.concatenate((runway_cycle[:1], runway_cycle))[:rows]
     go_around_row = np.concatenate((go_around_cycle[:1], go_around_cycle))[:rows]
@@ -175,7 +236,7 @@ def _outcome(states: np.ndarray, track: dict[str, np.ndarray], runway_cycle: np.
         landing_limit = landing_cross_limit_m(geometry, index, spec.landing_cross_limit_m, spec.parallel_course_delta_deg)
         on_runway_m = runway_lateral_limit_m(geometry, index, spec)
         for row in (np.nonzero(plane_crossed(before[:-1], before[1:]))[0] + 1).tolist():
-            crossing = _crossing(relative, row, index)
+            crossing, fraction = _crossing(relative, row, index)
             approach, other = crossing_ends(crossing["cross_m"], float(relative.track_minus_course_deg[row]),
                                             bool(go_around_row[row]), bool(runway_row[row] == index), landing_limit,
                                             on_runway_m, spec)
@@ -184,18 +245,13 @@ def _outcome(states: np.ndarray, track: dict[str, np.ndarray], runway_cycle: np.
                 break
             if not approach:
                 continue                       # no event: G true (D33), not lined up, or outside the landing screen
-            if crossing["height_m"] > spec.landing_max_height_m:
-                events.append((row, "crossed_too_high", crossing))
-            elif abs(crossing["cross_m"]) > on_runway_m:
-                events.append((row, "crossed_off_runway", crossing))
-            else:
-                start = row - 1                            # the approach: the cycles before it under R, G false
-                while start > 0 and runway_cycle[start - 1] == index and not go_around_cycle[start - 1]:
-                    start -= 1
-                decision = decision_check(relative, range(start + 1, row + 1), geometry, index, spec)
-                crossing["decision"] = decision
-                passed = decision is not None and decision["passed"]
-                events.append((row, "landed" if passed else "unstable_at_minimums", crossing))
+            start = row - 1                                # the approach: the cycles before it under R, G false
+            while start > 0 and runway_cycle[start - 1] == index and not go_around_cycle[start - 1]:
+                start -= 1
+            crossing["decision"] = decision_check(relative, range(start + 1, row + 1), geometry, index, spec)
+            crossing["evaluation"] = landing_verdict(states, actuators, row, fraction, cycle_s,
+                                                     geometry.candidates[index].evaluation, typecode)
+            events.append((row, LANDED if crossing["evaluation"]["verdict"] == "pass" else LANDING_FAILED, crossing))
             break
     if not events:
         return TIMEOUT, rows - 1, None
@@ -279,25 +335,27 @@ class Outcome:
     limits: dict[str, dict[str, float]]
 
 
-def outcome_of(flown: Flown, index: int, geometry: AirportGeometry, spec: VocabularySpec) -> Outcome:
-    """Flight ``index`` of ``flown``: its outcome, the state row it is read at, the crossing and the limits (the
-    decision-altitude check on each candidate's vertical path in ``geometry``, D61)."""
+def outcome_of(flown: Flown, index: int, geometry: AirportGeometry, spec: VocabularySpec, typecode: str) -> Outcome:
+    """Flight ``index`` of ``flown``: its outcome, the state row it is read at, the crossing (with the evaluation's
+    verdict on an approach crossing, ``typecode`` the airframe flown) and the limits."""
     last = int(flown.done_cycle[index]) + 1
     states = flown.states[index, : last + 1].cpu().numpy()
     track = flown_track(states, geometry)
     stalled = np.concatenate(([False], flown.limits["stall"][index, :last].cpu().numpy()))
-    outcome, end_row, crossing = _outcome(states, track, flown.runway[index, :last].cpu().numpy(),
+    outcome, end_row, crossing = _outcome(states, flown.actuators[index, : last + 1].cpu().numpy(), flown.cycle_s, track,
+                                          flown.runway[index, :last].cpu().numpy(),
                                           flown.modes["go_around"][index, :last].cpu().numpy(), stalled, geometry,
-                                          spec)
+                                          spec, typecode)
     return Outcome(outcome, end_row, crossing, _limits(flown, index, states, end_row))
 
 
 def judge(flown: Flown, index: int, geometry: AirportGeometry, instructions: Sequence[Instruction], sentence_step_s: float, observed: FlightSignals, spec: VocabularySpec,
-          words: Words) -> Verdict:
+          words: Words, typecode: str) -> Verdict:
     """Flight ``index`` of ``flown``: its outcome, its limits, and its words — ``instructions`` the sentence the
     executor flew (rows ``sentence_step_s`` apart; a heading word's ``info["target_deg"]`` the compass track it says
-    under the runway in force), ``observed`` the flight's observed signals (its clock and identity)."""
-    ended = outcome_of(flown, index, geometry, spec)
+    under the runway in force), ``observed`` the flight's observed signals (its clock and identity), ``typecode`` the
+    airframe flown (the evaluation's speed gate)."""
+    ended = outcome_of(flown, index, geometry, spec, typecode)
     outcome, end_row, crossing, limits = ended.outcome, ended.end_row, ended.crossing, ended.limits
     smoothed = read_flown(flown, index, outcome, end_row, geometry, observed, spec)
     if smoothed is None:

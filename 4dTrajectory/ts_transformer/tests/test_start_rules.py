@@ -113,6 +113,7 @@ def _read(monkeypatch, tmp_path, parts, name):
         params, {"sha256": "s", "checks": {"labeller": "stand-in"}}, words))
     monkeypatch.setattr(replay, "draw_readings", draw)
     monkeypatch.setattr(replay, "flight_approach_ias_mps", lambda series, group: approach_speed_ias_mps("A320", 62000.0))
+    monkeypatch.setattr(replay, "flown_typecode", lambda series: "A320")
     monkeypatch.setattr(closed_loop, "start_inputs", inputs)
     out = tmp_path / name
     assert start_rules.main(["--instructions", str(tmp_path / "artefact"), "--executor", str(tmp_path / "spec"),

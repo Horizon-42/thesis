@@ -12,7 +12,10 @@ manifest's ``runway_targets`` — the modeling plane's own target — is written
 line the models are judged against (`instructions.signals.signals_from_series` checks a flight's target against it). The runway length comes from the runway configuration. Each
 candidate also carries its published vertical path (`VerticalPath`: the threshold crossing height,
 the glidepath angle and the decision altitude, D61), read once from the harvest's runway data when the
-geometry is built: the judge's decision-altitude check reads it, the executor's laws never do (D9). Beside the candidates the geometry keeps
+geometry is built: the judge's decision-altitude check reads it, the executor's laws never do (D9). Each candidate carries the evaluation package's assessment
+context of its runway end too (`evaluation.context.assessment_for_runway`, built from the same harvest runway), which the
+judge's landing verdict reads (`autopilot.judge.landing_verdict`; the user, 2026-10-12: one landing judgement, the
+evaluation's). Beside the candidates the geometry keeps
 every runway end the harvest builds (`trajectory_data_process.harvest.airports.load_airport`), the
 set its landing rule measures parallel runways against (`landing_cross_limit_m`).
 """
@@ -25,6 +28,8 @@ from typing import Any, Sequence
 
 import numpy as np
 
+from evaluation.context import assessment_for_runway
+from evaluation.thresholds import AssessmentContext
 from flight_scenarios.runway_target import airport_reference_point, airport_runways
 from geokit import ft_to_m, wgs84_curvature_radii
 from ts_transformer.data.coordinate_frames import AirportENUFrame, AirportReference
@@ -54,15 +59,19 @@ class RunwayCandidate:
     elevation_m: float
     length_m: float
     vertical_path: VerticalPath
+    #: the evaluation's assessment context of this runway end (`evaluation.context.assessment_for_runway`): the judge's
+    #: landing verdict reads it
+    evaluation: AssessmentContext
 
     def to_dict(self) -> dict[str, Any]:
         return {"ident": self.ident, "threshold_e_m": self.threshold_e_m, "threshold_n_m": self.threshold_n_m,
                 "course_deg": self.course_deg, "elevation_m": self.elevation_m, "length_m": self.length_m,
-                "vertical_path": asdict(self.vertical_path)}
+                "vertical_path": asdict(self.vertical_path), "evaluation": asdict(self.evaluation)}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> RunwayCandidate:
-        return cls(**{**data, "vertical_path": VerticalPath(**data["vertical_path"])})
+        return cls(**{**data, "vertical_path": VerticalPath(**data["vertical_path"]),
+                      "evaluation": AssessmentContext(**data["evaluation"])})
 
 
 @dataclass(frozen=True)
@@ -137,7 +146,8 @@ def publishes_vertical_path(runway: Any) -> bool:
 
 def airport_geometry(code: str, harvest_runways: Sequence[Any]) -> AirportGeometry:
     """The airport frame; its candidates — every runway end of ``harvest_runways`` (the harvest's `Runway` objects) that
-    publishes a vertical path (`publishes_vertical_path`, D78), with it (`vertical_path`, D61), sorted by ident; and every
+    publishes a vertical path (`publishes_vertical_path`, D78), with it (`vertical_path`, D61) and the evaluation's
+    assessment context (`evaluation.context.assessment_for_runway`), sorted by ident; and every
     runway end of ``harvest_runways`` (sorted by ident)."""
     code = code.upper()
     point = airport_reference_point(code)
@@ -155,7 +165,8 @@ def airport_geometry(code: str, harvest_runways: Sequence[Any]) -> AirportGeomet
         e, n = frame.horizontal_from_latlon(float(runway.lat), float(runway.lon))
         candidates.append(RunwayCandidate(
             ident=ident, threshold_e_m=float(e), threshold_n_m=float(n), course_deg=float(runway.course_deg) % 360.0,
-            elevation_m=float(runway.elevation_msl_m), length_m=lengths[ident], vertical_path=vertical_path(code, runway)))
+            elevation_m=float(runway.elevation_msl_m), length_m=lengths[ident], vertical_path=vertical_path(code, runway),
+            evaluation=assessment_for_runway(runway)))
     candidates.sort(key=lambda item: item.ident)
     ends = []
     for runway in harvest_runways:

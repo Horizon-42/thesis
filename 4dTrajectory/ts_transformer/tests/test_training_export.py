@@ -217,7 +217,7 @@ FIXTURE_SET = "fixture_set"
 
 def stage_a_fixture() -> tuple[dict, dict]:
     """A set of one synthetic flight (`support.closed_loop_flight`: a downwind, base and final that ends unstable at the
-    DA) and its index, written by the export's own functions: the observed track, the open-loop sentence and the
+    DA, and whose crossing the evaluation fails, high) and its index, written by the export's own functions: the observed track, the open-loop sentence and the
     closed-loop sentence at Δ = 2, 4, 8 s, each flown again and judged. The observed attitude is the no-airframe one
     (heading and path angle; a synthetic flight has no data-plane series)."""
     import torch
@@ -267,7 +267,9 @@ def test_the_frontend_fixtures_are_what_the_export_writes():
     flight = sample["flights"][0]
     assert sorted(flight["closedLoop"]) == ["2", "4", "8"]
     replayed = flight["closedLoop"]["2"]["replay"]
-    assert replayed["outcome"] == "unstable_at_minimums" and replayed["crossing"]["decision"]["passed"] is False
+    graded = replayed["crossing"]["evaluation"]
+    assert replayed["outcome"] == "landing_failed" and graded["verdict"] == "fail" and graded["violations"] == ["vertical"]
+    assert replayed["crossing"]["decision"]["passed"] is False
     assert any(event["correction"] for event in flight["closedLoop"]["2"]["events"])
 
 

@@ -30,7 +30,8 @@ from ts_transformer.instructions.words import (
 )
 from ts_transformer.data.day_split import SealedDay
 from ts_transformer.tests.support import (
-    fixture_days, fly_legs, instruction_airport, instruction_flight, instruction_spec, landing_on,
+    TEST_HAE_MINUS_MSL_M, TEST_RUNWAY_WIDTH_M, fixture_days, fly_legs, instruction_airport, instruction_flight,
+    instruction_spec, landing_on,
 )
 
 
@@ -177,10 +178,15 @@ def test_compass_and_math_headings_round_trip():
 
 # ---- airport
 def _guided(**fields):
-    """A harvest `Runway` stand-in that publishes a vertical path (TCH 15 m, 3°, DA 60 m above the threshold)."""
+    """A harvest `Runway` stand-in that publishes a vertical path (TCH 15 m, 3°, DA 60 m above the threshold), with the
+    fields the evaluation's assessment context reads (`evaluation.context.assessment_for_runway`: LPV, 45.72 m wide)."""
     published = {"threshold_crossing_height_m": 15.0, "published_glidepath_deg": 3.0,
                  "decision_height_above_threshold_m": 60.0, "elevation_msl_m": 124.7,
-                 "published_minima": SimpleNamespace(vertically_guided=True, note="LPV")}
+                 "published_minima": SimpleNamespace(vertically_guided=True, note="LPV"),
+                 "airport": "KRDU", "elevation_hae_m": 124.7 + TEST_HAE_MINUS_MSL_M, "hae_minus_msl_m": TEST_HAE_MINUS_MSL_M,
+                 "width_m": TEST_RUNWAY_WIDTH_M, "lpv_course_width_m": 106.68, "baro_vnav_minima": False,
+                 **{name: "test" for name in ("width_source", "runway_source_cycle", "procedure_source_cycle",
+                                              "position_source", "vertical_source", "course_source", "tch_source")}}
     return SimpleNamespace(**{**published, **fields})
 
 

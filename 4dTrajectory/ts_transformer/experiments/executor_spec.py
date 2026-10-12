@@ -95,8 +95,7 @@ def main(argv: list[str] | None = None) -> int:
                                          "1–3.5 s for the bank (V3)"},
         },
         "from_the_vocabulary": {"heading_lead_s": spec.heading_lead_s, "angle_lead_s": spec.angle_lead_s,
-                                "speed_lead_s": spec.speed_lead_s, "lined_up_deg": spec.lined_up_deg,
-                                "landing_max_height_m": spec.landing_max_height_m},
+                                "speed_lead_s": spec.speed_lead_s, "lined_up_deg": spec.lined_up_deg},
         "from_the_runway": {
             "rule": "each candidate's published threshold crossing height, glidepath angle and decision altitude (the "
                     "judge's decision-altitude check), from the artefact's candidates.json (D61); recorded here as the "

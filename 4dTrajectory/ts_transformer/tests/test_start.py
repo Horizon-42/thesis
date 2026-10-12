@@ -69,7 +69,7 @@ def _artefact(tmp_path, monkeypatch, interval_s):
     batch = replay.Batch(indices=[0], signals=[replay.from_row(signals, sentence.first_row)], observed=[signals],
                          series=[None],
                          readings=[reading], sentences=[sentence], row_interval_s=interval_s, geometries=[geometry],
-                         approach_ias_mps=[A320_IAS], groups=[replay.OWN], drawn={})
+                         approach_ias_mps=[A320_IAS], typecodes=["A320"], groups=[replay.OWN], drawn={})
     (read,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
     assert isinstance(read, ClosedLoopSentence)
     (directory / CLOSED_LOOP_DIRECTORY).mkdir()
@@ -80,6 +80,7 @@ def _artefact(tmp_path, monkeypatch, interval_s):
     monkeypatch.setattr(start_module, "rebuild_series", lambda d, flights: [None] * len(flights))
     monkeypatch.setattr(replay, "group_of", lambda series: replay.OWN)
     monkeypatch.setattr(replay, "flight_approach_ias_mps", lambda series, group: A320_IAS)
+    monkeypatch.setattr(replay, "flown_typecode", lambda series: "A320")
     monkeypatch.setattr(start_module, "flight_inputs", lambda series, flights, anchors, airports, rule, device:
                         executor_inputs(signals, geometry, anchors[0], rule=rule))
     monkeypatch.setattr(replay.Batch, "inputs", lambda self, rule, device: inputs)
@@ -92,6 +93,7 @@ def _artefact(tmp_path, monkeypatch, interval_s):
     reference = replay.Batch(indices=[0], signals=[signals], observed=[signals], series=[None], readings=[reading],
                              sentences=[flown],
                              row_interval_s=spec.step_s, geometries=[geometry], approach_ias_mps=[A320_IAS],
+                             typecodes=["A320"],
                              groups=[replay.OWN], drawn={"split": "train"})
     monkeypatch.setattr(conformance, "draw_reference_batch", lambda instructions, words, draw: reference)
     _executor(tmp_path / "executor", directory, _params(), spec.sha256)
@@ -122,7 +124,8 @@ def test_a_stored_sentence_said_through_the_start_gives_its_states_and_its_outco
     assert np.abs(np.array(flown)[:, :3] - expected[:, :3]).max() <= STATE_BOUND_M     # the conformance tolerance
     assert np.array_equal(np.array(flown), expected)                                   # and here, the same code: exact
     moved, _ = closed_loop.replay_batch(batch, {0: stored}, words)
-    replayed = outcome_of(replay.fly_sentences(moved, params, words, device=CPU), 0, batch.geometries[0], words.spec)
+    replayed = outcome_of(replay.fly_sentences(moved, params, words, device=CPU), 0, batch.geometries[0], words.spec,
+                          batch.typecodes[0])
     assert loop.outcome(0).outcome == replayed.outcome
     assert loop.outcome(0).crossing == replayed.crossing
     assert stored.withheld.outcome == replayed.outcome           # D74: the reading's outcome, stored, is the replay's and the start's
@@ -146,7 +149,7 @@ def test_the_loops_executor_is_public_and_the_loop_has_no_timed_out(tmp_path, mo
     for k, row in enumerate(flown):
         at = record.states[:, (k + 1) * loop.row_cycles]
         assert np.array_equal(start_module.state_rows(read_state(at, loop.executor.charts))[0], row)
-    assert outcome_of(record, 0, batch.geometries[0], words.spec).outcome == stored.withheld.outcome
+    assert outcome_of(record, 0, batch.geometries[0], words.spec, batch.typecodes[0]).outcome == stored.withheld.outcome
     expected = executor_inputs(batch.observed[0], batch.geometries[0], anchor, rule=_params().start_rule)
     assert torch.equal(loop.executor.inputs.aero_params, expected.aero_params)
     assert not hasattr(loop, "timed_out")
@@ -269,8 +272,8 @@ def _schedules(tmp_path, monkeypatch, interval_s=2.0):
     def loop_of(ways: str, **join) -> Loop:
         many = FlightInputs(**{f.name: getattr(inputs, f.name).expand(len(ways), *getattr(inputs, f.name).shape[1:])
                                .clone() for f in fields(FlightInputs)})
-        return Loop(many, [geometry] * len(ways), [A320_IAS] * len(ways), [limit] * len(ways), _params(), words,
-                    interval_s=interval_s, most_go_arounds=1, device=CPU, **join)
+        return Loop(many, [geometry] * len(ways), [A320_IAS] * len(ways), ["A320"] * len(ways), [limit] * len(ways),
+                    _params(), words, interval_s=interval_s, most_go_arounds=1, device=CPU, **join)
 
     return loop_of, row_of
 
@@ -771,7 +774,7 @@ def test_the_start_refuses_sentences_not_read_under_its_artefact_split_and_execu
         start(directory, "train", 4.0, {0: stored}, off, most_go_arounds=0, device=CPU)
     with pytest.raises(ValueError, match="negative"):
         Loop(executor_inputs(load_signals(directory, "train")[0], load_candidates(directory)["KXXX"]),
-             [load_candidates(directory)["KXXX"]], [A320_IAS], [100.0], _params(), words, interval_s=4.0,
+             [load_candidates(directory)["KXXX"]], [A320_IAS], ["A320"], [100.0], _params(), words, interval_s=4.0,
              most_go_arounds=-1, device=CPU)
 
 

@@ -12,7 +12,8 @@ included, since the labeller reads kinematics only) and projected into each airp
 first even second at or after its first kept sample, and its ``entry_time_utc`` is that row's — so a row
 of any two flights at the same step is at the same time. The candidates (D78) are every runway end of the airport that
 publishes a vertical path — a threshold crossing height, a glidepath and a decision altitude (the judge's
-decision-altitude check, vocabulary §4.2, §5.8, `instructions.airport.vertical_path`) — in the configuration and CIFP the
+decision-altitude check, vocabulary §4.2, §5.8, `instructions.airport.vertical_path`), each with the evaluation's
+assessment context of its runway end (the judge's landing verdict reads it) — in the configuration and CIFP the
 harvest and the evaluator read by default (`evaluation.cli.DEFAULT_CONFIG`, `DEFAULT_CIFP`), with or without arrivals:
 no flight decides a candidate. Beside them go every runway end the harvest builds. They go into ``candidates.json``
 (D61), and nothing later reads the CIFP. A flight that landed on a runway end that is no candidate is refused by name and

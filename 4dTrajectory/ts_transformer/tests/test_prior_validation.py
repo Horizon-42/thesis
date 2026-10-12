@@ -72,7 +72,7 @@ def base_prior(tmp_path, monkeypatch, *, held_out=None):
     from ts_transformer.io_utils import file_sha256
 
     artefact = tmp_path / "artefact"
-    words, records = prior_artefact(artefact, interval_s=2.0, outcomes=("landed", "crossed_too_high"))
+    words, records = prior_artefact(artefact, interval_s=2.0, outcomes=("landed", "landing_failed"))
     landings = {"KXXX": roster_landings(records["KXXX"], ("09", "09L"), fixture_days())}
     digests = {"KXXX": {"09": "0" * 64, "09L": "0" * 64}}
     monkeypatch.setattr(runner, "require_conforming_closed_loop", lambda *given: (None, {"checks": {"stub": True}}, None))
@@ -267,7 +267,7 @@ def test_the_masks_readout_gives_a_flight_with_a_faulty_track_apart(tmp_path):
     from ts_transformer.instructions.artefact import closed_loop_sentences, load_spec, signals_flights
 
     artefact = tmp_path / "artefact"
-    words, _ = prior_artefact(artefact, interval_s=2.0, outcomes=("landed", "crossed_too_high"))
+    words, _ = prior_artefact(artefact, interval_s=2.0, outcomes=("landed", "landing_failed"))
     sentences = closed_loop_sentences(artefact, "val", 2.0, load_spec(artefact))
     finals = {"KXXX": finals_of(parallel_airport())}
     args = (sentences, signals_flights(artefact, "val"), finals, words, 2.0, "landed")

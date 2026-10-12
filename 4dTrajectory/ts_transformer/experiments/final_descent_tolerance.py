@@ -7,15 +7,16 @@ airport, the replay's seeded sample of D34; select: every labelled flight; on th
 `replay.draw_readings`), each read in closed loop at every ``--row-interval-s`` (`closed_loop.read_chunked`, as
 `instruction_closed_loop.read_interval`, in memory: nothing is written into the artefact) and its closed-loop sentence
 flown again as the replay flies it (`closed_loop.replay_batch`, `replay.fly_sentences`; every flight must fly its stored
-states again, `executor_replay.closed_loop_columns`) and judged (`judge.outcome_of`: the outcome and the decision-altitude
-check, D38). Per flight (``readout.json`` ``flights``): the outcome; the replay's DA check (its height above the
+states again, `executor_replay.closed_loop_columns`) and judged (`judge.outcome_of`: the outcome — a landing is the
+evaluation's verdict, the user 2026-10-12 — and the decision-altitude check, D38, a record). Per flight (``readout.json`` ``flights``): the outcome; the replay's DA check (its height above the
 published glidepath at the DA point); the DA check of the OBSERVED track (`observed_decision`); the final descents
 (runs of rows with "no level-off" in force) and the angle correction words said in them, beside all its angle
 correction words.
 
 Per row interval: the closed-loop reading's split numbers (`instruction_closed_loop.summarise`: D34 readings 1–3, the
 tolerance in force at each row) and, per airport and pooled (`table`): the outcomes and the landed share; the
-``unstable_at_minimums`` flights by why (`UNSTABLE_KINDS`: no DA point, high, low, lateral only); the height above the
+approach crossings whose DA check did not pass (``da_not_passed``), by why (`UNSTABLE_KINDS`: no DA point, high, low,
+lateral only); the height above the
 glidepath at the DA point, p10 / p50 / p90; the DA check of the observed track against the replay's (`PAIRS`), with the
 flights whose observed track passes and whose replay does not; the angle correction words per final descent and per
 flight.
@@ -44,7 +45,7 @@ import numpy as np
 import torch
 
 from ts_transformer.autopilot import closed_loop, replay
-from ts_transformer.autopilot.judge import decision_check, outcome_of
+from ts_transformer.autopilot.judge import LANDED, LANDING_FAILED, decision_check, outcome_of
 from ts_transformer.autopilot.spec import params_sha256
 from ts_transformer.experiments import instruction_closed_loop
 from ts_transformer.experiments.executor_replay import closed_loop_columns
@@ -59,17 +60,20 @@ from ts_transformer.instructions.words import ALTITUDE, ANGLE, RUNWAY, Words
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
-#: v2 (A29, D73): the checks the run ran before its work, as information.
-READOUT_SCHEMA = "ts-final-descent-tolerance-readout-v2"
-TABLE_SCHEMA = "ts-final-descent-tolerance-table-v1"
-#: Why an ``unstable_at_minimums`` replay failed its DA check (`unstable_kind`).
+#: v2 (A29, D73): the checks the run ran before its work, as information. v3 (the user, 2026-10-12): the outcomes are
+#: the judge's with a landing the evaluation's verdict; ``da_not_passed`` (every approach crossing whose DA check did not
+#: pass) replaces ``unstable_at_minimums``.
+READOUT_SCHEMA = "ts-final-descent-tolerance-readout-v3"
+#: v2: the readouts' v3 cells.
+TABLE_SCHEMA = "ts-final-descent-tolerance-table-v2"
+#: Why an approach crossing's DA check did not pass (`unstable_kind`).
 UNSTABLE_KINDS = ("no DA point", "high", "low", "lateral only")
 #: The observed track's DA check against the replay's: (observed passes, replay passes).
 PAIRS = {"both pass": (True, True), "observed passes, replay does not": (True, False),
          "replay passes, observed does not": (False, True), "neither": (False, False)}
 PERCENTILES = (10, 50, 90)
-#: The outcomes whose crossing carries a decision-altitude check (`judge`: an approach crossing inside the runway limit).
-DECIDED = ("landed", "unstable_at_minimums")
+#: The outcomes whose crossing carries a decision-altitude check (`judge`: an approach crossing).
+DECIDED = (LANDED, LANDING_FAILED)
 
 
 def observed_decision(signals: FlightSignals, reading: Reading, geometry: AirportGeometry,
@@ -124,15 +128,14 @@ def table(rows: list[dict[str, Any]]) -> dict[str, Any]:
         return out
     for airport in (*sorted({r["airport"] for r in rows}), "all"):
         members = [r for r in rows if airport in (r["airport"], "all")]
-        unstable = [r for r in members if r["outcome"] == "unstable_at_minimums"]
+        unstable = [r for r in members if r["outcome"] in DECIDED and not _passed(r["decision"])]
         pairs = Counter(next(name for name, key in PAIRS.items()
                              if key == (_passed(r["observed_decision"]), _passed(r["decision"]))) for r in members)
         descents = sum(r["final_descents"] for r in members)
         out[airport] = {
             "flights": len(members), "outcomes": dict(Counter(r["outcome"] for r in members).most_common()),
             "landed": sum(r["outcome"] == "landed" for r in members) / len(members),
-            "unstable_at_minimums": {kind: sum(unstable_kind(r["decision"]) == kind for r in unstable)
-                                     for kind in UNSTABLE_KINDS},
+            "da_not_passed": {kind: sum(unstable_kind(r["decision"]) == kind for r in unstable) for kind in UNSTABLE_KINDS},
             "above_glidepath_at_da_m": _percentiles([r["decision"]["above_glidepath_m"] for r in members
                                                      if r["decision"] is not None]),
             "observed_above_glidepath_at_da_m": _percentiles([r["observed_decision"]["above_glidepath_m"]
@@ -163,7 +166,7 @@ def read_interval(drawn: replay.Drawn, readings: list[Reading], observed: dict[i
     for first in range(0, len(flown_batch.sentences), chunk):
         part = replay.subset(flown_batch, list(range(first, min(first + chunk, len(flown_batch.sentences)))))
         flown = replay.fly_sentences(part, params, words, device=device)
-        judged = [outcome_of(flown, j, part.geometries[j], spec) for j in range(len(part.indices))]
+        judged = [outcome_of(flown, j, part.geometries[j], spec, part.typecodes[j]) for j in range(len(part.indices))]
         check(part, flown, judged)          # refused unless every flight flies its stored states again to its outcome
         for j, (index, ended) in enumerate(zip(part.indices, judged)):
             crossing = ended.crossing
@@ -207,7 +210,7 @@ def readout(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         write_json_atomic(out / f"interval_{interval:g}s.json", {"schema": READOUT_SCHEMA, "row_interval_s": interval,
                                                                  **intervals[f"{interval:g}"], "flights": rows})
         cells = intervals[f"{interval:g}"]["table"]
-        landed = f"landed {cells['all']['landed']:.4f}, unstable {cells['all']['unstable_at_minimums']}" if cells else ""
+        landed = f"landed {cells['all']['landed']:.4f}, DA not passed {cells['all']['da_not_passed']}" if cells else ""
         print(f"  Δ {interval:g} s: {len(rows)} flown, {landed}, {time.perf_counter() - started:.0f}s", flush=True)
     write_json_atomic(out / "readout.json", {
         "schema": READOUT_SCHEMA, "written_utc": utc_now(), "git": git,
@@ -260,7 +263,7 @@ def markdown(tables: dict[str, Any]) -> str:
     for split, part in tables.items():
         for interval, by_value in part["intervals"].items():
             lines += [f"## {split}, Δ = {interval} s", "",
-                      "| H_final (m) | flights | landed % | unstable: none / high / low / lateral | above glidepath at DA "
+                      "| H_final (m) | flights | landed % | DA not passed: none / high / low / lateral | above glidepath at DA "
                       "p10 / p50 / p90 (m) | observed passes, replay not | angle corrections per final descent | "
                       "vertical rows outside (share) |", "|---|---|---|---|---|---|---|---|"]
             for value, cell in by_value.items():
@@ -269,7 +272,7 @@ def markdown(tables: dict[str, Any]) -> str:
                 outside = cell["closed_loop"]["outside_the_tolerance"]["vertical"]
                 lines.append(
                     f"| {value} | {pooled['flights']} | {100 * pooled['landed']:.1f} | "
-                    + " / ".join(str(pooled["unstable_at_minimums"][k]) for k in UNSTABLE_KINDS) + " | "
+                    + " / ".join(str(pooled["da_not_passed"][k]) for k in UNSTABLE_KINDS) + " | "
                     + (" / ".join(_cell(above[f"p{q}"]) for q in PERCENTILES) if above else "—") + " | "
                     + f"{pooled['da_check_observed_vs_replay']['observed passes, replay does not']} | "
                     + f"{_cell(pooled['angle_corrections_per_final_descent'], 2)} | "

@@ -335,7 +335,7 @@ def test_the_behaviour_check_covers_the_sentence_rows_the_selection_the_choices_
     assert {"settings", "selection", "select_rules", "sentence_rows"} <= set(answer)
     assert answer["selection"]["left_out"]["landed"]["landed"] == {"False": None, "True": "fault"}
     assert answer["selection"]["kept"]["landed"]["landed"] == {"False": True, "True": False}
-    assert answer["selection"]["side"]["all"]["crossed_too_high"] == {"False": "inside", "True": "inside"}
+    assert answer["selection"]["side"]["all"]["landing_failed"] == {"False": "inside", "True": "inside"}
     assert answer["select_rules"]["tie"]["chosen"] == "D" and answer["select_rules"]["zero"]["within"] == ["B"]
     assert answer["select_rules"]["edge"]["within"] == ["A", "B"]
     assert answer["select_rules"]["variant_edge"]["chosen"] == "full"
@@ -343,7 +343,7 @@ def test_the_behaviour_check_covers_the_sentence_rows_the_selection_the_choices_
     for patch_it, key in ((lambda patch: patch.setattr(inputs_module, "utc_s",
                                                        lambda text, real=inputs_module.utc_s: real(text) + 600.0),
                            "sentence_rows"),
-                          (lambda patch: patch.setattr(selection_module, "LANDING", "crossed_too_high"), "selection"),
+                          (lambda patch: patch.setattr(selection_module, "LANDING", "landing_failed"), "selection"),
                           (lambda patch: patch.setattr(select_module, "seed_scale", lambda scores, seeds: 0.0),
                            "select_rules")):
         with monkeypatch.context() as patch:

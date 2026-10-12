@@ -1,5 +1,25 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-12 — Two-tier judge: a landing is the evaluation package's verdict
+
+- The user's order (2026-10-12): one landing judgement, the evaluation's. Where a flight ends is unchanged
+  (`autopilot/ends.py`: an approach crossing of R, another runway, ground contact, a dynamics failure, the time limit). At
+  an approach crossing the judge asks `evaluation.metrics.evaluate_record` (`judge.landing_verdict`: the flown state at
+  the interpolated crossing as the terminal state, the candidate's assessment context, the flown airframe's type for the
+  speed gate) → `landed` / `landing_failed`. The outcomes `unstable_at_minimums`, `crossed_too_high`,
+  `crossed_off_runway` are deleted. The judge's decision-altitude check (D38) stays unchanged as a record on every
+  approach crossing (the user, 2026-10-12: "保留，只做记录"); it decides no outcome. `final_descent_tolerance` (R52) reads
+  it as before (readout v3: `da_not_passed` in place of `unstable_at_minimums`). The Training view draws the DA point,
+  chip and label as before; the evaluation's verdict is added as text only.
+- Formats: `ts-instruction-candidates-v5` (each candidate carries the evaluation's assessment context of its runway end),
+  `ts-instruction-closed-loop-v9`, `ts-executor-replay-v10`; the Training samples (stage A v13, prior v6, window v7) and
+  the live segments (autopilot v11, prior v2, window v4) carry `crossing.evaluation` beside `crossing.decision`.
+  Every instruction artefact, executor spec and Training set made before is unreadable by this code.
+- Not measured: in a stage D window a commanded aircraft adds its landing to the others' landing context only when the
+  judge says `landed` (`post_window_loop._landed`); the evaluation's lateral gate (half the runway's width) passes fewer
+  crossings than the old runway limit (106.7 m), so the other aircraft can be given other inputs and fly other tracks.
+  `window_behaviour --against` (R68) on a stage D campaign measures it.
+
 ### 2026-10-06 — Multi-aircraft optimization merged into dev-two-tier
 
 - `dev-optimizer-multi-aircraft` merged (the user's order): dev-two-tier merged into the branch twice (de7f0daf, b9a8afec)

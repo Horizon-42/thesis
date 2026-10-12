@@ -474,7 +474,7 @@ def test_landed_keeps_exactly_the_landed_sentences_and_all_keeps_every_one():
 
     assert LANDING == OUTCOMES[0] == "landed"                       # the mirror of the judge's name (D74)
     stored = [Stored("train", "KXXX", "vectored", "landed", False),
-              Stored("train", "KXXX", "vectored", "crossed_too_high", False),
+              Stored("train", "KXXX", "vectored", "landing_failed", False),
               Stored("train", "KYYY", "straight-in", "landed", False), Stored("select", "KXXX", "vectored", "timeout", False)]
     assert [kept("landed", s.outcome, s.faulty) for s in stored] == [True, False, True, False]
     assert all(kept("all", s.outcome, s.faulty) for s in stored)
@@ -482,7 +482,7 @@ def test_landed_keeps_exactly_the_landed_sentences_and_all_keeps_every_one():
     assert record["rule"] == "landed"
     assert record["counts"]["train"]["KXXX"]["vectored"] == {
         "landed": {"kept": 1, "left_out_fault": 0, "left_out_outcome": 0},
-        "crossed_too_high": {"kept": 0, "left_out_fault": 0, "left_out_outcome": 1}}
+        "landing_failed": {"kept": 0, "left_out_fault": 0, "left_out_outcome": 1}}
     total = sum(sum(cell.values()) for split in record["counts"].values() for airport in split.values()
                 for stratum in airport.values() for cell in stratum.values())
     assert total == len(stored)
@@ -524,7 +524,7 @@ def test_the_source_reads_only_the_selected_sentences_and_the_identity_counts_ev
     from ts_transformer.prior.selection import selection_totals
 
     directory = tmp_path / "artefact"
-    _, records = prior_artefact(directory, interval_s=4.0, outcomes=("landed", "crossed_too_high"))
+    _, records = prior_artefact(directory, interval_s=4.0, outcomes=("landed", "landing_failed"))
     spec = load_spec(directory)
     with np.load(directory / "sentences_train.npz") as arrays:
         labelled = {name: arrays[name] for name in arrays.files}
@@ -548,13 +548,13 @@ def test_the_source_reads_only_the_selected_sentences_and_the_identity_counts_ev
     assert record["rule"] == "landed"
     assert record["counts"]["train"]["KXXX"] == {
         "vectored": {"landed": {"kept": 1, "left_out_fault": 0, "left_out_outcome": 0}},
-        "straight-in": {"crossed_too_high": {"kept": 0, "left_out_fault": 0, "left_out_outcome": 1}}}
+        "straight-in": {"landing_failed": {"kept": 0, "left_out_fault": 0, "left_out_outcome": 1}}}
     for split in SPLITS:
         cells = [cell for stratum in record["counts"][split]["KXXX"].values() for cell in stratum.items()]
         assert sum(sum(c.values()) for _, c in cells) == len(
             load_closed_loop(closed_loop_path(directory, split, 4.0), spec)["signal_index"])
-        assert {o: sum(c["kept"] for name, c in cells if name == o) for o in ("landed", "crossed_too_high")} == {
-            "landed": 1, "crossed_too_high": 0}
+        assert {o: sum(c["kept"] for name, c in cells if name == o) for o in ("landed", "landing_failed")} == {
+            "landed": 1, "landing_failed": 0}
     assert selection_totals(record) == {split: {"kept": 1, "left_out_fault": 0, "left_out_outcome": 1} for split in SPLITS}
     other = artefact_identity(directory, 4.0, landings, "all")
     assert selection_totals(other["selection"]) == {split: {"kept": 2, "left_out_fault": 0, "left_out_outcome": 0}
@@ -676,7 +676,7 @@ def test_the_source_leaves_out_a_marked_flight_under_landed_and_its_mark_changes
     from ts_transformer.prior import source as source_module
 
     directory = tmp_path / "artefact"
-    _, records = prior_artefact(directory, interval_s=4.0, outcomes=("landed", "crossed_too_high"))
+    _, records = prior_artefact(directory, interval_s=4.0, outcomes=("landed", "landing_failed"))
     landings = {"KXXX": roster_landings(records["KXXX"], ("09", "09L"), fixture_days())}
     plain = ArtefactSource(directory, 4.0, "full", landings, "all").sentences("train", "KXXX")
     monkeypatch.setattr(source_module, "faulty_flights",
@@ -703,7 +703,7 @@ def test_the_val_readers_recount_the_selection_and_the_identity_binds_the_signal
     from ts_transformer.prior.source import require_selection_of
 
     directory = tmp_path / "artefact"
-    _, records = prior_artefact(directory, interval_s=4.0, outcomes=("landed", "crossed_too_high"))
+    _, records = prior_artefact(directory, interval_s=4.0, outcomes=("landed", "landing_failed"))
     landings = {"KXXX": roster_landings(records["KXXX"], ("09", "09L"), fixture_days())}
     identity = artefact_identity(directory, 4.0, landings, "landed")
     assert set(identity["signals_files"]) == set(SPLITS)

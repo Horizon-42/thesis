@@ -22,11 +22,11 @@ flights as a single-aircraft batch with every candidate's vertical path changed 
 height, glidepath angle and decision altitude) and the dynamics' chart moved (`MOVED_ORIGIN`: its origin north, east
 and up), and requires the same states (horizontally within `MOVED_HORIZONTAL_BOUND_M`, `STATE_BOUNDS_M`), commands, limits and end
 cycles; only the judge's
-verdict, which reads the vertical paths, may differ.
+verdict may differ.
 
 Before flying, each flight's INPUTS are compared with the reference's digests (`input_digests`: the state it starts
-from, its airframe, frame, thrust and approach speed, its time limit, its words and runway, the runways' geometry and
-vertical paths): inputs that moved are refused by name — the data under the
+from, its airframe, frame, thrust and approach speed, its time limit, its words and runway, the runways' geometry,
+vertical paths and the evaluation's contexts the judge's landing verdict reads): inputs that moved are refused by name — the data under the
 reference changed, which says nothing about the executor.
 
 The check runs in every process that opens the spec, before its work (`require_conforming_executor`, called by
@@ -193,7 +193,7 @@ def fly_single(batch: replay.Batch, params: ExecutorParams, words: Words) -> lis
         flown, _ = single.fly(flight, batch.geometries[j], batch.approach_ias_mps[j], sentence_flown.grid, params, words,
                               step_s=batch.row_interval_s, time_limit_s=limits[j], reserve_s=reserve)
         verdict = judge(flown, 0, batch.geometries[j], sentence_flown.instructions,
-                        batch.row_interval_s, batch.signals[j], spec, words)
+                        batch.row_interval_s, batch.signals[j], spec, words, batch.typecodes[j])
         out += flight_results(flown, [verdict])
     return out
 
@@ -420,7 +420,9 @@ def input_digests(batch: replay.Batch, params: ExecutorParams, words: Words) -> 
                  np.array([[c.threshold_e_m, c.threshold_n_m, c.course_deg, c.elevation_m] for c in geometry.candidates]),
                  np.array([geometry.elevation_m]),
                  np.array([[float(getattr(path, f.name)) for f in dataclasses.fields(path)]
-                           for path in (c.vertical_path for c in geometry.candidates)], dtype=np.float64)]
+                           for path in (c.vertical_path for c in geometry.candidates)], dtype=np.float64),
+                 np.frombuffer(json.dumps([dataclasses.asdict(c.evaluation) for c in geometry.candidates],
+                                          sort_keys=True).encode(), dtype=np.uint8)]
         digest = hashlib.sha256()
         for part in parts:
             array = np.ascontiguousarray(part.cpu().numpy() if isinstance(part, torch.Tensor) else part)

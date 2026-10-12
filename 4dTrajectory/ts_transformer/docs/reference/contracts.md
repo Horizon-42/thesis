@@ -462,6 +462,12 @@ by their place in the signals. Read when the artefact is read; the artefact is n
 train 498 of 40,530 closed-loop sentences marked (469 landed), select 177 of 6,199 (157 landed); held positions are most
 of them. Stage B's selection `landed` leaves them out (prior D111, B11).
 
+**2026-10-12 (the user: one landing judgement, the evaluation package's)**: `candidates.json` is
+`ts-instruction-candidates-v5` — each candidate also carries ``evaluation``, the evaluation's assessment context of its runway
+end (`evaluation.context.assessment_for_runway`, built by the first runner from the same harvest `Runway` as the
+candidate), which the judge's landing verdict reads (C33). The vertical path stays: the judge's decision-altitude check
+(a record), the prior's inputs, the procedure masks and the Training view read it.
+
 ### C31 · the aircraft filter: drop a flight only where dynamics are used
 
 2026-09-24 (user decisions: "去掉 all 的 A320 回退", then "ts 用2 按需丢弃"). The retired `all` filter
@@ -555,6 +561,17 @@ log; `replay.open_spec` opens it without, for the check itself and for the backe
 everything with nothing run beforehand, and no spec, training or readout is redone; one that leaves them needs a new
 spec.** No passed record, no digest of code (until A29 a `passed-<code12>.json` named by the logic of every `autopilot/`
 module stood in for the check), no clean-checkout rule for a check; `executor_conformance` runs it as information.
+
+**2026-10-12 (the user: one landing judgement, the evaluation package's)**: the outcomes `unstable_at_minimums`,
+`crossed_too_high` and `crossed_off_runway` are deleted. The decision-altitude check (D38, `judge.decision_check`) stays,
+unchanged, as a record on every approach crossing (`decision`, beside `evaluation`); it decides no outcome (the user,
+2026-10-12).
+Where a flight ends is unchanged (`autopilot/ends.py`: an approach crossing of R, another runway, ground contact, a
+dynamics failure, the time limit). At an approach crossing the judge asks the evaluation (`judge.landing_verdict`:
+`evaluation.metrics.evaluate_record` on the flown state at the interpolated crossing, against the candidate's assessment
+context, the flown airframe's type for the speed gate) and names the outcome `landed` (pass) or `landing_failed` (fail, with
+the gates failed). The input digests of the reference tracks include the assessment contexts. A spec written before
+cannot be opened by this code: its reference outcomes carry the old names.
 
 ### C34 · a prior checkpoint belongs to one sentence artefact
 
@@ -707,3 +724,6 @@ speed follows the frame's ground scale at the moved rows, D87), the moved rows c
 flight's own (the user, 2026-10-05); `NO_MOVE` is `start` bit for bit. The closed-loop reading
 builds its `Loop` from the same pieces, so its sentences said through `start` give back their stored states and the
 replay's outcome (`tests/test_start.py`). The artefact's formats do not change.
+
+**2026-10-12**: `ts-instruction-closed-loop-v9` — the outcomes are the judge's of C33 (2026-10-12): `landed` /
+`landing_failed` for an approach crossing, by the evaluation's verdict.

@@ -312,7 +312,8 @@ def _batch(interval_s=2.0, legs=DOWNWIND_BASE_FINAL, track_deg=270.0, altitude_m
     observed = replay.from_row(signals, sentence.first_row)
     batch = replay.Batch(indices=[0], signals=[observed], observed=[signals], series=[None], readings=[reading],
                          sentences=[sentence], row_interval_s=interval_s, geometries=[geometry],
-                         approach_ias_mps=[approach_speed_ias_mps("A320", 62000.0)], groups=[replay.OWN], drawn={})
+                         approach_ias_mps=[approach_speed_ias_mps("A320", 62000.0)], typecodes=["A320"],
+                         groups=[replay.OWN], drawn={})
     start = closed_loop.start_row(interval_s) * int(round(interval_s / one.step_s))
     return batch, executor_inputs(signals, geometry, sentence.first_row + start), words
 
@@ -426,8 +427,8 @@ def test_each_outcome_is_stored_by_name_and_a_file_of_the_former_format_is_refus
                       sentences={k: _changed(sentence, outcome=name) for k, name in enumerate(OUTCOMES)})
     stored = closed_loop_sentences(directory, "train", 4.0, words.spec)
     assert [stored[k].withheld.outcome for k in range(len(OUTCOMES))] == list(OUTCOMES)
-    assert set(OUTCOMES) >= {"landed", "unstable_at_minimums", "crossed_too_high", "crossed_off_runway",
-                             "crossed_other_runway", "ground_contact", "timeout", "dynamics_failure"}
+    assert set(OUTCOMES) >= {"landed", "landing_failed", "crossed_other_runway", "ground_contact", "timeout",
+                             "dynamics_failure"}
     with np.load(path) as data:
         former = {name: data[name] for name in data.files}
     former["schema"] = np.array("ts-instruction-closed-loop-v7")             # the same fields, the former format
@@ -441,7 +442,7 @@ def test_the_closed_loop_file_round_trips_and_a_replay_flies_its_stored_states(t
     batch flies each from its first predicted step (its sentence and observed flight moved there) and the replay's check
     finds the stored states again."""
     from ts_transformer.experiments.executor_replay import closed_loop_columns
-    from ts_transformer.instructions.artefact import closed_loop_path, write_closed_loop
+    from ts_transformer.instructions.artefact import CLOSED_LOOP_SCHEMA, closed_loop_path, write_closed_loop
 
     batch, inputs, words = _batch(4.0)
     params = _params()
@@ -478,7 +479,7 @@ def test_the_closed_loop_file_round_trips_and_a_replay_flies_its_stored_states(t
         closed_loop_sentences(directory, "train", 8.0, words.spec)
     with pytest.raises(ValueError, match="holds sentences at 4 s, not 2 s"):
         closed_loop_sentences(directory, "train", 2.0, words.spec, path=path)        # a part file of another Δ
-    with pytest.raises(ValueError, match="is not a ts-instruction-closed-loop-v8 file read with spec"):
+    with pytest.raises(ValueError, match=f"is not a {CLOSED_LOOP_SCHEMA} file read with spec"):
         closed_loop_indices(directory, "train", 4.0, spec(closed_loop_final_vertical_m=5.0))  # another vocabulary
     assert np.array_equal(stored[7].rows.flown_states,
                           sentence.rows.states[int(np.flatnonzero(sentence.rows.on_interval)[sentence.rows.start]):])
@@ -765,7 +766,8 @@ def test_read_chunked_puts_each_result_in_its_place(monkeypatch):
                          readings=batch.readings * 3,
                          sentences=[short, batch.sentences[0], batch.sentences[0]], row_interval_s=2.0,
                          geometries=batch.geometries * 3,
-                         approach_ias_mps=batch.approach_ias_mps * 3, groups=batch.groups * 3, drawn={})
+                         approach_ias_mps=batch.approach_ias_mps * 3, typecodes=batch.typecodes * 3,
+                         groups=batch.groups * 3, drawn={})
     monkeypatch.setattr(closed_loop, "start_inputs", lambda part, params, step_s, device: closed_loop._rows(
         closed_loop.FlightInputs(*(torch.cat([getattr(inputs, n)] * len(part.sentences)) for n in (
             "initial_state", "aero_params", "frame_params", "max_thrust_n"))), list(range(len(part.sentences)))))
@@ -1097,6 +1099,7 @@ def test_the_runner_reads_the_same_files_and_summary_with_any_number_of_workers(
                         lambda executor, instructions: (_params(), {"sha256": "e", "checks": {}}, words))
     monkeypatch.setattr(replay, "draw_readings", draw)
     monkeypatch.setattr(replay, "flight_approach_ias_mps", lambda series, group: approach_speed_ias_mps("A320", 62000.0))
+    monkeypatch.setattr(replay, "flown_typecode", lambda series: "A320")
     monkeypatch.setattr(closed_loop, "start_inputs", inputs)
     monkeypatch.setattr(runner, "git_state", lambda: clean)
     monkeypatch.setattr(runner, "POOL_OPTIONS", {"start_method": "fork"})

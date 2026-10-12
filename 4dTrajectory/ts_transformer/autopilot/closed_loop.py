@@ -469,8 +469,8 @@ def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Word
     go_arounds = max(int((batch.readings[j].words[batch.sentences[j].first_row + start * every:, RUNWAY]
                           == RUNWAY_GO_AROUND).sum()) for j in flying)
     loop = Loop(_rows(inputs, flying), [batch.geometries[j] for j in flying],
-                [batch.approach_ias_mps[j] for j in flying], limits, params, words, interval_s=interval,
-                most_go_arounds=go_arounds, device=device)       # the start of a closed loop (D67)
+                [batch.approach_ias_mps[j] for j in flying], [batch.typecodes[j] for j in flying], limits, params,
+                words, interval_s=interval, most_go_arounds=go_arounds, device=device)   # the start of a closed loop (D67)
     live = np.ones(len(flying), dtype=bool)
     s = 0
     now = loop.rows()

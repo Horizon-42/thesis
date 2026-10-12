@@ -153,13 +153,14 @@ of the package, not a migration in progress.
   sentences on the 2 s rows and on the Δ grid at 4 and 8 s, D49), written with the labels, and every process that uses the
   labeller on the artefact reads it again first (`instructions/conformance.py` `require_conforming_labeller`, 1.7 s) —
   no passed record, no digest of code; candidates = the runway ends with a published vertical path, no flight decides
-  one (D78, `ts-instruction-candidates-v4`); one
+  one (D78; `ts-instruction-candidates-v5` since 2026-10-12: each candidate carries the evaluation's assessment context
+  of its runway end, which the judge's landing verdict reads); one
   gate (`read.admit`) for labelling and measuring; a sentence's words align with the FIRST `len(words)` rows of its
   signals (it ends before the landing); a flight with go-arounds is read approach by approach (D26); since v6
   (2026-10-02) every row is on the UTC even seconds; a change of speed says its 5 m/s steps, flown at a_max (D43);
   `--spec-from` keeps another artefact's spec; a flight's observed-track faults (jump, held position, reversal) are
   marked when read, `instructions/faults.py`, D111 (C30).
-- **The closed-loop sentences** (`<artefact>/closed_loop/`, `ts-instruction-closed-loop-v8`; vocabulary §4.9, D32; read as
+- **The closed-loop sentences** (`<artefact>/closed_loop/`, `ts-instruction-closed-loop-v9`; vocabulary §4.9, D32; read as
   `rows` apart from `withheld`, D82 — the observed rows' velocity by the spec's start rule, D77): each
   split × row interval — the 2 s open-loop words flown from the first predicted step by an executor spec, each said at the
   Δ row nearest where the observed aircraft heard it (D42, D45), a heading word in the frame where it is heard (D46), with
@@ -178,8 +179,11 @@ of the package, not a migration in progress.
   start and refuses an answer past the bound from the stored states instead, D73, A43) flies them again in every way
   (single-aircraft batch, multi-aircraft batch, single flight) within 1e-6 m first (`conformance.require_conforming_executor`,
   ~27 s), refused by name otherwise; no passed record, no digest of code, no clean-checkout rule for a check; a code change
-  that stays within the bounds opens everything and nothing is retrained; the vocabulary binds by its spec sha, the labeller by its conformance; the judge's decision-altitude check
-  has no parameter (D38: the evaluation's ±22 m and the FAS cone) (C33). **C34 (a prior belongs to one sentence
+  that stays within the bounds opens everything and nothing is retrained; the vocabulary binds by its spec sha, the labeller by its conformance; **a
+  landing is the evaluation package's verdict on the approach crossing** (`judge.landing_verdict` → `evaluate_record`:
+  `landed` / `landing_failed`; the user, 2026-10-12 — the outcomes `unstable_at_minimums`, `crossed_too_high`,
+  `crossed_off_runway` are deleted; the decision-altitude check stays, a record on the crossing that decides nothing;
+  where a flight ends, `autopilot/ends.py`, is unchanged) (C33). **C34 (a prior belongs to one sentence
   artefact), C35 (a prior speaks under its procedure's masks) and C37 (the traffic prior) describe the instruction-v3
   prior, archived with it** (`archive/two_tier_v3_2026_10/prior/`); the v4 prior is stage B (`docs/two_tier/design/prior.md` §12).
 - **Loss of separation has ONE judge, two readings** (`inference/separation.py`, 2026-09-27): `IFR` (7110.65BB as written)
@@ -369,8 +373,7 @@ row interval and their reference, `--workers` a split a process, `--train-parts`
 summary; clean tree; `--check` runs the readers' checks) (R50) →
 `executor_replay` (`--row-interval-s`, `--closed-loop`; no criterion is read; select and val from a clean tree) (R12);
 `executor_conformance` checks a spec's reference after an `autopilot/` change (R42); `executor_turns` measures the
-executor's turn against the exact words (A13, R51); `final_descent_tolerance` reads the closed loop and its replay of one
-H_final artefact in memory and puts several side by side (A24, D66, R52); `lead_ablation` reads the words' leads (heading, angle, speed) one column at a time, relabelled and read in closed loop in memory (executor design V12, R71); `closed_loop_start_check` says stored
+executor's turn against the exact words (A13, R51); `final_descent_tolerance` (A24, D66, R52; readout v3 since 2026-10-12: `da_not_passed` in place of `unstable_at_minimums`); `lead_ablation` reads the words' leads (heading, angle, speed) one column at a time, relabelled and read in closed loop in memory (executor design V12, R71); `closed_loop_start_check` says stored
 closed-loop sentences through `autopilot/start.py` and requires their stored states back (A26, D67, R53); `training_export` writes the Training sets of stage A beside the old ones (`training/index_v4.json`, sample
 v9; every closed-loop sentence flown again against its stored states and formal outcome; the live executor shares its
 setup, `experiments/training_flights.py`, and `aeroviz_backend.autopilot_segment.check_live` checks a set against it) (R54); `start_rules` reads the train closed loop at one Δ once for each start rule of D77 (A33, R55); stage B, the prior: `prior_train` (one run or a fold; memory checked at size; `landed`; clean tree) (R56) → `prior_free_generation` (the prior speaks through the start and the shared closed-loop step; `--split val` only for the base, under the val read's lock and claim with its options, D128) (R57), `prior_validation` (the base's teacher-forced val readout) (R58), `prior_select` (§5's choices) (R59), all run by `prior_campaign` (resumable; the behaviour check before each step, D108) (R60) with `prior_behaviour` (the check on fixed inputs) (R61); `prior_training_export` writes the Training sets of stage B (`training/index_prior_v2.json`, sample v3; every prior sentence flown again; the live segment `POST /autopilot/prior-segment`) (R62); `model_speed` times the prior's step of a row and the executor's steps apart, on select days only, CPU one thread and GPU, batch 1 and 400 (D136, R63); `post_ceiling` reads a campaign's models on the select windows N times each, draw 0 checked against the round's readout (P48, R64); `post_train` runs stage C's campaign, `--method branch` (D94) or `landed` (P49) (R65); `post_diagnose` reads a round with its traffic on and off, the start from the ceiling's draw 0, and five fields of each loss of separation (D175, R66); `window_list` writes a list of select windows chosen by their outcomes in per-window readouts, `ts-window-list-v1` (D176, R67); `window_behaviour` digests the window loop of a stage C or D campaign on fixed inputs, `--against` another code's record (D183, R68); `instruction_figures` draws select pages

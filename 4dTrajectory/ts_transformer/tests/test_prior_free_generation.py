@@ -516,8 +516,8 @@ def fly_changed(tmp_path, monkeypatch, interval_s, *, signals_after=False, limit
         monkeypatch.setattr(start_module, "load_signals", signals)
         monkeypatch.setattr(start_module, "flight_inputs", lambda series, flights, anchors, airports, rule, device:
                             executor_inputs(flights[0], geometry, anchors[0], rule=rule))
-        monkeypatch.setattr(start_module, "Loop", lambda inputs, geometries, ias, limits, *a, **k:
-                            loop_class(inputs, geometries, ias, [x * limit_factor for x in limits], *a, **k))
+        monkeypatch.setattr(start_module, "Loop", lambda inputs, geometries, ias, typecodes, limits, *a, **k:
+                            loop_class(inputs, geometries, ias, typecodes, [x * limit_factor for x in limits], *a, **k))
         return out
 
     monkeypatch.setattr(test_start, "_artefact", artefact)

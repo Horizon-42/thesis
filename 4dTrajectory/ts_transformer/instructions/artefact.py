@@ -50,7 +50,9 @@ from ts_transformer.io_utils import utc_now, write_bytes_atomic, write_json_atom
 SENTENCES_SCHEMA = "ts-instruction-sentences-v6"
 #: v3 (A22, D61): each candidate carries its published vertical path (TCH, glidepath angle, DA above the threshold).
 #: v4 (A32, D78): the candidates are the airport's runway ends with a published vertical path; no flight decides one.
-CANDIDATES_SCHEMA = "ts-instruction-candidates-v4"
+#: v5 (the user, 2026-10-12): each candidate carries the evaluation's assessment context of its runway end
+#: (``evaluation``, `evaluation.context.assessment_for_runway`), which the judge's landing verdict reads.
+CANDIDATES_SCHEMA = "ts-instruction-candidates-v5"
 #: The splits an artefact holds: the development operating days (the internal selection set is its
 #: own split, so no reader carves it out of train by another rule).
 SPLITS = DEVELOPMENT_SPLITS
@@ -252,7 +254,10 @@ def load_sentences(directory: Path, split: str, spec: VocabularySpec,
 #: v8 (A32, D77–D83): the observed rows' track, ground speed and vertical rate by the executor spec's start rule, the
 #: track in [0°, 360°) on every row; the flight ends where the judge ends it (D79); e_y to the path's segments (D83); read
 #: as the rows apart from the withheld fields (`closed_loop_sentences`, D82).
-CLOSED_LOOP_SCHEMA = "ts-instruction-closed-loop-v8"
+#: v9 (the user, 2026-10-12): the outcome of an approach crossing is the evaluation's verdict on it, ``landed`` or
+#: ``landing_failed`` (`autopilot.judge.landing_verdict`); ``unstable_at_minimums``, ``crossed_too_high`` and
+#: ``crossed_off_runway`` are gone (the decision-altitude check stays, a record on the crossing).
+CLOSED_LOOP_SCHEMA = "ts-instruction-closed-loop-v9"
 #: Every array a closed-loop file holds.
 CLOSED_LOOP_FIELDS = {"schema", "spec_sha256", "executor_params_sha256", "row_interval_s", "start_row", "signal_index",
                       "first_row", "offsets", "state_offsets", "words", "correction", "states", "on_interval",

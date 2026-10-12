@@ -1444,6 +1444,10 @@ the fixture's track leads its positions by 1 s. Information for the user's decis
 
 ### R52 · `run_ts.py final_descent_tolerance` — the closed loop's vertical tolerance in the final descent, H_final, measured for the user's choice (vocabulary §12.1 A24, D66)
 
+**2026-10-12** (the user: a landing is the evaluation's verdict, C33; the decision-altitude check stays, a record):
+readout v3, table v2 — the outcomes are `landed` / `landing_failed`, and ``da_not_passed`` (every approach crossing
+whose DA check did not pass, by why) replaces ``unstable_at_minimums``. The text below is from 2026-10-04.
+
 2026-10-04 (vocabulary §4.9, D34, D38, D55, D66, §12.1 A24; `experiments/final_descent_tolerance.py`). `final_descent_tolerance
 --instructions <artefact> --executor <spec dir> --split train|select [--per-airport N] [--seed 1337] --row-interval-s 2 4 8
 [--chunk 2048] [--device cpu] --out <new dir>` (select from a clean tree; val is refused): one artefact built as the formal

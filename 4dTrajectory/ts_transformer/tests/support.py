@@ -72,7 +72,7 @@ def raised_airport(geometry, elevation_m: float):
     rise = elevation_m - data["reference"]["elevation_m"]
     data["reference"]["elevation_m"] = elevation_m
     data["candidates"] = [{**c, "elevation_m": c["elevation_m"] + rise} for c in data["candidates"]]
-    return AirportGeometry.from_dict(data)
+    return AirportGeometry.from_dict(with_evaluation(data))
 
 
 #: The test airports' runways' published TCH, glidepath and decision altitude (the fleet's DAs above the threshold run
@@ -82,10 +82,53 @@ TEST_VERTICAL_PATH = {"crossing_height_m": TEST_TCH_M, "glidepath_deg": TEST_GLI
 
 
 def with_vertical_path(geometry, path):
-    """``geometry`` with every candidate's published vertical path ``path`` (an `instructions.airport.VerticalPath`)."""
-    from dataclasses import replace
+    """``geometry`` with every candidate's published vertical path ``path`` (an `instructions.airport.VerticalPath`),
+    its evaluation context's TCH with it."""
+    from dataclasses import asdict
 
-    return replace(geometry, candidates=tuple(replace(c, vertical_path=path) for c in geometry.candidates))
+    from ts_transformer.instructions.airport import AirportGeometry
+
+    data = geometry.to_dict()
+    data["candidates"] = [{**c, "vertical_path": asdict(path)} for c in data["candidates"]]
+    return AirportGeometry.from_dict(with_evaluation(data))
+
+
+#: The test airports' runways' width, m (150 ft): the evaluation's lateral bound is half of it.
+TEST_RUNWAY_WIDTH_M = 45.72
+#: A test runway's ellipsoid height above its MSL elevation, m (the US's −33 m geoid; no verdict of a computed record
+#: reads it).
+TEST_HAE_MINUS_MSL_M = -33.0
+
+
+def synthetic_assessment(code, ident, lat, lon, course_deg, elevation_m, tch_m) -> AssessmentContext:
+    """The evaluation's assessment context of a test runway end: LPV, `TEST_RUNWAY_WIDTH_M` wide, at the threshold
+    ``lat`` / ``lon`` (deg), ``course_deg`` true, ``elevation_m`` MSL, the TCH ``tch_m``."""
+    return AssessmentContext(
+        benchmark="lpv", airport=code, runway=ident, threshold_lat=float(lat), threshold_lon=float(lon),
+        runway_course_deg=float(course_deg), runway_width_m=TEST_RUNWAY_WIDTH_M, runway_source="test",
+        runway_source_cycle="test", procedure_source="test", procedure_source_cycle="test",
+        threshold_elevation_hae_m=float(elevation_m) + TEST_HAE_MINUS_MSL_M, threshold_elevation_msl_m=float(elevation_m),
+        threshold_crossing_height_m=float(tch_m), lpv_course_width_m=106.68)
+
+
+def with_evaluation(data: dict) -> dict:
+    """A geometry dict (`AirportGeometry.to_dict`'s shape) whose every candidate carries the evaluation's assessment
+    context of its test runway (`synthetic_assessment`): its threshold through the airport frame, its course, elevation
+    and TCH."""
+    from dataclasses import asdict
+
+    from ts_transformer.data.coordinate_frames import AirportENUFrame, AirportReference
+
+    reference = data["reference"]
+    frame = AirportENUFrame.for_airport(AirportReference(code=data["code"], lat=reference["lat"], lon=reference["lon"],
+                                                         elevation_msl_m=reference["elevation_m"]))
+
+    def context(candidate: dict) -> dict:
+        lat, lon = frame.latlon_from_horizontal(candidate["threshold_e_m"], candidate["threshold_n_m"])
+        return asdict(synthetic_assessment(data["code"], candidate["ident"], lat, lon, candidate["course_deg"],
+                                           candidate["elevation_m"], candidate["vertical_path"]["crossing_height_m"]))
+
+    return {**data, "candidates": [{**c, "evaluation": context(c)} for c in data["candidates"]]}
 
 
 #: `instruction_airport`'s field elevation E, MSL m.
@@ -99,12 +142,12 @@ def instruction_airport():
     by one 60 m step: a level of 1,080 m MSL is the word 1,020 m."""
     from ts_transformer.instructions.airport import AirportGeometry
 
-    return AirportGeometry.from_dict({
+    return AirportGeometry.from_dict(with_evaluation({
         "code": "KXXX", "reference": {"lat": 35.0, "lon": -78.0, "elevation_m": INSTRUCTION_AIRPORT_ELEVATION_M},
         "candidates": [{"ident": "09", "threshold_e_m": 0.0, "threshold_n_m": 0.0, "course_deg": 90.0,
                         "elevation_m": 100.0, "length_m": 3000.0, "vertical_path": TEST_VERTICAL_PATH}],
         "runway_ends": [{"ident": "09", "threshold_e_m": 0.0, "threshold_n_m": 0.0, "course_deg": 90.0}],
-    })
+    }))
 
 
 def instruction_spec(**changes):
@@ -186,11 +229,11 @@ def parallel_airport():
 
     ends = [{"ident": "09", "threshold_e_m": 0.0, "threshold_n_m": 0.0, "course_deg": 90.0},
             {"ident": "09L", "threshold_e_m": 0.0, "threshold_n_m": PARALLEL_SPACING_M, "course_deg": 90.0}]
-    return AirportGeometry.from_dict({
+    return AirportGeometry.from_dict(with_evaluation({
         "code": "KXXX", "reference": {"lat": 35.0, "lon": -78.0, "elevation_m": INSTRUCTION_AIRPORT_ELEVATION_M},
         "candidates": [{**end, "elevation_m": 100.0, "length_m": 3000.0, "vertical_path": TEST_VERTICAL_PATH}
                        for end in ends], "runway_ends": ends,
-    })
+    }))
 
 
 def signal_attitudes(_directory, signals):

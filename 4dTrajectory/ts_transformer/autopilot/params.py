@@ -4,7 +4,8 @@ Every parameter here is the executor's or its judge's; what the vocabulary alrea
 the tolerances) is read from the `VocabularySpec`, never restated. Every value here is the roll rate the user decided
 (D2), an assumed actuator time constant (§9.2: not identified from data, the acceptance runs over the literature's range)
 or one of the design's fixed choices (the runner's constants); the decision-altitude check's bounds are no parameter
-(vocabulary §5.8, D38: one definition with the evaluation module) — the executor takes nothing from data (the user's rule,
+(vocabulary §5.8, D38: one definition with the evaluation module), and a landing is the evaluation's verdict
+(`judge.landing_verdict`, the user 2026-10-12) — the executor takes nothing from data (the user's rule,
 2026-09-24); this container only checks that a set of values is one the laws can fly:
 
 - every rate, factor, time constant and period finite and positive (first: the other checks divide by them);
