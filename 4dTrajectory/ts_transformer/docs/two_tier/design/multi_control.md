@@ -78,9 +78,11 @@ the evidence is in §9.
 ### 0.3 Implementation
 
 Stage D's implementer keeps this table and its log, `readouts/2026-10-06_stage_d_implementation_log.md` (outline §5
-rule 10); its readings and requests go to `requests_from_d_to_designer.md`. State, 2026-10-11 (09:30): everything up
-to D194 merged (226ed303; D194 (3) for every point tried, d3dc3b26); arms A and B done (A 82.2 / 83.3 %, B 82.8 /
-82.3 % landed); the formal campaign `multi_train_majority_formal_20261011` (arm A's settings, 8 rounds) runs (log §22).
+rule 10); its readings and requests go to `requests_from_d_to_designer.md`. State, 2026-10-12 (10:30): everything up
+to D195 merged, and D191's second try and squares, D185's rates and §5 item 5 (cf7e21f0); the formal campaign
+`multi_train_majority_formal_20261011` ended its 8 rounds (round 7: select landed 83.7 %, reward 3727.2, the best of
+both arms) and runs on in place to 12 rounds (round 8: 83.6 %, 3726.9); round 7 published to the Training view; D195's
+control arm ended its 8 rounds (log §22).
 
 | Milestone | State |
 |---|---|
@@ -107,8 +109,12 @@ to D194 merged (226ed303; D194 (3) for every point tried, d3dc3b26); arms A and 
 | MC11 (D194 (2), (3)) | Merged (ca53c517, 226ed303): ce886c4a, 9bdbe6c5, d3dc3b26 (every point tried) (the longest batches first; a majority point out of reach ends its continuations); window_behaviour on arm A's campaign against 14e53df6: every digest the same (log §22) |
 | MC12 (D194 (1)) | Merged (e77bc220): f81b5a13, `--data-weight` (default `DATA_WEIGHT`) (log §22) |
 | Arms A, B (D192, D194 (1)) | A, `outputs/POOLED/multi/multi_train_majority_20261010`: done 2026-10-11 02:57, rounds 0 / 1 landed 82.2 / 83.3 %, lost separation 15.5 / 14.7 % (MC6's rounds 0–4: 82.1–82.9 %, 14.6–15.9 %); read-only with its checksums. B (data weight 0.25), `…/multi_train_majority_data025_20261011`: done 05:10, 82.8 / 82.3 %, 15.4 / 15.3 %; read-only (readout `readouts/2026-10-11_stage_d_arms_ab.zh.md`, log §22) |
-| Formal campaign (D192, arm A's settings) | `…/multi_train_majority_formal_20261011`, 8 rounds, launched 2026-10-11 09:25 at 226ed303 (D194 (3) for every point tried, d3dc3b26), 3 GPU + 4 CPU workers, 8 of every 15 batches on the CPU; rounds 0–4 landed 81.9 / 81.6 / 82.5 / 83.1 / 82.8 %; round 5 stopped 2026-10-11 16:42 at batch 186 (a CPU batch past the CPU's last level, 216 of 217 batches done); paused (the user), resumes after the control arm with 67e45506 and 9f50be58 (log §22) |
-| MC13 (D195, the user's decision of 2026-10-11; the number to be written by the designer, requests 112) | Merged (afb9aea2, fast-forward): `--group-weight minority-side`, default `equal`; the control arm `multi_train_minority_side_20261011` (3 rounds, the formal campaign's settings) launched 2026-10-11 16:58 from `.claude/worktrees/run-gw` at 1efca2f8 (unit `minority-side`), compared with the formal campaign's rounds 0–2 (log §22) |
+| Formal campaign (D192, arm A's settings) | `…/multi_train_majority_formal_20261011`, launched 2026-10-11 09:25 at 226ed303 (D194 (3) for every point tried, d3dc3b26), 3 GPU + 4 CPU workers, 8 of every 15 batches on the CPU; rounds 0–4 landed 81.9 / 81.6 / 82.5 / 83.1 / 82.8 %; round 5 stopped 2026-10-11 16:42 at batch 186 (a CPU batch past the CPU's last level); resumed 2026-10-12 01:50 at 96b5b87f with `--gpu-squares 200` (216 done batches kept, batch 186 on the GPU), rounds 5–7 83.3 / 83.5 / 83.7 % (reward 3711.8 / 3718.8 / 3727.2), ended 03:44; round 7 chosen (§5) and published (`majority_formal_r7_drawn_20261012`, `majority_formal_r7_not_landed_20261012`); extended in place to 12 rounds 09:20 at 70d87089 (the user; §0.4's stop rules), round 8 83.6 % / 3726.9 (log §22) |
+| MC14 (D195) | Merged (afb9aea2, fast-forward): `--group-weight minority-side`, default `equal`; the control arm `multi_train_minority_side_20261011` (the formal campaign's settings) launched 2026-10-11 16:58 at 1efca2f8, rounds 0–4 81.9 → 83.1 %, rounds 5–7 at 3 × the rates (D185) 83.1 / 82.5 / 83.0 %, ended 2026-10-12 01:20 (log §22) |
+| MC11 (D191: every done batch kept, the second try, the squares) | Merged: 67e45506, 9f50be58, 1efca2f8 (`malloc_trim`), ae3839bd (`--batch-squares`, `--gpu-squares`) (log §22) |
+| Post-training (D185: a resume's rates) | Merged: 16bacde0 (log §22) |
+| §5 item 5 (`multi_window_read`, `window_list --multi`) | Merged (cf7e21f0): af98c354, d0b9c202, 5139728a; read on the formal campaign's round 7 (log §22) |
+| Frontend §5.1 (the counted outcome) | Merged: 70d87089 (log §22) |
 | MC8–MC10 | Not started |
 
 ### 0.4 Plan
