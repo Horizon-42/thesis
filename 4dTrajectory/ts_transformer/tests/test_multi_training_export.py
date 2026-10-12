@@ -81,7 +81,7 @@ def stage_d_set(tmp_path, monkeypatch):
                    "windows": str(tmp_path / "census"), "procedure_root": "c", "smoke": True,
                    "settings": {"start": start, "seed": 2027}}}))
     # stage D's settings as its flying reads them: the window's span alone, a batch of its two aircraft
-    settings = SimpleNamespace(spans_s=[window.span_s], batch_rows=[2])
+    settings = SimpleNamespace(spans_s=[window.span_s], batch_rows=[2], batch_squares=[])
     stage = replace(multi_export.STAGE_D, settings_of=lambda record: settings,
                     windows=lambda *a: ([window], {"pool": 1, "real": 1, "leftOut": {}}),
                     model_of=lambda context_, settings_, campaign_, r: model)
@@ -235,7 +235,7 @@ def test_stage_d_s_positions_and_listed_parts_are_the_readout_s(tmp_path, monkey
 
     monkeypatch.setattr(multi_export, "flown_positions", capture("export"))
     monkeypatch.setattr(census, "flown_positions", capture("readout"))       # the readout's, through `loop_positions`
-    settings = SimpleNamespace(spans_s=[window.span_s], batch_rows=[2], seed=2027, select_per_airport=1)
+    settings = SimpleNamespace(spans_s=[window.span_s], batch_rows=[2], batch_squares=[], seed=2027, select_per_airport=1)
     flying = multi_export.stage_d_flying(two, settings, multi_export.STAGE_D.readout_numbers(settings))
     flown_ends = []
     end = flying.end

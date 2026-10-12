@@ -146,7 +146,7 @@ added three entries (the rows after the performance index's).
 | Two ATC constants in `instructions/spec.py` that nothing reads (2026-10-04) | open | delete `ATC_SPEED_COMPLIANCE_MPS` and `ATC_MIN_DESCENT_RATE_MPS` | no: nothing reads them |
 | Two runway ends on one centreline halve the landing screen to float noise (2026-10-05) | open | compare the across-course spacing with a tolerance in `landing_cross_limit_m` and its harvest original, together | yes: the candidates' landing screens (a rebuild); none of the five airports has such a pair today (not checked on every end) |
 | `post_profile`'s `executor_step` part reads 0.0 s (2026-10-09) | open | the part's match finds no `autopilot/start.py` `step` in the stats; C8 is finished and runs no more, so no code change (multi-aircraft control D181) | no: a finished readout's report only |
-| A stage D window's identity written twice (2026-10-12) | open | `STAGE_D.identity` in `experiments/multi_training_export.py` becomes `lambda w: identity_of("D", w)` (`post.window_lists`) | no (a set's export only) |
+| A stage D window's identity written twice (2026-10-12) | resolved | fixed on `dev-export-identity` (2026-10-12): `STAGE_D.identity` is `partial(identity_of, "D")` (`post.window_lists`); checked on round 7's list of the formal campaign: the same 453 windows; entry removed | — |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
 the executor `autopilot/` and its replay, `prior_train` / `prior_select` / `prior_free_generation`, the land-by-reward
@@ -788,10 +788,3 @@ names `("autopilot/start.py", "step")` and `part_times` takes the largest cumula
 **Judgement**: the cause is not traced (the match's file or name as cProfile records it). C8 is finished and its
 profile runs no more, so the code stays as it is (D181); its numbers read without that part. Stage D's speed is measured
 by `experiments/multi_speed.py` (D181 (56)), which times the executor between two synchronisations instead.
-
-## A stage D window's identity written twice (2026-10-12)
-
-Verified (review of cf7e21f0). `post.window_lists.identity_of("D", w)` (anchor flight, `row0_s`, `span_s`) is what a
-stage D window list writes; the Training export checks a listed window against its own `STAGE_D.identity` lambda
-(`experiments/multi_training_export.py`), which states the same three fields again. The export takes a list only while
-the two agree (pinned by `tests/test_multi_window_read.py`). Fix: the lambda calls `identity_of("D", w)`.

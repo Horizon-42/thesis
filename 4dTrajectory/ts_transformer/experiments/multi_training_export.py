@@ -34,6 +34,7 @@ campaign gives only a smoke set.
 from __future__ import annotations
 
 import argparse
+from functools import partial
 from typing import Any, Sequence
 
 import numpy as np
@@ -48,6 +49,7 @@ from ts_transformer.experiments.post_training_export import (
 from ts_transformer.experiments.post_window_loop import STEPS_BEFORE_EVENT, WindowLoop, WindowResult
 from ts_transformer.multi.census import flown_positions, judged_steps
 from ts_transformer.post.scene import Window
+from ts_transformer.post.window_lists import identity_of
 
 
 def chosen_windows(context: Any, settings: Any, split: str, airport: str, per_airport: int, seed: int
@@ -126,7 +128,7 @@ STAGE_D = StageExport(
     # the readout's numbers of each aircraft (`multi_train.read_batch`, D166 (34)): the campaign's seed, the place
     readout_numbers=lambda settings: lambda place, member: readout_numbers(settings.seed, place, member),
     selection=lambda context, settings: selection_windows(context, settings, "select"),
-    identity=lambda window: {"flight": window.commanded.key, "row0_s": window.row0_s, "span_s": window.span_s},
+    identity=partial(identity_of, "D"),                     # what a stage D window list writes
     # the seed that orders the readout's windows and draws their numbers (`multi_train.selection_windows`)
     selection_fields=lambda settings: {"select_seed": settings.seed, "per_airport": settings.select_per_airport,
                                        "spans_s": list(settings.spans_s)},
