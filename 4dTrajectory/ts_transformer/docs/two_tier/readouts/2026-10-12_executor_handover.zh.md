@@ -33,8 +33,9 @@
 
 ## 3. 证据（本机实验）
 
-实验目录在 Mac 上：`4dTrajectory/outputs/POOLED/spai_copy_20261011/plant_comparison/`。**它在 git 忽略的 outputs 下，不随
-代码过去**；需要时从 Mac 用 rsync 取。数字也已写进设计文档 D9、D10。
+实验脚本已移入仓库：`4dTrajectory/ts_transformer/archive/executor_first_principles_2026_10/`（README 有每个脚本的用途和
+路径的改写）。实验结果在 Mac 上：`4dTrajectory/outputs/POOLED/spai_copy_20261011/plant_comparison/`。**结果在 git 忽略的
+outputs 下，不随代码过去**；需要时从 Mac 用 rsync 取。数字也已写进设计文档 D9、D10。
 
 - `lead_eval_1000.py`、`lead_eval_1000_combo.py`：V12，train 999 架（每机场 200 架，种子 1337），Δ 2 s 与 4 s。4/4/4 对基准
   4/0/0：Δ 2 s 845 对 818，Δ 4 s 836 对 818。代价：垂直失败 22 → 34、20 → 30。
