@@ -23,7 +23,9 @@ from aeroviz_backend.autopilot_segment.fly import FlownSegment, last_state
 #: MIRROR of `aeroviz-4d/src/data/trainingAutopilot.ts` (`TRAINING_AUTOPILOT_SCHEMA`); the reader refuses anything
 #: else by name. A name changes with the payload's shape, on both sides, in one change. v9 (A23, 2026-10-04): stage A —
 #: a word of the closed-loop sentence at Δ, flown from its first predicted step; no model sentence, no procedure's masks.
-SCHEMA = "aeroviz-autopilot-segment-v9"
+#: v10 (executor design draft 5): the thrust, bank and load factor are what the actuators had reached (the lag plant),
+#: no longer the commands, which lead them.
+SCHEMA = "aeroviz-autopilot-segment-v10"
 #: The end of a segment its stop ended (the executor got there); otherwise the judge's outcome (`judge.OUTCOMES`).
 #: MIRROR of `trainingAutopilot.ts` (`TRAINING_AUTOPILOT_SEGMENT_END`).
 SEGMENT_END = "segment_end"
@@ -31,13 +33,14 @@ SEGMENT_END = "segment_end"
 
 def track_payload(result: FlownSegment, geometry: Any, hae_minus_msl_m: float, aero_params: np.ndarray
                   ) -> dict[str, Any]:
-    """The flown segment every control cycle from the word's cycle to its last state, with the commands each cycle flew
-    (one fewer than the states: the last state's is null) and the attitude it is drawn in."""
+    """The flown segment every control cycle from the word's cycle to its last state, with the thrust, bank and load
+    factor the actuators had reached at each cycle's start (`Flown.actuators`, what the aircraft flew; one fewer than the
+    states: the last state's is null) and the attitude it is drawn in."""
     flown = result.flown
     first, last = result.segment.start_cycle, last_state(result)
     states = flown.states[0, : last + 1].cpu().numpy()
     track = flown_track(states, geometry)
-    commands = flown.commands[0, :last].cpu().numpy()
+    actuators = flown.actuators[0, :last].cpu().numpy()
     shown = slice(first, None)
     cycles = np.arange(first, last + 1)
     return {
@@ -49,8 +52,8 @@ def track_payload(result: FlownSegment, geometry: Any, hae_minus_msl_m: float, a
         "groundSpeedMps": rounded(track["ground_speed"][shown], 3),
         "verticalRateMps": rounded(track["vertical_rate"][shown], 3),
         # the dynamics' bank turns left when positive
-        "thrustFraction": rounded(commands[shown, 0], 4), "bankRightDeg": rounded(-np.degrees(commands[shown, 1]), 3),
-        "loadFactor": rounded(commands[shown, 2], 4),
+        "thrustFraction": rounded(actuators[shown, 0], 4), "bankRightDeg": rounded(-np.degrees(actuators[shown, 1]), 3),
+        "loadFactor": rounded(actuators[shown, 2], 4),
         "attitude": attitude_payload(executor_attitude(flown, 0, cycles, aero_params)),
     }
 

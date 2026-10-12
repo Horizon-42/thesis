@@ -1,23 +1,20 @@
-"""The lateral law (vocabulary §5.4; executor design §4.1): a heading word. Nothing else — no capture, no turn onto the
+"""The lateral law (vocabulary §5.4; executor design §6): a heading word. Nothing else — no capture, no turn onto the
 final, no centreline tracking (D2, D3, D9): the words fly the aircraft onto the final, and "go-around" changes no
 heading target (D27): the word in force stays, and the model turns the aircraft with heading words as at every row.
 
-Every law here returns a compass TRACK RATE for the inverse (`autopilot.inverse.attitude`) to fly, within the
-vocabulary's turn rates and under its bank limit (the executor takes nothing beyond the vocabulary, the user's rule
-of 2026-09-24):
+The law returns a compass TRACK RATE and the heading error for the inverse (`autopilot.inverse.bank`) to fly; the bank
+it flies at, the bank it can still roll out of before the error is gone, and the roll rate are the inverse's (§6.3,
+§6.4, §4.4). Nothing here limits the rate: no turn-rate cap, no bank cap of the vocabulary (§6.4) —
 
 - a heading word (§3.3, D8) says a track RELATIVE to the course of the runway in force R. When the executor hears a new
   word it converts it with the course of R at that moment, θ = course(R) + 5k°, and keeps that absolute target until
   the next heading word: a change of R alone does not turn the aircraft. Each word says the track a lead ``L`` later,
-  so the law arrives on it then —
-  ``|χ̇*| = min(|e| / max(t_heard + L − t, 2Δt), sqrt(2 g p |e| / V), r_max)``: the error over the time left until the
+  so the law arrives on it then (R5.2) — ``χ̇* = e / max(t_heard + L − t, Δt)``: the error over the time left until the
   lead runs out, measured on the executor's own clock from the cycle it heard the word (heard on a cycle that starts
-  a row, `sentence`; the judge reads each word from that row), floored at the law's stability floor 2Δt (after that,
-  a hold); no faster than the bank can still be taken out before the word (`stopping_rate_deg_s`: the executor cannot
-  know a word is a turn's last); up to the vocabulary's largest turn rate ``r_max`` (the bank limit binds first in the
-  inverse at most speeds). The error ``e`` is measured from the word in force: a new word turns ``wrap180(θ_new −
-  θ_old)`` further than the old one, so a turn said word by word keeps its way even while the aircraft lags it; the
-  first word turns the shorter way.
+  a row, `sentence`; the judge reads each word from that row), at least one cycle, the shortest time the executor can
+  act in (§6.2). The error ``e`` is measured from the word in force: a new word turns ``wrap180(θ_new − θ_old)``
+  further than the old one, so a turn said word by word keeps its way even while the aircraft lags it; the first word
+  turns the shorter way.
 
 Positions are the airport frame's (`autopilot.frame`), the runway geometry the artefact's candidates.
 """
@@ -30,7 +27,6 @@ from typing import Sequence
 
 import torch
 
-from aerodynamic_model.torch_dynamics import GRAVITY_MPS2
 from ts_transformer.autopilot.ends import runway_lateral_limit_m
 from ts_transformer.autopilot.frame import Kinematics, wrap180
 from ts_transformer.autopilot.params import ExecutorParams
@@ -38,26 +34,10 @@ from ts_transformer.instructions.airport import AirportGeometry, landing_cross_l
 from ts_transformer.instructions.spec import VocabularySpec
 
 
-def bank_return_gain(speed_mps: torch.Tensor, params: ExecutorParams) -> torch.Tensor:
-    """``k = 2 g p / V``, 1/s²: at a turn rate r the bank is ``≈ V r / g``, and returning it at p turns the track
-    ``r² / k`` further (radians; a small-bank reading)."""
-    return 2.0 * GRAVITY_MPS2 * math.radians(params.bank_rate_deg_s) / speed_mps
-
-
-def stopping_rate_deg_s(error_deg: torch.Tensor, speed_mps: torch.Tensor, params: ExecutorParams) -> torch.Tensor:
-    """The fastest track rate, deg/s, whose bank the executor can still take out before ``error_deg`` is gone:
-    ``r = sqrt(k |e|)`` (`bank_return_gain`)."""
-    return torch.rad2deg(torch.sqrt(bank_return_gain(speed_mps, params) * torch.deg2rad(error_deg.abs())))
-
-
-def word_rate(error_deg: torch.Tensor, to_go_s: torch.Tensor, speed_mps: torch.Tensor, params: ExecutorParams,
-              spec: VocabularySpec) -> torch.Tensor:
+def word_rate(error_deg: torch.Tensor, to_go_s: torch.Tensor, params: ExecutorParams) -> torch.Tensor:
     """The compass track rate, deg/s, that arrives on the heading word in force when its lead runs out (``to_go_s``
-    from now, floored at the stability floor 2Δt), no faster than the bank can still be taken out before the word
-    (`stopping_rate_deg_s`), up to the vocabulary's largest turn rate (the bank cap binds in the inverse)."""
-    rate = torch.minimum((error_deg / to_go_s.clamp(min=2.0 * params.cycle_s)).abs(),
-                         stopping_rate_deg_s(error_deg, speed_mps, params))
-    return torch.sign(error_deg) * rate.clamp(max=spec.turn_rate_max_deg_s)
+    from now, at least one cycle; §6.2 step 1)."""
+    return error_deg / to_go_s.clamp(min=params.cycle_s)
 
 
 @dataclass(frozen=True)
@@ -165,10 +145,12 @@ class Lateral:
         return self.target_unwrapped - self.track_unwrapped
 
     def rate(self, state: Kinematics, relative_deg: torch.Tensor, issued: torch.Tensor, runway: torch.Tensor,
-             runways: Runways, time_s: float | torch.Tensor, *, fresh: torch.Tensor | None = None) -> torch.Tensor:
-        """The track rate for this cycle; ``issued`` is the step the heading word in force was written at, ``runway``
-        the runway in force, ``time_s`` the time flown."""
+             runways: Runways, time_s: float | torch.Tensor, *, fresh: torch.Tensor | None = None
+             ) -> tuple[torch.Tensor, torch.Tensor]:
+        """The track rate for this cycle and the heading error it closes (degrees; the inverse's stopping bank reads
+        it); ``issued`` is the step the heading word in force was written at, ``runway`` the runway in force,
+        ``time_s`` the time flown."""
         course = runways.pointed(runway)[2]
         error = self.word_error(state, relative_deg, issued, course, time_s, fresh)
         to_go = self.heard_s + self.spec.heading_lead_s - time_s
-        return word_rate(error, to_go, state.ground_speed_mps, self.params, self.spec)
+        return word_rate(error, to_go, self.params), error

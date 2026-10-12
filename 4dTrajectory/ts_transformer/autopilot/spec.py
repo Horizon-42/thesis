@@ -29,7 +29,10 @@ from ts_transformer.io_utils import write_json_atomic
 #: v9 (A29, D73): no digest of the executor's or the labeller's code beside the parameters.
 #: v10 (A32): the start rule (D77) among the parameters; the flight ends where the judge ends it (D79), the bank's limits
 #: from the first cycle (D84), the frame at the airport reference (D81).
-EXECUTOR_SPEC_SCHEMA = "ts-executor-spec-v10"
+#: v11 (executor design §2–§8, draft 5): the first-principles executor — a first-order-lag plant with an actuator observer
+#: and exact inverse (the three time constants among the parameters), roll rate p, no path-rate parameters; the laws read
+#: the vocabulary's leads (instruction-v7).
+EXECUTOR_SPEC_SCHEMA = "ts-executor-spec-v11"
 
 
 def params_to_dict(params: ExecutorParams) -> dict[str, Any]:

@@ -1,11 +1,9 @@
 """Executor E7: write the executor's spec (vocabulary §5, §12.1 A6; executor design §9–§10).
 
-The executor takes no information beyond the vocabulary (the user's rule, 2026-09-24) and the procedure standards:
-the roll rate p is the standards' 5°/s (`ROLL_RATE_DEG_S`); the executor makes no turn of its own (D2, D27), so no
-time constant of one; the turn rates, the bank limit, the speed word's rate (a_max, D43), "unspecified"'s pace and the
-level bands are the vocabulary's,
-read at run time; a
-word takes effect when it is said. The judge's decision-altitude check has no parameter (vocabulary §5.8, D38: the
+The executor takes no information beyond the vocabulary (the user's rule, 2026-09-24), the dynamics and values decided
+or assumed (executor design §9, draft 5): the roll rate p 15°/s (`ROLL_RATE_DEG_S`, D2), the actuators' first-order time
+constants (assumed, not identified from data, §9.2); the words' leads are the vocabulary's, read at run time; the limits
+are physical (the load band, the stall, the thrust box, the bank the wing can turn at). The judge's decision-altitude check has no parameter (vocabulary §5.8, D38: the
 evaluation module's vertical bound and the FAS cone); each candidate's
 published vertical path and decision altitude (the artefact's `candidates.json`, D61) are recorded in
 ``measurements.json`` as the spec is written. Nothing is measured from data. The design's fixed choices are module
@@ -33,27 +31,24 @@ from pathlib import Path
 
 from ts_transformer.autopilot import conformance
 from ts_transformer.autopilot.params import FORMAL_START_RULES, ExecutorParams
-from ts_transformer.autopilot.speed import speed_change_mps2
 from ts_transformer.autopilot.spec import params_sha256, write_spec
 from ts_transformer.instructions.artefact import load_candidates, load_spec
 from ts_transformer.instructions.conformance import require_conforming_labeller
-from ts_transformer.instructions.words import Words
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 #: Δt, the control period (the user's choice, design §14 item 5).
 CYCLE_S = 1.0
-#: τ_γ: the smallest §5.1 admits (2 Δt) — the path angle follows its reference as fast as the loop allows.
-PATH_TIME_CONSTANT_S = 2.0 * CYCLE_S
-#: γ̇_max as a multiple of §5.1's lower bound (method A).
-PATH_RATE_FACTOR = 2.0
+#: τ_x, τ_φ, τ_n, s: the actuators' first-order time constants — ASSUMED (executor design §9.2: the control path's
+#: `TSConfig` defaults; the repository holds no measured one, ADS-B carries no attitude; the acceptance runs over the
+#: literature's 1–3.5 s for the bank, V3).
+THRUST_TIME_CONSTANT_S, BANK_TIME_CONSTANT_S, LOAD_TIME_CONSTANT_S = 1.5, 2.0, 0.8
 #: A flight is given this many times its own sentence's time before it times out (§8.3).
 TIMEOUT_FACTOR = 1.5
-#: p, deg/s: the roll rate the procedure standards allow (user 2026-09-27, the heading-lead ablation: it reads the same as
-#: the bank limit over the lead, 8°/s, which is faster than every source). FAA Order 8260.3G (2024) App. E, Sec. 4, ¶6.a:
-#: "Roll-in rates of up to five degrees per second and bank angles of 25 degrees may be used"; ICAO Doc 8168 Vol II
-#: Part II, Sec 4, Ch 1, 1.3.9.1: "5 seconds for establishment of bank" (25°, reading: 5°/s). Quotes and files:
-#: repo `docs/literature/roll_rate_and_turn_response/` §3.1–§3.2.
-ROLL_RATE_DEG_S = 5.0
+#: p, deg/s: the largest rate the ACTUAL bank is rolled at (executor design §4.4, D2: the user's decision of 2026-10-11, from
+#: the roll-rate sweep on the lag plant — 5°/s on top of the bank's lag left flights > 300 m off their path; the
+#: procedure standards' 5°/s, FAA Order 8260.3G App. E Sec. 4 ¶6.a, is a design value for protected areas, repo
+#: `docs/literature/roll_rate_and_turn_response/` §3.1–§3.2).
+ROLL_RATE_DEG_S = 15.0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -80,23 +75,28 @@ def main(argv: list[str] | None = None) -> int:
     spec = load_spec(instructions)
 
     params = ExecutorParams(cycle_s=CYCLE_S, bank_rate_deg_s=ROLL_RATE_DEG_S,
-                            path_time_constant_s=PATH_TIME_CONSTANT_S, path_rate_factor=PATH_RATE_FACTOR,
-                            timeout_factor=TIMEOUT_FACTOR, start_rule=args.start_rule)
+                            thrust_time_constant_s=THRUST_TIME_CONSTANT_S, bank_time_constant_s=BANK_TIME_CONSTANT_S,
+                            load_time_constant_s=LOAD_TIME_CONSTANT_S, timeout_factor=TIMEOUT_FACTOR,
+                            start_rule=args.start_rule)
     params.check(spec, spec.step_s)
-    print(f"the standards' roll rate p {ROLL_RATE_DEG_S:g}°/s", flush=True)
+    print(f"roll rate p {ROLL_RATE_DEG_S:g}°/s; actuator time constants (assumed) {params.time_constants_s} s",
+          flush=True)
 
     measurements = {
-        "from_the_standards": {
+        "decided": {
             "bank_rate_deg_s": {"value": ROLL_RATE_DEG_S,
-                                "rule": "the procedure standards' roll rate: FAA Order 8260.3G App. E Sec. 4 ¶6.a (up to "
-                                        "5°/s), ICAO Doc 8168 Vol II Part II Sec 4 Ch 1 1.3.9.1 (bank established in 5 s)"},
+                                "rule": "the user's decision D2 (executor design §4.4, 2026-10-11): the largest rate the "
+                                        "actual bank is rolled at, from the roll-rate sweep on the lag plant"},
         },
-        "from_the_vocabulary": {"turn_rate_max_deg_s": spec.turn_rate_max_deg_s,
-                                "turn_bank_max_deg": spec.turn_bank_max_deg, "heading_lead_s": spec.heading_lead_s,
-                                "speed_word_accel_mps2": spec.speed_accel_max_mps2,
-                                "unspecified_pace_mps2": speed_change_mps2(spec),
-                                "narrowest_level_band_m": float(Words(spec).altitude_tolerances.min()),
-                                "lined_up_deg": spec.lined_up_deg, "landing_max_height_m": spec.landing_max_height_m},
+        "assumed": {
+            "time_constants_s": {"value": list(params.time_constants_s),
+                                 "rule": "thrust, bank, load factor: the control path's TSConfig defaults, not "
+                                         "identified from data (executor design §9.2); accepted over the literature's "
+                                         "1–3.5 s for the bank (V3)"},
+        },
+        "from_the_vocabulary": {"heading_lead_s": spec.heading_lead_s, "angle_lead_s": spec.angle_lead_s,
+                                "speed_lead_s": spec.speed_lead_s, "lined_up_deg": spec.lined_up_deg,
+                                "landing_max_height_m": spec.landing_max_height_m},
         "from_the_runway": {
             "rule": "each candidate's published threshold crossing height, glidepath angle and decision altitude (the "
                     "judge's decision-altitude check), from the artefact's candidates.json (D61); recorded here as the "
@@ -104,8 +104,7 @@ def main(argv: list[str] | None = None) -> int:
             "published": {code: {candidate.ident: asdict(candidate.vertical_path) for candidate in geometry.candidates}
                           for code, geometry in sorted(load_candidates(instructions).items())},
         },
-        "fixed": {"cycle_s": CYCLE_S, "path_time_constant_s": PATH_TIME_CONSTANT_S, "path_rate_factor": PATH_RATE_FACTOR,
-                  "timeout_factor": TIMEOUT_FACTOR},
+        "fixed": {"cycle_s": CYCLE_S, "timeout_factor": TIMEOUT_FACTOR},
         "chosen": {"start_rule": {"value": args.start_rule,
                                   "rule": "the user's choice from the measurement of A33 (D77): how the start state "
                                           "takes its velocity from the observed rows at or before its row"}},

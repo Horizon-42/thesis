@@ -106,11 +106,11 @@ def test_three_ways_and_the_control_fly_at_the_observed_speed_and_read_the_offse
     assert second["next_start_row"] is None
     # information, pinned: the fixture's track leads its positions by 1 s (each 2 s segment flown at its first row's
     # track), so even the observed track integrated (the control) ends 99 m inside each turn; the words add 20 m and
-    # 17 m; the executor takes back 14 m and 20 m
+    # 17 m; the executor (design draft 5) takes back 19 m and 29 m
     own = [{way: r[way]["own_m"] for way in executor_turns.WAYS} for r in (first, second)]
     assert [round(o["observed_track"]) for o in own] == [-99, -89]
     assert [round(o["exact_words"]) for o in own] == [-119, -106]
-    assert own[0]["executor"] == pytest.approx(-104.5, abs=3.0) and own[1]["executor"] == pytest.approx(-85.8, abs=3.0)
+    assert own[0]["executor"] == pytest.approx(-100.5, abs=3.0) and own[1]["executor"] == pytest.approx(-76.7, abs=3.0)
 
 
 def test_the_outside_of_a_turn_and_a_flight_that_ends_before_it_is_read():

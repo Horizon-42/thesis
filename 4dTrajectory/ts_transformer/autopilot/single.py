@@ -4,7 +4,8 @@
 The batched executor (`ts_transformer.autopilot`) spends ~2.7 ms a 1 s cycle on a flight flown alone: every law and
 every RK4 stage is a few hundred torch calls on one-element tensors, each paying the call's overhead. This module is
 the SAME cycle — the same laws, in the same order, with the same limits and the same dynamics (the control path's
-point-mass model on the scaled transport chart, two RK4 steps of 0.5 s a cycle) — written for one flight: every
+point-mass model on the scaled transport chart with its three first-order actuators, two RK4 steps of 0.5 s a cycle)
+— written for one flight: every
 quantity a Python float, every torch expression mirrored operation for operation. The setup is not mirrored: the words,
 the spec, the runways, the flight's physical context and the judge are the package's own.
 
@@ -47,7 +48,6 @@ from ts_transformer.autopilot.inverse import BANK_MAX_RAD, LOAD_FACTOR_MAX, LOAD
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.plant import EXECUTOR_DYNAMICS
 from ts_transformer.autopilot.sentence import ROW_ROUNDING, _filled
-from ts_transformer.autopilot.speed import speed_change_mps2
 from ts_transformer.autopilot.vertical import GO_AROUND_MAX_RAD, GO_AROUND_MIN_RAD
 from ts_transformer.instructions.airport import AirportGeometry, landing_cross_limit_m
 from ts_transformer.instructions.spec import VocabularySpec
@@ -175,19 +175,25 @@ def _polar(load: float, speed: float, mass: float, density: float, aero: Sequenc
 
 
 class Plant:
-    """The flight's airframe and chart: `step` integrates one cycle from a geodetic row
-    ``(lat, lon, alt, V, ψ, γ, m)`` under ``(thrust fraction, bank, load factor)``."""
+    """The flight's airframe and chart: `step` integrates one cycle from a geodetic row ``(lat, lon, alt, V, ψ, γ, m)``
+    and the actuators ``(thrust fraction, bank, load factor)`` under the commands (`plant.Plant`: the lag model,
+    `aerodynamic_model.torch_lag_dynamics.lag_rhs`, its actuators unscaled)."""
 
-    def __init__(self, aero_params: Sequence[float], frame_params: Sequence[float], max_thrust_n: float) -> None:
+    def __init__(self, aero_params: Sequence[float], frame_params: Sequence[float], max_thrust_n: float,
+                 time_constants_s: Sequence[float]) -> None:
         self.aero = tuple(aero_params)
         self.lat0_deg, self.lon0_deg, self.alt0_m, _heading = frame_params
         self.lat0_rad = math.radians(self.lat0_deg)
         self.lon0_rad = math.radians(self.lon0_deg)
         self.max_thrust_n = max_thrust_n
+        self.taus = tuple(time_constants_s)
 
-    def _rhs(self, s: list[float], thrust: float, bank: float, load: float) -> list[float]:
-        """`scaled_transport_chart_rhs`: the physical RHS (`transport_chart_rhs`) at the scaled state, chain-ruled."""
+    def _rhs(self, s: list[float], command: Sequence[float]) -> list[float]:
+        """`lag_rhs`: the physical chart RHS (`transport_chart_rhs`) at the scaled chart state under the actuators'
+        values, chain-ruled, and ``(u − a) / τ`` for each actuator."""
         _east, north, up, ve, vn, vu, mass = (s[i] * _UNITS[i] for i in range(7))
+        fraction, bank, load = s[7], s[8], s[9]
+        thrust = fraction * self.max_thrust_n
         lat_rad = self.lat0_rad + north / WGS84_A
         altitude = self.alt0_m + up
         sin_lat = math.sin(lat_rad)
@@ -215,39 +221,40 @@ class Plant:
         east_rate = ve * (WGS84_A * math.cos(self.lat0_rad) / ((radius_n + altitude) * math.cos(lat_rad)))
         north_rate = vn * WGS84_A / (radius_m + altitude)
         rate = (east_rate, north_rate, vu, force[0] - cross[0], force[1] - cross[1], force[2] - cross[2], 0.0)
-        return [rate[i] / _UNITS[i] for i in range(7)]
+        return ([rate[i] / _UNITS[i] for i in range(7)]
+                + [(command[i] - s[7 + i]) / self.taus[i] for i in range(3)])
 
-    def _rk4(self, s: list[float], thrust: float, bank: float, load: float, dt: float) -> list[float]:
+    def _rk4(self, s: list[float], command: Sequence[float], dt: float) -> list[float]:
         half = 0.5 * dt
-        k1 = self._rhs(s, thrust, bank, load)
-        k2 = self._rhs([s[i] + half * k1[i] for i in range(7)], thrust, bank, load)
-        k3 = self._rhs([s[i] + half * k2[i] for i in range(7)], thrust, bank, load)
-        k4 = self._rhs([s[i] + dt * k3[i] for i in range(7)], thrust, bank, load)
+        k1 = self._rhs(s, command)
+        k2 = self._rhs([s[i] + half * k1[i] for i in range(10)], command)
+        k3 = self._rhs([s[i] + half * k2[i] for i in range(10)], command)
+        k4 = self._rhs([s[i] + dt * k3[i] for i in range(10)], command)
         sixth = dt / 6.0
-        return [s[i] + sixth * (k1[i] + 2.0 * k2[i] + 2.0 * k3[i] + k4[i]) for i in range(7)]
+        return [s[i] + sixth * (k1[i] + 2.0 * k2[i] + 2.0 * k3[i] + k4[i]) for i in range(10)]
 
-    def step(self, state: Sequence[float], command: Sequence[float], duration_s: float) -> tuple[float, ...]:
-        fraction, bank, load = command
-        thrust = fraction * self.max_thrust_n
+    def step(self, state: Sequence[float], actuators: Sequence[float], command: Sequence[float],
+             duration_s: float) -> tuple[tuple[float, ...], tuple[float, ...]]:
         lat, lon, alt, speed, psi, gamma, mass = state
         try:
             cos_gamma = math.cos(gamma)
             chart = ((math.radians(lon) - self.lon0_rad) * WGS84_A * math.cos(self.lat0_rad),
                      (math.radians(lat) - self.lat0_rad) * WGS84_A, alt - self.alt0_m,
                      speed * cos_gamma * math.cos(psi), speed * cos_gamma * math.sin(psi), speed * math.sin(gamma), mass)
-            s = [chart[i] / _UNITS[i] for i in range(7)]
+            s = [chart[i] / _UNITS[i] for i in range(7)] + list(actuators)
             # `torch_piecewise_rollout._piecewise_schedule`: ceil(duration / dt_cap) steps of min(the rest, dt_cap)
             for local in range(math.ceil(duration_s / _DT_CAP)):
-                s = self._rk4(s, thrust, bank, load, _min(_clamp(duration_s - local * _DT_CAP, 0.0), _DT_CAP))
+                s = self._rk4(s, command, _min(_clamp(duration_s - local * _DT_CAP, 0.0), _DT_CAP))
             east, north, up, ve, vn, vu, mass_end = (s[i] * _UNITS[i] for i in range(7))
             horizontal = math.sqrt(ve * ve + vn * vn)
-            return (self.lat0_deg + math.degrees(north / WGS84_A),
-                    self.lon0_deg + math.degrees(east / (WGS84_A * math.cos(self.lat0_rad))), self.alt0_m + up,
-                    math.sqrt(horizontal * horizontal + vu * vu), math.atan2(vn, ve), math.atan2(vu, horizontal), mass_end)
+            return ((self.lat0_deg + math.degrees(north / WGS84_A),
+                     self.lon0_deg + math.degrees(east / (WGS84_A * math.cos(self.lat0_rad))), self.alt0_m + up,
+                     math.sqrt(horizontal * horizontal + vu * vu), math.atan2(vn, ve), math.atan2(vu, horizontal),
+                     mass_end), tuple(s[7:]))
         except (ArithmeticError, ValueError):
             # the dynamics left the reals: the torch rollout writes NaN (the mass, whose rate is zero, stays), and the
             # flight is done
-            return (math.nan,) * 6 + (mass,)
+            return (math.nan,) * 6 + (mass,), (math.nan,) * 3
 
 
 # ---- the words said (`sentence`)
@@ -304,7 +311,6 @@ class Lateral:
         self.word_deg: float | None = None
         self.word_step = 0
         self.heard_s = self.track_unwrapped = self.target_unwrapped = self.last_track = 0.0
-        self.return_gain = 2.0 * GRAVITY_MPS2 * math.radians(params.bank_rate_deg_s)
 
     def _word_error(self, state: Kin, relative_deg: float, issued: int, course: float, time_s: float) -> float:
         heard = _remainder(course + relative_deg, 360.0)
@@ -322,102 +328,122 @@ class Lateral:
         self.word_deg, self.word_step, self.last_track = word, issued, state.track_deg
         return self.target_unwrapped - self.track_unwrapped
 
-    def _word_rate(self, error: float, to_go: float, speed: float) -> float:
-        stopping = math.degrees(math.sqrt(self.return_gain / speed * math.radians(abs(error))))
-        rate = _min(abs(error / _clamp(to_go, 2.0 * self.params.cycle_s)), stopping)
-        return _sign(error) * _clamp(rate, high=self.spec.turn_rate_max_deg_s)
-
-    def rate(self, state: Kin, force: WordsNow, runways: Sequence[Runway], time_s: float) -> float:
+    def rate(self, state: Kin, force: WordsNow, runways: Sequence[Runway], time_s: float) -> tuple[float, float]:
         course = runways[force.runway].course_deg
         error = self._word_error(state, force.heading_rel_deg, force.issued_step[HEADING], course, time_s)
-        return self._word_rate(error, self.heard_s + self.spec.heading_lead_s - time_s, state.ground_speed_mps)
+        to_go = self.heard_s + self.spec.heading_lead_s - time_s
+        return error / _clamp(to_go, self.params.cycle_s), error
+
+
+def _stop_angle(left: float, speed: float, gamma: float, climbing: bool, bank_mean: float, observed_load: float,
+                ceiling: float, tau_load: float, cycle_s: float) -> float:
+    """`vertical.stop_angle_rad`, one flight."""
+    cos_bank = math.cos(bank_mean)
+    level = (math.cos(gamma) if climbing else 1.0) / cos_bank
+    limit = LOAD_FACTOR_MIN if climbing else ceiling
+    reach = level - limit if climbing else limit - level
+    if reach <= 0.0:                                  # the limit cannot change the path angle that way
+        return 0.0
+    rate = GRAVITY_MPS2 * reach * cos_bank / speed
+    from_now = observed_load - limit if climbing else limit - observed_load
+    delay = _clamp(tau_load * from_now / reach, 0.0) + cycle_s
+    a_term, b_term = speed * delay, _divide(speed, rate)
+    radius = math.hypot(a_term, b_term)
+    angle = math.atan2(b_term, a_term) + math.asin(_clamp(_divide(left - b_term, radius), high=1.0))
+    return angle
 
 
 class Vertical:
     """`vertical.Vertical`, one flight."""
 
     def __init__(self, params: ExecutorParams, words: Words) -> None:
-        spec = words.spec
         self.params, self.words = params, words
-        self.tolerance_m = float(words.altitude_tolerances.min())
-        self.steepest_low_rad = math.radians(spec.descent_angle_edges_deg[-2])
-        self.descent_max_rad = math.radians(max(spec.descent_angle_centres_deg))
-        self.climb_rad = math.radians(spec.climb_angle_centre_deg)
+        self.lead_s = words.spec.angle_lead_s
+        self.climb_rad = math.radians(words.spec.climb_angle_centre_deg)
         self.captured = False
         self.issued = (-1, -1)
+        self.heard_s = 0.0
 
-    def rate(self, state: Kin, force: WordsNow, elevation_m: float, aero: Sequence[float], max_thrust_n: float
-             ) -> tuple[float, float, dict[str, bool]]:
+    def rate(self, state: Kin, force: WordsNow, elevation_m: float, aero: Sequence[float], max_thrust_n: float,
+             time_s: float, bank_mean: float, observed_load: float, ceiling: float) -> tuple[float, dict[str, bool]]:
+        words, cycle = self.words, self.params.cycle_s
         no_level_off, angle_class, go_around = force.no_level_off, force.angle_class, force.go_around
-        if no_level_off and not (ANGLE_LEVEL + 1 <= angle_class <= self.words.n_descent):
+        if no_level_off and not (ANGLE_LEVEL + 1 <= angle_class <= words.n_descent):
             raise ValueError("\"no level-off\" in force without a descent class (vocabulary §3.7, rule 4)")
         if no_level_off and go_around:
             raise ValueError("\"no level-off\" in force while a go-around is (vocabulary §3.7, rules 5 and 6)")
         issued = (force.issued_step[ALTITUDE], force.issued_step[ANGLE])
         new_word = issued != self.issued
         self.captured = self.captured and not new_word
+        if new_word:
+            self.heard_s = time_s
         self.issued = issued
 
-        params, speed = self.params, state.speed_mps
-        rate_max = params.path_rate_factor * speed * self.steepest_low_rad ** 2 / (2.0 * self.tolerance_m)
-        # `vertical.go_around_angle_rad`: the steady climb at the thrust limit, load factor 1, within its limits
-        drag, _stalled = _polar(1.0, speed, state.mass_kg, _isa_density(state.height_m), aero)
-        sine = _clamp((MAX_THRUST_FRACTION * max_thrust_n - drag) / (state.mass_kg * GRAVITY_MPS2), -1.0, 1.0)
-        go_around_rad = _clamp(math.asin(sine), GO_AROUND_MIN_RAD, GO_AROUND_MAX_RAD)
-        climb_rad = go_around_rad if go_around else self.climb_rad
-        nominal = -go_around_rad if go_around and angle_class == self.words.angle_climb else math.radians(force.angle_deg)
-        height_to_go = state.height_m - (force.level_m + elevation_m)
-        level_off = speed * (nominal * nominal) / (2.0 * rate_max)
-        moving = not no_level_off and angle_class != ANGLE_LEVEL and not self.captured
-        reached = moving and ((height_to_go if nominal > 0.0 else -height_to_go) <= level_off)
-        self.captured = self.captured or reached or (not no_level_off and angle_class == ANGLE_LEVEL)
-
-        hold_tau = 4.0 * params.path_time_constant_s
-        hold = _min(_max(-height_to_go / (speed * hold_tau), -self.descent_max_rad), climb_rad)
-        reference = hold if self.captured and not no_level_off else -nominal
-        wanted = (reference - state.gamma_rad) / params.path_time_constant_s
-        gamma_rate = _clamp(wanted, -rate_max, rate_max)
-        return gamma_rate, wanted, {"level_captured": self.captured, "path_rate_limited": abs(wanted) > rate_max}
+        gamma, speed = state.gamma_rad, state.speed_mps
+        if angle_class == words.angle_climb:
+            if go_around:
+                # `vertical.go_around_angle_rad`: the steady climb at the thrust limit, load factor 1, within its limits
+                drag, _stalled = _polar(1.0, speed, state.mass_kg, _isa_density(state.height_m), aero)
+                sine = _clamp((MAX_THRUST_FRACTION * max_thrust_n - drag) / (state.mass_kg * GRAVITY_MPS2), -1.0, 1.0)
+                magnitude = _clamp(math.asin(sine), GO_AROUND_MIN_RAD, GO_AROUND_MAX_RAD)
+            else:
+                magnitude = self.climb_rad
+        else:
+            magnitude = abs(math.radians(force.angle_deg))
+        level_word = angle_class == ANGLE_LEVEL
+        above = state.height_m - (force.level_m + elevation_m)
+        toward = -1.0 if no_level_off else -_sign(above)
+        goal = 0.0 if level_word else toward * magnitude
+        to_go = _clamp(self.heard_s + self.lead_s - time_s, cycle)
+        ramp = gamma + (goal - gamma) * cycle / to_go
+        if no_level_off:
+            return (ramp - gamma) / cycle, {"level_captured": self.captured}
+        left = _clamp(abs(above) + _sign(above) * speed * cycle * math.sin(gamma), 0.0)
+        stop = _stop_angle(left, speed, gamma, toward > 0.0, bank_mean, observed_load, ceiling,
+                           self.params.load_time_constant_s, cycle)
+        aimed = toward * ramp > 0.0
+        reached = not level_word and not self.captured and aimed and stop < abs(ramp)
+        self.captured = self.captured or reached or level_word
+        if level_word:
+            target = 0.0
+        elif self.captured:
+            target = toward * _min(magnitude, stop)
+        else:
+            target = toward * _min(abs(ramp), stop) if aimed else ramp
+        return (target - gamma) / cycle, {"level_captured": self.captured}
 
 
 class Speed:
     """`speed.Speed`, one flight."""
 
-    def __init__(self, approach_ias_mps: float, words: Words) -> None:
-        spec = words.spec
+    def __init__(self, approach_ias_mps: float, params: ExecutorParams, words: Words) -> None:
         self.approach_ias_mps = approach_ias_mps
-        self.band_mps, self.accel_max_mps2 = spec.speed_tolerance_mps, spec.speed_accel_max_mps2
-        self.pace_mps2 = speed_change_mps2(spec)
-        self.margin = EXECUTOR_DYNAMICS.control_speed_floor_margin
+        self.cycle_s, self.lead_s = params.cycle_s, words.spec.speed_lead_s
         self.held_mps = math.nan
+        self.issued, self.heard_s = -1, 0.0
 
     def hear_go_around(self, state: Kin) -> None:
         self.held_mps = state.speed_mps
 
-    def rate(self, state: Kin, force: WordsNow, load: float, aero: Sequence[float],
-             straight_m: float) -> tuple[float, float, dict[str, bool]]:
+    def rate(self, state: Kin, force: WordsNow, time_s: float, load: float,
+             aero: Sequence[float]) -> tuple[float, float, dict[str, bool]]:
         go_around = force.go_around
         if force.unspecified and not go_around and self.approach_ias_mps != self.approach_ias_mps:
             raise ValueError("\"unspecified\" in force for a flight whose type publishes no approach speed")
+        issued = force.issued_step[SPEED]
+        if issued != self.issued:
+            self.heard_s = time_s
+        self.issued = issued
         speed = state.speed_mps
         density = _isa_density(state.height_m)
-        own = self.approach_ias_mps * math.sqrt(ISA_RHO0_KG_M3 / density)
+        floor = math.sqrt(2.0 * load * state.mass_kg * GRAVITY_MPS2 / (density * aero[0] * aero[1]))
         if force.unspecified:
+            own = self.approach_ias_mps * math.sqrt(_clamp(load, 1.0)) * math.sqrt(ISA_RHO0_KG_M3 / density)
             wanted = self.held_mps if go_around else own
         else:
             wanted = force.speed_mps / math.cos(state.gamma_rad)
-        floor = self.margin * math.sqrt(2.0 * load * state.mass_kg * GRAVITY_MPS2 / (density * aero[0] * aero[1]))
-        landing = _clamp((speed * speed - own * own) / (2.0 * _clamp(straight_m, 1.0)), self.pace_mps2,
-                         self.accel_max_mps2)
-        # a speed word at a_max both ways (D43); "unspecified" at its own pace, slowing to land at the landing rate
-        rising = self.pace_mps2 if force.unspecified else self.accel_max_mps2
-        slowing = landing if force.unspecified and not go_around else rising
-
-        def toward(reference: float) -> float:
-            tau = self.band_mps / (rising if reference > speed else slowing)
-            return _min(_max((reference - speed) / tau, -slowing), rising)
-
-        return toward(_max(wanted, floor)), toward(wanted), {"stall_floor": floor > wanted}
+        to_go = _clamp(self.heard_s + self.lead_s - time_s, self.cycle_s)
+        return (_max(wanted, floor) - speed) / to_go, (wanted - speed) / to_go, {"stall_floor": floor > wanted}
 
 
 # ---- the cycle (`executor.Executor`)
@@ -441,17 +467,19 @@ class SingleExecutor:
         self.runways = runways_of(geometry, spec)
         self.aero = tuple(inputs.aero_params[0].tolist())
         self.max_thrust_n = float(inputs.max_thrust_n[0])
-        self.plant = Plant(self.aero, inputs.frame_params[0].tolist(), self.max_thrust_n)
+        self.plant = Plant(self.aero, inputs.frame_params[0].tolist(), self.max_thrust_n, params.time_constants_s)
         self.lateral, self.vertical = Lateral(params, words), Vertical(params, words)
-        self.speed = Speed(approach_ias_mps, words)
-        self.bank_cap_rad = math.radians(spec.turn_bank_max_deg)
-        if not 0.0 < self.bank_cap_rad <= BANK_MAX_RAD:
-            raise ValueError(f"bank cap {spec.turn_bank_max_deg:.1f}° outside (0, {math.degrees(BANK_MAX_RAD):.0f}°]")
+        self.speed = Speed(approach_ias_mps, params, words)
+        #: `inverse.decays`
+        self.decay = tuple(math.exp(-params.cycle_s / tau) for tau in params.time_constants_s)
         self.cycles = int(math.ceil(self.most_s / params.cycle_s))
         self.step_rows = int(round(step_s / params.cycle_s))
         self.state = tuple(inputs.initial_state[0].tolist())
-        self.bank = 0.0
+        #: the plant's actuators and the observer's estimate of them (`executor.Executor`): the thrust the first cycle's
+        self.actuators: tuple[float, ...] = (math.nan, 0.0, 1.0)
+        self.observed: tuple[float, ...] = self.actuators
         self.states, self.commands, self.wanted = [self.state], [], []
+        self.actuator_rows: list[tuple[float, ...]] = []
         self.limits: dict[str, list[bool]] = {name: [] for name in LIMITS}
         self.modes: dict[str, list[bool]] = {name: [] for name in MODES}
         self.sentence_times: list[float] = []
@@ -466,7 +494,6 @@ class SingleExecutor:
         params, cycle = self.params, self.count
         now = self.now()
         self.sentence_times.append(sentence_s)
-        bank_rate = math.radians(params.bank_rate_deg_s)          # from the first cycle (D84)
         issued = force.issued_step[RUNWAY]
         if force.go_around and issued != self.runway_issued and not self.done:
             if self.time_limit_s + GO_AROUND_EXTRA_S > self.most_s:
@@ -474,40 +501,77 @@ class SingleExecutor:
             self.time_limit_s += GO_AROUND_EXTRA_S
             self.speed.hear_go_around(now)
         self.runway_issued = issued
-        track_rate = self.lateral.rate(now, force, self.runways, cycle * params.cycle_s)
-        runway = self.runways[force.runway]
-        before, right, _off_course = relative(now, runway)
-        straight = math.hypot(before, right)
-        gamma_rate, gamma_wanted, vertical_modes = self.vertical.rate(now, force, self.chart.elevation_m, self.aero,
-                                                                      self.max_thrust_n)
-        # `inverse.attitude`: the bank and load factor for the wanted rates, limits 1 and 2
+        time_s = cycle * params.cycle_s
+        aero, (decay_thrust, decay_bank, decay_load), dt = self.aero, self.decay, params.cycle_s
         speed, gamma = now.speed_mps, now.gamma_rad
-        cos_gamma = math.cos(gamma)
-        a = -math.radians(track_rate) * speed * cos_gamma / GRAVITY_MPS2
-        b = gamma_rate * speed / GRAVITY_MPS2 + cos_gamma
-        wanted_bank = math.atan2(a, _clamp(b, 0.0))
-        capped = _clamp(wanted_bank, -self.bank_cap_rad, self.bank_cap_rad)
-        step = bank_rate * params.cycle_s
-        bank = _min(_max(capped, self.bank - step), self.bank + step)
-        load_wanted = b / math.cos(bank)
-        load = _clamp(load_wanted, LOAD_FACTOR_MIN, LOAD_FACTOR_MAX)
-        accel, accel_wanted, speed_modes = self.speed.rate(now, force, load, self.aero, straight)
-        # `inverse.thrust`: the thrust fraction for the airspeed rate at that load factor, limit 3
-        sin_gamma = math.sin(gamma)
-        drag, stalled = _polar(load, speed, now.mass_kg, _isa_density(now.height_m), self.aero)
-        thrust_wanted = (now.mass_kg * (accel + GRAVITY_MPS2 * sin_gamma) + drag) / self.max_thrust_n
-        fraction = _clamp(thrust_wanted, MIN_THRUST_FRACTION, MAX_THRUST_FRACTION)
-        self.bank = bank
-        command = (fraction, bank, load)
-        self.state = self.plant.step(self.state, command, params.cycle_s)
+        density = _isa_density(now.height_m)
+        observed_thrust, observed_bank, observed_load = self.observed
+        # `inverse.load_ceiling` (the stall at the speed the cycle ends at), `inverse.bank_limit_rad`
+        if observed_thrust != observed_thrust:
+            end_speed = speed
+        else:
+            most = _min(0.5 * density * (speed * speed) * aero[0] * aero[1] / (now.mass_kg * GRAVITY_MPS2),
+                        LOAD_FACTOR_MAX)
+            drag_now, _ = _polar(most, speed, now.mass_kg, density, aero)
+            rate_now = (observed_thrust * self.max_thrust_n - drag_now) / now.mass_kg - GRAVITY_MPS2 * math.sin(gamma)
+            end_speed = speed + rate_now * dt
+        ceiling = _min(0.5 * density * (end_speed * end_speed) * aero[0] * aero[1] / (now.mass_kg * GRAVITY_MPS2),
+                       LOAD_FACTOR_MAX)
+        limit = _clamp(math.acos(_clamp(math.cos(gamma) / ceiling, high=1.0)), high=BANK_MAX_RAD)
+        # 1. `lateral`, `inverse.bank`
+        track_rate, error = self.lateral.rate(now, force, self.runways, time_s)
+        wanted_bank = -math.atan(speed * math.radians(track_rate) / GRAVITY_MPS2)
+        capped = _min(_max(wanted_bank, -limit), limit)
+        roll = math.radians(params.bank_rate_deg_s)
+        p_mean = roll * params.bank_time_constant_s * (1.0 - decay_bank) / dt
+        error_rad = math.radians(abs(error))
+        turning = GRAVITY_MPS2 * math.tan(abs(observed_bank)) / speed * dt
+        toward = _sign(-error) == _sign(observed_bank)
+        left = _clamp(error_rad - turning, 0.0) if toward else error_rad + turning
+        stop = math.acos(math.exp(-left * speed * p_mean / GRAVITY_MPS2))
+        target = _sign(capped) * _min(abs(capped), stop)
+        rate = _clamp((target - observed_bank) / dt, -roll, roll)
+        rolled = observed_bank + params.bank_time_constant_s * rate
+        bank = _min(_max(rolled, -limit), limit)
+        bank_end = bank + (observed_bank - bank) * decay_bank
+        bank_mean = 0.5 * (observed_bank + bank_end)
+        # 2. `vertical`, `inverse.load`
+        runway = self.runways[force.runway]
+        gamma_rate, vertical_modes = self.vertical.rate(now, force, self.chart.elevation_m, aero, self.max_thrust_n,
+                                                        time_s, bank_mean, observed_load, ceiling)
+        solved_load = (gamma_rate * speed / GRAVITY_MPS2 + math.cos(gamma)) / math.cos(bank_mean)
+        load = _min(_clamp(solved_load, LOAD_FACTOR_MIN), ceiling)
+        steered_load = (load - observed_load * decay_load) / (1.0 - decay_load)
+        load_command = _clamp(steered_load, LOAD_FACTOR_MIN, LOAD_FACTOR_MAX)
+        # 3. `speed`; 4. `inverse.thrust`
+        accel, accel_wanted, speed_modes = self.speed.rate(now, force, time_s, load, aero)
+        drag, _stalled = _polar(load, speed, now.mass_kg, density, aero)
+        solved = (now.mass_kg * (accel + GRAVITY_MPS2 * math.sin(gamma)) + drag) / self.max_thrust_n
+        thrust = _clamp(solved, MIN_THRUST_FRACTION, MAX_THRUST_FRACTION)
+        if observed_thrust != observed_thrust:               # the first cycle's thrust: in effect
+            observed_thrust = thrust
+            self.actuators = (thrust, *self.actuators[1:])
+        steered_thrust = (thrust - observed_thrust * decay_thrust) / (1.0 - decay_thrust)
+        thrust_command = _clamp(steered_thrust, MIN_THRUST_FRACTION, MAX_THRUST_FRACTION)
+        command = (thrust_command, bank, load_command)
+        # 5. `inverse.observe`, the plant
+        self.observed = tuple(u + (a - u) * k for u, a, k in
+                              zip(command, (observed_thrust, observed_bank, observed_load), self.decay))
+        self.actuator_rows.append(self.actuators)
+        self.state, self.actuators = self.plant.step(self.state, self.actuators, command, dt)
+        after = self.chart.read(self.state)
+        # `inverse.stalled` at the load factor the actuator reached
+        _drag, stalled = _polar(self.actuators[2], after.speed_mps, after.mass_kg, _isa_density(after.height_m), aero)
 
         self.states.append(self.state)
         self.commands.append(command)
-        self.wanted.append((track_rate, gamma_wanted, accel_wanted))
+        self.wanted.append((track_rate, gamma_rate, accel_wanted))
         self.runway_rows.append(force.runway)
-        limits = {"bank_cap": capped != wanted_bank, "bank_rate": bank != capped, "load_factor": load != load_wanted,
-                  "path_rate_limited": vertical_modes["path_rate_limited"], "stall_floor": speed_modes["stall_floor"],
-                  "thrust_max": thrust_wanted > MAX_THRUST_FRACTION, "thrust_min": thrust_wanted < MIN_THRUST_FRACTION,
+        limits = {"bank_cap": capped != wanted_bank or bank != rolled, "bank_rate": abs(target - observed_bank) > roll * dt,
+                  "load_factor": load != solved_load or load_command != steered_load,
+                  "stall_floor": speed_modes["stall_floor"],
+                  "thrust_max": solved > MAX_THRUST_FRACTION or steered_thrust > MAX_THRUST_FRACTION,
+                  "thrust_min": solved < MIN_THRUST_FRACTION or steered_thrust < MIN_THRUST_FRACTION,
                   "stall": stalled}
         for name in LIMITS:
             self.limits[name].append(limits[name])
@@ -515,7 +579,6 @@ class SingleExecutor:
         for name in MODES:
             self.modes[name].append(modes[name])
 
-        after = self.chart.read(self.state)
         # `executor.Executor.cycle`'s ends, the judge's tests (`ends`, D79): a crossing of any candidate's plane
         crossed = False
         for index, candidate in enumerate(self.runways):
@@ -545,7 +608,8 @@ class SingleExecutor:
         def flags(values: list[bool]) -> torch.Tensor:
             return torch.tensor([values], dtype=torch.bool)
 
-        return Flown(states=rows(self.states), commands=rows(self.commands), wanted=rows(self.wanted),
+        return Flown(states=rows(self.states), commands=rows(self.commands),
+                     actuators=rows([*self.actuator_rows, self.actuators]), wanted=rows(self.wanted),
                      limits={name: flags(values) for name, values in self.limits.items()},
                      modes={name: flags(values) for name, values in self.modes.items()},
                      runway=torch.tensor([self.runway_rows], dtype=torch.long),

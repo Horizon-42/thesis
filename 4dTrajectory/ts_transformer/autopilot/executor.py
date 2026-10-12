@@ -1,16 +1,19 @@
-"""The executor's cycle (vocabulary §5; executor design §3, §7): state → words in force → rates → controls → one cycle.
+"""The executor's cycle (vocabulary §5; executor design §3): state → words in force → rates → commands → one cycle.
 
-Each cycle, in the design's order of limits:
+Each cycle, in the design's order (§3; each step reads the one before it):
 
-1. the lateral law gives the track rate, the vertical law the path-angle rate (`autopilot.lateral`,
-   `autopilot.vertical`);
-2. the inverse sets bank and load factor for them (`autopilot.inverse.attitude`: bank cap and rate,
-   the grader's load band);
-3. the speed law gives the airspeed rate, above the stall floor at that load factor (`autopilot.speed`);
-4. the inverse sets the thrust for it (`autopilot.inverse.thrust`: the thrust box);
-5. the plant integrates the cycle (`autopilot.plant`).
+1. the lateral law gives the track rate and the heading error (`autopilot.lateral`); the inverse sets the bank command
+   for them (`autopilot.inverse.bank`: φ_phys, the stopping bank, the roll rate p through the bank's lag);
+2. the vertical law gives the path-angle rate at the cycle's mean bank (`autopilot.vertical`); the inverse sets the
+   load-factor command for it (`inverse.load`: the load band and the stall);
+3. the speed law gives the airspeed rate, above the stall speed at that load factor (`autopilot.speed`);
+4. the inverse sets the thrust command for it (`inverse.thrust`: the thrust box);
+5. the observer moves the executor's estimate of the actuators with the commands sent (`inverse.observe`, §4.2); the
+   plant integrates the cycle, actuators and all (`autopilot.plant`).
 
-The bank starts at 0 and its limit and roll rate hold from the first cycle (vocabulary §5.3, D84).
+The actuators start at bank 0, load factor 1 and the first cycle's thrust (§4.2), in the plant and in the observer
+alike; the bank's limit and roll rate hold from the first cycle (vocabulary §5.3, D84). The plant's actuators are the
+aircraft's, recorded as flown (`Flown.actuators`); the laws read only the observer.
 
 A flight is DONE at the end of the cycle in which the judge ends it (vocabulary §5.8, D79; the tests are `ends`, the
 judge's own): an APPROACH CROSSING of the runway in force R (the go-around state G false, the threshold plane crossed
@@ -42,6 +45,7 @@ from typing import Any, Callable, Sequence
 import torch
 
 from ts_transformer.autopilot import ends, inverse
+from ts_transformer.autopilot.inverse import BANK, LOAD, THRUST
 from ts_transformer.autopilot.flights import FlightInputs
 from ts_transformer.autopilot.frame import AirportCharts, Kinematics, read_state
 from ts_transformer.autopilot.lateral import Lateral, Runways, relative
@@ -50,11 +54,12 @@ from ts_transformer.autopilot.plant import Plant
 from ts_transformer.autopilot.sentence import Sentences, WordsNow
 from ts_transformer.autopilot.speed import Speed
 from ts_transformer.autopilot.vertical import Vertical
-from ts_transformer.instructions.words import ALTITUDE, ANGLE, HEADING, RUNWAY, Words
+from ts_transformer.instructions.words import ALTITUDE, ANGLE, HEADING, RUNWAY, SPEED, Words
+from ts_transformer.outputs.envelope import MAX_THRUST_FRACTION, MIN_THRUST_FRACTION
 
-#: Every limit the cycle can meet (§8.1), in the order they are applied.
-LIMITS = ("bank_cap", "bank_rate", "load_factor", "path_rate_limited", "stall_floor", "thrust_max", "thrust_min",
-          "stall")
+#: Every limit the cycle can meet, in the order they are applied; "stall": the wing could not give the load factor the
+#: actuator reached by the cycle's end (the dynamics' stall cut-off, a dynamics failure).
+LIMITS = ("bank_cap", "bank_rate", "load_factor", "stall_floor", "thrust_max", "thrust_min", "stall")
 #: What the laws were doing each cycle: the go-around state, a level captured.
 MODES = ("go_around", "level_captured")
 #: The time a go-around adds to its flight's limit (vocabulary §5.8; multi-aircraft design §6.6 step 8, the user 2026-10-02).
@@ -66,9 +71,10 @@ class Flown:
     """What the batch flew, one row per cycle boundary (``states``: ``T + 1``) or per cycle (the rest)."""
 
     states: torch.Tensor                    # [B, T+1, 7] geodetic
-    commands: torch.Tensor                  # [B, T, 3] thrust fraction, bank (the dynamics' sign), load factor
+    commands: torch.Tensor                  # [B, T, 3] thrust fraction, bank (the dynamics' sign), load factor, as sent
+    actuators: torch.Tensor                 # [B, T+1, 3] what the actuators had reached at each cycle boundary (flown)
     wanted: torch.Tensor                    # [B, T, 3] track rate deg/s, path-angle rate rad/s, speed rate m/s²,
-                                            # as the laws asked before their own limits (γ̇_max, the stall floor)
+                                            # as the laws asked before the inverse's limits (the speed's before the stall)
     limits: dict[str, torch.Tensor]         # LIMITS → [B, T] bool
     modes: dict[str, torch.Tensor]          # MODES → [B, T] bool, the state AFTER the cycle's law
     runway: torch.Tensor                    # [B, T] long: the runway in force R during each cycle
@@ -106,13 +112,17 @@ class Executor:
         own_cycles = torch.ceil(self.most_s / params.cycle_s).long()
         self.cycles = (int((self.start + own_cycles).max()) if self.staggered
                        else int(math.ceil(float(self.most_s.max()) / params.cycle_s)))
-        self.plant = Plant(inputs)
+        self.plant = Plant(inputs, params)
         self.lateral = Lateral(batch, params, spec, device)
         self.vertical = Vertical(batch, params, words, device)
-        self.speed = Speed(approach_ias_mps, spec)
+        self.speed = Speed(approach_ias_mps, params, spec)
         self.state = inputs.initial_state
-        self.bank = torch.zeros(batch, dtype=self.state.dtype, device=device)
+        #: the plant's actuators (the aircraft's) and the observer's estimate of them: thrust fraction, bank, load factor;
+        #: the thrust is the first cycle's (`cycle`), NaN until then
+        self.actuators = torch.tensor([math.nan, 0.0, 1.0], dtype=self.state.dtype, device=device).repeat(batch, 1)
+        self.observed = self.actuators.clone()
         self.states, self.commands, self.wanted = [self.state], [], []
+        self.actuator_rows: list[torch.Tensor] = []     # the actuators at each cycle's start, then the last end
         self.limits: dict[str, list[torch.Tensor]] = {name: [] for name in LIMITS}
         self.modes: dict[str, list[torch.Tensor]] = {name: [] for name in MODES}
         self.sentence_times: list[torch.Tensor] = []
@@ -162,9 +172,9 @@ class Executor:
 
         out = copy.copy(self)
         out.inputs, out.runways, out.charts = picked(self.inputs), picked(self.runways), picked(self.charts)
-        out.plant = Plant(out.inputs)
-        for name in ("time_limit_s", "most_s", "start", "state", "bank", "runway_issued", "done", "done_cycle",
-                     "halted", "last_command"):
+        out.plant = Plant(out.inputs, self.params)
+        for name in ("time_limit_s", "most_s", "start", "state", "actuators", "observed", "runway_issued", "done",
+                     "done_cycle", "halted", "last_command"):
             setattr(out, name, pick(getattr(self, name)))
         out.staggered = bool((out.start != 0).any())
         for name in ("lateral", "vertical", "speed"):
@@ -174,9 +184,10 @@ class Executor:
                 setattr(law, held, None if value is None else pick(value))   # the lateral word before any is heard
             setattr(out, name, law)
         out.speed.approach_ias_mps = pick(self.speed.approach_ias_mps)
-        out.states, out.commands, out.wanted, out.sentence_times, out.runway_rows = (
+        out.states, out.commands, out.wanted, out.sentence_times, out.runway_rows, out.actuator_rows = (
             [pick(rows) for rows in record]
-            for record in (self.states, self.commands, self.wanted, self.sentence_times, self.runway_rows))
+            for record in (self.states, self.commands, self.wanted, self.sentence_times, self.runway_rows,
+                           self.actuator_rows))
         out.limits = {name: [pick(rows) for rows in record] for name, record in self.limits.items()}
         out.modes = {name: [pick(rows) for rows in record] for name, record in self.modes.items()}
         return out
@@ -228,8 +239,9 @@ class Executor:
             setattr(out, name, type(records_of[0])(**{f.name: torch.cat([getattr(r, f.name)[i].to(device)
                                                                           for r, i in zip(records_of, index)])
                                                        for f in fields(records_of[0])}))
-        out.plant = Plant(out.inputs)
-        for name in ("time_limit_s", "most_s", "state", "bank", "runway_issued", "done", "halted", "last_command"):
+        out.plant = Plant(out.inputs, first.params)
+        for name in ("time_limit_s", "most_s", "state", "actuators", "observed", "runway_issued", "done", "halted",
+                     "last_command"):
             setattr(out, name, rows(lambda e, name=name: getattr(e, name)))
         out.start = torch.cat([(e.start[i] + shift).to(device) for (e, _, shift), i in zip(parts, index)])
         if bool((out.start < 0).any()):
@@ -247,9 +259,9 @@ class Executor:
         if out.count == 0:                  # a batch that has flown no cycle anchors its first as a new batch does
             out.lateral.word_deg = None
         out.speed.approach_ias_mps = rows(lambda e: e.speed.approach_ias_mps)
-        out.states, out.commands, out.wanted, out.sentence_times, out.runway_rows = (
+        out.states, out.commands, out.wanted, out.sentence_times, out.runway_rows, out.actuator_rows = (
             records(lambda e, name=name: getattr(e, name))
-            for name in ("states", "commands", "wanted", "sentence_times", "runway_rows"))
+            for name in ("states", "commands", "wanted", "sentence_times", "runway_rows", "actuator_rows"))
         out.limits = {name: records(lambda e, name=name: e.limits[name]) for name in first.limits}
         out.modes = {name: records(lambda e, name=name: e.modes[name]) for name in first.modes}
         return out
@@ -260,7 +272,8 @@ class Executor:
 
     def _held(self) -> list[tuple[Any, str, torch.Tensor | None]]:
         """Every per-flight quantity a cycle changes (the state, the bank, each law's `PER_FLIGHT`), as it is now."""
-        out: list[tuple[Any, str, torch.Tensor | None]] = [(self, "state", self.state), (self, "bank", self.bank),
+        out: list[tuple[Any, str, torch.Tensor | None]] = [(self, "state", self.state), (self, "actuators", self.actuators),
+                                                            (self, "observed", self.observed),
                                                             (self, "runway_issued", self.runway_issued)]
         for law in (self.lateral, self.vertical, self.speed):
             out += [(law, name, getattr(law, name)) for name in law.PER_FLIGHT]
@@ -288,7 +301,6 @@ class Executor:
             if bool(self.halted.any()):
                 frozen = self.halted
             time_s = cycle * params.cycle_s
-        bank_rate = math.radians(params.bank_rate_deg_s)          # from the first cycle (D84)
         held = self._held() if frozen is not None else []
         # a go-around heard this cycle gives its flight more time (`extend_time_limit`), not while it waits or is held
         issued = force.issued_step[:, RUNWAY]
@@ -299,49 +311,64 @@ class Executor:
         if bool(heard_go_around.any()):
             self.extend_time_limit(torch.where(heard_go_around, GO_AROUND_EXTRA_S, 0.0).to(self.time_limit_s.dtype))
         self.speed.hear_go_around(heard_go_around, now)
-        track_rate = self.lateral.rate(now, force.heading_rel_deg, force.issued_step[:, HEADING], force.runway,
-                                       self.runways, time_s, fresh=fresh)
+        aero, decay = self.inputs.aero_params, inverse.decays(params, self.state)
+        observed = self.observed
+        # 1. lateral: the track rate, then the bank through its lag
+        track_rate, error = self.lateral.rate(now, force.heading_rel_deg, force.issued_step[:, HEADING], force.runway,
+                                              self.runways, time_s, fresh=fresh)
+        ceiling = inverse.load_ceiling(now, observed, aero, self.inputs.max_thrust_n, params.cycle_s)
+        bank = inverse.bank(now, track_rate, error, observed[:, BANK], inverse.bank_limit_rad(now, ceiling), params,
+                            decay[BANK])
+        # 2. vertical: the path-angle rate at the cycle's mean bank, then the load factor through its lag
         e0, n0, course, elevation = self.runways.pointed(force.runway)
-        before, right, _off_course = relative(now, e0, n0, course)
-        gamma_rate, gamma_wanted, vertical_modes = self.vertical.rate(now, force.level_m, self.charts.elevation_m,
-                                                                      force.no_level_off,
-                                                                      force.angle_class, force.angle_deg,
-                                                                      force.issued_step[:, [ALTITUDE, ANGLE]],
-                                                                      force.go_around, self.inputs.aero_params,
-                                                                      self.inputs.max_thrust_n)
-        attitude = inverse.attitude(now, track_rate, gamma_rate, self.bank,
-                                    bank_cap_rad=math.radians(self.words.spec.turn_bank_max_deg),
-                                    bank_rate_rad_s=bank_rate, cycle_s=params.cycle_s)
+        gamma_rate, vertical_modes = self.vertical.rate(now, force.level_m, self.charts.elevation_m, force.no_level_off,
+                                                        force.angle_class, force.angle_deg,
+                                                        force.issued_step[:, [ALTITUDE, ANGLE]], force.go_around, aero,
+                                                        self.inputs.max_thrust_n, time_s, bank.mean, observed[:, LOAD],
+                                                        ceiling)
+        load = inverse.load(now, gamma_rate, bank.mean, observed[:, LOAD], ceiling, decay[LOAD])
+        # 3. speed at that load factor; 4. the thrust for it, through its lag (the first cycle's thrust: in effect)
         accel, accel_wanted, speed_modes = self.speed.rate(now, force.speed_mps, force.unspecified, force.go_around,
-                                                           attitude.load_factor, self.inputs.aero_params,
-                                                           torch.hypot(before, right))
-        thrust = inverse.thrust(now, accel, attitude.load_factor, self.inputs.aero_params, self.inputs.max_thrust_n)
-        self.bank = attitude.bank_rad
-        command = torch.stack((thrust.fraction, self.bank, attitude.load_factor), dim=1)
-        self.state = self.plant.step(self.state, command, params.cycle_s)
-        limits = {**attitude.binds, **thrust.binds, **speed_modes, "path_rate_limited": vertical_modes["path_rate_limited"]}
+                                                           force.issued_step[:, SPEED], time_s, load.wanted, aero)
+        solved = inverse.thrust_fraction(now, accel, load.wanted, aero, self.inputs.max_thrust_n)
+        first = self.observed[:, THRUST].isnan()
+        start_thrust = solved.clamp(MIN_THRUST_FRACTION, MAX_THRUST_FRACTION)
+        self.observed = torch.cat((torch.where(first, start_thrust, observed[:, THRUST])[:, None], observed[:, 1:]), 1)
+        self.actuators = torch.cat((torch.where(first, start_thrust, self.actuators[:, THRUST])[:, None],
+                                    self.actuators[:, 1:]), 1)
+        thrust = inverse.thrust(solved, self.observed[:, THRUST], decay[THRUST])
+        command = torch.stack((thrust.command, bank.command, load.command), dim=1)
+        # 5. the observer, and the plant
+        self.observed = inverse.observe(self.observed, command, decay)
+        start_actuators = self.actuators
+        self.state, self.actuators = self.plant.step(self.state, self.actuators, command, params.cycle_s)
+        after = read_state(self.state, self.charts)
+        limits = {**bank.binds, **load.binds, **speed_modes, **thrust.binds,
+                  "stall": inverse.stalled(after, self.actuators[:, LOAD], aero)}
         modes = {"go_around": force.go_around.clone(), "level_captured": vertical_modes["level_captured"]}
         if frozen is not None and bool(frozen.any()):
             for owner, name, value in held:
-                after = getattr(owner, name)
+                after_value = getattr(owner, name)
                 if value is not None:
-                    keep = frozen.view(-1, *([1] * (after.dim() - 1)))
-                    setattr(owner, name, torch.where(keep, value, after))
+                    keep = frozen.view(-1, *([1] * (after_value.dim() - 1)))
+                    setattr(owner, name, torch.where(keep, value, after_value))
             command = torch.where(self.halted[:, None], self.last_command, command)
+            start_actuators = torch.where(frozen[:, None], self.actuators, start_actuators)
             limits = {name: value & ~frozen for name, value in limits.items()}
             modes = {name: value & ~frozen for name, value in modes.items()}
+            after = read_state(self.state, self.charts)
         self.last_command = command
 
+        self.actuator_rows.append(start_actuators)
         self.states.append(self.state)
         self.commands.append(command)
-        self.wanted.append(torch.stack((track_rate, gamma_wanted, accel_wanted), dim=1))
+        self.wanted.append(torch.stack((track_rate, gamma_rate, accel_wanted), dim=1))
         self.runway_rows.append(force.runway.clone())
         for name, value in limits.items():
             self.limits[name].append(value)
         for name, value in modes.items():
             self.modes[name].append(value)
 
-        after = read_state(self.state, self.charts)
         # where the judge ends the flight (vocabulary §5.8, D79; `ends`, the judge's tests on the same rows): a crossing
         # of a candidate's plane, interpolated, an approach crossing of R or a crossing of another candidate
         runways = self.runways
@@ -378,7 +405,8 @@ class Executor:
                 max=out.shape[1] - 1)
             return torch.gather(out, 1, at.view(*at.shape, *([1] * (out.dim() - 2))).expand_as(out))
 
-        return Flown(states=stack(self.states), commands=stack(self.commands), wanted=stack(self.wanted),
+        return Flown(states=stack(self.states), commands=stack(self.commands),
+                     actuators=stack([*self.actuator_rows, self.actuators]), wanted=stack(self.wanted),
                      limits={name: stack(rows) for name, rows in self.limits.items()},
                      modes={name: stack(rows) for name, rows in self.modes.items()}, runway=stack(self.runway_rows),
                      done_cycle=self.done_cycle, sentence_s=stack(self.sentence_times), cycle_s=self.params.cycle_s)

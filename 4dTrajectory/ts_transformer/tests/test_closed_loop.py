@@ -52,7 +52,7 @@ def _changed(sentence, **changes):
 def _params():
     from ts_transformer.experiments.executor_spec import ROLL_RATE_DEG_S
 
-    return ExecutorParams(cycle_s=1.0, bank_rate_deg_s=ROLL_RATE_DEG_S, path_time_constant_s=2.0, path_rate_factor=2.0,
+    return ExecutorParams(cycle_s=1.0, bank_rate_deg_s=ROLL_RATE_DEG_S, thrust_time_constant_s=1.5, bank_time_constant_s=2.0, load_time_constant_s=0.8,
                           timeout_factor=1.5, start_rule="trailing-fit-8s")
 
 
@@ -592,13 +592,14 @@ def test_the_readings_of_d34_read_the_vertical_tolerance_in_force_at_each_row():
 
 
 def test_a_closed_loop_flight_with_h_final_differs_only_in_its_final_descent():
-    """D66 on a whole flight: read at H_final = 5 m and at H_final = H, the sentence and the flown states are the same on
-    every row before the first row where "no level-off" is in force; after it, angle corrections that H leaves out."""
+    """D66 on a whole flight: read at H_final = 2 m and at H_final = H, the sentence and the flown states are the same on
+    every row before the first row where "no level-off" is in force; after it, angle corrections that H leaves out (the
+    executor of design draft 5 holds this flight's final descent within 5 m but for the corrections both say)."""
     readings = {}
-    for final_vertical_m in (15.0, 5.0):
+    for final_vertical_m in (15.0, 2.0):
         batch, inputs, words = _batch(final_vertical_m=final_vertical_m)
         (readings[final_vertical_m],) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
-    before, after = readings[15.0], readings[5.0]
+    before, after = readings[15.0], readings[2.0]
     final = in_force(before.rows.grid)[:, ALTITUDE] == words.altitude_no_level_off
     first = int(np.argmax(final))
     assert final.any() and np.array_equal(in_force(after.rows.grid)[:first + 1, ALTITUDE], in_force(before.rows.grid)[:first + 1, ALTITUDE])

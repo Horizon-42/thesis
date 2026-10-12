@@ -87,7 +87,7 @@ def _read(monkeypatch, tmp_path, parts, name):
     flights = [instruction_flight(*fly_legs(legs, 270.0, 1079.0, -400.0, 0.0), dataset_id=f"KXXX:{k}")
                for k, legs in enumerate((LEGS, TURNING_LEGS))]
     readings = [read_flight(flight, geometry, one, words) for flight in flights]
-    params = ExecutorParams(cycle_s=1.0, bank_rate_deg_s=ROLL_RATE_DEG_S, path_time_constant_s=2.0, path_rate_factor=2.0,
+    params = ExecutorParams(cycle_s=1.0, bank_rate_deg_s=ROLL_RATE_DEG_S, thrust_time_constant_s=1.5, bank_time_constant_s=2.0, load_time_constant_s=0.8,
                             timeout_factor=1.5, start_rule="trailing-fit-8s")
 
     def draw(directory, split, spec_, words_, **kw):

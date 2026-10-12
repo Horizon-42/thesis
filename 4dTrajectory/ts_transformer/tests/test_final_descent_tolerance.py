@@ -102,17 +102,17 @@ def _flown(monkeypatch, final_vertical_m, interval_s):
     from ts_transformer.experiments.executor_spec import ROLL_RATE_DEG_S
     from ts_transformer.autopilot.params import ExecutorParams
 
-    params = ExecutorParams(cycle_s=1.0, bank_rate_deg_s=ROLL_RATE_DEG_S, path_time_constant_s=2.0,
-                            path_rate_factor=2.0, timeout_factor=1.5, start_rule="trailing-fit-8s")
+    params = ExecutorParams(cycle_s=1.0, bank_rate_deg_s=ROLL_RATE_DEG_S, thrust_time_constant_s=1.5,
+                            bank_time_constant_s=2.0, load_time_constant_s=0.8, timeout_factor=1.5, start_rule="trailing-fit-8s")
     return readout.read_interval(drawn, [reading], observed, interval_s, params, words, chunk=8, device=CPU)
 
 
 @pytest.mark.parametrize("interval_s", [2.0, 4.0, 8.0])
 def test_a_flight_read_in_closed_loop_flown_again_and_judged_at_each_row_interval(monkeypatch, interval_s):
     """Each row interval: the closed-loop numbers of the split, and the flight flown again on its stored sentence (it must
-    fly its stored states again) and judged; at H_final = 5 m its final descent says angle corrections that H leaves out."""
+    fly its stored states again) and judged; at H_final = 2 m its final descent says angle corrections that H leaves out."""
     rows = {}
-    for final_vertical_m in (15.0, 5.0):
+    for final_vertical_m in (15.0, 2.0):
         numbers, (row,) = _flown(monkeypatch, final_vertical_m, interval_s)
         assert numbers["sentences"] == 1
         rows[final_vertical_m] = row
@@ -121,7 +121,7 @@ def test_a_flight_read_in_closed_loop_flown_again_and_judged_at_each_row_interva
         assert row["final_descents"] == 1 and row["final_descent_rows"] > 0
         assert row["observed_decision"] is not None
         assert (row["decision"] is not None) == (row["outcome"] in readout.DECIDED)
-    assert rows[5.0]["final_descent_angle_corrections"] > rows[15.0]["final_descent_angle_corrections"]
+    assert rows[2.0]["final_descent_angle_corrections"] > rows[15.0]["final_descent_angle_corrections"]
 
 
 def _readout(h_final, split="select", **changes):
