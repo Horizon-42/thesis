@@ -941,3 +941,50 @@ formal campaign's round 3: 83.1 %, 648). The user then ordered its learning rate
 group at its setting's rate; each resume entry holds the rates before and after and the round they act from; small
 change). The control arm goes on to 8 rounds at 3e-5 / 3e-4 after the behaviour check at 16bacde0; the calibration
 follows it.
+
+**The calibration, and the control arm's end** (2026-10-12, 01:20–01:29). The control arm's rounds 5–7 at 3 × the
+rates (select readout, landed / lost separation / reward): 83.1 % / 631 / 3707.8, 82.5 % / 644 / 3672.8, 83.0 % / 635 /
+3701.7 (round 4: 83.1 % / 644 / 3702.5); KL 0.061 → 0.074 → 0.092 → 0.100, clipped share 0.7 → 2.0 → 2.4 → 2.7 %, other
+failures 116 → 126 → 142 → 129. The larger rate did not lift the plateau; pass_gradients (R70) reads the prior's reward
+gradient between updates at a cosine near 0, the data term's at 0.95, and the credit spread (median 33 rows a group).
+The calibration spoke single batches of round 5 alone on the CPU (round 4's model; added memory / search rows): squares
+45 → 0.37 GB / 1,906; 100 → 0.32 GB / 0; 128 → 2.31 GB / 90,439; 161 → 0.85 GB / 16,106; 194 → 2.88 GB / 88,613; 210 →
+2.25 GB / 100,929; a 600 s batch, 179 → 2.07 GB / 91,017; batch 186, 218 → 9.5 GB / 433,231. The memory follows the
+search rows (about 23–25 KB a row), the squares only roughly (requests 115).
+
+**The formal campaign's end** (the user, 2026-10-12 01:30: test batch 186 on the GPU, then finish; then "先把正式组的都跑
+完 再选出最好的那一轮的模型 然后再导出"). Batch 186 alone on the GPU (cuda, the executor on the CPU as launched; round 4's
+model, round 5's draw): allocated peak 3.36 GB, reserved 6.95 GB, host peak 9.25 GB, 397 s; its groups as on the CPU (25
+groups, 433,147 search rows). The campaign resumed 01:50 from `.claude/worktrees/run-formal` at 96b5b87f, after
+window_behaviour against arm A's record gave the same behaviour, with `--gpu-squares 200` and every other setting as
+launched (216 done batches kept, batch 186 on the GPU). Rounds 5–7: 83.3 % / 625 / 3711.8, 83.5 % / 625 / 3718.8,
+83.7 % / 604 / 3727.2; ended 03:44, exit 0. Round 7 by span: 300 s 83.4 % / 118, 600 s 83.9 % / 189, 1200 s 83.7 % / 297;
+KL 0.044 (round 0) → 0.070; other failures 95 → 129 (unstable at minimums 24 → 36, timeout 30 → 42, ground contact 30
+→ 34). Both campaigns' run scripts and logs are in their `run_logs/`, each read-only with its SHA256SUMS (1,762 and 1,764
+files). A publication of the control arm's round 4, started before the user's order, was stopped in its first step and
+wrote nothing.
+
+**Round 7 read window by window and published** (requests 117–118, 120). The round chosen: the highest select reward of
+both arms' 16 rounds, the formal campaign's round 7. `multi_window_read` (cf7e21f0) read it again at 96b5b87f: 1,500
+windows, the sum the round's readout; `window_list --multi` with every outcome but `landed`: 453 windows (KMSY 55, KRDU
+118, KSJC 95, KSMF 95, KSTL 90). Exported (rounds start and 7, select split): `majority_formal_r7_drawn_20261012` (10
+windows an airport, 5.0–6.6 MB) and `majority_formal_r7_not_landed_20261012` (the list; KMSY 29.3, KRDU 84.6, KSJC 58.8,
+KSMF 60.4, KSTL 65.4 MB). The run worktree's first read stopped on a missing `aeroviz-4d/public/data/airports` link
+(request 120). The browser check found two faults of the Training view: three listed sets refused (a flight whose
+executor failed in its first word has a closed loop of one word, `flownFromRow + 1` state rows; the reader asked + 2),
+and a window with a silent aircraft read as all landed (the list, its tooltip, "this round" and the rounds summary
+counted the export's end; the statistics and the loop count a loss). Fixed in 70d87089 (`countedOutcome`, the reader's
+rows; review: S2 the single-aircraft tooltip and S3 a bound that could not bind, fixed, second round clean; vitest
+130 files / 1,140 tests); the second browser check passed on all five airports.
+
+**The extension** (the user, 2026-10-12: continue 4 rounds from round 7). A new campaign cannot start from a stage D
+round and would draw rounds 0–3's windows again (`[seed, round]`), so the formal campaign is extended in place to 12
+rounds at 70d87089, after window_behaviour gave the same behaviour (09:20, unit `formal-extend`). Stop rules: two rounds
+in a row not above 3727.2, KL above 0.10, or other failures above 150. Round 8: 83.6 % / 613 / 3726.9, KL 0.075, other
+failures 123 (58 min).
+
+**notes/stage_d.md of 2026-10-12** (requests 108–120 decided). Order 1: §0.3 (D195's milestone MC14, the state;
+76cf287c). Order 2 (41a65026): `multi_training_export`'s window identity is `partial(identity_of, "D")` (`post.window_lists`)
+instead of its own lambda; checked once on round 7's list: the 1,500 selection windows' identities the same, the list's
+453 windows the same places and windows before and after. The two settings namespaces of `tests/test_multi_training_export.py` lacked `batch_squares`
+(read since ae3839bd; 2 tests failed since then) and gained it in the same commit. Order 3: this log and the requests.
