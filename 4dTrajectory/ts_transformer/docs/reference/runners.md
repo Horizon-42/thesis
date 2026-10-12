@@ -1885,7 +1885,9 @@ spent, by the user's order, and chooses nothing. Each commanded aircraft of each
 (`aircraft_record`: subject `predicted`, no controls — the speed gate reads the declared 1 g; latitude and longitude from the
 airport frame, the MSL height, ψ from the compass track, V and γ from the ground speed and vertical rate, no wind; the runway
 its crossing landed on, else its observed one; the target the evaluation context's threshold, LTP + TCH; the observed
-record's source without its observed-only fields, the flight's type as `dynamics_typecode`), one a window and aircraft;
+record's source without its observed-only fields and `aircraft_type`; the type and mass the executor flew, the scenario's —
+never the observed record's mass, the harvest's nominal 60 t for a type it does not resolve, which put a Phenom 300's
+speed window at 168 m/s in the first run of 2026-10-12), one a window and aircraft;
 `python -m evaluation` grades each airport's records, and the same flights' observed records are graded by the same code
 (`executor_replay.observed_verdicts`, the two reports' schema and methodology required equal). Writes, into a new directory,
 `config.json` (`ts-multi-val-evaluation-v1`), `records/<ICAO>/`, `observed/<ICAO>/`, `aircraft.jsonl` (an aircraft a line:

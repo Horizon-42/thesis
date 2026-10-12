@@ -13,10 +13,13 @@ THE RECORDS (`aircraft_record`): each commanded aircraft of each window, its sta
 from its row 0 — observed before its first predicted step, flown from it — to its end) as an evaluation record of the
 subject ``predicted`` without controls (the speed gate reads the declared 1 g): latitude and longitude from the airport
 frame, the MSL height, ψ from the compass track, V and γ from the ground speed and the vertical rate (no wind,
-`autopilot.frame`), the mass of its observed record. Its runway: the one its crossing landed on (a landed aircraft's, a
+`autopilot.frame`), the mass the executor flew it at (its rebuilt series' scenario, `autopilot.flights.flight_inputs`;
+not the observed record's, which is the harvest's nominal 60 t for a type it does not resolve). Its runway: the one its crossing landed on (a landed aircraft's, a
 silent one's too), else its observed runway; the target at that runway's threshold as the evaluation context gives it
 (LTP + TCH; where no path is published, the two-tier candidate's TCH: the vertical gate is then indeterminate). Its
-source: the observed record's, without the observed-only fields, with its type as ``dynamics_typecode``. One record a
+source: the observed record's, without the observed-only fields and its ``aircraft_type``, with the type the executor
+flew (the scenario's, a stand-in's where one flies it) as ``dynamics_typecode``: the speed gate reads one type, the one
+whose mass the states carry (`evaluation.speed_gate.TYPECODE_KEYS`). One record a
 window and aircraft: a flight in several windows has a record in each.
 
 THE OBSERVED: the same flights' observed records, graded by this evaluation code once a flight
@@ -51,6 +54,7 @@ from evaluation.context import contexts_for_airport
 from evaluation.thresholds import AssessmentContext
 from trajectory_data_process.harvest.airports import load_airport
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
+from ts_transformer.data.dataset import FlightSeries
 from ts_transformer.data.lateral_eligibility import default_evaluation_report_path
 from ts_transformer.experiments.executor_replay import evaluate_records, observed_verdicts, require_same_grading
 from ts_transformer.experiments.multi_train import (
@@ -71,7 +75,7 @@ PREDICTOR = "two_tier_stage_d"
 #: The observed record's source fields that a computed record may not carry (`evaluation.records`: a computed
 #: subject's crossing is derived from its states) or that describe the observed track only.
 OBSERVED_ONLY = ("crossing_span", "observed_threshold_event", "source_integrity", "mass_source", "baro_vnav_minima",
-                 "tch_source", "vertical_source")
+                 "tch_source", "vertical_source", "aircraft_type")
 #: The evaluation's verdicts, in the readout's order.
 VERDICTS = ("pass", "fail", "indeterminate")
 GATES = ("lateral_result", "vertical_result", "speed_result")
@@ -94,39 +98,41 @@ def record_states(rows: np.ndarray, geometry: AirportGeometry, step_s: float, ma
             for i in range(len(rows))]
 
 
-def target_state(context: AssessmentContext, geometry: AirportGeometry, observed_target: Mapping[str, float]
+def target_state(context: AssessmentContext, geometry: AirportGeometry, speed_mps: float, mass_kg: float
                  ) -> dict[str, float]:
     """The target at ``context``'s threshold: its position and course, its LTP + TCH (the candidate's TCH where the
-    context publishes none), the candidate's glidepath, the observed target's speed and mass."""
+    context publishes none), the candidate's glidepath, ``speed_mps`` (the observed target's) and ``mass_kg`` (the
+    flown)."""
     candidate = geometry.candidates[geometry.candidate_index(context.runway)]
     altitude = context.desired_threshold_altitude_msl_m
     if altitude is None:
         altitude = candidate.elevation_m + candidate.vertical_path.crossing_height_m
-    return {"lat": context.threshold_lat, "lon": context.threshold_lon, "alt": altitude, "V": observed_target["V"],
+    return {"lat": context.threshold_lat, "lon": context.threshold_lon, "alt": altitude, "V": speed_mps,
             "psi": math_heading_rad(context.runway_course_deg),
-            "gamma": -math.radians(candidate.vertical_path.glidepath_deg), "m": observed_target["m"]}
+            "gamma": -math.radians(candidate.vertical_path.glidepath_deg), "m": mass_kg}
 
 
-def aircraft_record(end: WindowResult, flight: Mapping[str, Any], observed: Mapping[str, Any],
+def aircraft_record(end: WindowResult, flight: Mapping[str, Any], series: FlightSeries, observed: Mapping[str, Any],
                     geometry: AirportGeometry, contexts: Mapping[tuple[str, str], AssessmentContext],
                     step_s: float, extra: Mapping[str, Any]) -> dict[str, Any]:
     """The evaluation record of one commanded aircraft's end (module docstring, THE RECORDS): ``flight`` its flight
-    record (`signals_flights`), ``observed`` its observed evaluation record, ``step_s`` the rows' interval (the
+    record (`signals_flights`), ``series`` its rebuilt series (the airframe and mass flown), ``observed`` its observed
+    evaluation record, ``step_s`` the rows' interval (the
     vocabulary's), ``extra`` the window's fields its source carries. The source's path facts (TCH, glidepath) are the
     landing runway's candidate's; the observed runway's other path fields are left out (`OBSERVED_ONLY`)."""
     runway = (geometry.candidates[int(end.crossing["runway_index"])].ident if end.crossing is not None
               else flight["runway"])
     context = contexts[(flight["airport"], runway)]
     path = geometry.candidates[geometry.candidate_index(runway)].vertical_path
-    states = record_states(end.states, geometry, step_s, float(observed["initial_state"]["m"]))
+    states = record_states(end.states, geometry, step_s, float(series.scenario.initial.m))
     source = {key: value for key, value in observed["source"].items() if key not in OBSERVED_ONLY}
     source.update({"subject": "predicted", "predictor": PREDICTOR, "runway": runway,
                    "runway_course_deg": context.runway_course_deg, "target_source": "runway_threshold",
                    "threshold_crossing_height_m": path.crossing_height_m, "published_glidepath_deg": path.glidepath_deg,
-                   "dynamics_typecode": flight["typecode"], "two_tier_outcome": end.outcome, **extra})
+                   "dynamics_typecode": series.scenario.source["dynamics_typecode"], "two_tier_outcome": end.outcome, **extra})
     initial = {key: value for key, value in states[0].items() if key != "t"}
     return {"source": source, "initial_state": initial,
-            "target_state": target_state(context, geometry, observed["target_state"]),
+            "target_state": target_state(context, geometry, observed["target_state"]["V"], states[-1]["m"]),
             "final_time_s": states[-1]["t"], "states": states, "controls": []}
 
 
@@ -217,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"round {args.round}: this code's readout of its model on the {device.type} is not the val "
                          f"read's ({val_read / 'readout.json'}): its flights would not be the read's — stopped")
 
-    flights = context.splits["val"]["flights"]
+    flights, start = context.splits["val"]["flights"], context.splits["val"]["start"]
     airports = sorted({w.scene.geometry.code for w in windows})
     contexts = {key: c for code in airports
                 for key, c in contexts_for_airport(load_airport(code, config_file=DEFAULT_CONFIG,
@@ -240,7 +246,7 @@ def main(argv: list[str] | None = None) -> int:
                 seen = json.loads((approach / files[key]).read_text(encoding="utf-8"))
                 name = f"w{place:04d}_a{member:02d}_{key}_eval.json"
                 extra = {"window_place": place, "window_member": member, "window_span_s": window.span_s}
-                made = aircraft_record(end, flight, seen, window.scene.geometry, contexts, context.words.spec.step_s,
+                made = aircraft_record(end, flight, start.series[end.index], seen, window.scene.geometry, contexts, context.words.spec.step_s,
                                        extra)
                 write_json_atomic(records / name, made)
                 runway = made["source"]["runway"]

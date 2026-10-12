@@ -56,13 +56,12 @@ def test_the_rows_are_the_records_timed_states():
 
 def test_the_target_is_the_contexts_threshold():
     """The context's position, course and LTP + TCH; the candidate's TCH where none is published; the candidate's
-    glidepath; the observed target's speed and mass."""
-    observed = {"V": 70.0, "m": 60000.0}
-    target = graded.target_state(_context("27", 21.5), _geometry(), observed)
+    glidepath; the speed and mass given."""
+    target = graded.target_state(_context("27", 21.5), _geometry(), 70.0, 60000.0)
     assert (target["lat"], target["lon"], target["alt"]) == (30.1, -89.9, 21.5)
     assert target["psi"] == pytest.approx(math.pi) or target["psi"] == pytest.approx(-math.pi)
     assert target["gamma"] == pytest.approx(-math.radians(3.2)) and (target["V"], target["m"]) == (70.0, 60000.0)
-    assert graded.target_state(_context("27", None), _geometry(), observed)["alt"] == 22.0
+    assert graded.target_state(_context("27", None), _geometry(), 70.0, 60000.0)["alt"] == 22.0
 
 
 def _observed():
@@ -76,22 +75,27 @@ def _observed():
 
 def test_an_aircrafts_record_is_a_predicted_record_on_its_landing_runway(tmp_path):
     """A landed aircraft's runway is its crossing's, one that did not land keeps its observed runway; the source is
-    the observed one's without the observed-only fields, the subject predicted, its type the dynamics type; no
-    controls; the final time the last row's; the evaluation package reads it."""
+    the observed one's without the observed-only fields, the subject predicted; its type and mass the flown airframe's
+    (not the observed record's nominal mass), one type field only; no controls; the final time the last row's; the evaluation package reads it."""
     rows = np.array([[0.0, 0.0, 900.0, 90.0, 80.0, 0.0], [160.0, 0.0, 890.0, 90.0, 80.0, -5.0]])
-    flight = {"airport": "KXXX", "runway": "09", "typecode": "B738"}
+    flight = {"airport": "KXXX", "runway": "09", "typecode": "E55P"}
+    series = SimpleNamespace(scenario=SimpleNamespace(initial=SimpleNamespace(m=8000.0),
+                                                      source={"dynamics_typecode": "E55P"}))
     contexts = {("KXXX", "09"): _context("09", 20.0), ("KXXX", "27"): _context("27", 21.0)}
     landed = SimpleNamespace(states=rows, crossing={"runway_index": 1}, outcome="landed")
-    record = graded.aircraft_record(landed, flight, _observed(), _geometry(), contexts, 2.0, {"window_place": 3})
+    record = graded.aircraft_record(landed, flight, series, _observed(), _geometry(), contexts, 2.0,
+                                    {"window_place": 3})
     source = record["source"]
     assert source["runway"] == "27" and record["target_state"]["alt"] == 21.0
-    assert source["subject"] == "predicted" and source["dynamics_typecode"] == "B738"
+    assert source["subject"] == "predicted" and source["dynamics_typecode"] == "E55P" and "aircraft_type" not in source
+    assert {state["m"] for state in record["states"]} == {8000.0} and record["target_state"]["m"] == 8000.0
     assert source["two_tier_outcome"] == "landed" and source["window_place"] == 3
     assert (source["threshold_crossing_height_m"], source["published_glidepath_deg"]) == (16.0, 3.2)
     assert not set(graded.OBSERVED_ONLY) & set(source)
     assert record["controls"] == [] and record["final_time_s"] == 2.0 and len(record["states"]) == 2
     timeout = SimpleNamespace(states=rows, crossing=None, outcome="timeout")
-    assert graded.aircraft_record(timeout, flight, _observed(), _geometry(), contexts, 2.0, {})["source"]["runway"] == "09"
+    assert graded.aircraft_record(timeout, flight, series, _observed(), _geometry(), contexts, 2.0,
+                                  {})["source"]["runway"] == "09"
     path = tmp_path / "r_eval.json"
     path.write_text(json.dumps(record))
     loaded = load_record(path)
