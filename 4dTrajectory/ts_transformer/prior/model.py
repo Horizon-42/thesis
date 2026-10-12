@@ -125,7 +125,7 @@ def rope_angles(time_s: torch.Tensor, head: int, base: float) -> tuple[torch.Ten
     and returned in the dtype of ``time_s``."""
     half = head // 2
     frequency = base ** (-torch.arange(half, dtype=torch.float64, device=time_s.device) / half)
-    angle = time_s.double()[..., None] * frequency
+    angle = time_s.double()[..., None] * frequency # [..., None]， add 1 dim to match frequency
     return angle.cos().to(time_s.dtype), angle.sin().to(time_s.dtype)
 
 
@@ -397,7 +397,12 @@ class Past(NamedTuple):
 
 
 class Layer(nn.Module):
-    """Time attention → the added module, if a caller set one (§7 item 5) → feed-forward."""
+    """One transformer layer. It is pre-normed and residual, and has three steps:
+
+    1. The time attention over the rows of the line, with RoPE on the time in seconds.
+    2. The added module, if a caller set one (`added`). The prior itself sets none.
+    3. The feed-forward network.
+    """
 
     def __init__(self, d: int, heads: int, feedforward: int, dropout: float, rope_base: float) -> None:
         super().__init__()
@@ -409,17 +414,27 @@ class Layer(nn.Module):
         self.feedforward = nn.Sequential(nn.Linear(d, feedforward), nn.GELU(), nn.Dropout(dropout),
                                          nn.Linear(feedforward, d))
         self.dropout = nn.Dropout(dropout)
-        #: A module a caller adds (§7 item 5): ``added(x, extra)`` → what it adds to the residual stream after the time
-        #: attention, ``[B, R, d]``; ``extra`` is what the caller passed to `Prior.encode` / `Prior.extend`.
+        #: A module that a caller adds, or None. ``added(x, extra)`` gives ``[B, R, d]``, which is added to ``x`` after
+        #: the time attention. ``extra`` is what the caller passed to `Prior.encode` or `Prior.extend`.
         self.added: nn.Module | None = None
 
     def extend(self, x: torch.Tensor, time_s: torch.Tensor, present: torch.Tensor, past: Past, extra: Any
                ) -> tuple[torch.Tensor, Past]:
-        """The rows ``x`` [B, R, d] at ``time_s`` [B, R] that follow the ``past`` ones, written into the past in
-        place: ``(the rows out, the past with them)``."""
+        """Run the layer on R new rows of each of B lines.
+
+        The new rows come after the rows already in ``past``. Their keys and values are written into ``past`` in place.
+
+        x:       [B, R, d] the new rows (d is the width of the model).
+        time_s:  [B, R] the time of each new row, in seconds.
+        present: [B, R] bool. True: a real row of the line. False: padding (a shorter line is filled up to R) or an
+                 aircraft that is absent at this time. A row that is not present is stored, but no later row reads it.
+        past:    the cache of this layer.
+        extra:   passed to the added module, if there is one.
+
+        Returns the output rows [B, R, d] and the past that holds the new rows."""
         batch, rows, d = x.shape
         head = d // self.heads
-        start, end = past.rows - past.start, past.rows - past.start + rows       # in each line's own rows
+        start, end = past.rows - past.start, past.rows - past.start + rows       # the new rows' indexes in a line's own rows (after the front)
         room = past.keys.shape[2]
         if end > room:                               # a line longer than its room: grown by steps
             past = past.grown(room + CACHE_STEP_ROWS * math.ceil((end - room) / CACHE_STEP_ROWS))
@@ -453,7 +468,39 @@ class CandidatePool(nn.Module):
 
 
 class Prior(nn.Module):
+    """The prior. It reads the rows of one aircraft and, at each row, says one word in each of the five columns of
+    `COLUMNS` (runway, heading, altitude, angle, speed). A word is a class: 0 is "unchanged". In the runway column
+    1 is "go-around" and 2 + k is candidate k. In the other columns 1 + k is word k.
+
+    The steps are:
+
+    1. `_inputs` makes one vector of each row: the own state, the words in force, the runway in force, and what the
+       row reads of the airport's candidate runways.
+    2. The layers run a causal time attention over the rows of the aircraft.
+    3. `logits` has one head for each column, in the order of `COLUMNS`. A head reads the hidden state of the row and
+       the classes that the earlier columns chose at this row.
+
+    **In training** the whole sentence is run at once, with the true words as input to the heads (teacher forcing).
+    `train.py` calls ``model(rows)``, which is `forward`:
+
+        forward → encode → extend (with `no_past`) → _inputs, then the layers
+                → logits → for each column: column_logits, then after_choice with the true class
+
+    **When speaking** (`Speaker`) the rows come one at a time and a cache holds the rows before. The speaker calls:
+
+        no_past                          once, an empty cache
+        extend(observed rows, cache)     the rows before the first predicted step; only the cache is kept
+        for each predicted row:
+            extend(row, cache)           h, tokens and the new cache
+            for each column:
+                column_logits            the speaker masks them and draws a class
+                after_choice             the drawn class goes into g for the next column
+
+    The value network of post-training calls `encode` and reads the hidden states.
+    """
+
     def __init__(self, config: PriorConfig) -> None:
+        """Build the input projections, the candidate network, the layers and one head for each column."""
         super().__init__()
         self.config = config
         d = config.d_model
@@ -480,19 +527,27 @@ class Prior(nn.Module):
 
     # ---- the rows
     def encode(self, rows: RowTensors, extra: Any = None) -> tuple[torch.Tensor, torch.Tensor]:
-        """``(h [B, R, d], tokens [B, R, K, d])`` of every row: `extend` from nothing."""
+        """Run all rows at once. This is `extend` with an empty past. Called by `forward` and by the value network.
+
+        Returns h [B, R, d], the hidden state of each row, and tokens [B, R, K, d], the vector of each of the K
+        candidate runways at each row."""
         h, tokens, _ = self.extend(rows, self.no_past(rows.present.shape[0], rows.present.shape[1]), extra)
         return h, tokens
 
     def no_past(self, batch: int, capacity: int) -> list[Past]:
-        """Every layer's `Past` before the first row, room for ``capacity`` rows."""
+        """The empty cache: one `Past` for each layer, with room for ``capacity`` rows. Called by `encode` and by the
+        speaker, once."""
         head = self.config.d_model // self.config.heads
         return [Past.nothing(batch, self.config.heads, head, capacity, self.no_runway) for _ in self.layers]
 
     def extend(self, rows: RowTensors, past: list[Past], extra: Any = None
                ) -> tuple[torch.Tensor, torch.Tensor, list[Past]]:
-        """The rows of ``rows`` that follow the ``past`` ones (`no_past` before the first): ``(h, tokens, the past
-        with these rows)``."""
+        """Run the layers on new rows and add them to the cache. Called by `encode` (all rows) and by the speaker (one
+        row at a time).
+
+        The new rows come after the rows in ``past`` (`no_past` before the first).
+
+        Returns h [B, R, d], tokens [B, R, K, d] (as `encode`) and the new list of `Past`, one for each layer."""
         x, tokens = self._inputs(rows)
         after = []
         for layer, before in zip(self.layers, past):
@@ -501,7 +556,14 @@ class Prior(nn.Module):
         return self.norm(x), tokens, after
 
     def _inputs(self, rows: RowTensors) -> tuple[torch.Tensor, torch.Tensor]:
-        """The first layer's input of the rows and their candidate tokens (module docstring)."""
+        """Make the input vector of each row, and the candidate tokens. Called by `extend`.
+
+        The vector of a row is the sum of:
+        - the own state: the own features, the time since the word of each column, the go-around flag, and the
+          heading in force as sine and cosine;
+        - an embedding for each word in force (altitude, angle, speed; 0 is "none yet");
+        - the token of the runway in force, projected (the learned vector `no_runway` when there is none yet);
+        - what the row reads of the candidate tokens (`CandidatePool`)."""
         tokens = self.candidate(rows.candidates) * rows.valid[:, None, :, None]
         x = self.state(torch.cat((rows.own, rows.since, rows.go_around[..., None].to(rows.own.dtype),
                                   rows.heading_in_force), dim=-1))
@@ -514,16 +576,26 @@ class Prior(nn.Module):
 
     @staticmethod
     def _token(tokens: torch.Tensor, candidate: torch.Tensor) -> torch.Tensor:
-        """``tokens`` [B, R, K, d] of the candidate ``candidate`` [B, R] at each row (a negative index: slot 0, for
-        the caller to replace)."""
+        """Pick the token of one candidate at each row. Called by `_inputs` and `after_choice`.
+
+        Returns [B, R, d]: the token of the candidate ``candidate`` [B, R] at each row, from ``tokens`` [B, R, K, d].
+        A negative index reads slot 0; the caller replaces that value."""
         index = candidate.clamp(min=0)[..., None, None].expand(*candidate.shape, 1, tokens.shape[-1])
         return tokens.gather(2, index)[..., 0, :]
 
     # ---- the heads
     def column_logits(self, column: int, g: torch.Tensor, tokens: torch.Tensor, valid: torch.Tensor,
                       first: torch.Tensor) -> torch.Tensor:
-        """Column ``column``'s logits ``[B, R, classes]`` from ``g`` (the hidden state plus the earlier columns'
-        choices, `after_choice`); ``first`` [B, R]: the first predicted step."""
+        """The scores of the classes of one column. Called by `logits` and, one row at a time, by the speaker.
+
+        Returns the logits [B, R, classes] of column ``column``.
+
+        g [B, R, d]: the hidden state plus the choices of the earlier columns (`after_choice`).
+        first [B, R] bool: the first predicted step. There "unchanged" is blocked in every column, and "go-around" in
+        the runway column.
+
+        In the runway column the classes are "unchanged", "go-around", and then one score for each candidate:
+        q(g) · token / √d. The score of a padded candidate is −inf."""
         if column == RUNWAY:
             scores = torch.einsum("brd,brkd->brk", self.runway_query(g), tokens) / math.sqrt(g.shape[-1])
             scores = scores.masked_fill(~valid[:, None, :], float("-inf"))
@@ -537,7 +609,10 @@ class Prior(nn.Module):
         return logit.masked_fill(first[..., None] & at_first, float("-inf"))
 
     def after_choice(self, column: int, g: torch.Tensor, chosen: torch.Tensor, tokens: torch.Tensor) -> torch.Tensor:
-        """``g`` with the class ``chosen`` [B, R] of column ``column`` added, for the columns after it."""
+        """Put the class chosen in one column into the state for the columns after it. Called by `logits` (true
+        class) and by the speaker (drawn class).
+
+        Returns ``g`` plus the embedding of the class ``chosen`` [B, R] in column ``column``."""
         if column == RUNWAY:
             candidate = chosen - RUNWAY_FIXED_CLASSES
             fixed = self.runway_fixed_chosen(chosen.clamp(max=RUNWAY_FIXED_CLASSES - 1))
@@ -547,8 +622,11 @@ class Prior(nn.Module):
 
     def logits(self, h: torch.Tensor, tokens: torch.Tensor, valid: torch.Tensor, chosen: torch.Tensor,
                first: torch.Tensor) -> list[torch.Tensor]:
-        """The five columns' logits ``[B, R, classes]``, each head reading the classes ``chosen`` [B, R, 5] of the
-        columns before it."""
+        """Run the five heads in order. Called by `forward`.
+
+        Returns the logits of the five columns, each [B, R, classes].
+
+        A head reads the hidden state ``h`` plus the classes in ``chosen`` [B, R, 5] of the columns before it."""
         out, g = [], h
         for column in range(len(COLUMNS)):
             out.append(self.column_logits(column, g, tokens, valid, first))
@@ -556,13 +634,14 @@ class Prior(nn.Module):
         return out
 
     def forward(self, rows: RowTensors, extra: Any = None) -> list[torch.Tensor]:
-        """Teacher forcing: the five columns' logits, each head reading the targets of the columns before it."""
+        """Training: encode the rows and give the logits of the five columns. Each head reads the true classes
+        (``rows.targets``) of the columns before it (teacher forcing)."""
         h, tokens = self.encode(rows, extra)
         return self.logits(h, tokens, rows.valid, rows.targets, rows.first)
 
-    # ---- §7 item 5
+    # ---- modules added by a caller
     def add_at_each_layer(self, make: Callable[[int], nn.Module]) -> None:
-        """Set ``make(i)`` as layer i's added module (`Layer.added`); refused where one is set already."""
+        """Give each layer i the module ``make(i)`` (`Layer.added`). A layer that has one already is refused."""
         for i, layer in enumerate(self.layers):
             if layer.added is not None:
                 raise ValueError(f"layer {i} has an added module already")
