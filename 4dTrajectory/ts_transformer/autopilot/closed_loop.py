@@ -42,14 +42,16 @@ measured against that line, for the readouts only; e_h is NaN there (no observed
 is no measurement), the reading says no correction, a correction in force ends, and the rows count as rows without
 correction (D34).
 
-THE CORRECTIONS (`Corrector`), with Y = `closed_loop_lateral_m` of the spec and H the vertical tolerance in force
-(`vertical_tolerance_m`, D66): `closed_loop_final_vertical_m` (H_final) while "no level-off" is in force — the final
-descent, told by the words — and `closed_loop_vertical_m` elsewhere:
+THE CORRECTIONS (`Corrector`), with Y the lateral tolerance in force (`lateral_tolerance_m`; the user, 2026-10-12) and
+H the vertical tolerance in force (`vertical_tolerance_m`, D66): `closed_loop_final_lateral_m` (Y_final) and
+`closed_loop_final_vertical_m` (H_final) while "no level-off" is in force — the final descent, told by the words — and
+`closed_loop_lateral_m` and `closed_loop_vertical_m` elsewhere:
 
 - lateral: when |e_y| > Y and the row says no new observed heading word, the heading class one step (5°)
   from the observed word in force, toward the path; the observed word again when |e_y| < Y / 2 or e_y changes sign —
   except an OVERSHOOT (D53): e_y changed its sign beyond Y, and the opposite correction is said in the same row; a
-  new observed heading word ends a correction (it is said, and the comparison goes on from the next row);
+  new observed heading word ends a correction (it is said, and the comparison goes on from the next row); a heading
+  correction in force where "no level-off" is said goes on against the tolerance in force at each row;
 - vertical: only while a descent class of the observed words is in force — when e_h > H the next steeper descent class,
   when e_h < −H the next shallower (none beyond descent 4 or descent 1); the observed class again when |e_h| < H / 2 or
   e_h changes sign — an overshoot beyond H takes the opposite class in the same row where it exists (D53); a new
@@ -209,6 +211,14 @@ class ObservedPath:
         return Match(lateral, vertical, row, along, last)
 
 
+def lateral_tolerance_m(words: Words, altitude: np.ndarray | int) -> np.ndarray:
+    """The lateral tolerance in force under each altitude word in force (module docstring): Y_final under "no
+    level-off", Y under a level. The one definition the corrections and the readings of D34 read."""
+    spec = words.spec
+    return np.where(np.asarray(altitude) == words.altitude_no_level_off, spec.closed_loop_final_lateral_m,
+                    spec.closed_loop_lateral_m)
+
+
 def vertical_tolerance_m(words: Words, altitude: np.ndarray | int) -> np.ndarray:
     """The vertical tolerance in force under each altitude word in force (D66, module docstring): H_final under "no
     level-off", H under a level. The one definition the corrections and the rule of D50 read."""
@@ -272,7 +282,8 @@ def outside_rows(sentence: ClosedLoopSentence, observed: np.ndarray, first_row: 
     toward = (np.sign(np.round(wrap180(said - plain), 9)) == -np.sign(withheld.lateral_m),
               np.sign(in_force(grid)[:, ANGLE].astype(int) - in_force(observed)[seen, ANGLE].astype(int))
               == np.sign(np.nan_to_num(withheld.vertical_m)))
-    tolerances = (words.spec.closed_loop_lateral_m, vertical_tolerance_m(words, in_force(grid)[:, ALTITUDE]))
+    altitude = in_force(grid)[:, ALTITUDE]
+    tolerances = (lateral_tolerance_m(words, altitude), vertical_tolerance_m(words, altitude))
     out = {}
     for k, (name, errors) in enumerate((("lateral", withheld.lateral_m), ("vertical", withheld.vertical_m))):
         correctable = ~withheld.uncorrectable[:, k]
@@ -314,8 +325,6 @@ class Corrector:
         self.observed, self.held, self.runway = observed[first_row:], held[first_row:], runway[first_row:]
         self.heading_row, self.track = heading_row[first_row:], track[first_row:]
         self.start, self.every, self.words = start, every, words
-        spec = words.spec
-        self.lateral_m = spec.closed_loop_lateral_m
         self.next = start        # the first 2 s row not said yet
         self.rows_said = 0
         self.turn = 0            # a heading correction in force: the sign of e_y it answers (0: none)
@@ -346,12 +355,13 @@ class Corrector:
         self.uncorrectable = np.ones(2, dtype=bool)
         if not first:
             self.uncorrectable[0] = observed[HEADING] != UNCHANGED or past_end
+            lateral_tolerance = float(lateral_tolerance_m(self.words, int(held[ALTITUDE])))     # in force at the row
             if observed[HEADING] != UNCHANGED or past_end:
                 self.turn = 0
-            elif self.turn and (abs(lateral_m) < self.lateral_m / 2 or _sign(lateral_m) != self.turn):
+            elif self.turn and (abs(lateral_m) < lateral_tolerance / 2 or _sign(lateral_m) != self.turn):
                 # ended; an overshoot beyond the tolerance takes the opposite correction in the same row (D53)
-                self.turn = _sign(lateral_m) if abs(lateral_m) > self.lateral_m else 0
-            elif not self.turn and abs(lateral_m) > self.lateral_m:
+                self.turn = _sign(lateral_m) if abs(lateral_m) > lateral_tolerance else 0
+            elif not self.turn and abs(lateral_m) > lateral_tolerance:
                 self.turn = _sign(lateral_m)
             angle = int(held[ANGLE])
             tolerance = float(vertical_tolerance_m(self.words, int(held[ALTITUDE])))     # in force at the row (D66)

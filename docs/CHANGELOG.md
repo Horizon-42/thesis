@@ -1,5 +1,18 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-12 — Two-tier labeller: the closed loop's lateral tolerance in the final descent, Y_final
+
+- The user's decision (2026-10-12), after the rebuilt v13 labels flown in closed loop landed 85.5 % (train, Δ 2 s) by the
+  evaluation's verdict, most failures 23–30 m off the centreline at the threshold (the evaluation's bound: half the
+  runway's width, 22.86 m; the closed loop's lateral tolerance Y: 30 m in every phase): while "no level-off" is in force
+  (the final descent) the closed loop's tolerances are half of the others — Y_final = 15 m (new spec field
+  `closed_loop_final_lateral_m`, `instruction_spec --closed-loop-final-lateral-m`, one definition
+  `closed_loop.lateral_tolerance_m`) and H_final = 7.5 m (`--closed-loop-final-vertical-m 7.5`; was 10 m, D66). A
+  correction ends under half of the tolerance in force, as before.
+- The spec gains a required field, `ts-instruction-spec-v9`: every spec written before is refused by name. The reading
+  rule's name stays `instruction-v8` (the frontend mirrors it; D66 moved it to instruction-v6 — renaming it is the
+  user's call, with the frontend's last stage).
+
 ### 2026-10-12 — Two-tier judge: a landing is the evaluation package's verdict
 
 - The user's order (2026-10-12): one landing judgement, the evaluation's. Where a flight ends is unchanged

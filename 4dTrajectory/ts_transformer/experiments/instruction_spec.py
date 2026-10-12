@@ -18,9 +18,11 @@ error of the level words (`measure.grid_candidates`). Writes ``spec.json`` (with
 ``--candidate NAME`` (required when measuring) is the user's choice of D15 (D56): the descent nominals and edges and
 the climb nominal of that row of the rounding candidates (`measure.CANDIDATE_NAMES`); ``--grid NAME`` (required when
 measuring) is the user's choice of the altitude grid (D58): a row of the grid candidates (`measure.GRID_NAMES`). The
-fitted values and every row stay in ``measurements.json`` beside the choices. ``--closed-loop-final-vertical-m`` (required
-when measuring) is the closed-loop reading's vertical tolerance in the final descent, H_final (D66): measured by A24, not
-here, and chosen by the user; at most H (`closed_loop_vertical_m`); recorded beside the other choices.
+fitted values and every row stay in ``measurements.json`` beside the choices. ``--closed-loop-final-lateral-m`` and
+``--closed-loop-final-vertical-m`` (required when measuring) are the closed-loop reading's lateral and vertical
+tolerances in the final descent, Y_final (the user, 2026-10-12) and H_final (D66: measured by A24): not measured here,
+chosen by the user; at most Y (`closed_loop_lateral_m`) and H (`closed_loop_vertical_m`); recorded beside the other
+choices.
 ``--angle-lead-s`` and ``--speed-lead-s`` (required when measuring) are the angle and speed words' leads L_γ and L_v
 (executor design D7, D8, §17): measured by their own reading (V12), not here, and chosen by the user; recorded beside the
 other choices.
@@ -29,7 +31,8 @@ other choices.
 under the same vocabulary, e.g. rows moved onto the UTC steps, keep the spec; every model trained under it still opens).
 
     python run_ts.py instruction_spec --dir 4dTrajectory/outputs/POOLED/instruction_language/<name> --candidate 0.25 \
-        --grid <name> --closed-loop-final-vertical-m <m> --angle-lead-s <s> --speed-lead-s <s>
+        --grid <name> --closed-loop-final-lateral-m <m> --closed-loop-final-vertical-m <m> \
+        --angle-lead-s <s> --speed-lead-s <s>
     python run_ts.py instruction_spec --dir <new> --spec-from 4dTrajectory/outputs/POOLED/instruction_language/<old>
 """
 
@@ -123,6 +126,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="the user's choice of D15 (required when measuring; module docstring)")
     parser.add_argument("--grid", choices=measure.GRID_NAMES, default=None,
                         help="the user's choice of the altitude grid (D58; required when measuring)")
+    parser.add_argument("--closed-loop-final-lateral-m", type=float, default=None,
+                        help="Y_final, the lateral tolerance of the closed loop in the final descent (the user, "
+                             "2026-10-12; required when measuring)")
     parser.add_argument("--closed-loop-final-vertical-m", type=float, default=None,
                         help="H_final, the vertical tolerance of the closed loop in the final descent (D66; required "
                              "when measuring)")
@@ -131,17 +137,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--speed-lead-s", type=float, default=None,
                         help="L_v, the speed words' lead (executor design D8; required when measuring)")
     args = parser.parse_args(argv)
-    choices = (args.candidate, args.grid, args.closed_loop_final_vertical_m, args.angle_lead_s, args.speed_lead_s)
+    choices = (args.candidate, args.grid, args.closed_loop_final_lateral_m, args.closed_loop_final_vertical_m,
+               args.angle_lead_s, args.speed_lead_s)
     if (args.spec_from is None) == (args.candidate is None) or len({c is None for c in choices}) != 1:
-        parser.error("measuring needs --candidate, --grid, --closed-loop-final-vertical-m, --angle-lead-s and "
-                     "--speed-lead-s (the user's choices of D15, D58, D66, D7 and D8); --spec-from keeps a spec and "
-                     "takes none")
+        parser.error("measuring needs --candidate, --grid, --closed-loop-final-lateral-m, --closed-loop-final-vertical-m, "
+                     "--angle-lead-s and --speed-lead-s (the user's choices of D15, D58, Y_final, D66, D7 and D8); "
+                     "--spec-from keeps a spec and takes none")
     if args.closed_loop_final_vertical_m is not None:      # refused by the spec's own rules before anything is read
         try:
-            replace(measure.provisional_spec(), closed_loop_final_vertical_m=args.closed_loop_final_vertical_m,
+            replace(measure.provisional_spec(), closed_loop_final_lateral_m=args.closed_loop_final_lateral_m,
+                    closed_loop_final_vertical_m=args.closed_loop_final_vertical_m,
                     angle_lead_s=args.angle_lead_s, speed_lead_s=args.speed_lead_s)
         except ValueError as error:
-            parser.error(f"--closed-loop-final-vertical-m / --angle-lead-s / --speed-lead-s: {error}")
+            parser.error(f"--closed-loop-final-lateral-m / --closed-loop-final-vertical-m / --angle-lead-s / "
+                         f"--speed-lead-s: {error}")
     directory = args.dir if args.dir.is_absolute() else REPO_ROOT / args.dir
     for name in ("spec.json", "measurements.json"):
         if (directory / name).exists():
@@ -196,12 +205,14 @@ def main(argv: list[str] | None = None) -> int:
         speed_accel_max_mps2=measure.round_up(float(np.percentile(first["transition_accel_mps2"], 99.9)), 0.1),
         **measure.grid_values(grids_m, args.grid),
     )
-    spec = measure.build_spec(measured, closed_loop_final_vertical_m=args.closed_loop_final_vertical_m,
+    spec = measure.build_spec(measured, closed_loop_final_lateral_m=args.closed_loop_final_lateral_m,
+                              closed_loop_final_vertical_m=args.closed_loop_final_vertical_m,
                               angle_lead_s=args.angle_lead_s, speed_lead_s=args.speed_lead_s)
     measurements = {
         "train_flights": len(flights), "not_admitted": dict(refused.most_common()),
         "suggested": suggested, "measured": measured.to_dict(), "chosen_candidate": args.candidate,
-        "chosen_grid": args.grid, "chosen_closed_loop_final_vertical_m": args.closed_loop_final_vertical_m,
+        "chosen_grid": args.grid, "chosen_closed_loop_final_lateral_m": args.closed_loop_final_lateral_m,
+        "chosen_closed_loop_final_vertical_m": args.closed_loop_final_vertical_m,
         "chosen_angle_lead_s": args.angle_lead_s, "chosen_speed_lead_s": args.speed_lead_s,
         "rules": {
             "heading_tolerance_deg": f"chosen: heading_step/2 + {measure.HEADING_WANDER_ALLOWANCE_DEG:g}° of wander "
@@ -222,6 +233,7 @@ def main(argv: list[str] | None = None) -> int:
             "climb_angle_centre_deg": "length-weighted median of the climb pieces with G false, at most the climb "
                                       f"class's largest angle (A33; climb_pieces), the row {args.candidate!r}",
             "speed_accel_max_mps2": "p99.9 of |acceleration| on transition rows, up to 0.1",
+            "closed_loop_final_lateral_m": "the user's choice of Y_final (2026-10-12) — not measured here",
             "closed_loop_final_vertical_m": "the user's choice of H_final (D66), from the measurement of A24 — not "
                                             "measured here",
             "angle_lead_s": "the user's choice of L_γ (executor design D7), from its own measurement (V12) — not "
@@ -249,8 +261,9 @@ def main(argv: list[str] | None = None) -> int:
     }
     source = {"git": git_state()}
     write_spec(directory, spec, measurements, source)
-    print(f"spec {spec.sha256[:12]} (candidate {args.candidate}, grid {args.grid}, H_final "
-          f"{args.closed_loop_final_vertical_m:g} m, L_γ {args.angle_lead_s:g} s, L_v {args.speed_lead_s:g} s):")
+    print(f"spec {spec.sha256[:12]} (candidate {args.candidate}, grid {args.grid}, Y_final "
+          f"{args.closed_loop_final_lateral_m:g} m, H_final {args.closed_loop_final_vertical_m:g} m, "
+          f"L_γ {args.angle_lead_s:g} s, L_v {args.speed_lead_s:g} s):")
     for name, value in measured.to_dict().items():
         print(f"  {name:32s} {value}")
     for k, fit in fits.items():

@@ -30,8 +30,9 @@ from geokit import FT_M, KT_MS, NM_M
 #: speed L_v later, as a heading word says the track L later; since instruction-v8 the last angle word of the last descent
 #: reads the final straight-in line's angle (`labeller.vertical` module docstring; executor design Q4, D10).
 READING_RULE = "instruction-v8"
-#: The spec file's format: v8 (A29, D73) records no digest of the labeller's code beside the spec.
-SPEC_SCHEMA = "ts-instruction-spec-v8"
+#: The spec file's format: v8 (A29, D73) records no digest of the labeller's code beside the spec; v9 (the user,
+#: 2026-10-12) the closed loop's lateral tolerance in the final descent, `closed_loop_final_lateral_m`.
+SPEC_SCHEMA = "ts-instruction-spec-v9"
 
 #: FAA JO 7110.65BB 5-9-2 TBL 5-9-1: the largest final-approach interception angle 2 NM or
 #: more outside the approach gate — the judge's "lined up" (vocabulary §5.8).
@@ -150,11 +151,13 @@ class VocabularySpec:
     #: A point past the threshold and at most this high is on the runway (a touch-and-go): not a go-around.
     go_around_on_runway_height_m: float
     # --- the closed-loop reading (vocabulary §4.9, D32; `autopilot.closed_loop`)
-    #: A heading correction starts when the flown path is more than `closed_loop_lateral_m` off the observed one, an
-    #: angle correction when it is more than the vertical tolerance in force above or below it; each ends under half of
-    #: it. The vertical tolerance in force is `closed_loop_final_vertical_m` (H_final) while "no level-off" is in force
-    #: (the final descent) and `closed_loop_vertical_m` (H) elsewhere (D66).
+    #: A heading correction starts when the flown path is more than the lateral tolerance in force off the observed one,
+    #: an angle correction when it is more than the vertical tolerance in force above or below it; each ends under half
+    #: of it. While "no level-off" is in force (the final descent) the tolerances in force are
+    #: `closed_loop_final_lateral_m` (Y_final; the user, 2026-10-12) and `closed_loop_final_vertical_m` (H_final, D66);
+    #: elsewhere `closed_loop_lateral_m` (Y) and `closed_loop_vertical_m` (H).
     closed_loop_lateral_m: float
+    closed_loop_final_lateral_m: float
     closed_loop_vertical_m: float
     closed_loop_final_vertical_m: float
     reading_rule: str = READING_RULE
@@ -177,8 +180,8 @@ class VocabularySpec:
             "speed_fit_tolerance_mps", "speed_flat_accel_mps2", "speed_min_hold_s", "speed_accel_max_mps2",
             "unspecified_plateau_s", "unspecified_distance_m", "go_around_max_cross_m", "go_around_max_height_m",
             "go_around_min_progress_m", "go_around_hold_s", "go_around_min_drop_m", "go_around_min_climb_m",
-            "go_around_on_runway_height_m", "closed_loop_lateral_m", "closed_loop_vertical_m",
-            "closed_loop_final_vertical_m",
+            "go_around_on_runway_height_m", "closed_loop_lateral_m", "closed_loop_final_lateral_m",
+            "closed_loop_vertical_m", "closed_loop_final_vertical_m",
         )
         for name in positive:
             if getattr(self, name) <= 0:
@@ -225,6 +228,9 @@ class VocabularySpec:
             raise ValueError("each descent centre must lie inside its class")
         if self.climb_angle_centre_deg > self.climb_angle_max_deg:
             raise ValueError("the climb centre lies beyond the climb range")
+        if self.closed_loop_final_lateral_m > self.closed_loop_lateral_m:
+            raise ValueError("closed_loop_final_lateral_m above closed_loop_lateral_m: the final descent's tolerance "
+                             "is the smaller one")
         if self.closed_loop_final_vertical_m > self.closed_loop_vertical_m:
             raise ValueError("closed_loop_final_vertical_m above closed_loop_vertical_m: the final descent's tolerance "
                              "is the smaller one (D66)")

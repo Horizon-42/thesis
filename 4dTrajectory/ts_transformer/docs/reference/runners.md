@@ -176,7 +176,8 @@ val: the val days are read once, in the stage's validation readout, D85; A41). E
 refuses to write over an existing file.
 
     python run_ts.py instruction_signals --out <artefact> --limit 80     # a smoke build; no --limit for the formal one
-    python run_ts.py instruction_spec --dir <artefact> --candidate 0.25 --grid <the user's choice>
+    python run_ts.py instruction_spec --dir <artefact> --candidate 0.25 --grid <the user's choice> \
+        --closed-loop-final-lateral-m <Y_final> --closed-loop-final-vertical-m <H_final> --angle-lead-s <s> --speed-lead-s <s>
     python run_ts.py instruction_labels --dir <artefact>
     python run_ts.py instruction_conformance --dir <artefact>
 

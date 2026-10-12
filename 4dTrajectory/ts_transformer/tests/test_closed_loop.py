@@ -266,6 +266,37 @@ def test_the_vertical_tolerance_in_force_is_h_final_only_while_no_level_off_is_i
     assert not any(added[ANGLE] for _, added in before)
 
 
+def test_the_lateral_tolerance_in_force_is_y_final_only_while_no_level_off_is_in_force():
+    """Y_final (the user, 2026-10-12): an e_y between Y_final (15 m) and Y (30 m) starts a heading correction in a final
+    descent and not before it; the correction ends under half of Y_final; the tolerance changes where "no level-off" is
+    said and where a go-around row says a level (rule 6), and again at the next final descent; at Y_final = Y no
+    correction starts anywhere."""
+    def read(final_lateral_m):
+        words = Words(spec(closed_loop_final_lateral_m=final_lateral_m))
+        final = {ALTITUDE: words.altitude_no_level_off, ANGLE: 3}
+        rows = [(_first(words, 600.0, 2), 0.0, 900.0), ({}, 20.0, 850.0),           # a descent to a level: Y
+                (final, 20.0, 800.0), ({}, 10.0, 700.0), ({}, 5.0, 600.0),           # the final descent: Y_final
+                ({RUNWAY: RUNWAY_GO_AROUND, ALTITUDE: words.altitude_index(900.0), ANGLE: words.angle_climb}, 0.0, 300.0),
+                ({}, 20.0, 500.0), ({RUNWAY: 0}, 0.0, 700.0),                        # a climb: Y
+                ({ALTITUDE: words.altitude_index(600.0), ANGLE: 2}, 0.0, 900.0), ({}, 20.0, 850.0),   # Y again
+                (final, 20.0, 700.0), ({}, 20.0, 650.0)]                             # Y_final again
+        grid = _grid([said for said, _, _ in rows])
+        corrector = Corrector(grid, 0, 0, 1, words, [90.0])
+        said = [corrector.row(k, e_y, 0.0, height, holding=False, past_end=False)
+                for k, (_, e_y, height) in enumerate(rows)]
+        return words, grid, said
+
+    words, grid, said = read(15.0)
+    assert closed_loop.lateral_tolerance_m(words, in_force(grid)[:, ALTITUDE]).tolist() == [
+        30.0, 30.0, 15.0, 15.0, 15.0, 30.0, 30.0, 30.0, 30.0, 30.0, 15.0, 15.0]
+    # one class left (toward the path) at 20 m right under Y_final; at 10 m (under Y / 2, not under Y_final / 2) it
+    # stays; the observed word again at 5 m, under Y_final / 2
+    assert [k for k, (_, added) in enumerate(said) if added[HEADING]] == [2, 4, 10]
+    assert [int(said[k][0][HEADING]) for k in (2, 4, 10)] == [words.n_heading - 1, 0, words.n_heading - 1]
+    _, _, before = read(30.0)
+    assert not any(added[HEADING] for _, added in before)
+
+
 def test_a_new_observed_altitude_word_ends_an_angle_correction():
     words = Words(spec())
     corrector = Corrector(_grid([_first(words, 600.0, 2), {}, {ALTITUDE: words.altitude_index(480.0)}]), 0, 0, 1, words, [90.0])
@@ -590,6 +621,29 @@ def test_the_readings_of_d34_read_the_vertical_tolerance_in_force_at_each_row():
     correctable, outside, breaks = closed_loop.outside_rows(sentence, observed, 0, words, [90.0])["vertical"]
     assert correctable.tolist() == [False, True, False, True, True]     # the first row and a new word: none
     assert outside.tolist() == [False, False, False, True, True] and not breaks.any()
+
+
+def test_the_readings_of_d34_read_the_lateral_tolerance_in_force_at_each_row():
+    """Y_final, D50: a row is outside laterally when |e_y| exceeds the tolerance in force there — Y_final in the final
+    descent, Y before it."""
+    words = Words(spec(closed_loop_final_lateral_m=15.0))
+    final = {ALTITUDE: words.altitude_no_level_off, ANGLE: 3}
+    observed = _grid([_first(words, 600.0, 2), {}, final, {}, {}])
+    corrector = Corrector(observed, 0, 0, 1, words, [90.0])
+    errors = [0.0, 20.0, 20.0, 20.0, 20.0]
+    rows, uncorrectable = [], []
+    for k, e_y in enumerate(errors):
+        rows.append(corrector.row(k, e_y, 0.0, 900.0, holding=False, past_end=False))
+        uncorrectable.append(corrector.uncorrectable.copy())
+    n = len(rows)
+    sentence = _sentence(
+        first_row=0, grid=np.array([r[0] for r in rows]), correction=np.array([r[1] for r in rows]),
+        states=np.zeros((n, 6)), on_interval=np.ones(n, bool), lateral_m=np.array(errors), vertical_m=np.zeros(n),
+        uncorrectable=np.array(uncorrectable), observed_row=np.arange(n), matched_row=np.arange(n, dtype=float),
+        start=0, timed_out=False, outcome="landed")
+    correctable, outside, breaks = closed_loop.outside_rows(sentence, observed, 0, words, [90.0])["lateral"]
+    assert correctable.tolist() == [False, True, True, True, True]          # the first row: none
+    assert outside.tolist() == [False, False, True, True, True] and not breaks.any()
 
 
 def test_a_closed_loop_flight_with_h_final_differs_only_in_its_final_descent():
