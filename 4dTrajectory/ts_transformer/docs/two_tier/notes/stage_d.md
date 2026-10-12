@@ -27,12 +27,5 @@
 2. 小改动，不用 agent 审核：multi_training_export 里窗口身份的 lambda 删掉，改为 import
    post.window_lists.identity_of（code-health-followups 里 96b5b87f 那条），翻掉它的状态行。核对一次：用第 7 轮
    的一个列表，改前改后选出的窗口相同。在分支上做；正式 campaign 在跑，只跑改动模块的测试。
-3. 正式 campaign 结束后（停止规则触发或第 11 轮跑完）：
-   a. 按规则选轮：正式 campaign 各轮和对照臂 8 轮里 select reward 最高的那一轮。
-   b. 如果不是第 7 轮：先写 intents，再用 multi_window_read 读这一轮，照第 7 轮的方式发布两套
-      （抽取的窗口、没落地的窗口）。
-   c. 对选中的轮读一次 val（multi_control §5 第 3 条：读之前先 claim，只读这一次）。
-   d. 报告给用户：每轮的 select 读数（落地、间隔丢失、其他失败、reward、KL），选中的轮，val 读数按机场和跨度。
-      其他失败（最低高度不稳、超时）在涨，单独列出来。
-4. 文档：日志 §22 补 115–120 和上面这些；requests 整份重写，只留还没定的。
+3. 文档：日志 §22 补 115–120；requests 整份重写，只留还没定的。
 ```
