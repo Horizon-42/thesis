@@ -1855,3 +1855,21 @@ the coherence |Σ g_i| / Σ |g_i| (1 aligned, about 1/√n independent). Writes 
 
     python run_ts.py pass_gradients --campaign 4dTrajectory/outputs/POOLED/multi/<campaign> --round <r> \
         --out <a new file>.json [--every K] [--device cpu] [--threads T]
+
+### R71 · `run_ts.py lead_ablation` — the words' leads measured one column at a time, for the user's choice (executor design V12, §17, D7, D8)
+
+2026-10-12 (`experiments/lead_ablation.py`). `lead_ablation --instructions <artefact> --executor <spec dir> --column
+heading|angle|speed --leads-s 0 2 4 6 8 --per-airport N [--seed 1337] --row-interval-s 2 4 [--chunk 2048] [--device cpu]
+--out <new dir>` (train only; no split option, so val and select are never read). ONE lead changed — the heading words'
+`heading_lead_s`, the angle words' `angle_lead_s` or the speed words' `speed_lead_s` — to each value, every other value of
+the artefact's spec kept (`spec_with_lead`; a lead off the 2 s steps is refused by the spec before any flight). The train
+flights drawn as the replay draws them (`replay.draw_flights`, D34's seeded sample, own dynamics or a stand-in's) are READ
+AGAIN by the labeller under each value, in memory (no stored sentence is read: those are the artefact's lead's; refusals
+counted by reason), and read in closed loop at each Δ in memory by the executor of this code, which reads the leads from
+the vocabulary. Per value and Δ (`readout.json`, `ts-lead-ablation-readout-v1`; `lead_<value>s.json` as each ends;
+`table.md`): the labeller's flights read / refused and the column's envelopes on the observed tracks (heading rows inside
+their bands; tubes or speed spans contained); the closed loop's split numbers (`instruction_closed_loop.summarise`), the
+column's correction words per sentence and the landed share (the judge's, D74, a readout); and the error of the flown path
+around each OBSERVED word of the column that changes its value, at the said rows −1…+4 from it (e_y for heading, e_h for
+angle, flown − observed ground speed at the matched point for speed): p10 / p50 / p90 and the share beyond Y, H or δv.
+No criterion is read (D7). Needs an `instruction-v7` artefact and an executor spec of this code (`ts-executor-spec-v11`).
