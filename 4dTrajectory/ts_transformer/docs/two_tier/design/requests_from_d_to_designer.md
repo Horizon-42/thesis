@@ -8,13 +8,13 @@ census's sample: 18; D172: 46–48; D179, D180: 49–53; D181, O20: 54–62; D18
 71–77; D188: 78–79; D190: 80–84; D190, D191: 85, 87, 88; D191–D193 and the log: 86, 90–98; D193, D194 and the log: 89, 99–107), item 23 (it asked for 6 and
 7), item 20 (built: item 40) and the names of MC0–MC4 (written into the interfaces).
 
-State: 2026-10-11 (17:30): arms A and B done (readout `readouts/2026-10-11_stage_d_arms_ab.zh.md`); notes/stage_d.md's
-order 1 (D194 (3) for every point tried) built and merged (d3dc3b26, 226ed303), order 2 checked; the formal campaign
-`multi_train_majority_formal_20261011` (arm A's settings) landed 81.9 / 81.6 / 82.5 / 83.1 / 82.8 % in rounds 0–4 and
-stopped in round 5 at a CPU batch past the CPU's last level; it is paused (the user). The user's group weight built and
-merged (afb9aea2, item 112); its control arm `multi_train_minority_side_20261011` runs (3 rounds). The user's three
-changes of the afternoon built and merged (1efca2f8, 67e45506, 9f50be58; items 113, 114) (stage D's log §22). 108–114
-are open.
+State: 2026-10-12 (05:30): the formal campaign `multi_train_majority_formal_20261011` resumed at 01:50 (round 5's 216
+done batches kept, batch 186 spoken on the GPU, `--gpu-squares 200`) and ended its 8 rounds at 03:44 (round 7: select
+landed 83.7 %, 604 losses of separation, reward 3727.2, the best of both arms); round 7 published to the Training view
+(two sets); the user extended the campaign in place to 12 rounds (rounds 8–11 run, item 119). The control arm
+`multi_train_minority_side_20261011` ended its 8 rounds (rounds 5–7 at 3 × the learning rates: no gain, item 116).
+Built and merged since item 114: ae3839bd (item 115), 16bacde0 (item 116), cf7e21f0 (item 117), 70d87089 (item 118).
+108–120 are open (stage D's log §22 is not yet written for 115–120).
 
 ## MC0 · stage A (vocabulary §6 item 5, D150)
 
@@ -231,6 +231,81 @@ are open.
     differ between two runs of the same round. Also built the same afternoon (small change): every worker, GPU workers
     too, calls `malloc_trim(0)` after a task (1efca2f8). Batch 186 (measured alone on the CPU): a peak
     of 12.0 GB, 9.5 GB for the batch; its 14 searches stepped 433,231 rows, the most of all 1,309 batches (p99 155,400),
-    from one KSTL window of 13 commanded and 12 joined aircraft. A batch's memory follows its search rows, which the
-    batching (by commanded aircraft) does not see. Proposal, for the user: count a window's aircraft (commanded and
-    joined) when batches are made or placed, so such a window goes to the GPU or into a smaller batch from the start. Please write both into D191 / D193 (4).
+    from one KSTL window of 13 commanded aircraft (a correction: the census's "12 joined" are the 12 commanded aircraft
+    besides the anchor, not 12 more aircraft). A batch's memory follows its search rows, which the batching (by
+    commanded aircraft) does not see. The proposal written here (count a window's aircraft when batches are made or
+    placed) was built as item 115. Please write 113's fallback into D191 / D193 (4).
+
+## The formal campaign's end, its publication and its extension (2026-10-11 evening to 2026-10-12)
+
+115. **Batches bounded by their commanded aircraft squared, and heavy batches on the speak device: a decision of the
+    user to write into D191 / D193 (4) and the settings of §7** (the user, 2026-10-11, after batch 186; built ae3839bd).
+    A window's searches fly each of its aircraft for each continuation, so the measure taken is a window's commanded
+    aircraft squared (over rounds 0–5 the sum of squares follows a batch's search rows at r = 0.47, the sum of rows at
+    0.03). Two settings, both off by default (the behaviour before them; a record without them reads so):
+    `--batch-squares` (one bound a span; `post_train.batches` also keeps a batch's sum of squares at most the bound, a
+    window above it a batch alone; a campaign setting, in `PROFILED_SETTINGS`) and `--gpu-squares` (a batch whose sum
+    reaches it is spoken on the speak device, else `batch_device`'s rule; a resume may change it, the resume record's
+    "rule" holds it). Measured after (each batch alone on the CPU, its added memory and search rows): squares 45 →
+    0.37 GB / 1,906 rows; 100 → 0.32 GB / 0; 128 → 2.31 GB / 90,439; 161 → 0.85 GB / 16,106; 194 → 2.88 GB / 88,613;
+    210 → 2.25 GB / 100,929; 600 s span, 179 → 2.07 GB / 91,017; batch 186, 218 → 9.5 GB / 433,231. So the memory
+    follows the search rows (about 23–25 KB a row), the squares only roughly; batch 186 on the GPU (its round-4 model,
+    round 5's draw, executor on the CPU as launched): allocated peak 3.36 GB, reserved 6.95 GB (the GPU's last level
+    was 6.81 GB), host peak 9.25 GB, 397 s. The formal campaign resumed with `--gpu-squares 200` only
+    (`--batch-squares` off: it would change the formal campaign's batching). Open, for the user: a bound on a window's
+    search rows is not known before it is spoken; the squares are the measure available.
+
+116. **A resume may change the two learning rates: a decision of the user for the resume rules (D185) and D195's control
+    arm** (the user, 2026-10-11; built 16bacde0, small change). `prior_lr` and `traffic_lr` join `RESUME_MAY_CHANGE`;
+    each resume entry holds the rates before and after and the round they act from; the optimizer state is loaded and
+    each group's rate set from the settings (Adam's moments kept). Used once: the control arm's rounds 5–7 at 3 × (3e-5
+    / 3e-4). Result (select readout, landed / losses of separation / reward): round 4 83.1 % / 644 / 3702.5; round 5
+    83.1 % / 631 / 3707.8; 6 82.5 % / 644 / 3672.8; 7 83.0 % / 635 / 3701.7; KL 0.061 → 0.074 → 0.092 → 0.100, clipped
+    share 0.7 → 2.7 %, other failures 116 → 129. The larger rate did not lift the plateau. Reading (pass_gradients,
+    R70): the prior's reward gradient between updates has a cosine near 0 while the data term's is 0.95, and the credit
+    is spread (median 33 rows a group); a larger step moves further along noise. Please write the rule into D185 and the
+    arm's result into the plan.
+
+117. **A stage D round read again window by window, and stage D's window lists: readings for §5 and the Training sets**
+    (built af98c354, d0b9c202, 5139728a, merged cf7e21f0; runners.md R71). `experiments/multi_window_read.py` (schema
+    `ts-multi-window-read-v1`, `config.json` + `per_window.jsonl`, sealed) speaks a done round's model again on its
+    select windows with the round's own numbers and writes a line a window (`multi_train.window_line`; each commanded
+    aircraft's outcome, reward and losses); it stops unless the summed lines are the round's `selection_readout`
+    (`selection_readout(..., lines=)`; without `lines` the readout is unchanged); it refuses a round not done, a smoke
+    campaign and a dirty tree (unless `--smoke`). `window_list --multi DIR` lists a stage D window when ANY of its
+    commanded aircraft has an outcome in `--outcomes`; it refuses a read of another stage. The list feeds
+    `multi_training_export --windows`, so a listed set's round column is the sentence the readout judged. Readings to
+    confirm: (a) "any commanded aircraft" as the rule of a stage D list; (b) the list's identity of a window is written
+    twice (the export's lambda and `post.window_lists.identity_of`, `docs/code-health-followups.md`). Round 7's read:
+    1,500 windows; not landed (every outcome but `landed`): 453 windows (KMSY 55, KRDU 118, KSJC 95, KSMF 95, KSTL 90).
+
+118. **The Training view counts a stage D aircraft as the readouts do; a closed loop of one word is read: for frontend
+    §5.1 / §5.6 and the stage A reader** (built 70d87089, review clean after one S2). (a) An aircraft that answers for a
+    loss is `lost_separation` in the loop (`post_window_loop.results`), a silent one flown on to a landing too; the
+    export writes the silent aircraft's sentence with the end it was flown on to. The statistics already counted the
+    loop's way; the window list (tally and tooltip), "this round" and the rounds summary counted the export's end, so
+    a window with a silent aircraft read as all landed (2 of KMSY's 55 listed windows). Now one rule,
+    `countedOutcome(window, place, aircraft)` (`trainingWindowSample.ts`); the aircraft line still shows the export's
+    end with "silent from row N". Please write the rule into frontend §5.1. (b) A flight whose executor failed in its
+    first word has a closed loop of one word, `flownFromRow + 1` state rows (the start state only); the reader asked
+    `flownFromRow + 2` and refused three listed sets (KRDU, KSJC, KSTL). The reader now asks only the rows' equation.
+
+119. **The formal campaign's end, the choice of the round to publish, and its extension: decisions of the user for the
+    plan** (the user, 2026-10-12). (a) Order: finish the formal campaign first, then choose the best round, then
+    export (the control arm's round-4 publication was stopped before it wrote anything). (b) The round chosen is the
+    one with the highest select reward over both arms' 16 rounds: the formal campaign's round 7. Formal rounds 0–7,
+    landed / losses / reward: 81.9 / 720; 81.6 / 730; 82.5 / 690; 83.1 / 648 / 3703.7; 82.8 / 663 / 3690.9; 83.3 / 625 /
+    3711.8; 83.5 / 625 / 3718.8; 83.7 / 604 / 3727.2 (start 81.5 %). Round 7 by span: 300 s 83.4 % / 118; 600 s 83.9 % /
+    189; 1200 s 83.7 % / 297. KL 0.044 → 0.070. The other failures rose 95 → 129 (unstable at minimums 24 → 36, timeout
+    30 → 42): the gain is all in the losses of separation. (c) Published from round 7 (rounds start and 7, select
+    split): `majority_formal_r7_drawn_20261012` (10 windows an airport, 5.0–6.6 MB) and
+    `majority_formal_r7_not_landed_20261012` (item 117's list, 29–85 MB an airport). (d) Extended in place to 12 rounds
+    (rounds 8–11; a new campaign cannot start from a stage D round, and its draws `[seed, round]` would repeat rounds
+    0–3), every setting kept, at 70d87089 after a behaviour check. Stop rules (Claude's proposal, accepted by the user):
+    two rounds in a row not above round 7's reward 3727.2, KL above 0.10 (the control arm's level at its plateau), or
+    other failures above 150. Please write (b)'s rule and (d) into the plan.
+
+120. **A run worktree needs `aeroviz-4d/public/data/airports` linked** (a gap of the run worktree's setup, found
+    2026-10-12): `multi_window_read` and the export read the procedure details from there; the run worktree's first
+    read stopped on a missing `KMSY/procedure-details/index.json`. The publication script now links it. Please add it
+    to the run worktree's setup (D163) beside the other data links.
