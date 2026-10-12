@@ -401,7 +401,10 @@ how each of them ended. One aircraft's sentence is on screen at a time, as in ev
 - **The item list:** the windows, with the four columns of every stage: the callsign (the anchor's, with "+k" for its
   k other commanded aircraft); the runway (the anchor's recorded runway, as D129); the stratum (the window's kind: real,
   or compressed with its c); the outcomes (the commanded aircraft landed of all in the last round, for example 5/6;
-  each round's in the tooltip).
+  each round's in the tooltip). An aircraft is counted as the readouts count it (multi-aircraft control D144): one that
+  answers for a loss of separation is `lost_separation`, also when it is flown on, silent, to a landing
+  (`countedOutcome`, `trainingWindowSample.ts`); the list, its tooltip, "this round", the rounds summary and the
+  statistics read this one rule, and the aircraft line keeps the end it was flown to with its silent row.
 - **The readouts**, one line each:
   - this round: W and the count of commanded aircraft, landed, go-arounds, silent aircraft, the losses of separation
     (between commanded aircraft; with recorded aircraft);
