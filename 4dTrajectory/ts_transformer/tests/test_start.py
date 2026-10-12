@@ -15,7 +15,7 @@ from ts_transformer.autopilot.flights import FlightInputs
 from ts_transformer.autopilot.frame import read_state
 from ts_transformer.autopilot.judge import TIMEOUT, outcome_of
 from ts_transformer.autopilot.params import ExecutorParams
-from ts_transformer.autopilot.speed import approach_speed_ias_mps
+from ts_transformer.autopilot.speed import approach_speeds
 from ts_transformer.autopilot.start import NO_MOVE, GoAroundBeyondMost, Loop, Move, RowRefused, start, start_moved
 from ts_transformer.autopilot.spec import params_sha256
 from ts_transformer.instructions.artefact import (
@@ -29,7 +29,7 @@ from ts_transformer.instructions.words import (
 from ts_transformer.tests.support import executor_inputs, labelled_instruction_artefact
 
 CPU = torch.device("cpu")
-A320_IAS = approach_speed_ias_mps("A320", 62000.0)
+A320_SPEEDS = approach_speeds("A320")
 
 
 def _params():
@@ -69,7 +69,7 @@ def _artefact(tmp_path, monkeypatch, interval_s):
     batch = replay.Batch(indices=[0], signals=[replay.from_row(signals, sentence.first_row)], observed=[signals],
                          series=[None],
                          readings=[reading], sentences=[sentence], row_interval_s=interval_s, geometries=[geometry],
-                         approach_ias_mps=[A320_IAS], typecodes=["A320"], groups=[replay.OWN], drawn={})
+                         approach_speeds=[A320_SPEEDS], typecodes=["A320"], groups=[replay.OWN], drawn={})
     (read,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
     assert isinstance(read, ClosedLoopSentence)
     (directory / CLOSED_LOOP_DIRECTORY).mkdir()
@@ -79,7 +79,7 @@ def _artefact(tmp_path, monkeypatch, interval_s):
     (stored,) = closed_loop_sentences(directory, "train", interval_s, spec).values()
     monkeypatch.setattr(start_module, "rebuild_series", lambda d, flights: [None] * len(flights))
     monkeypatch.setattr(replay, "group_of", lambda series: replay.OWN)
-    monkeypatch.setattr(replay, "flight_approach_ias_mps", lambda series, group: A320_IAS)
+    monkeypatch.setattr(replay, "flight_approach_speeds", lambda series: A320_SPEEDS)
     monkeypatch.setattr(replay, "flown_typecode", lambda series: "A320")
     monkeypatch.setattr(start_module, "flight_inputs", lambda series, flights, anchors, airports, rule, device:
                         executor_inputs(signals, geometry, anchors[0], rule=rule))
@@ -92,7 +92,7 @@ def _artefact(tmp_path, monkeypatch, interval_s):
     flown = replay.sentence_on_interval(reading, signals, spec.step_s, geometry, words)
     reference = replay.Batch(indices=[0], signals=[signals], observed=[signals], series=[None], readings=[reading],
                              sentences=[flown],
-                             row_interval_s=spec.step_s, geometries=[geometry], approach_ias_mps=[A320_IAS],
+                             row_interval_s=spec.step_s, geometries=[geometry], approach_speeds=[A320_SPEEDS],
                              typecodes=["A320"],
                              groups=[replay.OWN], drawn={"split": "train"})
     monkeypatch.setattr(conformance, "draw_reference_batch", lambda instructions, words, draw: reference)
@@ -272,7 +272,7 @@ def _schedules(tmp_path, monkeypatch, interval_s=2.0):
     def loop_of(ways: str, **join) -> Loop:
         many = FlightInputs(**{f.name: getattr(inputs, f.name).expand(len(ways), *getattr(inputs, f.name).shape[1:])
                                .clone() for f in fields(FlightInputs)})
-        return Loop(many, [geometry] * len(ways), [A320_IAS] * len(ways), ["A320"] * len(ways), [limit] * len(ways),
+        return Loop(many, [geometry] * len(ways), [A320_SPEEDS] * len(ways), ["A320"] * len(ways), [limit] * len(ways),
                     _params(), words, interval_s=interval_s, most_go_arounds=1, device=CPU, **join)
 
     return loop_of, row_of
@@ -774,7 +774,7 @@ def test_the_start_refuses_sentences_not_read_under_its_artefact_split_and_execu
         start(directory, "train", 4.0, {0: stored}, off, most_go_arounds=0, device=CPU)
     with pytest.raises(ValueError, match="negative"):
         Loop(executor_inputs(load_signals(directory, "train")[0], load_candidates(directory)["KXXX"]),
-             [load_candidates(directory)["KXXX"]], [A320_IAS], ["A320"], [100.0], _params(), words, interval_s=4.0,
+             [load_candidates(directory)["KXXX"]], [A320_SPEEDS], ["A320"], [100.0], _params(), words, interval_s=4.0,
              most_go_arounds=-1, device=CPU)
 
 

@@ -116,9 +116,9 @@ class ObservedSpeedLaw(Speed):
     the cycle's start to the observed one at its end (``ground_speed_mps`` ``[B, cycles + 1]``); the cycle counted by
     the executor (``cycle``, set before each cycle). The thrust box still binds (and is recorded)."""
 
-    def __init__(self, approach_ias_mps: torch.Tensor, params: ExecutorParams, spec: VocabularySpec,
+    def __init__(self, approach_speeds: torch.Tensor, params: ExecutorParams, spec: VocabularySpec,
                  ground_speed_mps: torch.Tensor) -> None:
-        super().__init__(approach_ias_mps, params, spec)
+        super().__init__(approach_speeds, params, spec)
         self.ground_speed_mps, self.cycle = ground_speed_mps, 0
 
     def rate(self, state, speed_mps, unspecified, go_around, issued, time_s, load_factor,  # type: ignore[override]
@@ -138,7 +138,7 @@ class ObservedSpeedExecutor(Executor):
     def __init__(self, *args: Any, ground_speed_mps: torch.Tensor, stopping: bool, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.ground_speed_mps = ground_speed_mps
-        self.speed = ObservedSpeedLaw(self.speed.approach_ias_mps, self.params, self.words.spec, ground_speed_mps)
+        self.speed = ObservedSpeedLaw(self.speed.approach_speeds, self.params, self.words.spec, ground_speed_mps)
         if not stopping:
             self.lateral = NoStoppingLateral(len(ground_speed_mps), self.params, self.words.spec, ground_speed_mps.device)
 
@@ -164,7 +164,7 @@ def fly_way(batch: replay.Batch, params: ExecutorParams, words: Words, *, stoppi
     executor = ObservedSpeedExecutor(
         batch.inputs(params.start_rule, device), Runways.of(batch.geometries, words.spec, dtype=f64, device=device),
         AirportCharts.of(batch.geometries, dtype=f64, device=device),
-        torch.tensor(batch.approach_ias_mps, dtype=f64, device=device), params, words, step_s=batch.row_interval_s,
+        torch.tensor(batch.approach_speeds, dtype=f64, device=device), params, words, step_s=batch.row_interval_s,
         time_limit_s=torch.tensor(limits, dtype=f64, device=device), reserve_s=replay.reserve_s(batch),
         ground_speed_mps=speed, stopping=stopping)
     for cycle in range(executor.cycles):

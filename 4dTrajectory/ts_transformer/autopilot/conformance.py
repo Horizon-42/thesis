@@ -168,7 +168,7 @@ def fly_staggered(batch: replay.Batch, params: ExecutorParams, words: Words) -> 
     executor = Executor(batch.inputs(params.start_rule, DEVICE),
                         Runways.of(batch.geometries, words.spec, dtype=f64, device=DEVICE),
                         AirportCharts.of(batch.geometries, dtype=f64, device=DEVICE),
-                        torch.tensor(batch.approach_ias_mps, dtype=f64, device=DEVICE), params, words,
+                        torch.tensor(batch.approach_speeds, dtype=f64, device=DEVICE), params, words,
                         step_s=batch.row_interval_s, time_limit_s=limits, start_cycle=torch.as_tensor(starts, device=DEVICE),
                         reserve_s=replay.reserve_s(batch))
     for _ in range(executor.cycles):
@@ -190,7 +190,7 @@ def fly_single(batch: replay.Batch, params: ExecutorParams, words: Words) -> lis
     out = []
     for j, sentence_flown in enumerate(batch.sentences):
         flight = FlightInputs(**{f.name: getattr(inputs, f.name)[j: j + 1] for f in dataclasses.fields(FlightInputs)})
-        flown, _ = single.fly(flight, batch.geometries[j], batch.approach_ias_mps[j], sentence_flown.grid, params, words,
+        flown, _ = single.fly(flight, batch.geometries[j], batch.approach_speeds[j], sentence_flown.grid, params, words,
                               step_s=batch.row_interval_s, time_limit_s=limits[j], reserve_s=reserve)
         verdict = judge(flown, 0, batch.geometries[j], sentence_flown.instructions,
                         batch.row_interval_s, batch.signals[j], spec, words, batch.typecodes[j])
@@ -229,7 +229,7 @@ def fly_moved(batch: replay.Batch, params: ExecutorParams, words: Words) -> list
                 Sentences([s.grid for s in moved.sentences], words, step_s=moved.row_interval_s, device=DEVICE),
                 Runways.of(moved.geometries, words.spec, dtype=f64, device=DEVICE),
                 AirportCharts.of(moved.geometries, dtype=f64, device=DEVICE),
-                torch.tensor(moved.approach_ias_mps, dtype=f64, device=DEVICE), params, words,
+                torch.tensor(moved.approach_speeds, dtype=f64, device=DEVICE), params, words,
                 time_limit_s=torch.tensor(replay.time_limits_s(moved, params, words.spec.step_s), dtype=f64,
                                           device=DEVICE),
                 reserve_s=replay.reserve_s(moved))
@@ -414,7 +414,7 @@ def input_digests(batch: replay.Batch, params: ExecutorParams, words: Words) -> 
     for j, sentence in enumerate(batch.sentences):
         geometry = batch.geometries[j]
         parts = [inputs.initial_state[j], inputs.aero_params[j], inputs.frame_params[j], inputs.max_thrust_n[j],
-                 np.array([batch.approach_ias_mps[j], limits[j], reserve, batch.readings[j].runway_index,
+                 np.array([*batch.approach_speeds[j], limits[j], reserve, batch.readings[j].runway_index,
                            batch.row_interval_s, sentence.first_row]),
                  np.asarray(sentence.grid),
                  np.array([[c.threshold_e_m, c.threshold_n_m, c.course_deg, c.elevation_m] for c in geometry.candidates]),

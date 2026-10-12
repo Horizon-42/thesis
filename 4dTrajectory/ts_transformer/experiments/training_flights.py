@@ -127,7 +127,7 @@ def fly_single(batch: replay.Batch, inputs: FlightInputs, j: int, params: Execut
     loop (`single.fly`) — its time limit and reserve — to its end, or stopped before cycle ``stop_cycle``."""
     limits, reserve = replay.time_limits_s(batch, params, words.spec.step_s), replay.reserve_s(batch)
     flight = FlightInputs(**{f.name: getattr(inputs, f.name)[j: j + 1] for f in dataclasses.fields(FlightInputs)})
-    return single.fly(flight, batch.geometries[j], batch.approach_ias_mps[j], batch.sentences[j].grid, params, words,
+    return single.fly(flight, batch.geometries[j], batch.approach_speeds[j], batch.sentences[j].grid, params, words,
                       step_s=batch.row_interval_s, time_limit_s=limits[j], reserve_s=reserve, stop_cycle=stop_cycle,
                       superseded=superseded)
 

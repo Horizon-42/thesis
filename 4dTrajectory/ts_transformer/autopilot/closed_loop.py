@@ -53,19 +53,21 @@ corrections read each error AHEAD, at the rate ė at which it changes now (`Obse
 ground speed and vertical rate). A correction starts on the error Δ/2 + L ahead, e_on = e + ė (Δ/2 + L): the word
 comes at the Δ row nearest the time it must be said, as an observed word does (D45). A correction ends on the error
 Δ/2 + L/2 ahead, e_off = e + ė (Δ/2 + L/2): the turn back to the observed word takes L, and in that time the
-aircraft moves half as far as at the rate now. With ė = 0 the corrections are the ones without the lead (Claude's
-reading of the user's choice; vocabulary §4.9 states the errors without the lead):
+aircraft moves half as far as at the rate now. It ends at the Δ row nearest the time at which the turn back leaves
+no error, the row where e_off reaches zero or has the other sign (the user, 2026-10-13: the end aims at the path,
+not at a part of the tolerance). With ė = 0 a correction starts on the error now (Claude's reading of the user's
+choice; vocabulary §4.9 states the errors without the lead):
 
 - lateral: when |e_y,on| > Y and the row says no new observed heading word, the heading class one step (5°)
-  from the observed word in force, toward the path; the observed word again when |e_y,off| < Y / 2 or e_y,off has the
-  other sign — except an OVERSHOOT (D53): e_y,off has the other sign beyond Y, and the opposite correction is said in
-  the same row; a
+  from the observed word in force, toward the path; the observed word again when e_y,off is zero or has the other
+  sign — except an OVERSHOOT (D53): e_y,off has the other sign beyond Y, and the opposite correction is said in the
+  same row; a
   new observed heading word ends a correction (it is said, and the comparison goes on from the next row); a heading
   correction in force where "no level-off" is said goes on against the tolerance in force at each row;
 - vertical: only while a descent class of the observed words is in force — when e_h,on > H the next steeper descent
   class, when e_h,on < −H the next shallower (none beyond descent 4 or descent 1); the observed class again when
-  |e_h,off| < H / 2 or e_h,off has the other sign — an overshoot beyond H takes the opposite class in the same row
-  where it exists (D53); a new
+  e_h,off is zero or has the other sign — an overshoot beyond H takes the opposite class in the same row where it
+  exists (D53); a new
   observed altitude or angle word ends a correction (so a correction never runs across a change of the tolerance: the
   altitude word changes there). A level hold and a climb get none. A
   level reached by a descent says no angle word (the descent class stays in force, `labeller.vertical`), so a LEVEL
@@ -396,7 +398,7 @@ class Corrector:
             lateral_tolerance = float(lateral_tolerance_m(self.words, int(held[ALTITUDE])))     # in force at the row
             if observed[HEADING] != UNCHANGED or past_end:
                 self.turn = 0
-            elif self.turn and (abs(lateral_off) < lateral_tolerance / 2 or _sign(lateral_off) != self.turn):
+            elif self.turn and lateral_off * self.turn <= 0.0:
                 # ended; an overshoot beyond the tolerance takes the opposite correction in the same row (D53)
                 self.turn = _sign(lateral_off) if abs(lateral_off) > lateral_tolerance else 0
             elif not self.turn and abs(lateral_on) > lateral_tolerance:
@@ -409,7 +411,7 @@ class Corrector:
                                          and not self.words.is_descent(angle + _sign(vertical_on))))
             if ends:
                 self.slope = 0
-            elif self.slope and (abs(vertical_off) < tolerance / 2 or _sign(vertical_off) != self.slope):
+            elif self.slope and vertical_off * self.slope <= 0.0:
                 self.slope = (_sign(vertical_off) if abs(vertical_off) > tolerance      # an overshoot (D53)
                               and self.words.is_descent(angle + _sign(vertical_off)) else 0)
             elif (not self.slope and self.words.is_descent(angle) and abs(vertical_on) > tolerance
@@ -517,7 +519,7 @@ def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Word
     go_arounds = max(int((batch.readings[j].words[batch.sentences[j].first_row + start * every:, RUNWAY]
                           == RUNWAY_GO_AROUND).sum()) for j in flying)
     loop = Loop(_rows(inputs, flying), [batch.geometries[j] for j in flying],
-                [batch.approach_ias_mps[j] for j in flying], [batch.typecodes[j] for j in flying], limits, params,
+                [batch.approach_speeds[j] for j in flying], [batch.typecodes[j] for j in flying], limits, params,
                 words, interval_s=interval, most_go_arounds=go_arounds, device=device)   # the start of a closed loop (D67)
     live = np.ones(len(flying), dtype=bool)
     s = 0

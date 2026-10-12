@@ -11,7 +11,7 @@ import pytest
 import torch
 
 from ts_transformer.autopilot import closed_loop, replay
-from ts_transformer.autopilot.speed import approach_speed_ias_mps
+from ts_transformer.autopilot.speed import approach_speeds
 from ts_transformer.experiments import final_descent_tolerance as readout
 from ts_transformer.instructions.airport import published_glidepath_height_m
 from ts_transformer.instructions.labeller.read import read_flight
@@ -92,7 +92,7 @@ def _flown(monkeypatch, final_vertical_m, interval_s):
     reading = read_flight(flight, geometry, one, words)
     drawn = replay.Drawn(indices=[5], signals=[flight], series=[None], groups=[replay.OWN],
                          geometries={flight.airport: geometry}, description={"excluded": {}}, excluded_seen=Counter())
-    monkeypatch.setattr(replay, "flight_approach_ias_mps", lambda series, group: approach_speed_ias_mps("A320", 62000.0))
+    monkeypatch.setattr(replay, "flight_approach_speeds", lambda series: approach_speeds("A320"))
     monkeypatch.setattr(replay, "flown_typecode", lambda series: "A320")
     sentence = replay.sentence_on_interval(reading, flight, interval_s, geometry, words)
     start = sentence.first_row + closed_loop.start_row(interval_s) * int(round(interval_s / one.step_s))

@@ -75,7 +75,7 @@ def _multi(s, joins=JOINS, shifts=None):
         count = len(chosen)
         many = FlightInputs(**{f.name: getattr(inputs, f.name).expand(count, *getattr(inputs, f.name).shape[1:]).clone()
                                for f in fields(FlightInputs)})
-        loop = Loop(many, [s["geometry"]] * count, [test_start.A320_IAS] * count, ["A320"] * count, [limit] * count,
+        loop = Loop(many, [s["geometry"]] * count, [test_start.A320_SPEEDS] * count, ["A320"] * count, [limit] * count,
                     test_start._params(), s["words"], interval_s=DELTA, most_go_arounds=MOST_GO_AROUNDS, device=CPU,
                     join_ticks=np.array([joins[i] for i in chosen]))
         return loop, list(chosen), {i: observed[i] for i in chosen}

@@ -1,13 +1,12 @@
 """A batch of labelled flights flown from their sentences (executor design §11; vocabulary §12.1 A6): who is flown, their
 inputs, the flight and the verdicts — shared by the spec's conformance reference and the replay readout.
 
-Who is flown (§11), by `group_of`: an identified type that publishes an approach speed ("unspecified" is
-flown at it) is flown — on its own dynamics (`OWN`: the identified type is the dynamics type) or on a
-stand-in's (`STAND_IN`: the airframe `aircraft/performance_index.json` substitutes for it, reported, never
-gated: its errors are the stand-in's aerodynamics, and its "unspecified" speed is its type's as published,
-unscaled — the flight's mass is the stand-in's, `flight_approach_ias_mps`); a flight with no identified
-type, with no aircraft dynamics (the index excludes its type, or nothing models it; since 2026-09-24 never
-an A320 in its place, C31), or whose type publishes no approach speed, is counted, not flown. The sample is a seeded
+Who is flown (§11), by `group_of`: an identified type is flown on its own dynamics (`OWN`: the identified type is
+the dynamics type) or on a stand-in's (`STAND_IN`: the airframe `aircraft/performance_index.json` substitutes for it,
+reported, never gated: its errors are the stand-in's aerodynamics), when the type it is flown on publishes an
+approach speed ("unspecified" is flown in its window, `flight_approach_speeds`); a flight with no identified type,
+with no aircraft dynamics (the index excludes its type, or nothing models it; since 2026-09-24 never an A320 in its
+place, C31), or whose flown type publishes no approach speed, is counted, not flown. The sample is a seeded
 permutation of a split's labelled flights, read in order until each airport holds ``per_airport`` flights of
 the asked groups (0: every one) — the pool, the count read and the exclusions are returned with it.
 
@@ -42,7 +41,7 @@ from ts_transformer.autopilot.lateral import Runways
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.sentence import Sentences
 from ts_transformer.autopilot.spec import load_spec
-from ts_transformer.autopilot.speed import approach_speed_ias_mps
+from ts_transformer.autopilot.speed import approach_speeds
 from ts_transformer.data.dataset import FlightSeries
 from ts_transformer.instructions import artefact
 from ts_transformer.instructions.airport import AirportGeometry, relative_to_runway
@@ -119,7 +118,7 @@ class Batch:
     sentences: list[Sentence]       # what is flown, on ``row_interval_s``
     row_interval_s: float
     geometries: list[AirportGeometry]               # with each candidate's vertical path (`candidates.json`, D61)
-    approach_ias_mps: list[float]
+    approach_speeds: list[tuple[float, float, float]]   # `flight_approach_speeds`
     #: the airframe each flight is flown on (`flown_typecode`): the judge's evaluation of a landing reads it
     typecodes: list[str]
     groups: list[str]               # OWN or STAND_IN, per flight
@@ -188,8 +187,8 @@ def group_of(series: FlightSeries) -> str:
         # the performance index excludes the type, or nothing models it: the signals keep the flight
         # (`all-flights`), but there is no airframe to fly it on (C31)
         return "no aircraft dynamics"
-    if math.isnan(approach_speed_ias_mps(identified, None)):
-        return "type publishes no approach speed"
+    if math.isnan(approach_speeds(source["dynamics_typecode"])[0]):
+        return "flown type publishes no approach speed"
     return OWN if identified == source["dynamics_typecode"] else STAND_IN
 
 
@@ -199,11 +198,10 @@ def flown_typecode(series: FlightSeries) -> str:
     return series.scenario.source["dynamics_typecode"]
 
 
-def flight_approach_ias_mps(series: FlightSeries, group: str) -> float:
-    """The "unspecified" speed a flown flight is given: its type's at its mass on its own dynamics, as
-    published (unscaled) on a stand-in's."""
-    mass = float(series.scenario.initial.m) if group == OWN else None
-    return approach_speed_ias_mps(series.scenario.source["resolved_typecode"], mass)
+def flight_approach_speeds(series: FlightSeries) -> tuple[float, float, float]:
+    """The published approach speeds a flown flight's "unspecified" reads (`speed.approach_speeds`): those of the type it
+    is flown on (`flown_typecode`), as the evaluation's speed gate reads them."""
+    return approach_speeds(flown_typecode(series))
 
 
 @dataclass
@@ -325,7 +323,7 @@ def batch_of(drawn: Drawn, keep: list[int], readings: list[Reading], row_interva
                  observed=[drawn.signals[i] for i in flights],
                  series=[drawn.series[i] for i in flights], readings=kept_readings, sentences=sentences,
                  row_interval_s=row_interval_s, geometries=[drawn.geometries[drawn.signals[i].airport] for i in flights],
-                 approach_ias_mps=[flight_approach_ias_mps(drawn.series[i], drawn.groups[i]) for i in flights],
+                 approach_speeds=[flight_approach_speeds(drawn.series[i]) for i in flights],
                  typecodes=[flown_typecode(drawn.series[i]) for i in flights], groups=[drawn.groups[i] for i in flights],
                  drawn={**drawn.description, "row_interval_s": row_interval_s,
                         "refused_on_interval": dict(refused.most_common())}, refused_seen=refused)
@@ -381,7 +379,7 @@ def subset(batch: Batch, indices: list[int]) -> Batch:
                  series=[batch.series[i] for i in indices],
                  readings=[batch.readings[i] for i in indices], sentences=[batch.sentences[i] for i in indices],
                  row_interval_s=batch.row_interval_s, geometries=[batch.geometries[i] for i in indices],
-                 approach_ias_mps=[batch.approach_ias_mps[i] for i in indices],
+                 approach_speeds=[batch.approach_speeds[i] for i in indices],
                  typecodes=[batch.typecodes[i] for i in indices], groups=[batch.groups[i] for i in indices],
                  drawn=batch.drawn, refused_seen=batch.refused_seen)
 
@@ -410,7 +408,7 @@ def fly_sentences(batch: Batch, params: ExecutorParams, words: Words, *, device:
     sentences = Sentences([s.grid for s in batch.sentences], words, step_s=batch.row_interval_s, device=device)
     return fly(batch.inputs(params.start_rule, device), sentences, Runways.of(batch.geometries, words.spec, dtype=f64, device=device),
                AirportCharts.of(batch.geometries, dtype=f64, device=device),
-               torch.tensor(batch.approach_ias_mps, dtype=f64, device=device), params, words,
+               torch.tensor(batch.approach_speeds, dtype=f64, device=device), params, words,
                time_limit_s=torch.tensor(time_limits_s(batch, params, words.spec.step_s), dtype=f64, device=device),
                reserve_s=reserve_s(batch))
 

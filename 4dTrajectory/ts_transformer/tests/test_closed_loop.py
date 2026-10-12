@@ -15,7 +15,7 @@ from ts_transformer.autopilot.closed_loop import REVERSAL_TURN_DEG, Corrector, O
 from ts_transformer.instructions.artefact import ClosedLoopSentence, SentenceRows, Withheld, closed_loop_sentences
 from ts_transformer.autopilot.judge import flown_track
 from ts_transformer.autopilot.params import ExecutorParams
-from ts_transformer.autopilot.speed import approach_speed_ias_mps
+from ts_transformer.autopilot.speed import approach_speeds
 from ts_transformer.instructions.labeller.interval import in_force, last_heard_row, on_interval
 from ts_transformer.instructions.labeller.read import read_flight, smooth, truncated
 from ts_transformer.instructions.labeller.records import Refused
@@ -174,7 +174,7 @@ def _first(words, altitude_m=900.0, angle=ANGLE_LEVEL):
             SPEED: words.speed_index(70.0)}
 
 
-def test_a_heading_correction_is_one_class_toward_the_path_and_ends_under_half_the_tolerance_or_at_a_sign_change():
+def test_a_heading_correction_is_one_class_toward_the_path_and_ends_where_the_error_reaches_zero():
     words = Words(spec())
     left, right = words.n_heading - 1, 1                        # classes −5° and +5°
     corrector = Corrector(_grid([_first(words), *[{}] * 9]), 0, 0, 1, words, [90.0])
@@ -186,8 +186,8 @@ def test_a_heading_correction_is_one_class_toward_the_path_and_ends_under_half_t
 
     assert heading(1, 25.0) == (UNCHANGED, False)                # inside Y = 30 m
     assert heading(2, 40.0) == (left, True)                      # right of the path: one class to the left
-    assert heading(3, 20.0) == (UNCHANGED, False)                # still over Y / 2: in force
-    assert heading(4, 10.0) == (0, True)                         # under Y / 2: the observed word again
+    assert heading(3, 10.0) == (UNCHANGED, False)                # on the same side: in force
+    assert heading(4, 0.0) == (0, True)                          # zero: the observed word again
     assert heading(5, -45.0) == (right, True)
     assert heading(6, 2.0) == (0, True)                          # the sign changed, within Y: the observed word
     assert heading(7, 35.0) == (left, True)
@@ -219,11 +219,12 @@ def test_an_angle_correction_on_a_final_descent_and_none_on_a_level_a_climb_or_b
 
     assert angle(2, 20.0) == (4, True)                           # too high: the next steeper class
     assert angle(3, 10.0) == (UNCHANGED, False)
-    assert angle(4, 5.0) == (3, True)                            # under H / 2: the observed class again
-    assert angle(5, -20.0) == (2, True)                          # too low: the next shallower
-    assert angle(6, 3.0) == (3, True)
-    assert angle(7, 20.0) == (4, True)
-    assert angle(8, -20.0) == (2, True)                          # an overshoot beyond H: the shallower class at once (D53)
+    assert angle(4, 5.0) == (UNCHANGED, False)                   # on the same side: in force
+    assert angle(5, 0.0) == (3, True)                            # zero: the observed class again
+    assert angle(6, -20.0) == (2, True)                          # too low: the next shallower
+    assert angle(7, 3.0) == (3, True)                            # the other sign, within H: the observed class
+    assert angle(8, 20.0) == (4, True)
+    assert angle(9, -20.0) == (2, True)                          # an overshoot beyond H: the shallower class at once (D53)
     level = Corrector(_grid([_first(words), *[{}] * 3]), 0, 0, 1, words, [90.0])
     level.row(0, 0.0, 0.0, 900.0, holding=False, past_end=False, rates_mps=STILL)
     assert int(level.row(1, 0.0, 60.0, 960.0, holding=False, past_end=False, rates_mps=STILL)[0][ANGLE]) == UNCHANGED            # a level hold: none
@@ -249,7 +250,7 @@ def test_the_vertical_tolerance_in_force_is_h_final_only_while_no_level_off_is_i
         words = Words(spec(closed_loop_final_vertical_m=final_vertical_m))
         final = {ALTITUDE: words.altitude_no_level_off, ANGLE: 3}
         rows = [(_first(words, 600.0, 2), 0.0, 900.0), ({}, 10.0, 850.0),          # a descent to a level: H
-                (final, 10.0, 800.0), ({}, 10.0, 700.0), ({}, 2.0, 600.0),           # the final descent: H_final
+                (final, 10.0, 800.0), ({}, 10.0, 700.0), ({}, -2.0, 600.0),          # the final descent: H_final
                 ({RUNWAY: RUNWAY_GO_AROUND, ALTITUDE: words.altitude_index(900.0), ANGLE: words.angle_climb}, 10.0, 300.0),
                 ({}, 10.0, 500.0), ({RUNWAY: 0}, 10.0, 700.0),                       # a climb: no correction
                 ({ALTITUDE: words.altitude_index(600.0), ANGLE: 2}, 10.0, 900.0), ({}, 10.0, 850.0),   # H again
@@ -270,14 +271,14 @@ def test_the_vertical_tolerance_in_force_is_h_final_only_while_no_level_off_is_i
 
 def test_the_lateral_tolerance_in_force_is_y_final_only_while_no_level_off_is_in_force():
     """Y_final (the user, 2026-10-12): an e_y between Y_final (15 m) and Y (30 m) starts a heading correction in a final
-    descent and not before it; the correction ends under half of Y_final; the tolerance changes where "no level-off" is
+    descent and not before it; the correction ends where e_y changes sign; the tolerance changes where "no level-off" is
     said and where a go-around row says a level (rule 6), and again at the next final descent; at Y_final = Y no
     correction starts anywhere."""
     def read(final_lateral_m):
         words = Words(spec(closed_loop_final_lateral_m=final_lateral_m))
         final = {ALTITUDE: words.altitude_no_level_off, ANGLE: 3}
         rows = [(_first(words, 600.0, 2), 0.0, 900.0), ({}, 20.0, 850.0),           # a descent to a level: Y
-                (final, 20.0, 800.0), ({}, 10.0, 700.0), ({}, 5.0, 600.0),           # the final descent: Y_final
+                (final, 20.0, 800.0), ({}, 10.0, 700.0), ({}, -3.0, 600.0),          # the final descent: Y_final
                 ({RUNWAY: RUNWAY_GO_AROUND, ALTITUDE: words.altitude_index(900.0), ANGLE: words.angle_climb}, 0.0, 300.0),
                 ({}, 20.0, 500.0), ({RUNWAY: 0}, 0.0, 700.0),                        # a climb: Y
                 ({ALTITUDE: words.altitude_index(600.0), ANGLE: 2}, 0.0, 900.0), ({}, 20.0, 850.0),   # Y again
@@ -291,8 +292,8 @@ def test_the_lateral_tolerance_in_force_is_y_final_only_while_no_level_off_is_in
     words, grid, said = read(15.0)
     assert closed_loop.lateral_tolerance_m(words, in_force(grid)[:, ALTITUDE]).tolist() == [
         30.0, 30.0, 15.0, 15.0, 15.0, 30.0, 30.0, 30.0, 30.0, 30.0, 15.0, 15.0]
-    # one class left (toward the path) at 20 m right under Y_final; at 10 m (under Y / 2, not under Y_final / 2) it
-    # stays; the observed word again at 5 m, under Y_final / 2
+    # one class left (toward the path) at 20 m right under Y_final; at 10 m (the same side) it stays; the observed word
+    # again at 3 m left (the other sign, within Y_final)
     assert [k for k, (_, added) in enumerate(said) if added[HEADING]] == [2, 4, 10]
     assert [int(said[k][0][HEADING]) for k in (2, 4, 10)] == [words.n_heading - 1, 0, words.n_heading - 1]
     _, _, before = read(30.0)
@@ -314,7 +315,8 @@ def test_the_rates_of_the_errors_are_the_flown_velocity_across_the_path_and_the_
 
 def test_a_heading_correction_starts_on_the_error_half_a_row_and_a_lead_ahead_and_ends_on_half_a_row_and_half_a_lead():
     """THE LEAD (the user, 2026-10-12): a heading correction starts when |e_y + ė_y (Δ/2 + L)| > Y and ends when
-    |e_y + ė_y (Δ/2 + L/2)| < Y / 2; at Δ = 2 s and L = 4 s that is 5 s and 3 s ahead, at Δ = 8 s 8 s and 6 s."""
+    e_y + ė_y (Δ/2 + L/2) is zero or has the other sign (the user, 2026-10-13); at Δ = 2 s and L = 4 s that is 5 s and
+    3 s ahead, at Δ = 8 s 8 s and 6 s."""
     words = Words(spec())
     assert words.spec.heading_lead_s == 4.0 and words.spec.closed_loop_lateral_m == 30.0
     left, right = words.n_heading - 1, 1                        # classes −5° and +5°
@@ -331,9 +333,9 @@ def test_a_heading_correction_starts_on_the_error_half_a_row_and_a_lead_ahead_an
     every_2s = corrector(1)
     assert heading(every_2s, 1, 40.0, -6.0) == (UNCHANGED, False)   # 40 m right, closing: 10 m 5 s ahead, inside Y
     assert heading(every_2s, 2, 20.0, 3.0) == (left, True)          # 20 m right, opening: 35 m 5 s ahead
-    assert heading(every_2s, 3, 25.0, 0.0) == (UNCHANGED, False)    # 25 m 3 s ahead, over Y / 2: in force
-    assert heading(every_2s, 4, 30.0, -4.0) == (UNCHANGED, False)   # 18 m 3 s ahead: in force (5 s ahead: 10 m)
-    assert heading(every_2s, 5, 25.0, -4.0) == (0, True)            # 13 m 3 s ahead, under Y / 2: the observed word
+    assert heading(every_2s, 3, 25.0, 0.0) == (UNCHANGED, False)    # 25 m 3 s ahead, the same side: in force
+    assert heading(every_2s, 4, 18.0, -4.0) == (UNCHANGED, False)   # 6 m 3 s ahead: in force (5 s ahead: −2 m)
+    assert heading(every_2s, 5, 10.0, -4.0) == (0, True)            # −2 m 3 s ahead, the other sign: the observed word
     assert heading(every_2s, 6, 20.0, 1.5) == (UNCHANGED, False)    # 27.5 m 5 s ahead: inside Y
     assert heading(every_2s, 7, 20.0, 1.8) == (UNCHANGED, False)    # 29 m 5 s ahead: inside Y (Δ + L ahead: 30.8 m)
     assert heading(every_2s, 8, 20.0, 3.0) == (left, True)
@@ -342,8 +344,9 @@ def test_a_heading_correction_starts_on_the_error_half_a_row_and_a_lead_ahead_an
     assert heading(every_2s, 9, 10.0, -10.0) == (0, True)
     every_8s = corrector(4)
     assert heading(every_8s, 4.0, 20.0, 1.5) == (left, True)        # 32 m 8 s ahead: over Y
-    assert heading(every_8s, 8.0, 40.0, -5.0) == (0, True)          # 10 m 6 s ahead, under Y / 2
-    assert heading(every_8s, 12.0, -10.0, -5.0) == (right, True)    # 10 m left, opening: 50 m left 8 s ahead
+    assert heading(every_8s, 8.0, 40.0, -5.0) == (UNCHANGED, False)  # 10 m 6 s ahead, the same side: in force
+    assert heading(every_8s, 12.0, 25.0, -5.0) == (0, True)         # −5 m 6 s ahead, the other sign
+    assert heading(every_8s, 16.0, -10.0, -5.0) == (right, True)    # 10 m left, opening: 50 m left 8 s ahead
 
 
 def test_an_angle_correction_reads_the_height_error_ahead_by_half_a_row_and_the_angle_lead():
@@ -361,8 +364,8 @@ def test_an_angle_correction_reads_the_height_error_ahead_by_half_a_row_and_the_
     assert angle(corrector, 1, 20.0, -2.0) == (UNCHANGED, False)    # 20 m high, closing: 14 m 3 s ahead
     assert angle(corrector, 2, 10.0, 1.5) == (UNCHANGED, False)     # 14.5 m 3 s ahead (with L: 17.5 m)
     assert angle(corrector, 3, 10.0, 2.5) == (3, True)              # 17.5 m 3 s ahead: steeper
-    assert angle(corrector, 4, 12.0, -2.0) == (UNCHANGED, False)    # 8 m 2 s ahead, over H / 2: in force (3 s: 6 m)
-    assert angle(corrector, 5, 10.0, -2.0) == (2, True)             # 6 m 2 s ahead, under H / 2: the observed class
+    assert angle(corrector, 4, 12.0, -2.0) == (UNCHANGED, False)    # 8 m 2 s ahead, the same side: in force
+    assert angle(corrector, 5, 3.0, -2.0) == (2, True)              # −1 m 2 s ahead, the other sign: the observed class
     steepest = Corrector(_grid([_first(words, 600.0, words.n_descent), {}]), 0, 0, 1, words, [90.0])
     steepest.row(0, 0.0, 0.0, 900.0, holding=False, past_end=False, rates_mps=STILL)
     assert angle(steepest, 1, 0.0, 6.0) == (UNCHANGED, False)       # 18 m high 3 s ahead, no class steeper
@@ -415,7 +418,7 @@ def _batch(interval_s=2.0, legs=DOWNWIND_BASE_FINAL, track_deg=270.0, altitude_m
     observed = replay.from_row(signals, sentence.first_row)
     batch = replay.Batch(indices=[0], signals=[observed], observed=[signals], series=[None], readings=[reading],
                          sentences=[sentence], row_interval_s=interval_s, geometries=[geometry],
-                         approach_ias_mps=[approach_speed_ias_mps("A320", 62000.0)], typecodes=["A320"],
+                         approach_speeds=[approach_speeds("A320")], typecodes=["A320"],
                          groups=[replay.OWN], drawn={})
     start = closed_loop.start_row(interval_s) * int(round(interval_s / one.step_s))
     return batch, executor_inputs(signals, geometry, sentence.first_row + start), words
@@ -895,7 +898,7 @@ def test_read_chunked_puts_each_result_in_its_place(monkeypatch):
                          readings=batch.readings * 3,
                          sentences=[short, batch.sentences[0], batch.sentences[0]], row_interval_s=2.0,
                          geometries=batch.geometries * 3,
-                         approach_ias_mps=batch.approach_ias_mps * 3, typecodes=batch.typecodes * 3,
+                         approach_speeds=batch.approach_speeds * 3, typecodes=batch.typecodes * 3,
                          groups=batch.groups * 3, drawn={})
     monkeypatch.setattr(closed_loop, "start_inputs", lambda part, params, step_s, device: closed_loop._rows(
         closed_loop.FlightInputs(*(torch.cat([getattr(inputs, n)] * len(part.sentences)) for n in (
@@ -1227,7 +1230,7 @@ def test_the_runner_reads_the_same_files_and_summary_with_any_number_of_workers(
     monkeypatch.setattr(replay, "open_executor",
                         lambda executor, instructions: (_params(), {"sha256": "e", "checks": {}}, words))
     monkeypatch.setattr(replay, "draw_readings", draw)
-    monkeypatch.setattr(replay, "flight_approach_ias_mps", lambda series, group: approach_speed_ias_mps("A320", 62000.0))
+    monkeypatch.setattr(replay, "flight_approach_speeds", lambda series: approach_speeds("A320"))
     monkeypatch.setattr(replay, "flown_typecode", lambda series: "A320")
     monkeypatch.setattr(closed_loop, "start_inputs", inputs)
     monkeypatch.setattr(runner, "git_state", lambda: clean)

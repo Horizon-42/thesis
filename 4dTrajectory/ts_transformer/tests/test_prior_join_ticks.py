@@ -61,7 +61,7 @@ def _setup(tmp_path, monkeypatch):
         many = FlightInputs(**{f.name: getattr(inputs, f.name).expand(count, *getattr(inputs, f.name).shape[1:]).clone()
                                for f in fields(FlightInputs)})
         joined = {} if join_ticks is None else {"join_ticks": join_ticks}
-        loop = Loop(many, [geometry] * count, [test_start.A320_IAS] * count, ["A320"] * count, [limit] * count,
+        loop = Loop(many, [geometry] * count, [test_start.A320_SPEEDS] * count, ["A320"] * count, [limit] * count,
                     test_start._params(), words, interval_s=INTERVAL_S, most_go_arounds=MOST_GO_AROUNDS, device=CPU,
                     **joined)
         flights = {b: {**record, "dataset_id": f"{geometry.code}:{key}"} for b, key in enumerate(keys)}

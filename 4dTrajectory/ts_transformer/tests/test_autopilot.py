@@ -16,6 +16,7 @@ import pytest
 import torch
 
 from aircraft.aero_params import aero_params_for_aircraft
+from evaluation.speed_gate import SPEED_GATE_UPPER_ADDITIVE_MS
 from flight_scenarios.scenario import aircraft_for_code
 from ts_transformer.autopilot import inverse
 from ts_transformer.autopilot.flights import FlightInputs, frame_params
@@ -364,10 +365,11 @@ def downwind_airport(geometry):
                                            for c in moved.candidates))
 
 
-def _physics(signals, geometry, approach_ias=None):
-    """One A320 flight flown from ``signals``' row 0: ``(inputs, runways, charts, approach IAS)``."""
+def _physics(signals, geometry, approach=None):
+    """One A320 flight flown from ``signals``' row 0: ``(inputs, runways, charts, approach speeds)`` (the A320's, or
+    ``approach``)."""
     from ts_transformer.autopilot.lateral import Runways
-    from ts_transformer.autopilot.speed import approach_speed_ias_mps
+    from ts_transformer.autopilot.speed import approach_speeds
 
     aircraft = aircraft_for_code("A320")
     aero, mass = aero_params_for_aircraft(aircraft), 62000.0
@@ -382,7 +384,7 @@ def _physics(signals, geometry, approach_ias=None):
         max_thrust_n=torch.tensor([aircraft.engine.max_thrust_total_n], dtype=F64))
     return (inputs, Runways.of([geometry], spec(), dtype=F64, device=CPU),
             AirportCharts.of([geometry], dtype=F64, device=CPU),
-            torch.tensor([approach_speed_ias_mps("A320", mass) if approach_ias is None else approach_ias], dtype=F64))
+            torch.tensor([approach_speeds("A320") if approach is None else approach], dtype=F64))
 
 
 def _said(grid, words, geometry):
@@ -398,7 +400,7 @@ def _said(grid, words, geometry):
     return out
 
 
-def _fly_sentence(signals, grid=None, params=None, approach_ias=None, reading=None):
+def _fly_sentence(signals, grid=None, params=None, approach=None, reading=None):
     """Read ``signals`` with the labeller, fly its sentence (or ``grid``) from row 0 on its own rows and judge it."""
     from ts_transformer.autopilot.executor import GO_AROUND_EXTRA_S, fly
     from ts_transformer.autopilot.judge import judge
@@ -409,7 +411,7 @@ def _fly_sentence(signals, grid=None, params=None, approach_ias=None, reading=No
     params = params or _params()
     reading = read_flight(signals, geometry, one, words) if reading is None else reading
     grid = reading.words if grid is None else grid
-    inputs, runways, charts, approach = _physics(signals, geometry, approach_ias)
+    inputs, runways, charts, approach = _physics(signals, geometry, approach)
     rows = len(grid)
     flown = fly(inputs, Sentences([grid], words, step_s=one.step_s, device=CPU), runways, charts,
                 approach, params, words, time_limit_s=torch.tensor([rows * one.step_s * params.timeout_factor], dtype=F64),
@@ -661,6 +663,24 @@ def test_the_outcome_alone_is_the_verdict_s_first_layer():
         verdict.outcome, verdict.end_row, verdict.crossing, verdict.limits)
 
 
+def test_unspecified_is_the_middle_of_the_evaluations_speed_window():
+    """Executor design §8.1 (the user, 2026-10-13): "unspecified" is the middle of the evaluation's speed window, from
+    the flown type's published speeds at the mass and the load factor now: the window `speed_gate_bounds` grades (a
+    type with one published speed and one with two)."""
+    from aircraft.reference_speeds import reference_speed
+    from evaluation.speed_gate import speed_gate_bounds
+    from ts_transformer.autopilot.speed import approach_speeds, unspecified_ias_mps
+
+    cases = [("A320", 58000.0, 1.0), ("A320", 61000.0, 1.08), ("A320", 61000.0, 0.95), ("B190", 7000.0, 1.2)]
+    middle = unspecified_ias_mps(torch.tensor([approach_speeds(t) for t, _, _ in cases], dtype=F64),
+                                 torch.tensor([m for _, m, _ in cases], dtype=F64),
+                                 torch.tensor([n for _, _, n in cases], dtype=F64))
+    for (typecode, mass_kg, n), got in zip(cases, middle.tolist()):
+        bounds = speed_gate_bounds(reference_speed(typecode), load_factor=n, crossing_mass_kg=mass_kg)
+        assert got == pytest.approx((bounds.lower_ms + bounds.upper_ms) / 2.0, rel=1e-12)
+    assert approach_speeds("B190")[0] < approach_speeds("B190")[1]
+
+
 def test_the_words_the_executor_refuses():
     signals, reading = _downwind()
     words = Words(spec())
@@ -671,7 +691,7 @@ def test_the_words_the_executor_refuses():
     unspecified = reading.words.copy()
     unspecified[5, SPEED] = words.speed_unspecified
     with pytest.raises(ValueError, match="publishes no approach speed"):
-        _fly_sentence(signals, unspecified, approach_ias=math.nan)
+        _fly_sentence(signals, unspecified, approach=(math.nan, math.nan, math.nan))
 
 
 def test_the_flight_meets_the_ground_when_told_below_the_threshold():
@@ -778,8 +798,8 @@ def test_go_around_alone_starts_no_climb():
     from ts_transformer.autopilot.executor import GO_AROUND_EXTRA_S
 
     inputs, _, _, approach = _physics(signals, instruction_airport())
-    executor = single.SingleExecutor(inputs, instruction_airport(), float(approach[0]), _params(), words, step_s=2.0,
-                                     time_limit_s=len(final) * 3.0, reserve_s=GO_AROUND_EXTRA_S)
+    executor = single.SingleExecutor(inputs, instruction_airport(), tuple(approach[0].tolist()), _params(), words,
+                                     step_s=2.0, time_limit_s=len(final) * 3.0, reserve_s=GO_AROUND_EXTRA_S)
     sentence = single.Sentence(final, words, step_s=2.0)
     with pytest.raises(ValueError, match="rules 5 and 6"):
         for cycle in range(executor.cycles):
@@ -884,12 +904,15 @@ HAND_TYPE, HAND_MASS_KG = "A320", 62000.0
 def _hand_states(e, n, height, track_deg, gamma_rad, geometry, speed_mps=None):
     """States ``[T, 7]`` of a hand-built flight through the airport frame's ``e``, ``n`` (m) at ``height`` (MSL m),
     on the compass track ``track_deg`` at the path angle ``gamma_rad``."""
-    from ts_transformer.autopilot.speed import approach_speed_ias_mps
+    from aircraft.reference_speeds import reference_speed
+    from geokit import KT_MS
 
+    published = reference_speed(HAND_TYPE)
     states = np.zeros((len(e), 7))
     states[:, LAT], states[:, LON] = geometry.frame.latlon_from_horizontal(e, n)
     states[:, ALT], states[:, PSI], states[:, GAMMA] = height, math_rad_from_compass(track_deg), gamma_rad
-    states[:, STATE_SPEED] = approach_speed_ias_mps(HAND_TYPE, HAND_MASS_KG) + 5.0 if speed_mps is None else speed_mps
+    states[:, STATE_SPEED] = (published.approach_speed_kt * KT_MS * math.sqrt(HAND_MASS_KG / published.malw_kg) + 5.0
+                              if speed_mps is None else speed_mps)
     states[:, MASS] = HAND_MASS_KG
     return states
 
@@ -1139,14 +1162,15 @@ def test_the_word_count_leaves_out_the_words_the_judge_did_not_judge():
 # ---- speed
 def test_a_speed_word_is_flown_to_arrive_when_its_lead_runs_out():
     """§8.2 (R5.5, D8, T10): a speed word is reached L_v after it is heard, the change spread over the time left, at least
-    one cycle; "unspecified" is the type's speed raised by √n and flown as a true airspeed, at least the stall (D3);
-    under G it holds the airspeed heard at the go-around; a new word restarts the clock."""
+    one cycle; "unspecified" is the middle of the evaluation's speed window at the mass now (its lower edge raised by √n
+    above 1 g, not lowered below it) and flown as a true airspeed, at least the stall (D3); under G it holds the airspeed
+    heard at the go-around; a new word restarts the clock."""
     from aerodynamic_model.torch_dynamics import GRAVITY_MPS2, ISA_RHO0_KG_M3, isa_density
     from ts_transformer.autopilot.frame import Kinematics
     from ts_transformer.autopilot.speed import Speed
 
     one, params = spec(speed_lead_s=6.0), _params()
-    speed = Speed(torch.tensor([65.0], dtype=F64), params, one)
+    speed = Speed(torch.tensor([[60.0, 66.0, 70000.0]], dtype=F64), params, one)    # low, high (m/s), MALW (kg)
     state = Kinematics(*(torch.tensor([v], dtype=F64) for v in (0.0, 0.0, 100.0, 90.0, 90.0, 0.0, 90.0, 60000.0)))
     aero = torch.tensor([[122.6, 2.5, 0.02, 0.04, 0.9, 0.2]], dtype=F64)
 
@@ -1159,8 +1183,10 @@ def test_a_speed_word_is_flown_to_arrive_when_its_lead_runs_out():
     assert rate(84.0, 1, 3.0) == pytest.approx(-6.0 / 3.0)               # half the lead left
     assert rate(84.0, 1, 9.0) == pytest.approx(-6.0 / params.cycle_s)    # past it: one cycle
     density = float(isa_density(torch.tensor(100.0, dtype=F64)))
-    own = 65.0 * math.sqrt(1.3) * math.sqrt(ISA_RHO0_KG_M3 / density)
-    assert rate(math.nan, 2, 10.0, unspecified=True, load=1.3) == pytest.approx((own - 90.0) / 6.0)
+    scale, true = math.sqrt(60000.0 / 70000.0), math.sqrt(ISA_RHO0_KG_M3 / density)
+    for load, raised in ((1.3, math.sqrt(1.3)), (0.9, 1.0)):
+        own = (60.0 * scale * raised + 66.0 * scale + SPEED_GATE_UPPER_ADDITIVE_MS) / 2.0 * true
+        assert rate(math.nan, 2, 10.0, unspecified=True, load=load) == pytest.approx((own - 90.0) / 6.0)
     speed.hear_go_around(torch.tensor([True]), state)
     slower = Kinematics(*(torch.tensor([v], dtype=F64) for v in (0.0, 0.0, 100.0, 80.0, 90.0, 0.0, 80.0, 60000.0)))
     assert rate(math.nan, 2, 30.0, go_around=True, unspecified=True, at=slower) == pytest.approx(10.0)   # back to 90
@@ -1281,7 +1307,7 @@ def test_the_single_flight_executor_flies_what_the_batch_flies(thrust_share):
         assert climb == pytest.approx(expected[thrust_share], abs=2e-3)
     else:
         assert GO_AROUND_MIN_RAD + 2e-3 < climb < GO_AROUND_MAX_RAD - 2e-3
-    executor = single.SingleExecutor(inputs, geometry, float(approach[0]), params, words, step_s=2.0,
+    executor = single.SingleExecutor(inputs, geometry, tuple(approach[0].tolist()), params, words, step_s=2.0,
                                      time_limit_s=limit, reserve_s=GO_AROUND_EXTRA_S)
     sentence = single.Sentence(grid, words, step_s=2.0)
     for cycle in range(executor.cycles):
@@ -1421,8 +1447,11 @@ def test_a_flight_is_flown_on_its_own_or_a_stand_ins_dynamics_only_with_a_publis
     assert replay.group_of(series(None, None)) == "no identified type"
     assert replay.group_of(series("GLF4", "CRJ9")) == replay.STAND_IN
     assert replay.group_of(series("PC12", None)) == "no aircraft dynamics"
-    monkeypatch.setattr(replay, "approach_speed_ias_mps", lambda typecode, mass: math.nan)
-    assert replay.group_of(series("A320", "A320")) == "type publishes no approach speed"
+    # the speed the flight reads is the flown type's (`replay.flight_approach_speeds`): only that type must publish one
+    monkeypatch.setattr(replay, "approach_speeds", lambda typecode: (math.nan,) * 3 if typecode == "GLF4" else (1.0,) * 3)
+    assert replay.group_of(series("GLF4", "CRJ9")) == replay.STAND_IN
+    assert replay.group_of(series("CRJ9", "GLF4")) == "flown type publishes no approach speed"
+    assert replay.group_of(series("GLF4", "GLF4")) == "flown type publishes no approach speed"
 
 
 def _batch(signals, reading, interval_s=2.0):
@@ -1433,7 +1462,7 @@ def _batch(signals, reading, interval_s=2.0):
     return replay.Batch(indices=[0], signals=[replay.from_row(signals, sentence.first_row)], observed=[signals],
                         series=[], readings=[reading],
                         sentences=[sentence], row_interval_s=interval_s, geometries=[downwind_airport(geometry)],
-                        approach_ias_mps=[], typecodes=[HAND_TYPE], groups=[replay.OWN], drawn={})
+                        approach_speeds=[], typecodes=[HAND_TYPE], groups=[replay.OWN], drawn={})
 
 
 def test_a_sentence_on_a_coarser_interval_starts_on_its_utc_grid():
@@ -1598,7 +1627,7 @@ def test_the_executor_levels_a_word_at_its_level_above_the_airport_elevation():
         flown = fly(inputs, Sentences([grid], words, step_s=2.0, device=CPU), runways, charts, approach, params, words,
                     time_limit_s=torch.tensor([limit], dtype=F64), reserve_s=0.0)
         assert flown.states[0, 10:100, 2].numpy() == pytest.approx(level, abs=0.5)      # the downwind, level
-        alone = single.SingleExecutor(inputs, geometry, float(approach[0]), params, words, step_s=2.0,
+        alone = single.SingleExecutor(inputs, geometry, tuple(approach[0].tolist()), params, words, step_s=2.0,
                                       time_limit_s=limit, reserve_s=0.0)
         sentence = single.Sentence(grid, words, step_s=2.0)
         for cycle in range(100):
@@ -1616,7 +1645,9 @@ def test_an_open_loop_replay_says_each_word_on_its_own_row():
     signals, reading = _downwind()
     batch = _batch(replace(signals, entry_time_utc="2026-06-01T11:00:02Z"), reading, 4.0)
     sentence, observed = batch.sentences[0], batch.signals[0]
-    inputs, runways, charts, approach = _physics(observed, geometry, approach_ias=60.0)    # slower than observed
+    # a window whose middle is 60 m/s at 62 t and 1 g: slower than observed
+    middle = 60.0 - SPEED_GATE_UPPER_ADDITIVE_MS / 2
+    inputs, runways, charts, approach = _physics(observed, geometry, approach=(middle, middle, 62000.0))
     flown = fly(inputs, Sentences([sentence.grid], words, step_s=4.0, device=CPU), runways, charts, approach, params,
                 words, time_limit_s=torch.tensor([len(sentence.grid) * 4.0 * 1.5], dtype=F64), reserve_s=0.0)
     done = int(flown.done_cycle[0])
@@ -1690,7 +1721,7 @@ def _end_airport():
 def _east_flight(geometry, speed_mps, *, e_m=-6500.0, height_m=400.0, track_deg=90.0):
     """One A320 flying east level from ``e_m`` on 09's centreline at ``height_m`` MSL: its inputs (the airport's chart,
     D81), approach speed and a sentence of one row — runway 09, its course, its level, its speed."""
-    from ts_transformer.autopilot.speed import approach_speed_ias_mps
+    from ts_transformer.autopilot.speed import approach_speeds
 
     words = Words(spec())
     aircraft = aircraft_for_code("A320")
@@ -1704,7 +1735,7 @@ def _east_flight(geometry, speed_mps, *, e_m=-6500.0, height_m=400.0, track_deg=
         max_thrust_n=torch.tensor([aircraft.engine.max_thrust_total_n], dtype=F64))
     grid = np.array([[0, words.heading_class(90.0, 90.0), words.altitude_index(height_m - geometry.elevation_m), 0,
                       words.speed_index(max(speed_mps, words.spec.speed_min_mps))]], dtype=np.int64)
-    return inputs, approach_speed_ias_mps("A320", 62000.0), grid, words
+    return inputs, approach_speeds("A320"), grid, words
 
 
 def _three_ways(geometry, inputs, approach, grid, words, *, limit_s=200.0):
@@ -1789,7 +1820,8 @@ def test_a_copy_of_a_staggered_batch_flies_as_its_originals():
                              for f in fields(FlightInputs)})
     executor = Executor(inputs, Runways.of([geometry] * 2, spec(), dtype=F64, device=CPU),
                         AirportCharts.of([geometry] * 2, dtype=F64, device=CPU),
-                        torch.tensor([approach, approach + 6.0], dtype=F64), params, words, step_s=2.0,   # apart
+                        torch.tensor([approach, (approach[0] + 6.0, approach[1] + 6.0, approach[2])], dtype=F64),  # apart
+                        params, words, step_s=2.0,
                         time_limit_s=torch.tensor([120.0, 150.0], dtype=F64), start_cycle=torch.tensor([0, 9]),
                         reserve_s=0.0)
 

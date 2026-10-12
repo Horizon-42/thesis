@@ -7,8 +7,8 @@ closed_loop_sentences`: a split and a row interval Δ), the directory of the exe
 may say. It opens the spec itself as the replay does (`replay.open_executor`, D71: the spec measured against
 the artefact's vocabulary, the labeller and the executor conformance), so no caller handles executor parameters; the
 words are the artefact's vocabulary's. For each sentence's flight: the flight rebuilt from the harvest and compared row by row with the stored signals
-(`flights.rebuild_series`, vocabulary §7.2 #4); its aircraft — its own dynamics or a stand-in's — and its approach speed,
-by the rule of the replay (`replay.group_of`, `replay.flight_approach_ias_mps`); its state and physical context at the
+(`flights.rebuild_series`, vocabulary §7.2 #4); its aircraft — its own dynamics or a stand-in's — and its approach speeds,
+by the rule of the replay (`replay.group_of`, `replay.flight_approach_speeds`); its state and physical context at the
 first predicted step (`flights.flight_inputs`); its time limit (§5.8: the observed time left from the first predicted
 step to the end of its labelled sentence × the spec's timeout factor, `replay.time_limit_s`) and the time its go-arounds
 may add (`GO_AROUND_EXTRA_S` each, up to the most given). The sentences are tied to what they were read under: each
@@ -146,15 +146,16 @@ def state_rows(state: Kinematics) -> np.ndarray:
 
 class Loop:
     """Flights flown from their first predicted step a Δ row at a time (module docstring): ``inputs`` their state and
-    physical context there, ``geometries`` their airports', ``approach_ias_mps`` their approach speeds, ``typecodes``
-    their airframes flown (`replay.flown_typecode`: the judge's evaluation of a landing), ``time_limits_s`` their time
+    physical context there, ``geometries`` their airports', ``approach_speeds`` their approach speeds
+    (`replay.flight_approach_speeds`), ``typecodes`` their airframes flown (`replay.flown_typecode`: the judge's
+    evaluation of a landing), ``time_limits_s`` their time
     limits before the go-arounds, ``most_go_arounds`` the most go-arounds one may say.
     A caller reads the states of the rows flown and which flights are done (`step`), and why a flight ended from the
     judge's outcome (`outcome`; the loop has no ``timed_out()``, D90: the time limit is a function of the observed
     landing time). ``executor`` is public: a caller reads its end cycle (``done_cycle``), its flown record (``flown()``)
     and the aero parameters (``inputs.aero_params``) (vocabulary §6 item 5)."""
 
-    def __init__(self, inputs: FlightInputs, geometries: Sequence[AirportGeometry], approach_ias_mps: Sequence[float],
+    def __init__(self, inputs: FlightInputs, geometries: Sequence[AirportGeometry], approach_speeds: Sequence[tuple[float, float, float]],
                  typecodes: Sequence[str], time_limits_s: Sequence[float], params: ExecutorParams, words: Words, *,
                  interval_s: float, most_go_arounds: int, device: torch.device, join_ticks: Sequence[int] | None = None) -> None:
         """``join_ticks``: each flight's join tick (module docstring, D150), every flight's 0 when not given."""
@@ -180,7 +181,7 @@ class Loop:
         self.executor = Executor(
             inputs, Runways.of(self.geometries, words.spec, dtype=f64, device=device),
             AirportCharts.of(self.geometries, dtype=f64, device=device),
-            torch.tensor(list(approach_ias_mps), dtype=f64, device=device), params, words, step_s=interval_s,
+            torch.tensor(list(approach_speeds), dtype=f64, device=device), params, words, step_s=interval_s,
             time_limit_s=torch.tensor(list(time_limits_s), dtype=f64, device=device),
             start_cycle=torch.as_tensor(self.join_ticks * self.step_cycles, device=device),
             reserve_s=GO_AROUND_EXTRA_S * most_go_arounds)
@@ -415,7 +416,7 @@ class Start:
                                      params.start_rule, airport)
                     for i, flight, airport in zip(order, moved, airports)}
         loop = Loop(flight_inputs(series, moved, anchors, airports, params.start_rule, device=device), airports,
-                    [replay.flight_approach_ias_mps(s, g) for s, g in zip(series, groups)],
+                    [replay.flight_approach_speeds(s) for s in series],
                     [replay.flown_typecode(s) for s in series],
                     [replay.time_limit_s(int(self.lengths[i]), anchor, params, words.spec.step_s)
                      for i, anchor in zip(order, anchors)],
