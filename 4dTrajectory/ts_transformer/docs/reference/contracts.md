@@ -675,7 +675,8 @@ the share is D34's third reading — and of those the rows after which no correc
 (`without_a_correction_toward_the_path`, `closed_loop.outside_rows`, read from the stored sentence and its open-loop
 reading: the heading word in force on the path's side of the observed word's track, the angle class steeper when too
 high): the rule of D50 that §14.6 checks; since A16 an overshoot — the error changing its sign beyond the tolerance —
-takes the opposite correction in its own row (D53), so the reading keeps the rule on every row), the rows past the end and the lateness of the observed heading words. The reading says each
+takes the opposite correction in its own row (D53); since 2026-10-12 the corrections read the errors ahead (below), so
+a row outside the tolerance whose error closes fast gets none and the count is a record, not zero by construction), the rows past the end and the lateness of the observed heading words. The reading says each
 observed word at the PLACE where the observed aircraft heard it, not at its time (D42): the words of the 2 s open-loop
 reading (not the Δ grid), each said at the first Δ row whose matched observed time is less than Δ/2 before the word's
 2 s time (D45: the nearest row; of several, each column's last word), so the words wait while the flown aircraft is
@@ -692,7 +693,11 @@ force under a descent class (while "no level-off" is in force `closed_loop_final
 2026-10-12: half of Y — and `closed_loop_final_vertical_m`, H_final; elsewhere `closed_loop_lateral_m`, 30 m, and
 `closed_loop_vertical_m`, 15 m — one definition each, `closed_loop.lateral_tolerance_m` and
 `closed_loop.vertical_tolerance_m`, which the corrections, the rule of D50 and the readings of D34 read at each row,
-D66), ending under half of it, at a sign change or at a new observed word;
+D66), ending under half of it, at a sign change or at a new observed word. The corrections read each error AHEAD at
+the rate it changes now (the user's choice, 2026-10-12; `ObservedPath.rates`, from the flown track, ground speed and
+vertical rate): a correction starts on e + ė (Δ/2 + L) and ends on e + ė (Δ/2 + L/2), L the column's lead
+(`heading_lead_s`, `angle_lead_s`) — a word said now has its full effect L later, the next row comes Δ later, and a
+turn back over L moves the aircraft half as far; at ė = 0 these are the errors now;
 a level hold is the executor's capture of the level in force (Claude's reading). `conformance/` holds a reference sample
 (train, seed 1337, 10 flights an airport, every row interval written), written with the sentences; every process that
 reads closed-loop sentences or flies them again first calls `require_conforming_closed_loop(artefact, executor_dir)` (D69,

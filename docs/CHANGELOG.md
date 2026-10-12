@@ -1,5 +1,24 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-12 — Two-tier labeller: the closed loop's corrections read the errors ahead (the lead)
+
+The user's choice (2026-10-12, "按1"), after v14 (Y_final 15 m, H_final 7.5 m) landed 95.1 % at Δ 2 s but 89.0 % at
+Δ 4 s and 76.5 % at Δ 8 s (train): the corrector read the error NOW, while a word it says has its full effect one lead
+later (L = 4 s) and the next row comes Δ later — at Δ 8 s one 5° class moves the aircraft about 50 m across the path
+before the next row, more than the 15 m band. The labeller's observed words already say what the track will be a lead
+later; the corrections now do the same.
+
+- `closed_loop.ObservedPath.rates`: ė_y, the flown velocity across the matched segment; ė_h, the flown vertical rate
+  minus the segment's height slope times the flown velocity along it.
+- `Corrector.row(..., rates_mps=)` (required): a correction starts on e + ė (Δ/2 + L) and ends on e + ė (Δ/2 + L/2),
+  L the column's lead (`heading_lead_s`, `angle_lead_s`). At ė = 0 the corrections are the ones before. The tolerances,
+  the overshoot (D53) and the ends at a new observed word are unchanged.
+- The rule of D50 (`outside_rows`, `without_a_correction_toward_the_path`) is a record now: a row outside the tolerance
+  whose error closes fast gets no correction.
+- No format changes; the closed loop's conformance sample refuses an artefact read with the corrector before.
+- Design text to amend with the user's numbered decision: vocabulary §4.9 (D32), D50, D53 (the rule of D50 "on every
+  row"), and Y_final / H_final 7.5 m (D66).
+
 ### 2026-10-12 — Two-tier labeller: the closed loop's lateral tolerance in the final descent, Y_final
 
 - The user's decision (2026-10-12), after the rebuilt v13 labels flown in closed loop landed 85.5 % (train, Δ 2 s) by the
