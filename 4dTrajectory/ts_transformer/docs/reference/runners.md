@@ -1874,3 +1874,25 @@ chosen when an outcome of any of its commanded aircraft is one of `--outcomes`. 
         --out 4dTrajectory/outputs/POOLED/multi/<read id> [--speak-workers N] [--device cuda]
     python run_ts.py window_list --multi 4dTrajectory/outputs/POOLED/multi/<read id> --outcomes lost_separation … \
         --out 4dTrajectory/outputs/POOLED/multi/<list id>
+
+### R72 · `run_ts.py multi_val_evaluation` — a stage D round's val windows flown again and graded by the evaluation package
+
+2026-10-12 (the user: "用 evaluation 跑一下 r7 的 val 轨迹"). Round `--round`'s model flown again on the campaign's val
+windows as `multi_validation` flew them (`multi_train.selection_readout` with `window_ends`: the same windows and random
+numbers, one process on `--device`); the summed readout must be the val read's own (`--val-read`'s `readout.json`), or the
+run stops and writes nothing. The val claim is neither checked nor written: the run flies the windows of the read the claim
+spent, by the user's order, and chooses nothing. Each commanded aircraft of each window becomes an evaluation record
+(`aircraft_record`: subject `predicted`, no controls — the speed gate reads the declared 1 g; latitude and longitude from the
+airport frame, the MSL height, ψ from the compass track, V and γ from the ground speed and vertical rate, no wind; the runway
+its crossing landed on, else its observed one; the target the evaluation context's threshold, LTP + TCH; the observed
+record's source without its observed-only fields, the flight's type as `dynamics_typecode`), one a window and aircraft;
+`python -m evaluation` grades each airport's records, and the same flights' observed records are graded by the same code
+(`executor_replay.observed_verdicts`, the two reports' schema and methodology required equal). Writes, into a new directory,
+`config.json` (`ts-multi-val-evaluation-v1`), `records/<ICAO>/`, `observed/<ICAO>/`, `aircraft.jsonl` (an aircraft a line:
+window, span, outcome, runway, the evaluation's verdict and gates, the observed verdict), `readout.json` (`readout_table`:
+pooled and by airport, each by span: outcomes, verdicts and pass share, gates of the landed, verdict by outcome, and of the
+aircraft whose observed track passes the share whose flown track passes) and `SHA256SUMS`, read-only. A clean tree; the
+checks first; no criterion is read (D7). Tests: `tests/test_multi_val_evaluation.py`.
+
+    python run_ts.py multi_val_evaluation --campaign 4dTrajectory/outputs/POOLED/multi/<campaign> --round <r> \
+        --val-read 4dTrajectory/outputs/POOLED/multi/<val read> --out 4dTrajectory/outputs/POOLED/multi/<id> [--device cuda]

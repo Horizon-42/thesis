@@ -444,13 +444,16 @@ def window_line(place: int, window: Window, ends: Sequence[Any], losses: Mapping
 
 def selection_readout(model: Prior, context: Context, windows: Sequence[Window], settings: MultiSettings,
                       speakers: Speakers | None, *, stage: Stage, split: str = "select",
-                      lines: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+                      lines: list[dict[str, Any]] | None = None,
+                      window_ends: list[tuple[int, Sequence[Any]]] | None = None) -> dict[str, Any]:
     """The readout of ``windows`` of ``split`` (module docstring; `multi_validation`: the val days): its batches read
     here (``stage``'s `Stage.read_batch`) or by ``speakers`` (refused unless they run ``stage``), summed by airport,
     span (`span_key`) and kind, each with its ``all``; an airport's ``reward_mean`` is its ``all`` of both. ``lines``,
-    when given, gets each window's line (`window_line`) in place order."""
+    when given, gets each window's line (`window_line`) in place order; ``window_ends``, each window's place and its commanded
+    aircraft's ends (`WindowResult`, in the window's order) in place order."""
     if speakers is not None and speakers.stage is not stage:
         raise ValueError("the speaking workers run another stage's parts than the one given (Speakers(..., stage=))")
+    read_ends = []
     places = stage.batches(windows, settings)
     read = (speakers.read(model, windows, places, split) if speakers is not None else
             [stage.read_batch(model, context, windows, p, settings, split) for p in places])
@@ -461,6 +464,8 @@ def selection_readout(model: Prior, context: Context, windows: Sequence[Window],
             window = windows[place]
             if lines is not None:
                 read_lines.append(window_line(place, window, ends, losses))
+            if window_ends is not None:
+                read_ends.append((place, ends))
             for span, kind in product((span_key(window.span_s), "all"), (kind_of(window), "all")):
                 c = counted.setdefault(window.scene.geometry.code, {}).setdefault(span, {}).setdefault(kind, _empty())
                 c["windows"] += 1
@@ -481,6 +486,8 @@ def selection_readout(model: Prior, context: Context, windows: Sequence[Window],
                 c["order"] = [c["order"][0] + timing["order"][0], c["order"][1] + timing["order"][1]]
     if lines is not None:
         lines += sorted(read_lines, key=lambda line: line["place"])
+    if window_ends is not None:
+        window_ends += sorted(read_ends, key=lambda item: item[0])
     out: dict[str, Any] = {}
     for code, spans in sorted(counted.items()):
         out[code] = {span: {kind: _summed(c) for kind, c in kinds.items()} for span, kinds in spans.items()}
