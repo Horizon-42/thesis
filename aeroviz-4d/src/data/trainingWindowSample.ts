@@ -642,6 +642,14 @@ export function silentFromS(aircraft: TrainingWindowAircraft, sentence: Training
   return sentence.silentFromRow === null ? null : aircraft.firstStepS + sentence.silentFromRow * rowIntervalS;
 }
 
+/** A commanded aircraft's outcome in the window's round at ``place``, as the readouts count it: lost separation when it
+ *  answers for a loss of the round — a silent one too, whose flight the executor took on to an end of its own (D144: the
+ *  set gives that end; the loop's outcome is the loss) —, else its sentence's outcome. */
+export function countedOutcome(window: TrainingWindow, place: number, aircraft: TrainingWindowAircraft): TrainingFlownEnd {
+  const answered = window.rounds[place].losses.some((loss) => loss.answering.includes(aircraft.datasetId));
+  return answered ? TRAINING_LOST_SEPARATION : aircraft.rounds[place].outcome;
+}
+
 /** The window's reward W of a round (multi-aircraft control D141): the sum of its commanded aircraft's rewards. */
 export function windowReward(window: TrainingWindow, place: number): number {
   return window.commanded.reduce((sum, aircraft) => sum + aircraft.rounds[place].reward, 0);

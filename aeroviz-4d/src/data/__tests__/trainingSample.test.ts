@@ -130,6 +130,29 @@ describe("the sample", () => {
     if (!c.ok) expect(c.problem).toContain("flownFromRow");
   });
 
+  it("reads a closed loop of one word: its executor failed in it, so its states end at the start state", () => {
+    // the shape the export writes for such a flight (stage D's listed set at KRDU, 2026-10-12): Δ 4 s, flownFromRow 8, nine rows
+    const file = stageASampleFile();
+    const loop = file.flights[0].closedLoop["4"];
+    const rows = loop.flownFromRow + 1;
+    loop.words = loop.words.slice(0, 1);
+    loop.events = loop.events.filter((event: { row: number }) => event.row === 0);
+    for (const key of ["lateralM", "verticalM", "uncorrectable", "observedRow", "matchedRow"]) loop[key] = loop[key].slice(0, 1);
+    for (const key of Object.keys(loop.states)) if (key !== "rows") loop.states[key] = loop.states[key].slice(0, rows);
+    loop.states.rows = rows;
+    const { replay } = loop;
+    Object.assign(replay, { outcome: "dynamics_failure", endCycle: 1, crossing: null, envelopes: null, flewTheSentence: false, notReached: 0 });
+    for (const key of Object.keys(replay.track)) if (Array.isArray(replay.track[key])) replay.track[key] = replay.track[key].slice(0, 1);
+    Object.assign(replay.track, { rows: 1, lastCycle: 0 });
+    for (const key of Object.keys(replay.attitude)) replay.attitude[key] = replay.attitude[key].slice(0, 1);
+    const parsed = parseTrainingSample(file, TRAINING_SPLITS);
+    if (!parsed.ok) throw new Error(parsed.problem);
+    const read = parsed.value.flights[0].closedLoop["4"];
+    expect(read.words).toHaveLength(1);
+    expect(read.replay.outcome).toBe("dynamics_failure");
+    expect(read.flown.tS).toHaveLength(1);
+  });
+
   it("refuses an unknown outcome and a rows grid that is not the vocabulary's 2 s from 0", () => {
     const outcome = stageASampleFile();
     outcome.flights[0].closedLoop["2"].replay.outcome = "went_around";

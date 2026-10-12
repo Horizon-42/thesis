@@ -27,6 +27,7 @@ import useTrainingWindowAutopilot from "../../hooks/useTrainingWindowAutopilot";
 import useTrainingSet from "../../hooks/useTrainingSet";
 import { setTrainingWindowLayer, useTrainingWindowLayers, useTrainingWindowPick } from "../../data/trainingWindowLayers";
 import {
+  countedOutcome,
   fetchTrainingWindowSample,
   lossesOf,
   mostTrafficAtOnce,
@@ -163,10 +164,10 @@ export function cohortText(cohort: TrainingWindowCohort): string {
 
 /** A window as the list shows it (outline §6.2, frontend §5.1): its anchor's callsign ("+k" for its k other commanded
  *  aircraft), recorded runway and kind; its commanded aircraft landed of all in its last round, each round's in the
- *  tooltip. */
+ *  tooltip — landed as the readouts count it (`countedOutcome`). */
 function windowItem(item: TrainingWindow, sample: TrainingWindowSample) {
   const [anchor] = item.commanded;
-  const landedIn = (place: number) => item.commanded.filter((aircraft) => aircraft.rounds[place].outcome === "landed").length;
+  const landedIn = (place: number) => item.commanded.filter((aircraft) => countedOutcome(item, place, aircraft) === "landed").length;
   const several = item.commanded.length > 1;
   const last = item.rounds.length - 1;
   return {
@@ -174,23 +175,25 @@ function windowItem(item: TrainingWindow, sample: TrainingWindowSample) {
     runway: `recorded ${anchor.head.runway}`,
     runwayTitle: "the runway the flight landed on in the record (a round's sentence may say another)",
     stratum: item.c === null ? item.kind : `${item.kind} · c ${item.c}`,
-    landed: several ? landedIn(last) : anchor.rounds.filter((s) => s.outcome === "landed").length,
+    landed: several ? landedIn(last) : item.rounds.filter((_, place) => countedOutcome(item, place, anchor) === "landed").length,
     of: several ? item.commanded.length : anchor.rounds.length,
     more: `${item.traffic.length} other`, title: anchor.head.flightKey,
     outcomes: several
       ? item.rounds.map((end, place) => `${roundLabel(end.round, sample.model.start)}: ${landedIn(place)}/${item.commanded.length} landed`).join("; ")
-      : anchor.rounds.map((s) => `${roundLabel(s.round, sample.model.start)}: ${TRAINING_OUTCOME_TAG[s.outcome]}`).join("; "),
+      : item.rounds.map((end, place) => `${roundLabel(end.round, sample.model.start)}: ${TRAINING_OUTCOME_TAG[countedOutcome(item, place, anchor)]}`).join("; "),
   };
 }
 
-/** Stage D's "this round" (frontend §5.1): W and the count of commanded aircraft, landed, go-arounds, silent aircraft,
- *  and the round's losses of separation, between commanded aircraft and with recorded ones. */
+/** Stage D's "this round" (frontend §5.1): W and the count of commanded aircraft, landed (as the readouts count it,
+ *  `countedOutcome`), go-arounds, silent aircraft, and the round's losses of separation, between commanded aircraft and
+ *  with recorded ones. */
 function roundReadout(window: TrainingWindow, place: number): string {
   const said = window.commanded.map((aircraft) => aircraft.rounds[place]);
   const ids = new Set(window.commanded.map((aircraft) => aircraft.datasetId));
   const losses = window.rounds[place].losses;
   const between = losses.filter((loss) => loss.aircraft.every((key) => ids.has(key))).length;
-  return `W ${windowReward(window, place).toFixed(2)} of ${said.length} · ${said.filter((s) => s.outcome === "landed").length} landed · ` +
+  const landed = window.commanded.filter((aircraft) => countedOutcome(window, place, aircraft) === "landed").length;
+  return `W ${windowReward(window, place).toFixed(2)} of ${said.length} · ${landed} landed · ` +
     `${said.reduce((sum, s) => sum + s.goArounds, 0)} go-arounds · ${said.filter((s) => s.silentFromRow !== null).length} silent · ` +
     `${between} loss${between === 1 ? "" : "es"} of separation between commanded aircraft, ${losses.length - between} with recorded`;
 }
@@ -204,11 +207,11 @@ function aircraftReadout(aircraft: TrainingWindowAircraft, sentence: TrainingWin
   return `${aircraft.head.callsign} · ${said} · joins at ${aircraft.joinS.toFixed(0)} s`;
 }
 
-/** The landed of each round over the set's windows. */
+/** The landed of each round over the set's windows, as the readouts count it (`countedOutcome`). */
 function roundsSummary(sample: TrainingWindowSample): string {
-  return sample.model.rounds.map((round) => {
-    const said = sample.windows.flatMap((window) => window.commanded.flatMap((aircraft) => aircraft.rounds.filter((item) => item.round === round)));
-    return `${roundLabel(round, sample.model.start)}: ${said.filter((item) => item.outcome === "landed").length}/${said.length} landed`;
+  return sample.model.rounds.map((round, place) => {
+    const said = sample.windows.flatMap((window) => window.commanded.map((aircraft) => countedOutcome(window, place, aircraft)));
+    return `${roundLabel(round, sample.model.start)}: ${said.filter((outcome) => outcome === "landed").length}/${said.length} landed`;
   }).join(" · ");
 }
 

@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
-  mostTrafficAtOnce, onAircraftClock, silentFromS, trackAt, windowAircraftAt, windowReward,
+  countedOutcome, mostTrafficAtOnce, onAircraftClock, silentFromS, trackAt, windowAircraftAt, windowReward,
 } from "../trainingWindowSample";
 import { roundKind } from "../trainingSentenceKind";
 import { stageDSample } from "./stageD";
@@ -38,6 +38,13 @@ describe("a window of two commanded aircraft", () => {
     expect(said.flown.tS[said.flown.tS.length - 1]).toBeGreaterThan(fromS);              // it flies on
     // the loss is at the row it went silent on (on the anchor's clock)
     expect(onAircraftClock(anchor, answered[0].timeS)).toBeCloseTo(fromS, 6);
+  });
+
+  it("counts an aircraft as the readouts do: one that answers a loss lost separation, flown on to a landing too", () => {
+    // the export gives a silent aircraft the end the executor flew it on to (D144); the loop's outcome is the loss
+    const landedOn = { ...anchor, rounds: [{ ...anchor.rounds[0], outcome: "landed" as const }] };
+    expect(countedOutcome(window, 0, landedOn)).toBe("lost_separation");
+    expect(countedOutcome(window, 0, copy)).toBe(copy.rounds[0].outcome);
   });
 
   it("W is the sum of the commanded aircraft's rewards", () => {

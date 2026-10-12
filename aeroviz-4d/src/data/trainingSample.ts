@@ -978,7 +978,8 @@ function parseClosedLoop(
   const words = parseGrid(reader, "words");
   const events = parseEvents(reader, words, candidates, true);
   const states = reader.child("states");
-  const stateRows = states.count("rows", flownFromRow + 2);
+  // one word covers the start state only: a flight whose executor failed in its first word has flownFromRow + 1 rows
+  const stateRows = states.count("rows");
   if (stateRows !== (words.length + startRow - 1) * every + 1) {
     states.fail(`rows is ${stateRows}, but ${words.length} Δ rows from Δ row ${startRow} cover ${(words.length + startRow - 1) * every + 1}`);
   }
