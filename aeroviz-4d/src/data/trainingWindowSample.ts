@@ -642,6 +642,14 @@ export function silentFromS(aircraft: TrainingWindowAircraft, sentence: Training
   return sentence.silentFromRow === null ? null : aircraft.firstStepS + sentence.silentFromRow * rowIntervalS;
 }
 
+/** A commanded aircraft's outcome in the window's round at ``place``, as the readouts count it: lost separation when it
+ *  answers for a loss of the round — a silent one too, whose flight the executor took on to an end of its own (D144: the
+ *  set gives that end; the loop's outcome is the loss) —, else its sentence's outcome. */
+export function countedOutcome(window: TrainingWindow, place: number, aircraft: TrainingWindowAircraft): TrainingFlownEnd {
+  const answered = window.rounds[place].losses.some((loss) => loss.answering.includes(aircraft.datasetId));
+  return answered ? TRAINING_LOST_SEPARATION : aircraft.rounds[place].outcome;
+}
+
 /** The window's reward W of a round (multi-aircraft control D141): the sum of its commanded aircraft's rewards. */
 export function windowReward(window: TrainingWindow, place: number): number {
   return window.commanded.reduce((sum, aircraft) => sum + aircraft.rounds[place].reward, 0);
@@ -658,6 +666,17 @@ export function mostTrafficAtOnce(window: TrainingWindow): number {
     most = Math.max(most, now);
   }
   return most;
+}
+
+/** The last moment of the window's scene in round ``place``, on its clock (s from its row 0): where the last of its
+ *  aircraft stops — a recorded one's last row, a commanded one's flown track or observed track, whichever ends later. */
+export function windowSceneEndS(window: TrainingWindow, place: number): number {
+  const last = (tS: number[]) => tS[tS.length - 1];
+  return Math.max(
+    ...window.traffic.map((aircraft) => last(aircraft.tS)),
+    ...window.commanded.map((aircraft) => onWindowClock(aircraft,
+      Math.max(last(aircraft.rounds[place].flown.tS), last(aircraft.head.observed.tS)))),
+  );
 }
 
 /** Where aircraft ``key`` of the window is at window time ``windowS`` in round ``place``: a commanded aircraft from the

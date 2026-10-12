@@ -18,7 +18,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "../../context/AppContext";
 import CursorSlider from "./CursorSlider";
 import TrainingDetails, { type TrainingDetailsSection } from "./TrainingDetails";
-import { DetailsLink, DrawBox, EXPERIMENT_SECTION, LayerSwitches, STATISTICS_SECTION, type DetailsPage } from "./PanelParts";
+import { DetailsLink, DrawBox, EXPERIMENT_SECTION, LabelSwitches, LayerSwitches, STATISTICS_SECTION, type DetailsPage } from "./PanelParts";
 import StatisticsSection from "./StatisticsSection";
 import { ExperimentSection, ItemList } from "./SetParts";
 import {
@@ -154,6 +154,7 @@ export default function TrainingFlightSession({ airport, sample, entry, details,
           <CursorSlider marks={marks} />
           <DrawBox>
             <LayerSwitches />
+            <LabelSwitches />
           </DrawBox>
         </>
       )}

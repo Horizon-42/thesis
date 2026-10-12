@@ -3,7 +3,8 @@
  * -------------------------
  * The Training panel over a window set of stage C (`data/trainingWindowSample.ts`), in the layout every stage shares
  * (outline §6.2): the set chooser with the set's intent line, the list of windows, one line per readout, the cursor slider
- * (frontend §6.1: its marks the first predicted step and the round's loss of separation) and the Draw box.
+ * (frontend §6.1: its marks the first predicted step and the round's loss of separation; stage D's spans the window's scene,
+ * not one aircraft's sentence: the user, 2026-10-12) and the Draw box.
  * A window holds a list of commanded aircraft (frontend §5.7, the window format of stages C and D); stage C's windows
  * hold one, and this view shows it (stage D's aircraft strip chooses among several, F3). Of the window on screen the
  * SENTENCE BAR'S TABS choose the sentence — Labelled (the labeller's open-loop reading of the recorded flight of the
@@ -27,6 +28,7 @@ import useTrainingWindowAutopilot from "../../hooks/useTrainingWindowAutopilot";
 import useTrainingSet from "../../hooks/useTrainingSet";
 import { setTrainingWindowLayer, useTrainingWindowLayers, useTrainingWindowPick } from "../../data/trainingWindowLayers";
 import {
+  countedOutcome,
   fetchTrainingWindowSample,
   lossesOf,
   mostTrafficAtOnce,
@@ -49,10 +51,19 @@ import {
   type TrainingWindowStage,
   type TrainingWindowStart,
   windowReward,
+  windowSceneEndS,
 } from "../../data/trainingWindowSample";
 import { readingAxisEndS, trainingReadingOf } from "../../data/trainingSample";
 import { TRAINING_OUTCOME_TAG } from "../../data/trainingText";
-import { firstStepMark, lossMark, silenceMark } from "../../data/trainingSlider";
+import {
+  firstStepMark,
+  lossMark,
+  sceneAxis,
+  sceneLossMark,
+  sentenceAxis,
+  silenceMark,
+  type TrainingSliderAxis,
+} from "../../data/trainingSlider";
 import { publishTrainingTabs, useTrainingTabs, type TrainingTab } from "../../data/trainingTabs";
 import { useTrainingSetIntent } from "../../data/trainingSetIntent";
 import { useTrainingSetResults } from "../../data/trainingSetResults";
@@ -61,7 +72,7 @@ import { roundKind } from "../../data/trainingSentenceKind";
 import CursorSlider from "./CursorSlider";
 import ProblemBox from "./ProblemBox";
 import TrainingDetails, { type TrainingDetailsSection } from "./TrainingDetails";
-import { DetailsLink, DrawBox, EXPERIMENT_SECTION, LayerSwitches, ReadoutLine, STATISTICS_SECTION, type DetailsPage } from "./PanelParts";
+import { DetailsLink, DrawBox, EXPERIMENT_SECTION, LabelSwitches, LayerSwitches, ReadoutLine, STATISTICS_SECTION, type DetailsPage } from "./PanelParts";
 import StatisticsSection from "./StatisticsSection";
 import AircraftStrip from "./AircraftStrip";
 import { ExperimentSection, ItemList, SetChooser } from "./SetParts";
@@ -80,15 +91,15 @@ export const TRAINING_WINDOW_KIND_TEXT: Record<TrainingWindow["kind"], string> =
 /** The cursor of a window. When a window comes on screen, at its row 0 (D129), so the other aircraft show from the start
  *  (the cursor resets to the flight's row 0, which is before the window's, with each flight on screen). On a change of the
  *  round or of the selected aircraft (stage D), at the window's instant it was at (frontend §6.1: kept on the window's
- *  clock, each aircraft's flight clock ``clockS`` from it), or at the nearer end of the new sentence's axis (0 … ``endS``)
- *  when that does not reach it — also between Labelled and the round whose flight it is read on (one derived flight, so
- *  the provider keeps the cursor: it is only clamped). Between those changes the cursor is the user's. A LEAF: it reads
- *  the Training cursor, which moves on every chart hover. ``windowKey``: the window's identity (its set and place);
- *  ``flightKey``: the derived flight of the window, aircraft and round — the cursor is set only once that flight is the
- *  one on screen (the session publishes it after this leaf's effect has run), never on the flight before; ``labelled``:
- *  the labelled sentence is on screen; ``clockS``: the aircraft's flight time at the window's row 0. */
-export function WindowCursor({ windowKey, flightKey, labelled, clockS, endS }: {
-  windowKey: string; flightKey: string; labelled: boolean; clockS: number; endS: number;
+ *  clock, each aircraft's flight clock ``clockS`` from it), or at the nearer end of the slider's axis (``fromS`` …
+ *  ``toS``, on the cursor's clock) when that does not reach it — also between Labelled and the round whose flight it is
+ *  read on (one derived flight, so the provider keeps the cursor: it is only clamped). Between those changes the cursor is
+ *  the user's. A LEAF: it reads the Training cursor, which moves on every chart hover. ``windowKey``: the window's identity
+ *  (its set and place); ``flightKey``: the derived flight of the window, aircraft and round — the cursor is set only once
+ *  that flight is the one on screen (the session publishes it after this leaf's effect has run), never on the flight
+ *  before; ``labelled``: the labelled sentence is on screen; ``clockS``: the aircraft's flight time at the window's row 0. */
+export function WindowCursor({ windowKey, flightKey, labelled, clockS, fromS, toS }: {
+  windowKey: string; flightKey: string; labelled: boolean; clockS: number; fromS: number; toS: number;
 }) {
   const { trainingSelection } = useApp();
   const { trainingCursorS, setTrainingCursorS } = useTrainingCursor();
@@ -97,12 +108,13 @@ export function WindowCursor({ windowKey, flightKey, labelled, clockS, endS }: {
   const kept = useRef<{ windowKey: string; flightKey: string; labelled: boolean; windowS: number } | null>(null);
   useEffect(() => {
     if (!onScreen) return;
+    const clamp = (atS: number) => Math.min(Math.max(atS, fromS), toS);
     const last = kept.current;
     if (last !== null && last.flightKey === flightKey) {
       if (last.labelled !== labelled) {
         // the same flight read as another sentence: the provider kept the cursor; clamp it to this sentence's axis
         last.labelled = labelled;
-        const atS = Math.min(trainingCursorS, endS);
+        const atS = clamp(trainingCursorS);
         last.windowS = atS - clockS;
         if (atS !== trainingCursorS) setTrainingCursorS(atS);
         return;
@@ -111,10 +123,10 @@ export function WindowCursor({ windowKey, flightKey, labelled, clockS, endS }: {
       return;
     }
     // another flight on screen: the setter is its own (a new flight, a new setter), set once
-    const atS = Math.min(Math.max(last !== null && last.windowKey === windowKey ? last.windowS + clockS : clockS, 0), endS);
+    const atS = clamp(last !== null && last.windowKey === windowKey ? last.windowS + clockS : clockS);
     kept.current = { windowKey, flightKey, labelled, windowS: atS - clockS };
     setTrainingCursorS(atS);
-  }, [onScreen, windowKey, flightKey, labelled, clockS, endS, trainingCursorS, setTrainingCursorS]);
+  }, [onScreen, windowKey, flightKey, labelled, clockS, fromS, toS, trainingCursorS, setTrainingCursorS]);
   return null;
 }
 
@@ -163,10 +175,10 @@ export function cohortText(cohort: TrainingWindowCohort): string {
 
 /** A window as the list shows it (outline §6.2, frontend §5.1): its anchor's callsign ("+k" for its k other commanded
  *  aircraft), recorded runway and kind; its commanded aircraft landed of all in its last round, each round's in the
- *  tooltip. */
+ *  tooltip — landed as the readouts count it (`countedOutcome`). */
 function windowItem(item: TrainingWindow, sample: TrainingWindowSample) {
   const [anchor] = item.commanded;
-  const landedIn = (place: number) => item.commanded.filter((aircraft) => aircraft.rounds[place].outcome === "landed").length;
+  const landedIn = (place: number) => item.commanded.filter((aircraft) => countedOutcome(item, place, aircraft) === "landed").length;
   const several = item.commanded.length > 1;
   const last = item.rounds.length - 1;
   return {
@@ -174,23 +186,25 @@ function windowItem(item: TrainingWindow, sample: TrainingWindowSample) {
     runway: `recorded ${anchor.head.runway}`,
     runwayTitle: "the runway the flight landed on in the record (a round's sentence may say another)",
     stratum: item.c === null ? item.kind : `${item.kind} · c ${item.c}`,
-    landed: several ? landedIn(last) : anchor.rounds.filter((s) => s.outcome === "landed").length,
+    landed: several ? landedIn(last) : item.rounds.filter((_, place) => countedOutcome(item, place, anchor) === "landed").length,
     of: several ? item.commanded.length : anchor.rounds.length,
     more: `${item.traffic.length} other`, title: anchor.head.flightKey,
     outcomes: several
       ? item.rounds.map((end, place) => `${roundLabel(end.round, sample.model.start)}: ${landedIn(place)}/${item.commanded.length} landed`).join("; ")
-      : anchor.rounds.map((s) => `${roundLabel(s.round, sample.model.start)}: ${TRAINING_OUTCOME_TAG[s.outcome]}`).join("; "),
+      : item.rounds.map((end, place) => `${roundLabel(end.round, sample.model.start)}: ${TRAINING_OUTCOME_TAG[countedOutcome(item, place, anchor)]}`).join("; "),
   };
 }
 
-/** Stage D's "this round" (frontend §5.1): W and the count of commanded aircraft, landed, go-arounds, silent aircraft,
- *  and the round's losses of separation, between commanded aircraft and with recorded ones. */
+/** Stage D's "this round" (frontend §5.1): W and the count of commanded aircraft, landed (as the readouts count it,
+ *  `countedOutcome`), go-arounds, silent aircraft, and the round's losses of separation, between commanded aircraft and
+ *  with recorded ones. */
 function roundReadout(window: TrainingWindow, place: number): string {
   const said = window.commanded.map((aircraft) => aircraft.rounds[place]);
   const ids = new Set(window.commanded.map((aircraft) => aircraft.datasetId));
   const losses = window.rounds[place].losses;
   const between = losses.filter((loss) => loss.aircraft.every((key) => ids.has(key))).length;
-  return `W ${windowReward(window, place).toFixed(2)} of ${said.length} · ${said.filter((s) => s.outcome === "landed").length} landed · ` +
+  const landed = window.commanded.filter((aircraft) => countedOutcome(window, place, aircraft) === "landed").length;
+  return `W ${windowReward(window, place).toFixed(2)} of ${said.length} · ${landed} landed · ` +
     `${said.reduce((sum, s) => sum + s.goArounds, 0)} go-arounds · ${said.filter((s) => s.silentFromRow !== null).length} silent · ` +
     `${between} loss${between === 1 ? "" : "es"} of separation between commanded aircraft, ${losses.length - between} with recorded`;
 }
@@ -204,11 +218,11 @@ function aircraftReadout(aircraft: TrainingWindowAircraft, sentence: TrainingWin
   return `${aircraft.head.callsign} · ${said} · joins at ${aircraft.joinS.toFixed(0)} s`;
 }
 
-/** The landed of each round over the set's windows. */
+/** The landed of each round over the set's windows, as the readouts count it (`countedOutcome`). */
 function roundsSummary(sample: TrainingWindowSample): string {
-  return sample.model.rounds.map((round) => {
-    const said = sample.windows.flatMap((window) => window.commanded.flatMap((aircraft) => aircraft.rounds.filter((item) => item.round === round)));
-    return `${roundLabel(round, sample.model.start)}: ${said.filter((item) => item.outcome === "landed").length}/${said.length} landed`;
+  return sample.model.rounds.map((round, place) => {
+    const said = sample.windows.flatMap((window) => window.commanded.map((aircraft) => countedOutcome(window, place, aircraft)));
+    return `${roundLabel(round, sample.model.start)}: ${said.filter((outcome) => outcome === "landed").length}/${said.length} landed`;
   }).join(" · ");
 }
 
@@ -304,21 +318,33 @@ export default function TrainingWindowSession({ airport, stage, sets, details }:
 
   const sentence = aircraft === null || shownPlace < 0 ? null : aircraft.rounds[shownPlace];
   const end = window === null || shownPlace < 0 ? null : window.rounds[shownPlace];
-  // the round's sentence on screen as the views read it, and the slider's marks (frontend §6.1): the first predicted step
-  // on every tab; on a round's tab, the losses of separation the aircraft is in
+  // the round's sentence on screen as the views read it
   const view = sample === null || window === null || aircraft === null || shown === null ? null
     : trainingWindowFlightView(sample, window, aircraft, shown);
-  const endS = sample === null || view === null ? 0
-    : readingAxisEndS(trainingReadingOf(view, sample.vocabulary.stepS, chosen === LABELLED ? null : sample.model.rowIntervalS));
+  const reading = useMemo(() => (sample === null || view === null ? null
+    : trainingReadingOf(view, sample.vocabulary.stepS, chosen === LABELLED ? null : sample.model.rowIntervalS)), [sample, view, chosen]);
+  // the slider's axis (frontend §6.1): stage C's the sentence's, on the aircraft's flight clock; stage D's the window
+  // scene's, on the window's clock (the user, 2026-10-12: several aircraft are commanded), its round's whatever the tab
+  const axis = useMemo((): TrainingSliderAxis | null => {
+    if (sample === null || window === null || aircraft === null || view === null || reading === null || shownPlace < 0) return null;
+    const stepS = sample.vocabulary.stepS;
+    return sample.stage === "D"
+      ? sceneAxis(`${sample.setId}/${window.index}`, windowSceneEndS(window, shownPlace), stepS, aircraft.clockS)
+      : sentenceAxis(view.flightKey, reading, stepS);
+  }, [sample, window, aircraft, view, reading, shownPlace]);
   const silentS = sample === null || aircraft === null || sentence === null || chosen === LABELLED ? null
     : silentFromS(aircraft, sentence, sample.model.rowIntervalS);
+  // its marks, on its clock: the first predicted step on every tab; on a round's tab, stage C's losses of separation the
+  // aircraft is in, stage D's every loss of the round and the aircraft's silence
   const marks = useMemo(() => {
-    if (aircraft === null || end === null) return [];
-    const losses = chosen === LABELLED ? [] : lossesOf(end, aircraft.datasetId);
-    return [firstStepMark(aircraft.firstStepS),
-      ...losses.map((loss) => lossMark(onAircraftClock(aircraft, loss.timeS), otherOf(loss, aircraft.datasetId))),
-      ...(silentS === null ? [] : [silenceMark(silentS, endS)])];
-  }, [aircraft, end, chosen, silentS, endS]);
+    if (sample === null || aircraft === null || end === null || reading === null || axis === null) return [];
+    const onAxis = (flightS: number) => flightS - axis.offsetS;
+    const losses = chosen === LABELLED ? [] : sample.stage === "D"
+      ? end.losses.map((loss) => sceneLossMark(loss.timeS, loss.aircraft))
+      : lossesOf(end, aircraft.datasetId).map((loss) => lossMark(onAircraftClock(aircraft, loss.timeS), otherOf(loss, aircraft.datasetId)));
+    return [firstStepMark(onAxis(aircraft.firstStepS)), ...losses,
+      ...(silentS === null ? [] : [silenceMark(onAxis(silentS), onAxis(readingAxisEndS(reading)))])];
+  }, [sample, aircraft, end, reading, axis, chosen, silentS]);
 
   // ── the details page: the set and the models' statistics (frontend §3 item 3, D159) ──
   const results = useTrainingSetResults(stage, airport, setId);
@@ -379,10 +405,10 @@ export default function TrainingWindowSession({ airport, stage, sets, details }:
           {window === null ? null : (
             <AircraftStrip aircraft={window.commanded} place={chosen === LABELLED ? null : shownPlace} selected={member} onSelect={select} />
           )}
-          <CursorSlider marks={marks} />
-          {window === null || aircraft === null || view === null ? null : (
+          <CursorSlider marks={marks} axis={axis} />
+          {window === null || aircraft === null || view === null || axis === null ? null : (
             <WindowCursor windowKey={windowKey!} flightKey={view.flightKey} labelled={chosen === LABELLED}
-              clockS={aircraft.clockS} endS={endS} />
+              clockS={aircraft.clockS} fromS={axis.offsetS} toS={axis.offsetS + axis.endS} />
           )}
           <DrawBox legend="Draw (window)">
             <LayerSwitches />
@@ -392,13 +418,9 @@ export default function TrainingWindowSession({ airport, stage, sets, details }:
                 Other commanded tracks
               </label>
             ) : null}
-            <label title="the other aircraft where their records have them at the cursor's time">
+            <label title="the other aircraft: each one's track over the window, in its role's colour, and where its record has it at the cursor's time">
               <input type="checkbox" checked={layers.traffic} onChange={(event) => setTrainingWindowLayer("traffic", event.target.checked)} />
-              Other aircraft
-            </label>
-            <label title="each other aircraft's track over the window, in its role's colour">
-              <input type="checkbox" checked={layers.trafficTracks} onChange={(event) => setTrainingWindowLayer("trafficTracks", event.target.checked)} />
-              Their tracks
+              Other aircraft and tracks
             </label>
             <label title="the two aircraft at the loss of separation that ended the round, joined">
               <input type="checkbox" checked={layers.loss} onChange={(event) => setTrainingWindowLayer("loss", event.target.checked)} />
@@ -412,6 +434,7 @@ export default function TrainingWindowSession({ airport, stage, sets, details }:
               <input type="checkbox" checked={layers.procedure} onChange={(event) => setTrainingWindowLayer("procedure", event.target.checked)} />
               Procedure limits
             </label>
+            <LabelSwitches />
           </DrawBox>
         </>
       )}

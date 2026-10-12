@@ -2,7 +2,7 @@
  * The 3D scene's coordinates and the word each envelope belongs to (`scene/trainingEntities.ts`), on the stage-A fixture:
  * what is drawn is the exporter's, only put in Cesium's flat arrays.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as Cesium from "cesium";
 import {
   airLine,
@@ -13,6 +13,7 @@ import {
   groundRows,
   lonLatHeights,
   planDegrees,
+  showLabels,
   TRAINING_ENTITY,
   trainingBandFan,
   trainingBandGround,
@@ -192,5 +193,21 @@ describe("each kind of sentence has its colour (frontend §3 item 11, D159)", ()
     for (const outcome of ["timeout", "ground_contact", "lost_separation"] as const) {
       expect(trainingOutcomeColour(outcome)).toBe(TRAINING_FAILURE_COLOR);
     }
+  });
+});
+
+describe("a label switch", () => {
+  it("shows or hides the labels of the entities drawn, and passes over an id not drawn or with no label", () => {
+    const entities = new Cesium.EntityCollection();
+    const viewer = { entities, scene: { requestRender: vi.fn() } } as unknown as Cesium.Viewer;
+    entities.add({ id: "with-label", position: Cesium.Cartesian3.fromDegrees(0, 0), label: { text: "AAL1" } });
+    entities.add({ id: "no-label", position: Cesium.Cartesian3.fromDegrees(0, 0), point: { pixelSize: 4 } });
+    const shown = () => entities.getById("with-label")!.label!.show!.getValue(Cesium.JulianDate.now());
+    showLabels(viewer, ["with-label", "no-label", "absent"], false);
+    expect(shown()).toBe(false);
+    expect(entities.getById("no-label")!.label).toBeUndefined();
+    showLabels(viewer, ["with-label"], true);
+    expect(shown()).toBe(true);
+    expect(viewer.scene.requestRender).toHaveBeenCalledTimes(2);
   });
 });

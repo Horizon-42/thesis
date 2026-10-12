@@ -43,7 +43,7 @@ import { useTrainingSetResults } from "../../data/trainingSetResults";
 import CursorSlider from "./CursorSlider";
 import ProblemBox from "./ProblemBox";
 import TrainingDetails, { type TrainingDetailsSection } from "./TrainingDetails";
-import { DetailsLink, DrawBox, EXPERIMENT_SECTION, LayerSwitches, ReadoutLine, STATISTICS_SECTION, type DetailsPage } from "./PanelParts";
+import { DetailsLink, DrawBox, EXPERIMENT_SECTION, LabelSwitches, LayerSwitches, ReadoutLine, STATISTICS_SECTION, type DetailsPage } from "./PanelParts";
 import StatisticsSection from "./StatisticsSection";
 import { stageBStatistics } from "../../data/trainingStatistics";
 import { ExperimentSection, ItemList, SetChooser } from "./SetParts";
@@ -229,6 +229,7 @@ export default function TrainingPriorSession({ airport, sets, details }: {
               <input type="checkbox" checked={layers.otherSentences} onChange={(event) => setTrainingPriorLayer("otherSentences", event.target.checked)} />
               Other sentences
             </label>
+            <LabelSwitches />
           </DrawBox>
         </>
       )}

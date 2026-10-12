@@ -1162,3 +1162,37 @@ lose what was set up in it.
   track and its ground trace, its aircraft at the cursor, window B's moved-start rows, its lines on the read-back charts
   — and the labelled sentence's envelopes and selected-word marks, which judge it (`trainingEnvelopeSwitches`; a
   closed-loop reading's judge its flown path and stay). 3D visibility is per entity: every switch it needs must be on.
+
+### AV50 · Learning (Training): the slider plays, stage D's slider spans the window's scene, the label switches (2026-10-12)
+
+The user's four requests of 2026-10-12, for the Learning task (mode `training`):
+
+- **One switch for the other aircraft of a window (stages C and D)**: Draw "Other aircraft and tracks"
+  (`trainingWindowLayers.traffic`) shows or hides each other aircraft's track over the window AND its point at the cursor;
+  the old "Their tracks" (`trafficTracks`) is gone.
+- **Two label switches, the last lines of every stage's Draw box** (`training/PanelParts.LabelSwitches`, store
+  `data/trainingLabels.ts`): "Aircraft labels" — the attitude under the aircraft at the cursor (`useTrainingAircraftLayer`),
+  the key of another aircraft and the callsign of another commanded aircraft (`useTrainingWindowLayer`), the live
+  executor's clock (`useTrainingLiveLayer`); "Failure labels" — a loss of separation's numbers (`useTrainingWindowLayer`),
+  where a flown path ended and how, and the DA check (`useTrainingTrackLayer`). A switch hides the TEXT only: the points,
+  lines and aircraft stay. Entities built once per flight keep their label and the switch sets its `show`
+  (`scene/trainingEntities.showLabels`); the window layer's points, rebuilt per cursor step anyway, are built with or
+  without it.
+- **Stage D's slider is the window scene's time axis**, not one commanded aircraft's: a `TrainingSliderAxis`
+  (`data/trainingSlider.ts`) carries its stops, end and the clock name, all from its own 0, and `offsetS`, where that 0 is
+  on the cursor's clock. The cursor stays the flight time of the aircraft on screen, so every reader of it (bar, charts,
+  3D) is unchanged. Stages A, B, C: `sentenceAxis` (as before, offset 0; the slider's default). Stage D: `sceneAxis` —
+  from the window's row 0 to `windowSceneEndS` (where the last of its aircraft stops: a recorded one's last row, a commanded
+  one's flown or observed track) at the records' 2 s rows, offset = the aircraft's `clockS`; readout "scene t … s"; marks
+  on that clock: the aircraft's first predicted step and silence, EVERY loss of the round (`sceneLossMark`, both aircraft
+  named). `WindowCursor` clamps to the axis's bounds (`fromS`/`toS` on the cursor's clock), so a change of the selected
+  aircraft or round keeps the window's instant even where that aircraft has not joined yet or has ended (its flight time
+  then runs below 0 or past its end: the bar and the read-back charts keep their cursor line on their axis).
+- **Play / Pause at the slider's left, the speed at its right** (`hooks/useCursorPlayback.ts`; 1–50×, 10× first): it moves
+  the cursor along the axis — the exported tracks play; nothing is flown (not the live executor) and no Cesium clock runs.
+  The cursor setter takes an update (`setTrainingCursorS((s) => …)`), so a frame adds to what another writer set in the
+  same frame (stage D's `WindowCursor` on an aircraft change). Play at the end starts from the axis's 0; the playback
+  stops at the end, on another axis (`key`: the flight; stage D's the window, so its aircraft and rounds keep playing), when
+  the slider is dragged or keyed, and outside the Training task. At most one cursor step per 33 ms, and at most 0.25 s
+  of real time played in one step (a hidden tab resumes where it was). The end is judged when the cursor moves, never on
+  a change of the axis alone: stage D renders a newly selected aircraft's axis once with the last aircraft's cursor.

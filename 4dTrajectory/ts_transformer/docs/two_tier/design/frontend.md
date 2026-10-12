@@ -401,7 +401,10 @@ how each of them ended. One aircraft's sentence is on screen at a time, as in ev
 - **The item list:** the windows, with the four columns of every stage: the callsign (the anchor's, with "+k" for its
   k other commanded aircraft); the runway (the anchor's recorded runway, as D129); the stratum (the window's kind: real,
   or compressed with its c); the outcomes (the commanded aircraft landed of all in the last round, for example 5/6;
-  each round's in the tooltip).
+  each round's in the tooltip). An aircraft is counted as the readouts count it (multi-aircraft control D144): one that
+  answers for a loss of separation is `lost_separation`, also when it is flown on, silent, to a landing
+  (`countedOutcome`, `trainingWindowSample.ts`); the list, its tooltip, "this round", the rounds summary and the
+  statistics read this one rule, and the aircraft line keeps the end it was flown to with its silent row.
 - **The readouts**, one line each:
   - this round: W and the count of commanded aircraft, landed, go-arounds, silent aircraft, the losses of separation
     (between commanded aircraft; with recorded aircraft);
@@ -496,24 +499,33 @@ give the counts; the scene gives the place.
 
 - **Where:** the left panel, one line under the item's readouts, in every stage, for the sentence on screen. With no
   sentence on screen it is disabled and says "choose a sentence".
-- **Form:** on the left, the time at the cursor ("t 128 s"); on the right, the track, from the sentence's row 0 to its
-  last row, 12 px high, with the thumb at the cursor and the stage's marks on the track.
+- **Form:** on the left, Play / Pause and the time at the cursor ("t 128 s"); then the track, 12 px high, with the thumb at
+  the cursor and the stage's marks on it; on the right, the playback speed (1–50×, 10× first).
+- **Axis:** stages A, B and C: the sentence's, from its row 0 to its last row, on the flight's clock. Stage D: the window's
+  scene (the user, 2026-10-12: several aircraft are commanded), from the window's row 0 to where the last of its aircraft
+  stops, at the records' 2 s rows, on the window's clock ("scene t 128 s"). The cursor stays the flight time of the
+  aircraft on screen; the axis says where its own 0 is on that clock.
 - **Input:** drag the thumb; a click on the track puts the thumb there; with the slider focused, ← and → move one Δ row
   (one 2 s row on a labelled sentence), Shift with ← and → ten rows, Home and End to the first and the last row. It is
   a `role="slider"` element with `aria-valuenow` (the row) and `aria-valuetext` ("t = 128 s, row 32 of 210").
 - **State:** it reads and writes the one cursor of the view (`trainingCursorS`, `useTrainingCursor`); every reader of
   the cursor follows it: the aircraft in the scene, the word and the runway in force, the traffic, the bar's cursor
-  line, the read-back charts. It does not drive the Cesium clock, and it has no playback.
+  line, the read-back charts. **Play** moves the cursor on along the axis at the chosen speed: the exported tracks play;
+  nothing is flown (not the live executor) and no Cesium clock runs. Play at the end starts from the axis's 0; the playback
+  stops at the end, on another flight (stage D: another window; its aircraft and rounds keep the scene and keep playing),
+  when the slider is dragged or keyed, and outside the Learning task.
 - **Marks on the track** (each stage's session gives a list; the slider draws them; no stage draws a strip of its own):
   - every stage: a tick at the first predicted step;
   - A: a tick at each row with a correction word;
   - B, on a sample's tab: the probability of "go-around" at each row as a line (the line of B's former strip); B's
     readout line "At the cursor …" stays above the slider;
-  - C and D: a red tick at each loss of separation that the aircraft on screen is in; in D, a slate band from the
+  - C: a red tick at each loss of separation that the aircraft on screen is in;
+  - D: a red tick at each loss of separation of the round, between any two aircraft, and a slate band from the
     aircraft's silence to its end.
   The marks use the view's existing colours.
 - **In a window** (stages C and D) the cursor keeps the window's instant: a change of the round or of the selected
-  aircraft keeps the cursor's UTC time where the new sentence has it, else puts it at the nearer end of the sentence.
+  aircraft keeps the cursor's UTC time where the new sentence has it (stage D: wherever the window's scene has it, also
+  before the new aircraft joins or after it ends), else puts it at the nearer end of the axis.
 
 ### 6.2 One definition of each part
 

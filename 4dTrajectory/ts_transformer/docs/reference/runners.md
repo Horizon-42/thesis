@@ -1787,7 +1787,7 @@ under the same select seed and windows an airport), refused by name otherwise; a
 `campaign.json` beside it. Writes, into a new directory, `list.json` (stage C; the select windows only, none moved out
 of the split; each window's place, airport and identity — flight, `row0_s`, kind — and, as information no reader acts
 on, each read's outcome and D175's fields; the reads by path and sha256) and `SHA256SUMS`; read-only. The Training
-export takes a list (`--windows`, D176 (3), frontend F5). Tests: `tests/test_window_lists.py`.
+export takes a list (`--windows`, D176 (3), frontend F5). Stage D's reads: `--multi DIR` (R71). Tests: `tests/test_window_lists.py`.
 
     python run_ts.py window_list --diagnose 4dTrajectory/outputs/POOLED/post/<diagnose id> on \
         --ceiling 4dTrajectory/outputs/POOLED/post/<ceiling id> start --outcomes lost_separation \
@@ -1855,3 +1855,22 @@ the coherence |Σ g_i| / Σ |g_i| (1 aligned, about 1/√n independent). Writes 
 
     python run_ts.py pass_gradients --campaign 4dTrajectory/outputs/POOLED/multi/<campaign> --round <r> \
         --out <a new file>.json [--every K] [--device cpu] [--threads T]
+
+### R71 · `run_ts.py multi_window_read` — a stage D round read again on its select windows, a line a window (post-training D176 (2))
+
+2026-10-12 (the user: a Training set of the windows a stage D model did not land). Round `--round`'s model read on its
+campaign's select windows by its own selection readout (`multi_train.selection_readout` with `lines`: the windows and
+random numbers of every round's readout), here or by `--speak-workers` workers on `--device` (default `cuda`; the rule
+of the CPU's batches left off, D191). The summed readout must be the round's own (`round.json`'s `selection_readout`),
+or the run stops and writes nothing: the behaviour check on fixed inputs, on the device and code of this read. Writes,
+into a new directory, `config.json` (`ts-multi-window-read-v1`: the campaign, the round, its inputs, the commit, the
+checks, the device and workers, the selection as the Training export's `StageExport.selection_fields`, the count),
+`per_window.jsonl` (`multi_train.window_line`: place, airport, identity, span, kind, each commanded aircraft's key,
+outcome, reward and go-arounds, the steps of loss by pair) and `SHA256SUMS`, read-only. A clean tree unless `--smoke`,
+the checks first; a smoke campaign only with `--smoke`. `window_list --multi DIR` reads it (R67): a stage D window is
+chosen when an outcome of any of its commanded aircraft is one of `--outcomes`. Tests: `tests/test_multi_window_read.py`.
+
+    python run_ts.py multi_window_read --campaign 4dTrajectory/outputs/POOLED/multi/<campaign> --round <r> \
+        --out 4dTrajectory/outputs/POOLED/multi/<read id> [--speak-workers N] [--device cuda]
+    python run_ts.py window_list --multi 4dTrajectory/outputs/POOLED/multi/<read id> --outcomes lost_separation … \
+        --out 4dTrajectory/outputs/POOLED/multi/<list id>

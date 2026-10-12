@@ -4,7 +4,7 @@
  * The 3D scene of a window set beyond stage A's layers (`useTrainingTrackLayer` draws the commanded aircraft's flown path,
  * DA point and words as it does for stage A, since a round's sentence is read as a closed-loop one):
  *
- *  • THE OTHER AIRCRAFT (`trafficTracks`, `traffic` switches): each one's track over the window, thin, in its role's colour
+ *  • THE OTHER AIRCRAFT (`traffic` switch, one for both): each one's track over the window, thin, in its role's colour
  *    (on its record; window A's inserted one; window D's moved one), and where each is at the cursor's time — a point with
  *    its key, placed between the record's 2 s rows the cursor falls between (the only number computed here: a straight
  *    line between two of the exporter's points). An aircraft not in the air at the cursor is not drawn. The traffic is on
@@ -23,6 +23,9 @@
  *    flight's observed track (stage A's layer draws that one; the flown path starts from the moved start) — with the
  *    observed track's switch (`trainingLayers.observed`).
  *
+ * The keys and callsigns written beside the aircraft are under Draw "Aircraft labels", a loss's numbers under "Failure
+ * labels" (`data/trainingLabels.ts`).
+ *
  * Static entities, never time-sampled (`viewer.clock` belongs to Evaluation); the points follow the Training cursor. Called
  * from a leaf (`TrainingWindowScene`).
  */
@@ -32,6 +35,7 @@ import * as Cesium from "cesium";
 import { useApp, useTrainingCursor } from "../context/AppContext";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import { pickTrainingWindowAircraft, useTrainingWindowLayers } from "../data/trainingWindowLayers";
+import { useTrainingLabels } from "../data/trainingLabels";
 import {
   lossesOf,
   onAircraftClock,
@@ -99,8 +103,8 @@ function drawTrafficTracks(viewer: Cesium.Viewer, origin: TrainingWindowOrigin) 
   return group;
 }
 
-/** ``timeS``: the cursor, on the commanded aircraft's flight clock. */
-function drawTrafficAt(viewer: Cesium.Viewer, origin: TrainingWindowOrigin, timeS: number) {
+/** ``timeS``: the cursor, on the commanded aircraft's flight clock; ``labelled``: each with its key. */
+function drawTrafficAt(viewer: Cesium.Viewer, origin: TrainingWindowOrigin, timeS: number, labelled: boolean) {
   const group = entityGroup(viewer);
   const lost = lostWith(origin);
   const windowS = onWindowClock(origin.aircraft, timeS);
@@ -109,15 +113,16 @@ function drawTrafficAt(viewer: Cesium.Viewer, origin: TrainingWindowOrigin, time
     if (at === null) continue;
     const hue = lost.has(aircraft.key) ? TRAINING_FAILURE_COLOR : TRAINING_WINDOW_ROLE_COLOR[aircraft.role];
     group.add(marker(ENTITY.at(aircraft.key), `${aircraft.key} at ${timeS.toFixed(0)} s`, Cesium.Cartesian3.fromDegrees(...at), hue, 9,
-      aircraft.key.split(":").pop()));
+      labelled ? aircraft.key.split(":").pop() : undefined));
   }
   return group;
 }
 
 /** Every loss of separation of the round on screen, between any two of the window's aircraft (stage C's: the one its
  *  commanded aircraft is in): the two at the loss's time joined by a red line, with the minimum and the distance; dashed
- *  when no commanded aircraft answers for it (a loss the records also have, multi-aircraft control D145). */
-function drawLosses(viewer: Cesium.Viewer, origin: TrainingWindowOrigin) {
+ *  when no commanded aircraft answers for it (a loss the records also have, multi-aircraft control D145); ``labelled``: the
+ *  numbers written at it. */
+function drawLosses(viewer: Cesium.Viewer, origin: TrainingWindowOrigin, labelled: boolean) {
   const group = entityGroup(viewer);
   const place = origin.window.rounds.indexOf(origin.end);
   origin.end.losses.forEach((loss, k) => {
@@ -131,7 +136,8 @@ function drawLosses(viewer: Cesium.Viewer, origin: TrainingWindowOrigin) {
       : `${loss.answering.join(", ")} answer${loss.answering.length === 1 ? "s" : ""} for it`;
     const text = `lost separation (${loss.kind}) · ${loss.distanceM.toFixed(0)} m of ${loss.requiredM.toFixed(0)} m required · ${answered}`;
     group.add(airLine(ENTITY.loss(k), text, [oneAt, twoAt], TRAINING_FAILURE_COLOR, 3, 1, loss.answering.length === 0));
-    group.add(marker(ENTITY.lossOwn(k), `${first} at the loss (${loss.timeS.toFixed(0)} s of the window)`, oneAt, TRAINING_FAILURE_COLOR, 10, text));
+    group.add(marker(ENTITY.lossOwn(k), `${first} at the loss (${loss.timeS.toFixed(0)} s of the window)`, oneAt, TRAINING_FAILURE_COLOR, 10,
+      labelled ? text : undefined));
     group.add(marker(ENTITY.lossOther(k), `${second} at the loss`, twoAt, TRAINING_FAILURE_COLOR, 10));
   });
   return group;
@@ -174,8 +180,8 @@ function drawOwnSilence(viewer: Cesium.Viewer, origin: TrainingWindowOrigin) {
 
 /** The window's other commanded aircraft at the cursor (``timeS``, on the flight clock of the aircraft on screen): each
  *  one's point from the row it joins to its end, always drawn (Draw "Other commanded tracks" hides only the tracks); a
- *  click on one selects it (`pickTrainingWindowAircraft`). */
-function drawOtherCommandedAt(viewer: Cesium.Viewer, origin: TrainingWindowOrigin, timeS: number) {
+ *  click on one selects it (`pickTrainingWindowAircraft`); ``labelled``: each with its callsign. */
+function drawOtherCommandedAt(viewer: Cesium.Viewer, origin: TrainingWindowOrigin, timeS: number, labelled: boolean) {
   const group = entityGroup(viewer);
   const place = origin.window.rounds.indexOf(origin.end);
   const windowS = onWindowClock(origin.aircraft, timeS);
@@ -188,7 +194,8 @@ function drawOtherCommandedAt(viewer: Cesium.Viewer, origin: TrainingWindowOrigi
     const silentS = silentFromS(aircraft, sentence, origin.sample.model.rowIntervalS);
     const silent = silentS !== null && onAircraftClock(aircraft, windowS) >= silentS;
     group.add(marker(ENTITY.commandedAt(aircraft.datasetId), `${aircraft.head.callsign}: click to select it`,
-      Cesium.Cartesian3.fromDegrees(...at), silent ? TRAINING_TRAFFIC_COLOR : colour, 11, aircraft.head.callsign));
+      Cesium.Cartesian3.fromDegrees(...at), silent ? TRAINING_TRAFFIC_COLOR : colour, 11,
+      labelled ? aircraft.head.callsign : undefined));
   }
   return group;
 }
@@ -229,6 +236,7 @@ function drawOtherRounds(viewer: Cesium.Viewer, origin: TrainingWindowOrigin) {
 export default function useTrainingWindowLayer(): void {
   const { viewer, mode, trainingSelection, trainingLayers } = useApp();
   const layers = useTrainingWindowLayers();
+  const labels = useTrainingLabels();
   const flight = mode === "training" && trainingSelection !== null ? trainingSelection.flight : null;
   const origin = flight === null ? undefined : trainingWindowOriginOf(flight);
   const { trainingCursorS } = useTrainingCursor();
@@ -244,22 +252,22 @@ export default function useTrainingWindowLayer(): void {
   }, [viewer, origin, designated, layers.procedure]);
 
   useEffect(() => {
-    if (!isCesiumViewerUsable(viewer) || origin === undefined || !layers.trafficTracks) return;
+    if (!isCesiumViewerUsable(viewer) || origin === undefined || !layers.traffic) return;
     const group = drawTrafficTracks(viewer, origin);
     return () => group.remove();
-  }, [viewer, origin, layers.trafficTracks]);
+  }, [viewer, origin, layers.traffic]);
 
   useEffect(() => {
     if (!isCesiumViewerUsable(viewer) || origin === undefined || !layers.traffic) return;
-    const group = drawTrafficAt(viewer, origin, trainingCursorS);
+    const group = drawTrafficAt(viewer, origin, trainingCursorS, labels.aircraft);
     return () => group.remove();
-  }, [viewer, origin, trainingCursorS, layers.traffic]);
+  }, [viewer, origin, trainingCursorS, layers.traffic, labels.aircraft]);
 
   useEffect(() => {
     if (!isCesiumViewerUsable(viewer) || origin === undefined || !layers.loss) return;
-    const group = drawLosses(viewer, origin);
+    const group = drawLosses(viewer, origin, labels.failures);
     return () => group.remove();
-  }, [viewer, origin, layers.loss]);
+  }, [viewer, origin, layers.loss, labels.failures]);
 
   useEffect(() => {
     if (!isCesiumViewerUsable(viewer) || origin === undefined || !trainingLayers.observed) return;
@@ -281,9 +289,9 @@ export default function useTrainingWindowLayer(): void {
 
   useEffect(() => {
     if (!isCesiumViewerUsable(viewer) || origin === undefined) return;
-    const group = drawOtherCommandedAt(viewer, origin, trainingCursorS);
+    const group = drawOtherCommandedAt(viewer, origin, trainingCursorS, labels.aircraft);
     return () => group.remove();
-  }, [viewer, origin, trainingCursorS]);
+  }, [viewer, origin, trainingCursorS, labels.aircraft]);
 
   useEffect(() => {
     if (!isCesiumViewerUsable(viewer) || origin === undefined) return;

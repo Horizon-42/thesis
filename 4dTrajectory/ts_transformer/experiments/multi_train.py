@@ -21,7 +21,8 @@ parts (`stage_d`):
   out when one of its commanded aircraft opens inside a loss it answers for (`multi.windows.left_out`), until each
   kind's count of each span is reached; a shortfall of a span is recorded, never silent. The batches hold windows of
   one span, at most that span's ``--batch-rows`` commanded aircraft (one number a span: a batch's memory grows with its
-  ticks too, the user, 2026-10-07, after MC5's profile), and command each flight once (`span_batches`).
+  ticks too, the user, 2026-10-07, after MC5's profile), and command each flight once (`span_batches`); with
+  ``--batch-squares`` also at most that span's sum of commanded aircraft squared (the user, 2026-10-11).
 - **The speaking** (`speak_batch`, `post_branches.branch_round`): stage D's rules (`multi.credit.rules`: W the sum,
   spoken again below the count, the varied aircraft and their branch points, each aircraft's own numbers, D141–D143)
   and its loop (`loop_options`: the rule of who answers, D145; the token part, D152). Its record is stage C's
@@ -80,7 +81,7 @@ import argparse
 import json
 from collections import Counter
 from itertools import product
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -108,6 +109,7 @@ from ts_transformer.multi.windows import COMPRESSED, KINDS, REAL_KIND, Anchors, 
 from ts_transformer.post.branches import CONTINUATIONS, EQUAL, GROUP_WEIGHTS, MINORITY_SIDE
 from ts_transformer.post.loss import DATA_WEIGHT
 from ts_transformer.post.scene import Window
+from ts_transformer.post.window_lists import identity_of
 from ts_transformer.post.traffic_attention import add_token_part, parameter_groups
 from ts_transformer.prior.model import COPIED, FRONT_ATTENTIONS, Prior
 from ts_transformer.prior.procedure import PROCEDURE_MASKS
@@ -127,7 +129,7 @@ MEASURE_MARGIN = 1.3
 #: rounds, seed, learning rates, a start of the same traffic shape, and the select set, which the measure does not read,
 #: D179, D181 (55)) change the words spoken, not the shapes — a worker past its share stops by name.
 PROFILED_SETTINGS = ("per_kind", "spans_s", "c_min", "batch_rows", "continuations", "update_groups", "data_sentences",
-                     "branching", "front_attention")
+                     "branching", "front_attention", "batch_squares")
 #: The devices of ``--executor-device`` (multi-aircraft control S1). ``speak``: the executor flies on the speaker's
 #: device (the behaviour before S1). ``cpu``: the executor flies on the CPU (`Context.executor_device`).
 EXECUTOR_DEVICES = ("speak", "cpu")
@@ -177,6 +179,13 @@ class MultiSettings:
     #: each group's weight in the pass (D195, the user, 2026-10-11; `post.branches.GROUP_WEIGHTS`); the default `EQUAL`
     #: (the behaviour before it; a record without it reads so)
     group_weight: str = EQUAL
+    #: the user, 2026-10-11 (after batch 186 of the formal round 5): the most sum of commanded aircraft squared of a
+    #: batch of each span, in the order of `spans_s`, besides `batch_rows` (`span_batches`, `post_train.batches`); empty,
+    #: the default: no such bound (the behaviour before it; a record without it reads so)
+    batch_squares: list[int] = field(default_factory=list)
+    #: a batch whose sum of commanded aircraft squared reaches this is spoken on the speak device (`post_train.Settings
+    #: .gpu_squares`, `post_train.batch_kinds`); a resume may change it; the default 0: off (a record without it reads so)
+    gpu_squares: int = 0
 
     def __post_init__(self) -> None:
         if set(self.per_kind) != set(KINDS) or min(self.per_kind.values()) < 0 or not any(self.per_kind.values()):
@@ -204,6 +213,11 @@ class MultiSettings:
             raise ValueError(f"data_weight must be 0 or more, not {self.data_weight}")
         if self.group_weight not in GROUP_WEIGHTS:
             raise ValueError(f"group_weight {self.group_weight!r} is none of {GROUP_WEIGHTS}")
+        if self.batch_squares and (len(self.batch_squares) != len(self.spans_s) or min(self.batch_squares) <= 0):
+            raise ValueError(f"batch_squares: none, or a positive bound for each span, not {self.batch_squares} for "
+                             f"{self.spans_s}")
+        if self.gpu_squares < 0:
+            raise ValueError(f"gpu_squares {self.gpu_squares}: 0 (off) or more")
 
 
 def span_key(span_s: float) -> str:
@@ -221,14 +235,16 @@ def span_counts(settings: MultiSettings) -> dict[str, dict[str, int]]:
 
 def span_batches(windows: Sequence[Window], settings: MultiSettings) -> list[list[int]]:
     """The windows' places in batches (`Stage.batches`): the windows of each span in `post_train.batches` of that span's
-    `MultiSettings.batch_rows`, span after span; a window of another span is refused by name."""
+    `MultiSettings.batch_rows` (and `MultiSettings.batch_squares`, where given), span after span; a window of another
+    span is refused by name."""
     others = {w.span_s for w in windows} - set(settings.spans_s)
     if others:
         raise ValueError(f"windows of spans {sorted(others)} s, not of this campaign's {settings.spans_s}")
     out = []
-    for span, size in zip(settings.spans_s, settings.batch_rows):
+    squares = settings.batch_squares or [None] * len(settings.spans_s)
+    for span, size, bound in zip(settings.spans_s, settings.batch_rows, squares):
         places = [p for p, w in enumerate(windows) if w.span_s == span]
-        out += [[places[i] for i in batch] for batch in batches([windows[p] for p in places], size)]
+        out += [[places[i] for i in batch] for batch in batches([windows[p] for p in places], size, bound)]
     return out
 
 
@@ -416,19 +432,35 @@ def window_losses_of(window: Window, ends: Sequence[Any], start: int, context: A
     return dict(count.loss_steps), count.steps
 
 
+def window_line(place: int, window: Window, ends: Sequence[Any], losses: Mapping[str, int]) -> dict[str, Any]:
+    """The readout's line of one window (post-training D176 (2): what a window list reads of stage D): its place among
+    the readout's windows, its airport, its identity (`post.window_lists.identity_of`), span and kind, and each
+    commanded aircraft's key, outcome, reward and go-arounds in the window's order, with its steps of loss by pair."""
+    return {"place": place, "airport": window.scene.geometry.code, "identity": identity_of("D", window),
+            "span": span_key(window.span_s), "kind": kind_of(window),
+            "aircraft": [record.key for record in window.commanded_all], "outcomes": [e.outcome for e in ends],
+            "rewards": [e.reward for e in ends], "go_arounds": [e.go_arounds for e in ends], "loss_steps": dict(losses)}
+
+
 def selection_readout(model: Prior, context: Context, windows: Sequence[Window], settings: MultiSettings,
-                      speakers: Speakers | None, *, stage: Stage, split: str = "select") -> dict[str, Any]:
+                      speakers: Speakers | None, *, stage: Stage, split: str = "select",
+                      lines: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """The readout of ``windows`` of ``split`` (module docstring; `multi_validation`: the val days): its batches read
     here (``stage``'s `Stage.read_batch`) or by ``speakers`` (refused unless they run ``stage``), summed by airport,
-    span (`span_key`) and kind, each with its ``all``; an airport's ``reward_mean`` is its ``all`` of both."""
+    span (`span_key`) and kind, each with its ``all``; an airport's ``reward_mean`` is its ``all`` of both. ``lines``,
+    when given, gets each window's line (`window_line`) in place order."""
     if speakers is not None and speakers.stage is not stage:
         raise ValueError("the speaking workers run another stage's parts than the one given (Speakers(..., stage=))")
     places = stage.batches(windows, settings)
     read = (speakers.read(model, windows, places, split) if speakers is not None else
             [stage.read_batch(model, context, windows, p, settings, split) for p in places])
     counted: dict[str, dict[str, dict[str, dict[str, Any]]]] = {}
+    read_lines = []
     for batch, parts in zip(places, read, strict=True):
-        for window, (ends, losses, steps, timing) in zip((windows[p] for p in batch), parts, strict=True):
+        for place, (ends, losses, steps, timing) in zip(batch, parts, strict=True):
+            window = windows[place]
+            if lines is not None:
+                read_lines.append(window_line(place, window, ends, losses))
             for span, kind in product((span_key(window.span_s), "all"), (kind_of(window), "all")):
                 c = counted.setdefault(window.scene.geometry.code, {}).setdefault(span, {}).setdefault(kind, _empty())
                 c["windows"] += 1
@@ -447,6 +479,8 @@ def selection_readout(model: Prior, context: Context, windows: Sequence[Window],
                 for key in ("delays_s", "spacing_s", "record_spacing_s"):
                     c[key] += timing[key]
                 c["order"] = [c["order"][0] + timing["order"][0], c["order"][1] + timing["order"][1]]
+    if lines is not None:
+        lines += sorted(read_lines, key=lambda line: line["place"])
     out: dict[str, Any] = {}
     for code, spans in sorted(counted.items()):
         out[code] = {span: {kind: _summed(c) for kind, c in kinds.items()} for span, kinds in spans.items()}
@@ -708,6 +742,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--cpu-batches", type=int, default=MultiSettings.cpu_batches,
                         help="D191: of every --cpu-period batches by index, the first this many on the CPU workers")
     parser.add_argument("--cpu-period", type=int, default=MultiSettings.cpu_period, help="D191: the rule's period")
+    parser.add_argument("--batch-squares", type=int, nargs="+", default=[],     # mirror of the field's default factory
+                        help="the most sum of commanded aircraft squared of a batch of each span (default: no "
+                             "bound)")
+    parser.add_argument("--gpu-squares", type=int, default=MultiSettings.gpu_squares,
+                        help="a batch whose sum of commanded aircraft squared reaches this is spoken on the speak device "
+                             "(default 0: off)")
     parser.add_argument("--data-weight", type=float, default=MultiSettings.data_weight,
                         help="R2: the data term's weight in each update (default: post.loss.DATA_WEIGHT)")
     parser.add_argument("--group-weight", choices=GROUP_WEIGHTS, default=MultiSettings.group_weight,
@@ -724,7 +764,7 @@ def settings_from(args: argparse.Namespace, start: dict[str, Any]) -> MultiSetti
                          args.c_min, args.batch_rows, args.continuations, args.seed, args.prior_lr, args.traffic_lr,
                          args.weight_decay, args.update_groups, args.data_sentences, args.select_per_airport, start,
                          args.branching, args.front_attention, args.cpu_batches, args.cpu_period, args.data_weight,
-                         args.group_weight)
+                         args.group_weight, args.batch_squares, args.gpu_squares)
 
 
 def main(argv: list[str] | None = None) -> int:

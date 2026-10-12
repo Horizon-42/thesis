@@ -10,10 +10,15 @@
  * (2 s apart on a labelled sentence), to its last row. A key moves one row; the value the slider reports is the row's place
  * in that list.
  *
- * THE MARKS are in flight time, given by the session of the stage on screen; the slider draws them and computes none.
+ * THE AXIS (`TrainingSliderAxis`). The track above is the SENTENCE AXIS (stages A, B, C). Stage D's windows command several
+ * aircraft, so its slider spans the WINDOW SCENE instead (the user, 2026-10-12): the window's clock from its row 0 to the
+ * last moment any of its aircraft flies, stopping at the records' 2 s rows. The cursor stays the flight time of the
+ * aircraft on screen (every reader of it is unchanged); an axis says where its own 0 is on that clock (`offsetS`).
+ *
+ * THE MARKS are on the axis's clock, given by the session of the stage on screen; the slider draws them and computes none.
  */
 
-import { readingRowTimeS, type TrainingReading } from "./trainingSample";
+import { readingAxisEndS, readingRowTimeS, type TrainingReading } from "./trainingSample";
 import {
   TRAINING_CORRECTION_COLOR,
   TRAINING_EXECUTOR_COLOR,
@@ -34,6 +39,33 @@ export function sliderStops(reading: TrainingReading, stepS: number): number[] {
   for (let k = 0; k * stepS < reading.originS - 1e-9; k += 1) stops.push(k * stepS);
   for (let row = 0; row < reading.rows; row += 1) stops.push(readingRowTimeS(reading, row));
   return stops;
+}
+
+/** What the slider's track spans (see the module's note). Its times are on its own clock, from 0; the cursor (the flight
+ *  time of the aircraft on screen) is an axis time + ``offsetS``. */
+export interface TrainingSliderAxis {
+  /** What the axis is of (a flight, a window): the playback stops when it changes. */
+  key: string;
+  /** The name of its clock in the time readout: "t" (the flight's), "scene t" (the window's). */
+  clock: string;
+  endS: number;
+  /** The times it stops at, ascending, from 0 to ``endS``. */
+  stops: number[];
+  offsetS: number;
+}
+
+/** Stages A, B and C: the sentence's axis, on the flight's clock. */
+export function sentenceAxis(key: string, reading: TrainingReading, stepS: number): TrainingSliderAxis {
+  return { key, clock: "t", endS: readingAxisEndS(reading), stops: sliderStops(reading, stepS), offsetS: 0 };
+}
+
+/** Stage D: the window scene's axis, from the window's row 0 to ``endS`` at the records' ``stepS`` rows (the last stop is
+ *  ``endS``); ``offsetS``: the flight time of the aircraft on screen at the window's row 0. */
+export function sceneAxis(key: string, endS: number, stepS: number, offsetS: number): TrainingSliderAxis {
+  const stops: number[] = [];
+  for (let k = 0; k * stepS < endS - 1e-9; k += 1) stops.push(k * stepS);
+  stops.push(endS);
+  return { key, clock: "scene t", endS, stops, offsetS };
 }
 
 /** The place of the row in force at ``atS``: the last stop at or before it (the first before the first). */
@@ -93,6 +125,14 @@ export function lossMark(atS: number, other: string): TrainingSliderMark {
   return {
     kind: "tick", key: `loss-${other}-${atS}`, atS, colour: TRAINING_FAILURE_COLOR,
     title: `a loss of separation with ${other}, ${atS.toFixed(0)} s`,
+  };
+}
+
+/** Stage D, on the scene's axis: a red tick at each loss of separation of the round, between any two aircraft. */
+export function sceneLossMark(atS: number, aircraft: [string, string]): TrainingSliderMark {
+  return {
+    kind: "tick", key: `loss-${aircraft.join("-")}-${atS}`, atS, colour: TRAINING_FAILURE_COLOR,
+    title: `a loss of separation between ${aircraft[0]} and ${aircraft[1]}, ${atS.toFixed(0)} s`,
   };
 }
 

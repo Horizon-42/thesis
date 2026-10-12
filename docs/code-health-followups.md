@@ -146,6 +146,7 @@ added three entries (the rows after the performance index's).
 | Two ATC constants in `instructions/spec.py` that nothing reads (2026-10-04) | open | delete `ATC_SPEED_COMPLIANCE_MPS` and `ATC_MIN_DESCENT_RATE_MPS` | no: nothing reads them |
 | Two runway ends on one centreline halve the landing screen to float noise (2026-10-05) | open | compare the across-course spacing with a tolerance in `landing_cross_limit_m` and its harvest original, together | yes: the candidates' landing screens (a rebuild); none of the five airports has such a pair today (not checked on every end) |
 | `post_profile`'s `executor_step` part reads 0.0 s (2026-10-09) | open | the part's match finds no `autopilot/start.py` `step` in the stats; C8 is finished and runs no more, so no code change (multi-aircraft control D181) | no: a finished readout's report only |
+| A stage D window's identity written twice (2026-10-12) | resolved | fixed on `dev-export-identity` (2026-10-12): `STAGE_D.identity` is `partial(identity_of, "D")` (`post.window_lists`); checked on round 7's list of the formal campaign: the same 453 windows; entry removed | — |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
 the executor `autopilot/` and its replay, `prior_train` / `prior_select` / `prior_free_generation`, the land-by-reward

@@ -588,7 +588,7 @@ export default function TrainingSentenceBar() {
               y={HEAD_H + TRAINING_COLUMN_INDEX[autopilot.request.column] * ROW_H} />
           ) : null}
           {/* the cursor, kept on the axis */}
-          <line x1={xFor(Math.min(cursorS, endS))} x2={xFor(Math.min(cursorS, endS))} y1={HEAD_H - 8}
+          <line x1={xFor(Math.min(Math.max(cursorS, 0), endS))} x2={xFor(Math.min(Math.max(cursorS, 0), endS))} y1={HEAD_H - 8}
             y2={HEAD_H + TRAINING_COLUMNS.length * ROW_H + 4} className="training-sentence-cursor" />
         </svg>
       </div>
