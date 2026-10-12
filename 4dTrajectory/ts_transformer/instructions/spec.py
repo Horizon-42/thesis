@@ -27,8 +27,9 @@ from geokit import FT_M, KT_MS, NM_M
 #: row (D4); since instruction-v6 the closed-loop reading's vertical tolerance in the final descent (D66, a field of its own);
 #: since instruction-v7 the angle words' and the speed words' leads L_γ and L_v (`angle_lead_s`, `speed_lead_s`, executor
 #: design §17, D7, D8): an angle word, and the altitude word said with it, says the path angle L_γ later, a speed word the
-#: speed L_v later, as a heading word says the track L later.
-READING_RULE = "instruction-v7"
+#: speed L_v later, as a heading word says the track L later; since instruction-v8 the last angle word of the last descent
+#: reads the final straight-in line's angle (`labeller.vertical` module docstring; executor design Q4, D10).
+READING_RULE = "instruction-v8"
 #: The spec file's format: v8 (A29, D73) records no digest of the labeller's code beside the spec.
 SPEC_SCHEMA = "ts-instruction-spec-v8"
 

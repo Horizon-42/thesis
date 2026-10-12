@@ -29,6 +29,14 @@ together. The shift is one number of rows for every word, so the words keep thei
 row 0 is said at row 0, and of several words of one column there, the last stands (row 0 says the class in force L_γ
 later). The go-around row is its climb's row, so it moves with it. The tube of a word starts where its words arrive,
 L_γ after they are said (`tube_bounds`).
+
+THE LAST ANGLE WORD (instruction-v8; executor design §17, Q4, D10). The last piece of the last descent — the one that
+runs to the end of the track — is read not at its own fitted angle but at the path angle of the final straight-in line
+(`read.final_path_angle_deg`: `final_approach.fit_projected_segment`, the line the harvest extrapolates an observed
+crossing with, 5000–300 m before the threshold). The executor holds the last word past the end of the track to the
+threshold, where the evaluation judges the height, and a track's last few hundred metres often flatten: the last word
+was shallower than 2.75° on 1 flight in 8. A track whose last descent has no such line is refused; the descents that
+end at a go-around are read at their own angles.
 """
 
 from __future__ import annotations
@@ -147,9 +155,10 @@ def climb_after(groups: list[list[VerticalPiece]], point: int, before: int, spec
 
 
 def read_vertical(distance: np.ndarray, altitude: np.ndarray, spec: VocabularySpec, words: Words,
-                  go_around_points: list[int]) -> VerticalReading:
-    """The altitude and angle words; ``go_around_points`` each go-around's lowest point, in row order (module
-    docstring)."""
+                  go_around_points: list[int], final_angle_deg: float | None) -> VerticalReading:
+    """The altitude and angle words; ``go_around_points`` each go-around's lowest point, in row order;
+    ``final_angle_deg`` the path angle of the final straight-in line, the last piece's angle, None where the track has
+    no such line (module docstring)."""
     pieces = vertical_pieces(distance, altitude, spec, words)
     groups = _runs(pieces, spec)
     bounds = [*go_around_points[1:], len(altitude)]
@@ -206,14 +215,19 @@ def read_vertical(distance: np.ndarray, altitude: np.ndarray, spec: VocabularySp
         reading.instructions.append(Instruction(ALTITUDE, target_index, first.start, kind, {"level_m": target_m}))
         in_force_altitude = target_index
         for piece in group:
+            angle = piece.angle_deg
+            if following is None and piece is group[-1]:      # the last angle word (module docstring)
+                if final_angle_deg is None:
+                    raise Refused("no final straight-in line",
+                                  f"the last descent from row {piece.start} has no line 5000–300 m before the threshold")
+                angle = final_angle_deg
             try:
-                angle_class = words.angle_index(piece.angle_deg)
+                angle_class = words.angle_index(angle)
             except ValueError as error:
                 raise Refused("path angle out of range", str(error)) from None
             if angle_class != in_force_angle:
                 reading.instructions.append(Instruction(
-                    ANGLE, angle_class, piece.start, "initial" if piece.start == 0 else "angle",
-                    {"angle_deg": piece.angle_deg}))
+                    ANGLE, angle_class, piece.start, "initial" if piece.start == 0 else "angle", {"angle_deg": angle}))
                 in_force_angle = angle_class
     lead = spec.rows_exact(spec.angle_lead_s)
     reading.instructions = said_earlier(reading.instructions, lead)

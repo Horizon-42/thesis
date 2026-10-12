@@ -23,6 +23,8 @@ from typing import Any, Sequence
 import numpy as np
 
 from final_approach.crossing import bracket_fraction
+from final_approach.fit import fit_projected_segment
+from final_approach.frame import Projected
 from ts_transformer.instructions import envelope
 from ts_transformer.instructions.airport import (
     AirportGeometry, RunwayCandidate, RunwayRelative, landing_cross_limit_m, relative_to_runway,
@@ -212,13 +214,25 @@ def runway_again_rows(found: Sequence[GoAround], vertical: VerticalReading, heig
     return out
 
 
+def final_path_angle_deg(relative: RunwayRelative, height_m: np.ndarray, runway: str) -> float | None:
+    """The path angle (descending positive) of the final straight-in line on these rows, or None when they hold none:
+    `final_approach.fit_projected_segment` — the line the harvest extrapolates an observed crossing with, over the last
+    inbound run, straight on the centreline, 5000–300 m before the threshold — on the smoothed track in the runway's
+    frame. The last angle word's angle (`vertical` module docstring)."""
+    projected = [Projected(-float(before), float(right), float(height)) for before, right, height
+                 in zip(relative.before_threshold_m, relative.right_of_course_m, height_m)]
+    fit = fit_projected_segment(projected, runway)
+    return None if fit is None else fit.glidepath_deg
+
+
 def read_heights(flight: Admitted, height_m: np.ndarray, spec: VocabularySpec,
                  words: Words) -> tuple[VerticalReading, list[int]]:
     """An admitted flight's vertical reading (`vertical.read_vertical`) on ``height_m``, its smoothed heights above E,
     and the row of the runway word that ends each go-around (`runway_again_rows`): G is true from each go-around row to
     its runway word (D19). Refused as `read_flight` refuses them."""
     found = list(flight.go_arounds)
-    vertical = read_vertical(flight.smoothed.distance_m, height_m, spec, words, [item.point for item in found])
+    vertical = read_vertical(flight.smoothed.distance_m, height_m, spec, words, [item.point for item in found],
+                             final_path_angle_deg(flight.relative, height_m, flight.candidate.ident))
     again = runway_again_rows(found, vertical, height_m, flight.signals.n_rows, spec, words)
     return vertical, again
 

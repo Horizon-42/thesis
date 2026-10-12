@@ -366,13 +366,30 @@ def fit_final_segment(
     direction of travel, which is the only thing separating the two ends of one
     runway. Order is not verified here; the harvest sorts by timestamp upstream.
     """
+    return fit_projected_segment(frame.project_all(points), frame.ident, window_m=window_m,
+                                 min_samples=min_samples, min_span_m=min_span_m)
+
+
+def fit_projected_segment(
+    projected: Sequence[Projected],
+    runway: str,
+    *,
+    window_m: tuple[float, float] = DEFAULT_WINDOW_M,
+    min_samples: int = DEFAULT_MIN_SAMPLES,
+    min_span_m: float = DEFAULT_MIN_SPAN_M,
+) -> SegmentFit | None:
+    """`fit_final_segment` on points already in ``runway``'s frame, in time order.
+
+    Public because the two-tier labeller reads its last angle word off this same line, on
+    its own smoothed track in its own runway frame (instruction-v8): two copies of the
+    sample choice would be one edit away from disagreeing.
+    """
     # The two tuning knobs are checked once, here, because this is the package's
     # public entry point: below this line they are invariants, not arguments.
     if min_samples < 3:
         raise ValueError("min_samples must be >= 3 (the line fit needs n - 2 degrees of freedom)")
     if min_span_m <= 0.0:
         raise ValueError("min_span_m must be > 0 (a zero-span segment cannot pin a slope)")
-    projected = frame.project_all(points)
     indexed = _straight_final_suffix(
         _final_inbound_run(projected, window_m),
         min_samples=min_samples,
@@ -417,7 +434,7 @@ def fit_final_segment(
 
     crosses = [p.cross_m for p in projected]
     return SegmentFit(
-        runway=frame.ident,
+        runway=runway,
         n_samples=len(projected),
         span_m=span,
         window_m=window_m,

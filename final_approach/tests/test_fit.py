@@ -6,7 +6,7 @@ import math
 
 import pytest
 
-from final_approach import Projected, RunwayFrame, TrackPoint, fit_final_segment
+from final_approach import Projected, RunwayFrame, TrackPoint, fit_final_segment, fit_projected_segment
 from final_approach.fit import _robust_seed_indices
 from final_approach.tests.factories import (
     ALTITUDE_QUANTUM_M,
@@ -31,6 +31,12 @@ def test_recovers_glidepath_and_crossing_from_a_truncated_track():
     assert fit.glidepath_deg == pytest.approx(3.0, abs=0.01)
     assert fit.height_at_threshold_m == pytest.approx(17.5, abs=0.2)
     assert fit.nearest_sample_along_m == pytest.approx(-325.0, abs=80.0)
+
+
+def test_the_projected_fit_is_the_same_fit_on_points_already_in_the_frame():
+    """`fit_projected_segment` is `fit_final_segment` after the projection (the labeller's entry point)."""
+    points = synthetic_approach(glidepath_deg=3.0, tch_m=17.5, cross_m=40.0)
+    assert fit_projected_segment(FRAME.project_all(points), FRAME.ident) == fit_final_segment(points, FRAME)
 
 
 def test_recovers_a_lateral_offset():

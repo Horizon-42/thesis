@@ -504,12 +504,17 @@ within 10 m (the fit residual). A piece has at least two rows.
    reaches the threshold, or the go-around row; D26, §4.6). A run whose word is the word in force (a move between two
    heights that round to one level) says nothing: the word cannot be said (§3.4).
 3. Each move says its angle class where the class differs from the class in force: the descent class whose range holds
-   the angle, or "climb" for a climb of 0.5° to 15° (§3.5).
+   the angle, or "climb" for a climb of 0.5° to 15° (§3.5). **The last move of the last descent** (the one that runs
+   to the end of the sentence) is read at the angle of the final straight-in line, not at its own fitted angle
+   (instruction-v8; executor design D10): the line `final_approach.fit_projected_segment` fits over the last inbound
+   run, straight on the centreline, 5000–300 m before the threshold — the fit the harvest extrapolates an observed
+   crossing with. The executor holds this word past the end of the track to the threshold, and a track's last few
+   hundred metres often flatten. A descent that ends at a go-around keeps its own angles.
 4. A step is two levels with different words and no move between them. The altitude word is said at the last row of
    the first level. Its angle is read from there to the first row within 10 m of the height of the second level.
 5. The flight is refused when it climbs at the end of the sentence, when a level is outside the grid, when an angle is
-   outside the classes, or when a level word is on the wrong side of the height where its run starts (by more than its
-   ε).
+   outside the classes, when a level word is on the wrong side of the height where its run starts (by more than its
+   ε), or when its last descent has no final straight-in line (rule 3).
 
 The tube of §3.4 checks each word, with the ε of its level (D52).
 
