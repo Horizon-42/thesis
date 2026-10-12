@@ -271,8 +271,8 @@ The masks of a row read the runway and G in force after the row's runway word, a
 **A mask blocks a word when it is said, never "unchanged".** A word in force was permitted when it was said. A mask
 that made the speaker change it, for example a level forced above an aircraft that sank under the edge with
 "no level-off" in force, would fly the aircraft along a line that the procedure computes: the glidepath floor that the
-executor does not have (D9). Whether to correct or to go around is the model's decision, and the DA check judges it
-(vocabulary §6, item 6).
+executor does not have (D9). Whether to correct or to go around is the model's decision, and the judge's landing
+verdict judges it (vocabulary §6, item 6; D196).
 
 **Masks while G is true (D14).** Only one mask stops a go-around: "no climb below the entry height". It does not apply
 while G is true. A go-around clears the join and the passage below the entry height, and while G is true neither is

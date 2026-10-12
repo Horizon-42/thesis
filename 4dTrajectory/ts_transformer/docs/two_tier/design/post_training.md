@@ -182,8 +182,8 @@ Every other milestone from now on is built by stage D's implementer (it takes ov
    "The airport's present landing direction": a runway within 90° of a runway with a landing in the 30 min before the
    first predicted step, among the window's landings (D105); with no landing in those 30 min, every runway (D112).
 
-   The reward gives a go-around that the DA check needs without a term of its own. An unstable approach that continues
-   ends as `unstable_at_minimums`: 0. A go-around before the DA point continues the flight with 900 s more time
+   The reward gives a go-around that a failing approach needs without a term of its own. An approach that continues
+   and fails the evaluation's verdict ends as `landing_failed`: 0 (vocabulary D196). A go-around before the DA point continues the flight with 900 s more time
    (vocabulary §6 item 6); a landing then gives 0.9. Thus the model gains from a go-around only when the go-around
    changes a probable failure into a probable landing: with the same probability p of a landing before and after the
    go-around, 0.9·p < p. A go-around that prevents a loss of separation keeps the chance of 0.9, so the same reward also

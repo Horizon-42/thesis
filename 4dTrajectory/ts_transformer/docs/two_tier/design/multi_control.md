@@ -162,7 +162,8 @@ The present landing direction (post-training D112, §9 item 6) is read for each 
 step, from the landings of its window (D147). The bound of two go-arounds (post-training D91) holds for each aircraft.
 
 D30's reasons hold for each aircraft: a go-around gains only when it changes a probable failure into a probable
-landing (0.9·p < p); a chain of go-arounds costs; an unstable approach that continues ends as `unstable_at_minimums`.
+landing (0.9·p < p); a chain of go-arounds costs; an approach that continues and fails the evaluation's verdict ends as
+`landing_failed` (vocabulary D196).
 Nothing of D30 is changed, so that a window of one commanded aircraft earns what stage C's window earns.
 
 ### 2.2 One window: the sum (D141)
