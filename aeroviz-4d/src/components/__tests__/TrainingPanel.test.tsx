@@ -140,11 +140,14 @@ describe("TrainingPanel", () => {
       await waitFor(() => expect(document.querySelector("[data-mark]")).toBeNull());     // the labelled sentence: none
     });
 
-    it("offers the four switches the view has, no more", async () => {
+    it("offers the four switches the view has and the two label switches, no more", async () => {
       render(<TrainingPanel hidden={false} />);
       await screen.findByText("KXXX:test");
       expect(screen.getAllByRole("checkbox").map((box) => box.parentElement!.textContent)).toEqual([
-        "Observed track", "Heading bands", "Altitude tubes", "Other candidate runways"]);
+        "Observed track", "Heading bands", "Altitude tubes", "Other candidate runways", "Aircraft labels", "Failure labels"]);
+      fireEvent.click(screen.getByLabelText("Failure labels"));
+      expect((screen.getByLabelText("Failure labels") as HTMLInputElement).checked).toBe(false);
+      fireEvent.click(screen.getByLabelText("Failure labels"));
       fireEvent.click(screen.getByLabelText("Heading bands"));
       expect(setTrainingLayer).toHaveBeenCalledWith("headingBands", false);
       fireEvent.click(screen.getByLabelText("Observed track"));

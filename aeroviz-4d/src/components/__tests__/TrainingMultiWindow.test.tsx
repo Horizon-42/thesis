@@ -2,7 +2,9 @@
  * Stage D's window view (frontend §5, F3) on the set of two commanded aircraft (`stageD.ts`): the stage switch offers D
  * where the airport has its index; the list names the anchor "+1" and the landed of both; the aircraft strip shows both,
  * the anchor silent, and a click, `[` and `]` or a click in the scene select an aircraft (the tab stays); D's readouts;
- * the slider's slate band of the anchor's silence; a window of one commanded aircraft shows no strip.
+ * the slider over the window's scene (the user, 2026-10-12) with the slate band of the anchor's silence and every loss of
+ * the round; the other aircraft and their tracks under one switch; a window of one commanded aircraft shows no strip and
+ * keeps the sentence's slider.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -28,7 +30,7 @@ vi.mock("../../context/AppContext", () => ({
 import TrainingPanel from "../TrainingPanel";
 import { stageDIndex, stageDSample, stageDSampleFile, stageDSelection, TWO_SET_ID } from "../../data/__tests__/stageD";
 import { stageCIndex, stageCSampleFile, WINDOW_SET_ID } from "../../data/__tests__/stageC";
-import { trainingWindowOriginOf } from "../../data/trainingWindowSample";
+import { onWindowClock, trainingWindowOriginOf, windowSceneEndS } from "../../data/trainingWindowSample";
 import { pickTrainingWindowAircraft } from "../../data/trainingWindowLayers";
 
 const json = (body: unknown) => ({ ok: true, status: 200, headers: { get: () => "application/json" }, text: async () => JSON.stringify(body) });
@@ -96,7 +98,7 @@ describe("stage D's window view", () => {
     await waitFor(() => expect(lastOrigin().aircraft.place).toBe(0));
   });
 
-  it("gives D's readouts and the slider's slate band of the anchor's silence", async () => {
+  it("gives D's readouts and the slider over the window's scene, with the slate band of the anchor's silence", async () => {
     appState.trainingSelection = stageDSelection(stageDSample(), 0, 0);      // the slider draws for a sentence on screen
     await openStage("multi");
     const readouts = await screen.findByRole("list", { name: "Readouts" });
@@ -109,11 +111,32 @@ describe("stage D's window view", () => {
     expect(readouts.textContent).toContain("joins at 0 s");
     expect(readouts.textContent).toContain("2 commanded · at most 0 recorded at once");
     expect(document.querySelector('[data-mark="silent"]')).not.toBeNull();
+    // the scene's clock: the cursor (the anchor's flight time 0) is before the window's row 0 by the anchor's clockS
+    expect(screen.getByText(`scene t ${-anchor.clockS} s`)).toBeTruthy();
+    // the marks on the window's clock, the copy selected (its flight clock is 32 s behind the window's): every loss of the
+    // round, named by both aircraft, and the copy's first step
+    const copy = sample.windows[0].commanded[1];
+    expect(copy.clockS).not.toBe(0);
+    fireEvent.keyDown(document.body, { key: "]" });
+    const sceneEndS = windowSceneEndS(sample.windows[0], 0);
+    const xOf = (mark: Element) => Number(mark.getAttribute("x1"));
+    await waitFor(() => expect(xOf(document.querySelector('[data-mark="first-step"]')!))
+      .toBeCloseTo((onWindowClock(copy, copy.firstStepS) / sceneEndS) * 1000));
+    const ticks = [...document.querySelectorAll('[data-mark^="loss-"]')];
+    expect(ticks.length).toBe(losses.length);
+    losses.forEach((loss, k) => {
+      expect(xOf(ticks[k])).toBeCloseTo((loss.timeS / sceneEndS) * 1000);
+      expect(ticks[k].querySelector("title")!.textContent)
+        .toBe(`a loss of separation between ${loss.aircraft[0]} and ${loss.aircraft[1]}, ${loss.timeS.toFixed(0)} s`);
+    });
+    expect(screen.getByLabelText("Other aircraft and tracks")).toBeTruthy();
+    expect(screen.queryByLabelText("Their tracks")).toBeNull();
   });
 
   it("a window of one commanded aircraft (stage C's) shows no strip", async () => {
     await openStage("window");
     await screen.findByRole("list", { name: "Readouts" });
     expect(screen.queryByRole("group", { name: "The window's commanded aircraft" })).toBeNull();
+    expect(screen.queryByText(/^scene t/)).toBeNull();
   });
 });

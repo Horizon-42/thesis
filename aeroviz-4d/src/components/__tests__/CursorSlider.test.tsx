@@ -1,10 +1,10 @@
 /**
  * The cursor slider (frontend §6.1, D155): its rows (the observed 2 s rows before the sentence opens, then the sentence's
  * rows), the drag, the click and the keys moving the one cursor by rows, its aria values, every reader of the cursor
- * following it, disabled with no sentence on screen; and each stage's marks on its track. With the real provider, on the
- * fixtures the exports write.
+ * following it, disabled with no sentence on screen; stage D's scene axis (on the window's clock) and the playback (the
+ * user, 2026-10-12); and each stage's marks on its track. With the real provider, on the fixtures the exports write.
  */
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 
 vi.mock("../../utils/fetchJson", () => ({
@@ -20,9 +20,12 @@ import {
   goAroundLine,
   lossMark,
   nearestStop,
+  sceneAxis,
+  sceneLossMark,
   sliderStops,
   stopAt,
   stopForKey,
+  type TrainingSliderAxis,
   type TrainingSliderMark,
 } from "../../data/trainingSlider";
 import { stageASample, stageASelection } from "../../data/__tests__/stageA";
@@ -70,25 +73,27 @@ describe("the slider's rows", () => {
   });
 });
 
-/** The slider with the real provider, stage A's flight on screen at Δ ``intervalS``, and a reader of the cursor. */
-function mount(marks: TrainingSliderMark[] = [], intervalS: number | null = 4) {
+/** The slider with the real provider, stage A's flight on screen at Δ ``intervalS``, and a reader of the cursor; ``axis``:
+ *  the session's (none: the sentence's). */
+function mount(marks: TrainingSliderMark[] = [], intervalS: number | null = 4, axis?: TrainingSliderAxis) {
   let app!: ReturnType<typeof useApp>;
   let cursor!: ReturnType<typeof useTrainingCursor>;
   function Harness() {
     app = useApp();
     cursor = useTrainingCursor();
-    return <CursorSlider marks={marks} />;
+    return <CursorSlider marks={marks} axis={axis} />;
   }
   render(<AppProvider><Harness /></AppProvider>);
   const selection = stageASelection();
   act(() => {
+    app.setMode("training");
     app.setTrainingSelection(selection);
     app.setTrainingIntervalS(intervalS);
   });
   const reading = trainingReadingOf(selection.flight, STEP_S, intervalS);
   return {
     reading, stops: sliderStops(reading, STEP_S), cursorS: () => cursor.trainingCursorS,
-    setCursorS: (atS: number) => cursor.setTrainingCursorS(atS),
+    setCursorS: (atS: number) => cursor.setTrainingCursorS(atS), setMode: app.setMode,
   };
 }
 
@@ -159,6 +164,136 @@ describe("the slider", () => {
     expect(tick.querySelector("title")!.textContent).toContain("first predicted step");
     const line = document.querySelector('[data-mark="go-around"]')!;
     expect(line.getAttribute("points")).toBe(`${(16 / endS) * 1000},11 ${(20 / endS) * 1000},1`);
+  });
+});
+
+describe("the scene axis (stage D)", () => {
+  it("stops at the records' 2 s rows from the window's row 0 to the scene's end", () => {
+    expect(sceneAxis("w", 9, 2, 0).stops).toEqual([0, 2, 4, 6, 8, 9]);
+    expect(sceneAxis("w", 8, 2, 0).stops).toEqual([0, 2, 4, 6, 8]);
+  });
+
+  it("names its clock, puts the thumb at the cursor less its offset, and a click puts the cursor at the stop plus it", () => {
+    const axis = sceneAxis("set/0", 100, 2, 30);
+    const { cursorS, setCursorS } = mount([], 4, axis);
+    const slider = screen.getByRole("slider", { name: "Cursor" });
+    placeTrack(slider);
+    act(() => setCursorS(40));                                          // the aircraft's 40 s: the scene's 10 s
+    expect(screen.getByText("scene t 10 s")).toBeTruthy();
+    expect(slider.getAttribute("aria-valuenow")).toBe("5");
+    expect(Number(slider.querySelector(".training-cursor-slider-thumb")!.getAttribute("x1"))).toBeCloseTo(100);
+    fireEvent(slider, new MouseEvent("pointerdown", { clientX: 100 + 500, bubbles: true }));
+    expect(cursorS()).toBe(80);                                          // the scene's 50 s
+    fireEvent(slider, new MouseEvent("pointerup", { bubbles: true }));
+    fireEvent.keyDown(slider, { key: "End" });
+    expect(cursorS()).toBe(130);
+  });
+
+  it("marks a loss between any two aircraft by both", () => {
+    const mark = sceneLossMark(42, ["KXXX:A", "KXXX:B"]);
+    expect(mark.kind === "tick" && mark.atS).toBe(42);
+    expect(mark.title).toBe("a loss of separation between KXXX:A and KXXX:B, 42 s");
+  });
+});
+
+/** Animation frames run by hand: ``frame`` moves the clock once and runs the frames asked for; ``advance`` does so
+ *  every 100 ms. */
+function handFrames() {
+  let clock = 0;
+  let next = 0;
+  const frames = new Map<number, FrameRequestCallback>();
+  const now = vi.spyOn(performance, "now").mockImplementation(() => clock);
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    next += 1;
+    frames.set(next, callback);
+    return next;
+  });
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+  return {
+    restore: () => now.mockRestore(),
+    frame(ms: number) {
+      clock += ms;
+      const due = [...frames.values()];
+      frames.clear();
+      act(() => due.forEach((callback) => callback(clock)));
+    },
+    advance(ms: number) {
+      for (let done = 0; done < ms; done += 100) this.frame(Math.min(100, ms - done));
+    },
+  };
+}
+
+describe("the playback", () => {
+  let frames: ReturnType<typeof handFrames>;
+  beforeEach(() => {
+    frames = handFrames();
+  });
+  afterEach(() => {
+    frames.restore();
+    vi.unstubAllGlobals();
+  });
+
+  it("plays the cursor on from where it is at the chosen speed, pauses, and stops at the axis's end", () => {
+    const { stops, reading, cursorS, setCursorS } = mount();
+    act(() => setCursorS(stops[10]));
+    fireEvent.change(screen.getByLabelText("Playback speed"), { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Play" }));
+    frames.advance(1000);                                                // 1 s at 5×
+    expect(cursorS()).toBeCloseTo(stops[10] + 5);
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    frames.advance(1000);
+    expect(cursorS()).toBeCloseTo(stops[10] + 5);
+    fireEvent.change(screen.getByLabelText("Playback speed"), { target: { value: "50" } });
+    fireEvent.click(screen.getByRole("button", { name: "Play" }));
+    frames.advance(60_000);
+    expect(cursorS()).toBe(readingAxisEndS(reading));
+    expect(screen.getByRole("button", { name: "Play" })).toBeTruthy();   // stopped there
+    fireEvent.click(screen.getByRole("button", { name: "Play" }));       // Play at the end: from the axis's 0
+    expect(cursorS()).toBe(0);
+    frames.advance(100);
+    expect(cursorS()).toBeCloseTo(5);                                   // 0.1 s at 50×
+  });
+
+  it("plays at most a quarter of a second of real time in one move (a tab hidden for a while)", () => {
+    const { cursorS } = mount();
+    fireEvent.click(screen.getByRole("button", { name: "Play" }));
+    frames.frame(60_000);
+    expect(cursorS()).toBeCloseTo(2.5);                                 // 0.25 s at 10×
+  });
+
+  it("plays over the scene axis on the cursor's clock, and stops when the user takes the slider", () => {
+    const { cursorS, setCursorS } = mount([], 4, sceneAxis("set/0", 100, 2, 30));
+    act(() => setCursorS(40));
+    fireEvent.click(screen.getByRole("button", { name: "Play" }));
+    frames.advance(1000);                                                // 1 s at 10×, the default
+    expect(cursorS()).toBeCloseTo(50);
+    frames.advance(10_000);
+    expect(cursorS()).toBe(130);                                         // the scene's end on the cursor's clock
+    act(() => setCursorS(40));
+    fireEvent.click(screen.getByRole("button", { name: "Play" }));
+    fireEvent.keyDown(screen.getByRole("slider", { name: "Cursor" }), { key: "ArrowRight" });
+    expect(screen.getByRole("button", { name: "Play" })).toBeTruthy();
+    frames.advance(1000);
+    expect(cursorS()).toBe(32 + 10);                                     // the key's row, not played on
+  });
+
+  it("stops outside the Training task (the panel stays mounted there)", () => {
+    const { cursorS, setMode } = mount();
+    fireEvent.click(screen.getByRole("button", { name: "Play" }));
+    frames.advance(1000);
+    const playedS = cursorS();
+    act(() => setMode("evaluation"));
+    frames.advance(1000);
+    expect(cursorS()).toBe(playedS);
+    act(() => setMode("training"));
+    frames.advance(1000);
+    expect(cursorS()).toBe(playedS);                                     // not back unasked
+    expect(screen.getByRole("button", { name: "Play" })).toBeTruthy();
+  });
+
+  it("cannot play with no sentence on screen", () => {
+    render(<AppProvider><CursorSlider marks={[]} /></AppProvider>);
+    expect((screen.getByRole("button", { name: "Play" }) as HTMLButtonElement).disabled).toBe(true);
   });
 });
 

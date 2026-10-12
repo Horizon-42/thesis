@@ -1,7 +1,8 @@
 /**
  * PanelParts.tsx
  * --------------
- * What the Training panel's sessions share with the panel (outline §6.2 item 5) — the Draw box and stage A's switches, a
+ * What the Training panel's sessions share with the panel (outline §6.2 item 5) — the Draw box, stage A's switches and the
+ * label switches of every stage, a
  * readout's one line opening the details page, and the details page's state (`useDetailsPage`), which the panel owns and
  * gives to every session: its header ⓘ opens it on the session's first section, a readout's line on its own, and the
  * sentence bar — a sibling of the dock — asks for it through `requestTrainingDetails`.
@@ -9,6 +10,7 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from "react";
 import { useApp, type TrainingLayers } from "../../context/AppContext";
+import { setTrainingLabels, useTrainingLabels, type TrainingLabels } from "../../data/trainingLabels";
 import {
   TRAINING_CANDIDATE_COLOR,
   TRAINING_HEADING_BAND_COLOR,
@@ -103,6 +105,28 @@ export function LayerSwitches() {
       {LAYER_SWITCHES.map(({ layer, colour, text, title }) => (
         <label key={layer} style={{ color: colour }} title={title}>
           <input type="checkbox" checked={trainingLayers[layer]} onChange={(event) => setTrainingLayer(layer, event.target.checked)} />
+          {text}
+        </label>
+      ))}
+    </>
+  );
+}
+
+/** The label switches, the Draw box's last lines in every stage (`data/trainingLabels.ts`). */
+const LABEL_SWITCHES: Array<{ name: keyof TrainingLabels; text: string; title: string }> = [
+  { name: "aircraft", text: "Aircraft labels",
+    title: "the text beside each aircraft: the attitude of the aircraft at the cursor, the key or callsign of every other aircraft, the live executor's clock" },
+  { name: "failures", text: "Failure labels",
+    title: "the text at each outcome: a loss of separation, where a flown path ended and how, the DA check" },
+];
+
+export function LabelSwitches() {
+  const labels = useTrainingLabels();
+  return (
+    <>
+      {LABEL_SWITCHES.map(({ name, text, title }) => (
+        <label key={name} title={title}>
+          <input type="checkbox" checked={labels[name]} onChange={(event) => setTrainingLabels(name, event.target.checked)} />
           {text}
         </label>
       ))}

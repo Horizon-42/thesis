@@ -668,6 +668,17 @@ export function mostTrafficAtOnce(window: TrainingWindow): number {
   return most;
 }
 
+/** The last moment of the window's scene in round ``place``, on its clock (s from its row 0): where the last of its
+ *  aircraft stops — a recorded one's last row, a commanded one's flown track or observed track, whichever ends later. */
+export function windowSceneEndS(window: TrainingWindow, place: number): number {
+  const last = (tS: number[]) => tS[tS.length - 1];
+  return Math.max(
+    ...window.traffic.map((aircraft) => last(aircraft.tS)),
+    ...window.commanded.map((aircraft) => onWindowClock(aircraft,
+      Math.max(last(aircraft.rounds[place].flown.tS), last(aircraft.head.observed.tS)))),
+  );
+}
+
 /** Where aircraft ``key`` of the window is at window time ``windowS`` in round ``place``: a commanded aircraft from the
  *  row it joins — on its observed rows before its first predicted step (window B's: as its start moved them, which end
  *  one 2 s row before that step: null between), then on its round's flown track (its flight clock); another on its

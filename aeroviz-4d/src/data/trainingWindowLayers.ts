@@ -1,9 +1,9 @@
 /**
  * trainingWindowLayers.ts
  * -----------------------
- * What the window sets of stages C and D draw in 3D beyond stage A's layers: the switches of the other aircraft (their
- * tracks and where each is at the cursor), the loss of separation, the window's other rounds and (D) the tracks of its
- * other commanded aircraft — a store of their own (stage A's and stage B's switches are not changed for stage C). Read with
+ * What the window sets of stages C and D draw in 3D beyond stage A's layers: the switches of the other aircraft (one switch
+ * for their tracks and where each is at the cursor, the user 2026-10-12), the loss of separation, the window's other rounds
+ * and (D) the tracks of its other commanded aircraft — a store of their own (stage A's and stage B's switches are not changed for stage C). Read with
  * `useTrainingWindowLayers`; the scene's leaf and the panel share it. Beside it, the commanded aircraft last clicked in the
  * scene (`pickTrainingWindowAircraft`), which the session selects (frontend §5.2).
  */
@@ -11,10 +11,8 @@
 import { useSyncExternalStore } from "react";
 
 export interface TrainingWindowLayers {
-  /** The other aircraft at the cursor's time, each where its record has it. */
+  /** The other aircraft: each one's track over the window, thin, and where its record has it at the cursor's time. */
   traffic: boolean;
-  /** Each other aircraft's track over the window, thin. */
-  trafficTracks: boolean;
   /** The loss of separation that ended the round on screen: the two aircraft at that time, joined. */
   loss: boolean;
   /** The flown paths of the window's other rounds, thin and faded beside the one on screen. */
@@ -26,7 +24,7 @@ export interface TrainingWindowLayers {
 }
 
 let layers: TrainingWindowLayers = {
-  traffic: true, trafficTracks: true, loss: true, otherRounds: true, otherCommanded: true, procedure: true,
+  traffic: true, loss: true, otherRounds: true, otherCommanded: true, procedure: true,
 };
 const listeners = new Set<() => void>();
 

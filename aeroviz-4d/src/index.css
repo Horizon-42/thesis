@@ -1589,6 +1589,41 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   height: 12px;
 }
 
+/* the playback: Play / Pause at the line's left, the speed at its right */
+.training-cursor-slider-play {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid #334155;
+  border-radius: 3px;
+  background: transparent;
+  color: #67e8f9;
+  font-size: 9px;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.training-cursor-slider-play:disabled {
+  color: #64748b;
+  cursor: default;
+}
+
+.training-cursor-slider-play[aria-pressed="true"] {
+  background: rgba(103, 232, 249, 0.15);
+}
+
+.training-cursor-slider-speed {
+  flex: 0 0 auto;
+  height: 18px;
+  padding: 0 2px;
+  border: 1px solid #334155;
+  border-radius: 3px;
+  background: #0f172a;
+  color: #cbd5e1;
+  font-size: 10px;
+}
+
 .training-cursor-slider-rail {
   stroke: #334155;
   stroke-width: 1;

@@ -2,11 +2,13 @@
  * Stage D's reading of a window of several commanded aircraft (frontend §5, F3) on the file stage C's export writes for a
  * synthetic window of two (`stageD.ts`): both aircraft in the order they join, each on its own flight clock; the anchor
  * silent from the row of the loss it answers (D144) and flying on; the loss written once, between the two commanded
- * aircraft; W the sum of the rewards; where each aircraft is at a window time; a D round's sentences in stage D's colour.
+ * aircraft; W the sum of the rewards; where each aircraft is at a window time; where the window's scene ends (the slider's
+ * axis); a D round's sentences in stage D's colour.
  */
 import { describe, expect, it } from "vitest";
 import {
-  countedOutcome, mostTrafficAtOnce, onAircraftClock, silentFromS, trackAt, windowAircraftAt, windowReward,
+  countedOutcome, mostTrafficAtOnce, onAircraftClock, onWindowClock, silentFromS, trackAt, windowAircraftAt, windowReward,
+  windowSceneEndS,
 } from "../trainingWindowSample";
 import { roundKind } from "../trainingSentenceKind";
 import { stageDSample } from "./stageD";
@@ -22,6 +24,19 @@ describe("a window of two commanded aircraft", () => {
     expect([anchor.joinS, copy.joinS]).toEqual([0, 32]);
     // the same flight copied: its flight clock is the anchor's, 32 s behind on the window's
     expect(anchor.clockS - copy.clockS).toBe(32);
+  });
+
+  it("its scene ends where the last of its aircraft stops, on the window's clock", () => {
+    const last = (tS: number[]) => tS[tS.length - 1];
+    const ends = [
+      ...window.traffic.map((aircraft) => last(aircraft.tS)),
+      ...window.commanded.flatMap((aircraft) => [aircraft.rounds[0].flown.tS, aircraft.head.observed.tS].map((tS) => onWindowClock(aircraft, last(tS)))),
+    ];
+    const endS = windowSceneEndS(window, 0);
+    expect(ends.every((atS) => atS <= endS)).toBe(true);
+    expect(ends).toContain(endS);
+    // the copy joins 32 s later and ends 32 s later than the anchor's same track: it is the scene's end
+    expect(endS).toBe(onWindowClock(copy, Math.max(last(copy.rounds[0].flown.tS), last(copy.head.observed.tS))));
   });
 
   it("the anchor answers the loss with the copy, once, and is silent from that row, flying on", () => {
