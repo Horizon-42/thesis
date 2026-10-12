@@ -1,0 +1,46 @@
+% 两层模型实验结果表（2026-10-12）。需要 booktabs、multirow；中文需 ctex。
+% 说明与数据来源：two_tier_results.md。表 2 中的"待填"在 val 读数完成后替换。
+
+\begin{table}[htbp]
+  \centering
+  \caption{标注数据集 val 划分上的单机闭环生成结果}
+  \label{tab:two_tier_val_single}
+  \begin{tabular}{lrrcc}
+    \toprule
+    \multirow{2}{*}{模型} & \multirow{2}{*}{轨迹数} & \multirow{2}{*}{降落率} & arc ADE (m) & arc FDE (m) \\
+     & & & 均值 / 中位数 & 均值 / 中位数 \\
+    \midrule
+    标注指令闭环重放（参考） & 947   & 100.0\% & 83 / 69     & 132 / 103 \\
+    \midrule
+    基础模型 (base)          & 1\,894 & 94.6\%  & 1\,444 / 315 & 775 / 192 \\
+    阶段 C 第 5 轮 (C-r5)    & 1\,894 & 97.9\%  & 1\,242 / 298 & 708 / 190 \\
+    阶段 D 第 7 轮 (D-r7)    & 1\,894 & 96.9\%  & 1\,248 / 295 & 674 / 195 \\
+    \bottomrule
+  \end{tabular}
+  \par\smallskip
+  \parbox{0.95\linewidth}{\footnotesize
+    5 个机场各随机抽取 200 个 val 航班（三个模型相同），每个航班生成 2 次；只统计先验选择集内的航班
+    （标注结局为降落、观测航迹无故障），共 947 个航班。arc ADE：生成轨迹与观测航迹各按水平弧长归一化，
+    在弧长比例 $k/64$（$k=1,\dots,64$）处计算三维距离的平均值；arc FDE：弧长比例为 1 处（终点）的三维距离。
+    参考行为标注指令句经执行器重放后与观测航迹的误差。}
+\end{table}
+
+\begin{table}[htbp]
+  \centering
+  \caption{后训练多机交通窗口 val 划分上的多机闭环控制结果}
+  \label{tab:two_tier_val_multi}
+  \begin{tabular}{lrcc}
+    \toprule
+    模型 & 受控飞机数 & 降落率 & 失去间隔率 \\
+    \midrule
+    基础模型 (base)       & 待填 & 待填 & 待填 \\
+    阶段 C 第 5 轮 (C-r5) & 待填 & 待填 & 待填 \\
+    阶段 D 第 7 轮 (D-r7) & 待填 & 待填 & 待填 \\
+    \bottomrule
+  \end{tabular}
+  \par\smallskip
+  \parbox{0.95\linewidth}{\footnotesize
+    阶段 D 的多机交通窗口（时长 5、10、20 min，每机场每种时长 100 个真实窗口），三个模型使用相同的窗口和随机数。
+    比例的分母为受控飞机架数。失去间隔：受控飞机与另一架飞机的间距低于间隔规则且由该受控飞机负责。
+    基础模型以交通模块输出为零的形式运行。}
+\end{table}
