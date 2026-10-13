@@ -145,8 +145,10 @@ def _zero_join_scenario(speaking, join_ticks) -> str:
 
 #: `_zero_join_scenario`'s digests, written by the code before join ticks (dev-two-tier-v4 c7a0b6b0, the CPU, one
 #: thread, the loop without join ticks): the reference of D150's "every join tick 0 is today's loop, bit for bit".
-BEFORE_JOIN_TICKS = ("03dbe9d489c6ec3bcba1a2589d02bc1f469d3c1d9257918e291b6ab94f4879c7"
-                     "6bc66c9fac4c54e902d2650198d46034470e13e117e3b6e3a4552ed5e972accc")
+#: Written again 2026-10-13: the first-principles executor (223f1e30, ts-executor-spec-v11) flies the words otherwise.
+#: The loop with no join ticks and the loop with every join tick 0 give this same digest from 223f1e30 to 288b779b.
+BEFORE_JOIN_TICKS = ("bad26a75bf272bfb41ce63f3f04072091f984e114de5719f04a05870af0b6d3a"
+                     "959fff656cc008ae09cde91f17d0858d08c717809e49eeb1357365eccd3ef049")
 
 
 def test_every_join_tick_zero_says_and_flies_what_the_loop_said_before_join_ticks(tmp_path, monkeypatch):
