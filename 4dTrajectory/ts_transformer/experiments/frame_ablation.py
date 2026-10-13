@@ -119,7 +119,7 @@ def stale_arm_error(key: str, train_dir: Path, declared: dict, development_cohor
     arm declares today. An arm that fails either is refused by name; nothing is deleted.
 
     The arm's ``development_cohort`` is part of what it declares, and it is a FILE, so its path
-    alone says nothing: `plan_cohort` rewrites it in place. An arm that names one is resumed only
+    alone says nothing: `plan_cohort` (archived) rewrote it in place. An arm that names one is resumed only
     when its training recorded that cohort with the same train and val flights
     (`data_selection.development_cohort`, the eligible SET's digests, C26); a run that recorded no
     cohort is refused rather than assumed to match, and so is a run that recorded one when the arm
@@ -232,7 +232,8 @@ def arm_steps(
     ``development_cohort`` (the declaration's, or the arm's own, ``{airport}`` substituted) is
     handed to the train step as ``--development-cohort``: the explicit train roster the train
     CLI demands when a random-anchor future contract covers fewer train flights than the locked
-    split holds (`run_ts.py plan_cohort` writes it from the same config; two-tier L1's 60 s
+    split holds (`archive/manoeuvre_lockstep_2026_10/experiments/plan_cohort.py`, archived, wrote it from the same
+    config; two-tier L1's 60 s
     floor at anchor 59 leaves one KRDU train flight uncovered).
     """
     manifest = HARVEST_ROOT / airport / "arrivals" / "manifest.json"
@@ -317,7 +318,8 @@ def main(argv: list[str] | None = None) -> int:
 
     # `"development_cohort"` — the explicit train roster a train step is handed, declared for
     # the whole file or per arm (an arm's own wins: a grid whose cells keep different flights);
-    # it is DATA written before the campaign (`run_ts.py plan_cohort`), so a missing file is a
+    # it is DATA written before the campaign (`archive/manoeuvre_lockstep_2026_10/experiments/plan_cohort.py`,
+    # archived), so a missing file is a
     # plan-time error, dry run included
     def cohort_path(arm: dict) -> Path | None:
         declared = arm.get("development_cohort") or declaration.get("development_cohort")
@@ -326,7 +328,8 @@ def main(argv: list[str] | None = None) -> int:
         path = REPO_ROOT / str(declared).format(airport=airport)
         if not path.is_file():
             parser.error(f"development_cohort {path} does not exist; write it with "
-                         "`run_ts.py plan_cohort` from the arm's config before launching")
+                         "`archive/manoeuvre_lockstep_2026_10/experiments/plan_cohort.py` (archived) from the "
+                         "arm's config before launching")
         return path
 
     cohorts = {arm["key"]: cohort_path(arm) for arm in arms if "checkpoint" not in arm}

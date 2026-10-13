@@ -1,8 +1,10 @@
 """A prediction directory read as an arm of a paired comparison: every scored flight with its predicted endpoint
 against the assigned threshold (and its parallel sibling) and the time-free path metrics attached, plus the
-Markdown table the readouts print. Shared by the frame-ablation readout (`experiments/compare_frame_arms.py`, which it
-came from, 2026-09-25) and the residual readouts (`experiments.wind_residual_readout`,
-`experiments.straight_in_residual_readout`) — a runner imports this module (L20)."""
+Markdown table the readouts print. Shared by the frame-ablation readout
+(`archive/one_tier_runners_2026_10/experiments/compare_frame_arms.py`, which it
+came from, 2026-09-25) and the residual readouts
+(`archive/one_tier_runners_2026_10/experiments/wind_residual_readout.py`,
+`archive/one_tier_runners_2026_10/experiments/straight_in_residual_readout.py`); all three are archived (2026-10-13)."""
 
 from __future__ import annotations
 

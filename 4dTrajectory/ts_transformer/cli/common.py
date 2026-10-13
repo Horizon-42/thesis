@@ -862,7 +862,8 @@ def prepare_training_run(
     """Resolve the config, load the development cohort and open the experiment manifest.
 
     ``config`` replaces the one the flags would resolve (a runner whose configs come from an
-    arm declaration rather than the CLI — `plan_cohort --arms`); the data flags still decide
+    arm declaration rather than the CLI — `archive/manoeuvre_lockstep_2026_10/experiments/plan_cohort.py --arms`,
+    archived); the data flags still decide
     what is loaded."""
     refuse_airport_override_for_pooled_data(args, parser)
     config, batch_auto = config_from_args(args, parser) if config is None else (config, False)

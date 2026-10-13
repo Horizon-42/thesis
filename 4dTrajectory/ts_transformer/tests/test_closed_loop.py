@@ -1512,7 +1512,7 @@ def test_the_readers_two_parts_have_their_names():
         "lateral_m", "vertical_m", "uncorrectable", "observed_row", "matched_row"]
 
 
-@pytest.mark.parametrize("runner", ["executor_replay", "closed_loop_start_check", "final_descent_tolerance"])
+@pytest.mark.parametrize("runner", ["executor_replay", "closed_loop_start_check"])
 def test_a_readout_that_serves_a_choice_reads_train_or_select_only(runner, capsys):
     """A37, D85: the val days are read once, in the stage's validation readout; a readout runner refuses them."""
     import importlib

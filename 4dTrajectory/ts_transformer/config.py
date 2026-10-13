@@ -2201,7 +2201,8 @@ class TSConfig:
     # `default_anchor` is `max(L-1, anchor_floor_index)`, so the fixed anchor every window
     # set, validation replay, cohort filter and `predict` reads moves to the floor together,
     # and arms at L = 60 / 90 / 120 with the floor at 119 train and are judged on the SAME
-    # flights at the SAME anchor. 0 = L-1, every stored run. `run_ts.py history_ablation`'s
+    # flights at the SAME anchor. 0 = L-1, every stored run.
+    # `archive/one_tier_runners_2026_10/experiments/history_ablation.py`'s (archived)
     # `minimum_anchor_index` is the same floor passed at call time; this one is the run's own.
     anchor_floor_index: int = 0
     # One formal development score: fixed-anchor, common true-physical-time, airport-macro

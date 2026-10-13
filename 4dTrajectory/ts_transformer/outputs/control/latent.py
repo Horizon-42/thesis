@@ -62,7 +62,8 @@ ACTIVE_UNIT_KL_NATS = 0.05
 #: The ruler for the posterior mean's displacement, in prior sigmas: the L2.f gate
 #: ("the information is in the MEAN") is a median above one sigma. It is a GATE, not the
 #: observed value — the three collapsed L2.e' arms measured 0.05-0.2. Read by every surface
-#: that prints the displacement (`experiments/latent_readout.py`, `experiments/latent_probe.py`), so
+#: that prints the displacement (`archive/one_tier_runners_2026_10/experiments/latent_readout.py`,
+#: `archive/one_tier_oneoffs_2026_10/experiments/latent_probe.py`; archived), so
 #: the number a reader is judged against is written once.
 DEAD_MEAN_DISPLACEMENT_SIGMA = 1.0
 #: The per-dimension component KL reaches the epoch record as one summed diagnostic per

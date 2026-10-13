@@ -107,7 +107,8 @@ MAX_LOAD_FACTOR = 2.0
 # speed-rate error costs the imitation MSE the same under both contracts for the median
 # airframe and one imitation weight reads the same in both arms. The floor sits below the
 # truth teacher's p0.1 (-0.179 g on KRDU val) and below the feasible floor of 99.7 % of its
-# states (`experiments/specific_force_teacher_distribution.py`); the box cuts 0.10 % of that
+# states (`archive/one_tier_runners_2026_10/experiments/specific_force_teacher_distribution.py`, archived); the box cuts
+# 0.10 % of that
 # teacher. Like the thrust-fraction box it is the head's SEARCH SPACE: feasibility is the
 # thrust clamp inside the lag RHS, which admits the thrust-fraction box's thrust RANGE at
 # every state — the same range, not the same trajectories (see NEUTRAL_SPECIFIC_FORCE).
@@ -115,7 +116,8 @@ MIN_SPECIFIC_FORCE = -0.20
 MAX_SPECIFIC_FORCE = 0.23
 # The specific-force neutral: n_x = sin(gamma) holds speed, and -0.05 is the hold on a
 # ~2.9 deg descent — an approach's dominant condition, beside the truth teacher's median
-# (-0.059 g, KRDU val, `experiments/specific_force_teacher_distribution.py`). NOT level trim, which
+# (-0.059 g, KRDU val, `archive/one_tier_runners_2026_10/experiments/specific_force_teacher_distribution.py`, archived).
+# NOT level trim, which
 # is what the thrust-fraction neutral (0.2) means for the median airframe: under that law
 # the drag feedback bounds the overspeed a level-trim command builds on a descent (~210 m/s
 # on four synthetic 2.5-3 deg KRDU descents over 416 s), while under specific-force the speed

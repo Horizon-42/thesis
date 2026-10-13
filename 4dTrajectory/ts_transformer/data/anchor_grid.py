@@ -135,7 +135,8 @@ def anchors_for_bin(series: Sequence[FlightSeries], profiles: Sequence[np.ndarra
     just ``len(...)``.
 
     The truth's end admission reads is the SUPERVISION rows' (``dataset.truth_duration_s``: the observed track closed
-    to the threshold). The displacement readouts (`inference.receding`, `experiments.lead_time_error`) read the
+    to the threshold). The displacement readouts (`inference.receding`,
+    `archive/one_tier_runners_2026_10/experiments/lead_time_error.py`, archived) read the
     OBSERVED rows, which stop a median 6 s / 380 m short at KRDU — so a flight admitted with ``min_future_s`` of truth
     can have less readable truth there: `receding.mean_displacement_to` refuses it, `receding.displacement_at` reads
     it as absent (None), and `lead_time_error` leaves the flight out of that lead.

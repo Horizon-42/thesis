@@ -33,7 +33,6 @@ from ts_transformer.config import (
 from ts_transformer.data.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
 from flight_scenarios.identity import summary_row_key
 from ts_transformer.data.dataset import build_series
-from ts_transformer.experiments import quantile_fan_readout
 from ts_transformer.io_utils import file_sha256
 from ts_transformer.run_naming import run_display_name
 from ts_transformer.data.synthetic import synthetic_arrivals
@@ -231,32 +230,3 @@ def test_a_calibrated_fan_also_decodes_the_interval_endpoints(tmp_path: Path, mo
                 if entry["alpha"] == FAN_INTERVAL_ALPHA
             )
             assert row["cta_s"] == pytest.approx(published[end])
-
-
-# ── the readout ─────────────────────────────────────────────────────────────
-
-def test_the_fan_readout_runs_on_a_predicted_directory(tmp_path: Path, monkeypatch, capsys):
-    checkpoint, _series = _trained(tmp_path, monkeypatch)
-    out = tmp_path / "fan"
-    assert _predict(checkpoint, out, tmp_path, "--cta-from-quantiles") == 0
-
-    assert quantile_fan_readout.main(["--arm", str(out), "--json", str(tmp_path / "fan.json")]) == 0
-    payload = json.loads((tmp_path / "fan.json").read_text())
-    assert payload["calibrated"] is False
-    assert payload["quantiles"] == list(DURATION_QUANTILES)
-    block = payload["strata"]["all"]
-    assert 0.0 <= block["truth_in_fan_share"] <= 1.0
-    assert block["fan_width_p50_s"] >= 0.0
-    geometry = block["geometry"]["all"]
-    # The nearest of the five can never be further than q50, which is one of the five.
-    assert geometry["chamfer_nearest_p50_m"] <= geometry["chamfer_q50_p50_m"] + 1e-9
-    text = capsys.readouterr().out
-    assert "readout, not a coverage guarantee" in text
-
-
-def test_the_readout_refuses_a_directory_without_a_fan(tmp_path: Path, monkeypatch):
-    checkpoint, _series = _trained(tmp_path, monkeypatch)
-    out = tmp_path / "plain"
-    assert _predict(checkpoint, out, tmp_path) == 0          # cta=given, no fan
-    with pytest.raises(SystemExit, match="no complete quantile fan"):
-        quantile_fan_readout.main(["--arm", str(out)])

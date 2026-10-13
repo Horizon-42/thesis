@@ -767,8 +767,7 @@ def write_prediction_sets(sets: PredictionSets, options: PredictOptions, config,
     if fan_records:
         names = ", ".join(sorted(fan_records))
         print(f"  wrote the quantile fan under {output_dir / QUANTILE_DIR_NAME}: {names} "
-              f"(the top-1 records above are the {median_directory} decode); read it with "
-              f"run_ts.py quantile_fan_readout --arm {output_dir}")
+              f"(the top-1 records above are the {median_directory} decode)")
     if shuffled_records:
         emit(shuffled_records, output_dir / "shuffled", shuffled_metrics)
         print(f"  wrote the shuffled-latent diagnostic under {output_dir / 'shuffled'}")

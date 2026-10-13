@@ -70,9 +70,6 @@ from ts_transformer.outputs.control.forecast import (
     random_latent_forecasts,
     shuffled_latent_forecasts,
 )
-from ts_transformer.outputs.control.latent import displacement_verdict
-from ts_transformer.experiments.latent_readout import kept_epoch_latent, readout, render_latent
-from ts_transformer.experiments.latent_readout import main as readout_main
 from ts_transformer.data.synthetic import synthetic_arrivals
 from ts_transformer.tests.support import dynamics_context
 from ts_transformer.tests.support_prediction import latent_config as _config
@@ -445,37 +442,6 @@ def test_train_checkpoint_forecast_and_export_one_latent_run(tmp_path: Path):
                 flight_metrics=[observed_series_metrics(item, f) for item, f in zip(series[:3], shuffled)])
     shuffled_states = json.loads((out / "shuffled" / summary["results"][0]["states_file"]).read_text())
     assert shuffled_states["source"]["latentShuffled"] is True
-
-    # The readout joins the three by flight and takes the per-flight best.
-    result = readout(out, None)
-    everything = result["strata"]["all"]
-    assert result["modes"] == 2 and result["random_modes"] == 2 and result["shuffled"] and everything["n"] == 3
-    assert result["control"].endswith("/random")
-    assert everything["min_ade_mean_m"] <= everything["top1_ade_mean_m"] + 1e-9
-    assert everything["control_min_ade_mean_m"] <= everything["top1_ade_mean_m"] + 1e-9
-    assert everything["mode_fde_spread_m"] is not None and everything["shuffled_delta_ade_m"] is not None
-
-    # ...and the kept epoch's own latent diagnostics, read off the artifact's best_epoch.
-    diagnostics = kept_epoch_latent(tmp_path / "run" / "history.json")
-    history = json.loads((tmp_path / "run" / "history.json").read_text())
-    assert diagnostics["epoch"] == history["fit_diagnostics"]["training_objective"]["best_epoch"]
-    assert len(diagnostics["component_kl_per_dim"]) == 3
-    text = render_latent(diagnostics)
-    assert "per-dimension component KL" in text and "p sigma" in text
-    # the verdict is the shared sentence, and it is printed because the key is there
-    assert displacement_verdict(diagnostics["mean_displacement_sigma"]) in text
-    # ...and a pre-L2.f run prints the keys it has, without a verdict it cannot compute
-    older = {key: value for key, value in diagnostics.items()
-             if key not in ("mean_displacement_sigma", "component_kl_per_dim")}
-    assert "displacement median" not in render_latent(older)
-
-    # The documented epoch-1 command is `--history` ALONE: it must parse and print.
-    assert readout_main(["--history", str(tmp_path / "run" / "history.json")]) == 0
-    assert readout_main(["--arm", str(out), "--history", str(tmp_path / "run" / "history.json")]) == 0
-    with pytest.raises(SystemExit):
-        readout_main([])                      # neither an arm nor a history
-    with pytest.raises(SystemExit):
-        readout_main(["--control", str(out)])  # a control with nothing to compare
 
 
 def test_every_latent_forecast_entry_refuses_a_non_latent_checkpoint():

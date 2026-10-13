@@ -1320,7 +1320,7 @@ the A9 smoke; the closed loop with a tie at the earlier row, before A14). Readou
   average at Δ = 8 s.
 - The open-loop sentences at Δ = 4 s do not change: on a 4 s grid, the nearest row with a tie at the later row is the
   next row.
-- The turn of the executor (A13, `experiments/executor_turns.py`), select, 837 turns measured in every way, the turn's
+- The turn of the executor (A13, `executor_turns`, archived in `archive/two_tier_readouts_2026_10/`), select, 837 turns measured in every way, the turn's
   own part toward the outside, mean: the exact words −36 m, the executor −18 m, the executor without the stopping-rate
   limit −21 m, the observed track integrated (the control) −2 m. Without the 292 turns whose next turn starts within
   30 s of the end: −34, −16, −18, +1 m. Larger at higher speed: at 100 m/s or more the words −39 m, the executor −18 m.

@@ -1,5 +1,33 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-13 — ts runners archived: settled readouts, plan v3's no-token line, unused one-tier runners
+
+The user's decision (2026-10-13), after a census of `experiments/` against the formal two-tier chain (labelling A,
+prior B, post-training C, multi-aircraft D, the Training exports): four groups that the formal chain does not use moved
+to `4dTrajectory/ts_transformer/archive/` with their tests ("archive的同时，把测试也带过去 而且archive代码一律不做测试").
+Each campaign has a README (file → what it was; what stayed live and why).
+
+- `archive/two_tier_readouts_2026_10/`: `executor_turns`, `final_descent_tolerance`, `start_rules`, `lead_ablation`,
+  `multi_windows`, `pass_gradients` (each measured for a choice that is made: D47, D66, D77, V12/D9, D146, log §22) and
+  `multi_val_evaluation` (a second grading path beside the judge; stage D's landing now reads the judge only).
+- `archive/manoeuvre_lockstep_2026_10/`: the `manoeuvre/` package (lockstep, gates, failure modes) and its six runners
+  (`plan_cohort`, `manoeuvre_lockstep`, `executor_failure_modes`, `executor_grid_gate`, `executor_relative_gate`,
+  `two_tier_grid_queue`) — plan v3's no-token closed loop.
+- `archive/one_tier_runners_2026_10/`: 20 one-tier runners with no live importer (`cv`, `plot_results`,
+  `coordinate_ablation`, `history_ablation`, `predictability_report`, `latent_readout`, `lead_time_error`,
+  `quantile_fan_readout`, `runway_hypotheses`, `runway_intent_r1` (+ readout), four `compare_*`, `score_control_arms`,
+  `specific_force_teacher_distribution`, two residual readouts, `trace_architecture`).
+- Tests: whole files moved unchanged; nine mixed files split (an excerpt to the archive, the live file keeps the rest).
+  Archived tests do not run (`pyproject.toml` `norecursedirs`). `test_architecture.py` lost the runner pins of the
+  archived runners; `test_closed_loop.py`'s val-refusal test no longer names `final_descent_tolerance`.
+- Docs: runners.md entries R3, R8, R9, R51, R52, R55, R70, R71, R74 moved to each campaign's
+  `docs/reference/entries.md` (a heading line each stays; R8 keeps `frame_ablation --only`); the package README's CV,
+  history, coordinate and predictability passages moved to `one_tier_runners_2026_10/docs/cut_sections.md`; the ts
+  CLAUDE.md index lines of these runners were removed. Live comments that named a runner now name its archive path;
+  `predict` no longer tells the user to run `quantile_fan_readout`.
+- Left live with no live caller (the user decides): `data/runway_features.py`, `inference/arm_readout.py`,
+  `inference/export.copy_record_subset`, `multi_train.selection_readout(window_ends=)`.
+
 ### 2026-10-12 — Two-tier labeller: the closed loop's corrections read the errors ahead (the lead)
 
 The user's choice (2026-10-12, "按1"), after v14 (Y_final 15 m, H_final 7.5 m) landed 95.1 % at Δ 2 s but 89.0 % at

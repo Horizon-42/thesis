@@ -900,7 +900,8 @@ def fixed_anchor_index(config: TSConfig, minimum_anchor_index: int | None = None
     """The one anchor a fixed-anchor window set places EVERY flight at.
 
     ``L-1`` (:func:`config.default_anchor`) unless an experiment supplies a common floor,
-    in which case it is the floor: ``experiments/history_ablation.py`` trains every candidate
+    in which case it is the floor: ``archive/one_tier_runners_2026_10/experiments/history_ablation.py`` (archived)
+    trains every candidate
     ``seq_len`` at ``max(L) - 1`` so their anchor populations are identical. This is the
     ONE definition. Until 2026-09-09 the common-grid truth, the cohort floor and the
     fixed-anchor fraction each restated ``seq_len - 1`` and ignored the floor (review A-2):

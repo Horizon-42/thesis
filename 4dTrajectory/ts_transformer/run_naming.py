@@ -336,7 +336,8 @@ _ABBREV = {
     "trombone_surplus_reference": "trombone-surplus",
 }
 
-#: The validation days of a day partition (the runway-intent R series, `experiments.runway_intent_r1`
+#: The validation days of a day partition (the runway-intent R series,
+#: `archive/one_tier_runners_2026_10/experiments/runway_intent_r1.py`, archived
 #: `day_folds`), flown by a checkpoint trained and selected on that partition's training days only —
 #: none of the checkpoint's own splits, and not the sealed outer test. Records under it come from a
 #: runner, never from `predict` — the one that wrote them is archived

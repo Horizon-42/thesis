@@ -31,7 +31,7 @@ from ts_transformer.data.dataset import load_flight_dicts
 from ts_transformer.data.day_split import parse_utc
 
 #: Inbound courses this close are one landing direction (the parallel-sibling rule of
-#: `experiments.runway_hypotheses.parallel_sibling`).
+#: `parallel_sibling` of `archive/one_tier_runners_2026_10/experiments/runway_hypotheses.py`, archived).
 DIRECTION_GROUP_DEG = 30.0
 #: A runway whose inbound course is further than this from the aircraft's track is not being
 #: flown to (the 2026-09-03 course gate).

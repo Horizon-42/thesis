@@ -29,7 +29,7 @@ docs/
     figures/           设计文档的示意图；每张由一个 runner 画（`python run_ts.py <名字>`，脚本在 experiments/，测试核对图与脚本一致），不手改
   reference/           CLAUDE.md 索引的全文（P C D S G H L R T W 编号）+ ENGINEERING_NOTES.md
   experiments/         intents.json + 代码仍在的实验的配置（代码已归档的实验，配置跟着进 archive/<名>/docs/experiments/）
-  tutorials/           教程与综述；arch_*.svg 由 `python run_ts.py trace_architecture` 生成
+  tutorials/           教程与综述；arch_*.svg 由 `archive/one_tier_runners_2026_10/experiments/trace_architecture.py` 生成（已归档）
   figures/             2026-08-19 坡度摆动诊断的插图
   history/             做完的研究线（代码仍在的），按线分子目录，文件名不改
 ```

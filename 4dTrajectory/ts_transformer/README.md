@@ -292,54 +292,7 @@ grids; the default `n_segments,learning_rate,d_model` grid has 27 candidates and
 candidate sampling.
 The default CV budget is 36 epochs with patience 6.
 
-Run pooled CV only, followed by automatic result plotting, with:
-
-```bash
-conda run -n aeroviz python run_ts.py cv
-```
-
-Use `--batch-size 2048` to force a larger batch, or leave the default
-`--batch-size auto` to run the CUDA training-step probe.
-
-Plots and flat CSV tables are kept beside the source artifacts under the same run directory:
-
-```text
-ts_<model>_normalized_time/
-  cross_validation/
-    cv_results.json
-    best_config.json
-  history.json                 # present after final training
-  plots/
-    index.md                   # one-page chart index
-    plot_manifest.json
-    cv_candidate_scores.{png,svg}
-    cv_hyperparameter_effects.{png,svg}
-    cv_airport_heatmap.{png,svg}
-    cv_candidates.csv
-    cv_airport_scores.csv
-    training_curves.{png,svg}
-    training_airport_loss.{png,svg}
-    training_epochs.csv
-```
-
-After final training, refresh the same directory with
-`conda run -n aeroviz python run_ts.py plot_results <run-directory>`.
-
-Run the controlled history-length ablation with:
-
-```bash
-conda run -n aeroviz python run_ts.py history_ablation
-```
-
-The default candidates are `L=30,60,90`. All candidates use the same flight roster, outer-
-train folds, batch size, and anchor population. The common minimum anchor is fixed at
-`max(L)-1`, so changing L only changes how many samples before that anchor enter the model;
-the predicted remainder is identical. Results are written under
-`4dTrajectory/outputs/POOLED/ts_<model>_normalized_time_history_length_ablation/` as JSON,
-flat CSV tables, PNG/SVG plots, and `plots/index.md`. Use `--dry-run` to inspect the protocol
-and `--config-overrides <best_config.json>` to hold a previously selected architecture fixed.
-
-The runner defaults to `--batch-size auto`. It probes actual FP32 forward/backward/Adam steps
+`--batch-size auto` probes actual FP32 forward/backward/Adam steps
 for the selected architecture and normalized output grid; an explicit integer disables
 probing. State output uses the largest successful power of two. Control output phase-shifts
 the duration partition across probe rows, exercising the per-segment maxima that determine
@@ -366,35 +319,12 @@ source tracks are loaded, and validation/test counts enter the audit JSON withou
 trajectory values being read. The default result is written under
 `4dTrajectory/outputs/POOLED/batch_benchmarks/`; the final terminal line is
 `BEST_BATCH_SIZE=<integer>`. Pass a CV `best_config.json` through `--config-overrides` to
-benchmark an already selected architecture, and use the resulting integer with
-`run_ts.py coordinate_ablation --batch-size <integer>`.
+benchmark an already selected architecture, and pass the resulting integer as `--batch-size <integer>`.
 
 `--coordinate-frame enu` is the unchanged baseline. `runway-aligned` rotates horizontal
 position and chart-velocity channels into along-runway/cross-runway axes while retaining the
 same six-channel tensor contract; use separate runs as an ablation. Neither mode edits the
 vendored architectures.
-
-Run the paired pooled coordinate-frame ablation with:
-
-```bash
-conda run -n aeroviz python run_ts.py coordinate_ablation \
-  --model itransformer \
-  --outputs eval
-```
-
-The script discovers the same fixed K-airport roster once, runs ENU and runway-aligned CV
-with the same seed, candidates, folds, sampling budget, and batch size, and rejects the
-comparison if their recorded split or fold digests differ. It selects the frame and that
-frame's hyperparameters using outer-train airport-macro CV loss, trains only the winner with
-outer-validation early stopping, and leaves outer-test sealed by default. Pass `--release-test`
-only after the experiment is permanently frozen to perform the one-shot test prediction.
-The losing frame never sees outer-validation or outer-test. The auditable decision is written
-under `4dTrajectory/outputs/POOLED/ts_<model>_normalized_time_coordinate_frame_ablation/` as
-`coordinate_frame_ablation.json`. Use `--reuse-cv` only to reuse two
-artifacts that pass the complete paired-run contract check. Immediately before the first
-test prediction, the decision file is marked `outer_test_evaluation_started`; the script
-then refuses to evaluate test again from the same experiment directory, including after a
-partially failed test stage.
 
 The four `run_ts_*.py` scripts above (repo root, alongside this package) are the general
 ones. The rest — the control
@@ -548,11 +478,6 @@ predicted position nodes and explicit segment durations; direct-state velocity i
 that same curve, while control velocity comes from the rollout. They are quality-assurance diagnostics only: raw
 kinematics, FDE, endpoint error, ETA and runway-threshold pass rate never replace the single
 common-time ADE checkpoint selector.
-
-The validation-only comparison, future-dispersion analysis and deterministic/multi-candidate
-coverage report are generated by `run_ts.py predictability_report`; the current illustrated
-HTML is at
-`4dTrajectory/outputs/POOLED/ts_time_parameterization_predictability_report/report.html`.
 
 ### Full versus recursive window
 

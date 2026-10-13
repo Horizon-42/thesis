@@ -153,8 +153,8 @@ rebased — same rule, new IDs.
   FIXED 0.05-nat ruler, because `active_units` moves with the free-bits budget and made that
   gate unreadable across arms. **The three `component_*` numbers sum to
   `component_kl_nats_per_flight`, NOT to the charged `kl_nats_per_flight`** (free bits and
-  the mixture estimator separate the two). Read them with `run_ts.py latent_readout
-  --history <run>/history.json` (which needs no `--arm`: this is the epoch-1 reading), or off
+  the mixture estimator separate the two). Read them with `latent_readout` (archived 2026-10-13, `archive/one_tier_runners_2026_10/`)
+  `--history <run>/history.json` (which needs no `--arm`: this is the epoch-1 reading), or off
   a checkpoint with the archived `latent_probe` (`archive/one_tier_oneoffs_2026_10/`); the gate sentence is
   `outputs.control.latent.displacement_verdict` and its ruler `DEAD_MEAN_DISPLACEMENT_SIGMA`, so no
   surface restates either. A scalar auxiliary target concentrates the information in ONE
@@ -249,7 +249,7 @@ rebased — same rule, new IDs.
 
 - **The fixed anchor is ONE definition: `dataset.fixed_anchor_index(config, minimum_anchor_index)`,
   read off a window set as `FixedAnchorTrajectoryWindows.anchor` / `.anchor_indices`.** It is
-  `L-1` unless an experiment supplies a common floor (`run_ts.py history_ablation` trains every
+  `L-1` unless an experiment supplies a common floor (`history_ablation`, archived 2026-10-13 in `archive/one_tier_runners_2026_10/`, trained every
   candidate `seq_len` at `max(L) - 1`). Every fixed-anchor consumer — the common-grid truth, the
   cohort floor, the terminal-velocity weights, the report metrics — takes the anchor as a REQUIRED
   argument from the window set; none may restate `seq_len - 1`. Until 2026-09-09 three of them
@@ -384,8 +384,9 @@ digest. The arrival loader reads a non-current schema only when the bytes are a 
 generation's, so a frozen roster is read AS WRITTEN (the checkpoint's data is not converted).
 Users: `experiments/support.checkpoint_manifests`, `anytime_curve.load_arm` (and through it
 `chain_sensitivity`; the archived `latent_probe`),
-`predictability_report`, `control_basis_oracle` (teacher fit), `runway_hypotheses` (and the archived
-`control_capacity_ceiling`, `clock_attribution`: `archive/one_tier_oneoffs_2026_10/`).
+`control_basis_oracle` (teacher fit) (and the archived
+`control_capacity_ceiling`, `clock_attribution`: `archive/one_tier_oneoffs_2026_10/`; `predictability_report`,
+`runway_hypotheses`: `archive/one_tier_runners_2026_10/`).
 `predict` / `evaluate-fit` take `--data` explicitly — pass the frozen root's manifests there.
 New training always reads the live root (`repo_layout.HARVEST_ROOT`, the one definition; the
 four runners that restated it import it).

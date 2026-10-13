@@ -681,7 +681,7 @@ there, not what will happen here.
   samples (D153). It imports `instructions/`, the names of `post/` in the post-training's
   public interface (§6.1) and the names of `prior/` in prior §7; it imports neither `autopilot/` nor any runner
   (`experiments/`). `post/` never imports `multi/`.
-- The runners of stage D (`experiments/multi_*.py`): `multi_windows` (the census, MC1), `multi_train` (the campaign,
+- The runners of stage D (`experiments/multi_*.py`): `multi_windows` (the census, MC1; archived 2026-10-13 in `archive/two_tier_readouts_2026_10/`), `multi_train` (the campaign,
   through the post-training's campaign steps, post-training §9 item 11), `multi_validation`, `multi_profile` (the memory measure, D179), `multi_speed` (D181, to be built),
   `multi_training_export` (written by fronter, frontend F4). They import from `autopilot/` only the names of vocabulary §6, from `prior/` only those of
   prior §7, from `post/` and stage C's runners only those of post-training §9, and `multi/`.
