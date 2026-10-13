@@ -97,14 +97,14 @@ The decision numbers are shared by all documents (outline §3).
 | D111 | A flight whose stored observed track has a faulty point is marked when the artefact is read (§6 item 3); the artefact is not changed and nothing is built again. A point is faulty where a 2 s step is more than 3 times, or less than a third of, the median of the 10 steps around it (5 on each side; a jump, or a position that stops while the aircraft flies on), or where the track turns more than 120° between two consecutive positions (a reversal). The mark is a function of the stored signals alone, by one definition, with the reasons it found. The prior leaves marked flights out of its selection (prior D111). Why: ADS-B faults in the observed tracks (jumps, held positions, reversals) gave A34's dynamics failures (a start rule reading a held position: 7–58 m/s), its 26 km lateral errors and A37's vertex flips; the closed-loop sentences of some such flights land and would be learned from. On A34's artefact at Δ = 4 s, among the flights with a closed-loop sentence: train 498 of 40,530 marked (469 landed), select 177 of 6,199 (157 landed), most of them held positions; the rule marks 11 of train's 14 and 5 of select's 6 dynamics failures (`instructions/faults.py`) | Decided | User, 2026-10-05 (the rule X = 3, the reversal at 120°, the mark read at reading time, the prior's selection) |
 | D126 | §6 item 8 lists the functions of stage A's Training export that a later stage's export imports (stage C's window export, post-training C11); the later stage imports exactly these names (`tests/test_architecture.py` `TRAINING_EXPORT_NAMES`). Names only: no code changes. (The part of the prior: D126 there) | Decided | User, 2026-10-05, on stage C's request |
 | D196 | A landing is the evaluation package's verdict. Where a flight ends does not change (D79). At an approach crossing of R (§5.8) the judge gives the flown state at the interpolated crossing to the evaluation package (`evaluation.metrics.evaluate_record`, with the candidate's assessment context and the flown type): `landed` when the verdict passes, `landing_failed` when it fails, with the gates that failed. The judge adds no bound of its own. The DA check (D38) stays as a record on every approach crossing; it decides no outcome. Each candidate carries the evaluation's assessment context of its runway end (`candidates.json`). Why: one landing judgement in the project, the one that grades every trajectory; a second definition in the judge passed crossings that the evaluation fails (its runway limit was 106.7 m, the evaluation's lateral gate is half the runway's width) | Decided | User, 2026-10-12 |
-| D197 | The corrections read the errors ahead. A word said at a Δ row has its full effect one lead later (a heading word: L; an angle word: L_γ; §5), and the next row comes Δ later. The labeller reads each error e at the rate ė at which it changes now, from the flown track, ground speed and vertical rate against the matched segment of the observed path. A correction starts when e + ė (Δ/2 + L) is outside the tolerance: the word comes at the Δ row nearest the time at which it must be said, as an observed word does (D45). A correction ends, or turns at an overshoot (D53), on e + ė (Δ/2 + L/2): the turn back to the observed word takes L, and in that time the aircraft moves half as far as at the rate now. At ė = 0 these are the errors now. Why: the observed words already say what the track and the path angle will be a lead later (§4.3, §4.4); a correction read on the error now comes late by up to Δ/2 + L and overshoots: at Δ = 8 s one class moves the aircraft about 50 m across the path before the next row, more than Y_final (v14, train: 95.1 / 89.0 / 76.5 % landed at Δ = 2 / 4 / 8 s; v15 with the lead: 93.8 / 93.0 / 69.9 %, better at the chosen Δ = 4 s (D11) and worse at 2 and 8 s; `readouts/2026-10-12_landing_verdict_labels.zh.md`) | Decided | User, 2026-10-12 |
+| D197 | The corrections read the errors ahead. A word said at a Δ row has its full effect one lead later (a heading word: L; an angle word: L_γ; §5), and the next row comes Δ later. The labeller reads each error e at the rate ė at which it changes now, from the flown track, ground speed and vertical rate against the matched segment of the observed path. A correction starts when e + ė (Δ/2 + L) is outside the tolerance: the word comes at the Δ row nearest the time at which it must be said, as an observed word does (D45). A correction ends, or turns at an overshoot (D53), on e + ė (Δ/2 + L/2): the turn back to the observed word takes L, and in that time the aircraft moves half as far as at the rate now. It ends at the Δ row nearest the time at which the turn back leaves no error: where e + ė (Δ/2 + L/2) is zero or has the other sign. At ė = 0 the start error is the error now. Why: the observed words already say what the track and the path angle will be a lead later (§4.3, §4.4); a correction read on the error now comes late by up to Δ/2 + L and overshoots: at Δ = 8 s one class moves the aircraft about 50 m across the path before the next row, more than Y_final (v14, train: 95.1 / 89.0 / 76.5 % landed at Δ = 2 / 4 / 8 s; v15 with the lead: 93.8 / 93.0 / 69.9 %, better at the chosen Δ = 4 s (D11) and worse at 2 and 8 s; `readouts/2026-10-12_landing_verdict_labels.zh.md`). The end aims at the path, not at half the tolerance: an end under half the tolerance left the aircraft on its first side by up to half the tolerance and one row's move (v15, Δ = 8 s, train sample: \|lateral\| at the crossing p90 33.0 m) | Decided | User, 2026-10-12; the end at the path: user, 2026-10-13 |
+| D199 | Three rules of the labeller for Δ = 4 s. (A) A piece of at least 20 s within 0.5° of level is a level (§4.4). (C) While a vertical correction is in force and its start error on the side it answers is more than 2 H, the corrected class is two steps from the observed class, where that class exists (§4.9). (D1) A new observed heading word does not end a heading correction and does not stop one from starting; while one is in force, the row says the new word one class toward the path (§4.9). Why: at Δ = 4 s (D11) 1,170 of v16's train flights (2.9 %) did not land. At the first row more than 22 m off the observed height, 355 were too low under descent 1 and 240 too high under descent 4; of the lateral failures in the replay samples at Δ = 4 s, 31 of 44 had their largest uncorrected error on rows that said a new observed heading word. Measured in memory on 5,000 random train flights of v16 (1,000 an airport, seed 1337, Δ = 4 s): landed 97.1 % → A 97.3 %, C 97.6 %, D1 97.4 %, all three 97.8 % (80 flights landed that did not, 46 the reverse); the pieces A reads as levels: 153 in 143 flights, median 38 s and 32 m of drop, the largest 182 s and 85 m (`outputs/POOLED/analyses/landing_options_20261013`). Built (v17): train 97.11 → 97.62 %, val 97.13 → 97.55 % landed at Δ = 4 s, ground contacts 184 → 42 (train); at Δ = 8 s 70.74 → 68.82 % (train; `readouts/2026-10-13_d199_labels.zh.md`) | Decided | User, 2026-10-13 ("A + C + D1 都采用") |
 
 ### 0.2 Open items
 
 | # | Item | Proposal | §  |
 |---|---|---|---|
 | O8 | Speed words in ground speed: wind can make speed words at turns | A check on data, later | 3.6 |
-| O22 | A flight on a stand-in's dynamics flies the identified type's approach speed, but the evaluation's speed gate reads the flown stand-in's window (v13 replay sample, train, Δ = 2 s: 23 of 98 stand-in flights fail the speed gate) | The user's choice: the speed gate on the identified type, or the stand-in's own approach speed | 5.8 |
 | O23 | Stage D's landing context: a commanded aircraft adds its landing to the others' context only when the judge says `landed`; D196 passes fewer crossings than the judge before it, so the other aircraft can get other inputs | Measure with `window_behaviour --against` (R68) on a stage D campaign | 5.8 |
 
 ### 0.3 Implementation
@@ -118,8 +118,8 @@ The commits, dates, branches, test counts and measurements of every milestone ar
 | A43 (D73) | Done: `60bbc901` on `dev-two-tier-v4`, reviewed; merged into `dev-two-tier` with stage B's B12 (`645e4cf0`, 2026-10-05) |
 | A44 (D138) | Built and reviewed by stage B's implementer (outline §5 rule 1): `3b535db6` on `dev-two-tier-v4`, `Start.release` with C13 (`65a21c57`); `closed_loop_start_check` on v12 / v17 (train, 50 an airport, Δ 2, 4, 8 s): 750 flights, largest position difference 0 m. Not merged: the user merges |
 | The formal artefact | `instruction_language/v12_20261005`, `executor/v17_20261005` (A34; read-only, `SHA256SUMS`); its Training sets `closed_loop_v12_20261005`, 5 airports (A35), exported again in the new format on 2026-10-07 by stage D's implementer (`aeroviz-training-sample-v11`, `index_v5.json`; the old set kept as `closed_loop_v12_20261005.v10-old`; stage B's log §6). The superseded `v11_20261004`, `v16_20261004` and `closed_loop_v11_20261004` are deleted |
-| D196, D66 (Y_final, H_final 7.5 m), D197 | Built on the branch `two-tier2-eval-landing` (from `two-tier2`): `04378395` (D196), `ea632d20` (D66), `51a68b8e` (D197), each reviewed. Artefacts, each from its commit in the run worktree `run-v8`, read-only: `instruction_language/v13_20261012` with `executor/v18_20261012` (D196), `v14_20261012` with `v19_20261012` (and D66), `v15_20261012` with `v20_20261012` (and D197). Readings: `readouts/2026-10-12_landing_verdict_labels.zh.md`. The frontend and backend part of D196 is not committed: the user's last stage. Not merged: the user merges |
-| The val days | Read in the labelling stage (outline D198): the closed-loop landed shares of v13–v15 |
+| D196, D66 (Y_final, H_final 7.5 m), D197; "unspecified" (§5.6); D199 | Built on the branch `two-tier2-eval-landing` (from `two-tier2`): `04378395` (D196), `ea632d20` (D66), `51a68b8e` (D197), `e00c8d08` (D197's end at the path; "unspecified" in the middle of the evaluation's speed window, executor design §8.1), `d8f21c77` (D199), each reviewed. Artefacts, each from its commit in the run worktree `run-v8`, read-only: `instruction_language/v13_20261012` with `executor/v18_20261012` (D196), `v14_20261012` with `v19_20261012` (and D66), `v15_20261012` with `v20_20261012` (and D197), `v16_20261013` with `v21_20261013` (and `e00c8d08`), `v17_20261013` with `v22_20261013` (and D199). Readings: `readouts/2026-10-12_landing_verdict_labels.zh.md` (v13–v15), `readouts/2026-10-13_d199_labels.zh.md` (v15–v17). The frontend and backend part of D196 is not committed: the user's last stage. Not merged: the user merges |
+| The val days | Read in the labelling stage (outline D198): the closed-loop landed shares of v13–v16 |
 | Worktrees `two-tier-v4-a32`, `two-tier-v4-a37` | Deleted with their branches on 2026-10-06 (the user); their ignored scratch (`smoke_v4/data/a33`, `a34`, `a37`, `a38`), cited by the A33, A34, A37 and A38 reports, went with them |
 
 ### 0.4 Plan
@@ -494,10 +494,12 @@ the three values of each candidate into `candidates.json` (D61).
 From the first row of a piece, the piece grows as long as the least-squares line through its rows keeps every residual
 within 10 m (the fit residual). A piece has at least two rows.
 
-1. **Level.** A piece is level when it lasts at least 20 s and every row is within 25 m of the piece's own median. This
-   test is physical and does not use the grid: a test against the 60–450 m steps would miss a level between two grid
-   levels (a level at 630 m is 30 m from both neighbours) or take a slow descent for a level. The word of a level is the
-   grid level nearest to its median. Consecutive level pieces with the same word are one level.
+1. **Level.** A piece is level when it lasts at least 20 s and every row is within 25 m of the piece's own median, or
+   when its path angle is within 0.5° of level (D199). This test is physical and does not use the grid: a test against
+   the 60–450 m steps would miss a level between two grid levels (a level at 630 m is 30 m from both neighbours) or take
+   a slow descent for a level. The angle test reads a near-level piece as a level, not as a descent of class 1 (nominal
+   1.5°). The word of a level is the grid level nearest to its median. Consecutive level pieces with the same word are
+   one level.
 2. **Move.** Every other piece is a move, with its path angle (descending positive). Consecutive moves in one direction
    are a run.
 
@@ -715,7 +717,7 @@ that its own closed loop also gives.
    executor spec, from the rows at or before it (D77); the bank is 0 (D84). The rows before it stay observed.
 2. The aircraft flies with its own dynamics or with a stand-in's, by the rule of the replay (`autopilot/replay.py`
    `group_of`). A flight that the replay does not fly (no identified type, no aircraft dynamics, or no published
-   approach speed) gives no training sentence. Nor does a sentence with fewer than two rows from the first predicted
+   approach speed of the type it is flown on) gives no training sentence. Nor does a sentence with fewer than two rows from the first predicted
    step, or in a go-around at it. The artefact counts these flights by reason.
 3. At each row, the labeller finds the matched point, then decides the words of the row: the observed words that the
    matched point has reached ("When the observed words are said", below) and the correction words. The executor hears
@@ -787,17 +789,20 @@ changes now: ė_y is the flown velocity across the matched segment of the observ
 flown vertical rate minus the segment's slope times the flown velocity along it. The START ERROR is e + ė (Δ/2 + L): a
 word said now comes at the Δ row nearest the time at which it must be said, as an observed word does (D45). The END
 ERROR is e + ė (Δ/2 + L/2): the turn back to the observed word takes L, and in that time the aircraft moves half as far
-as at the rate now. At ė = 0 both are the error now.
+as at the rate now. A correction ends at the Δ row nearest the time at which the turn back leaves no error, the row
+where the end error is zero or has the other sign: the end aims at the observed path. At ė = 0 the start error is the
+error now.
 
 **Lateral correction.** The lateral tolerance in force is Y_final while "no level-off" is in force (the final descent)
 and Y elsewhere (D66). In the rules below, Y is the tolerance in force, e_y,on the start error and e_y,off the end error.
 
-1. When |e_y,on| > Y, and the row says no new observed heading word, the labeller says the heading class one step (5°)
-   from the observed word in force, toward the observed path.
-2. When |e_y,off| < Y / 2, or e_y,off has the other sign, the labeller says the observed word in force again — except an
-   overshoot (D53): when e_y,off has the other sign and |e_y,off| > Y, it says the opposite correction in the same row
-   (item 1 toward the other side).
-3. A new observed heading word ends a correction. The labeller says the observed word, and the comparison continues.
+1. When |e_y,on| > Y, the labeller says the heading class one step (5°) from the observed word in force, toward the
+   observed path.
+2. When e_y,off is zero or has the other sign, the labeller says the observed word in force again — except an
+   overshoot (D53): when |e_y,off| > Y, it says the opposite correction in the same row (item 1 toward the other side).
+3. A new observed heading word does not end a correction and does not stop one from starting (D199). While a
+   correction is in force, the row says the new observed word one class toward the observed path, and this word is a
+   correction. When the correction ends at that row, the row says the new observed word.
 
 **Vertical correction.** The vertical tolerance in force is H_final while "no level-off" is in force (the final
 descent) and H elsewhere (D66). In the rules below, H is the tolerance in force, e_h,on the start error and e_h,off the
@@ -810,10 +815,12 @@ end error.
    one in force ends. A climb has one class, so a climb gets no correction.
 2. When e_h,on > H (too high), the labeller says the next steeper descent class. When e_h,on < −H (too low), it says
    the next shallower descent class. From descent 4 there is no steeper class, and from descent 1 no shallower one: then
-   there is no correction.
-3. When |e_h,off| < H / 2, or e_h,off has the other sign, the labeller says the observed angle class in force again —
-   except an overshoot (D53): when e_h,off has the other sign and |e_h,off| > H, it says the opposite correction in the
-   same row (item 2, where that class exists). A new observed altitude word or angle word ends a correction.
+   there is no correction. While a correction is in force and its start error on the side it answers is more than 2 H,
+   the labeller says the class two steps from the observed class, where that class exists; when the start error is
+   within 2 H again, one step (D199).
+3. When e_h,off is zero or has the other sign, the labeller says the observed angle class in force again — except an
+   overshoot (D53): when |e_h,off| > H, it says the opposite correction in the same row (item 2, where that class
+   exists). A new observed altitude word or angle word ends a correction.
 
 **The words.** A correction word is an ordinary word of its column (§3.3, §3.5). The grammar (§3.7) checks each row at
 the flown height; a row that it refuses refuses the flight (counted by reason). The envelopes of the closed-loop
@@ -822,8 +829,8 @@ of the open-loop reading. The capture row, the runway words and the go-around ro
 decisions come from the observed track; the closed-loop reading only adds corrections. The executor reads only words
 (D2, D3).
 
-**Tolerances (D32, D66).** Y = 30 m, H = 15 m, Y_final = 15 m and H_final = 7.5 m, constants of the labeller in the
-spec. H = 15 m is larger than the fit residual of the altitude pieces (10 m, §4.4), so that the noise of the fit starts
+**Tolerances (D32, D66).** Y = 30 m, H = 15 m, Y_final = 15 m and H_final = 7.5 m, and the factor 2 of the two-class
+step (D199), constants of the labeller in the spec. H = 15 m is larger than the fit residual of the altitude pieces (10 m, §4.4), so that the noise of the fit starts
 no correction. In the final descent the tolerances are half of these: the landing is the evaluation's verdict at the
 threshold (D196), with a lateral gate of half the runway's width (15.24–22.86 m) and a vertical gate of ±22 m of
 LTP + TCH; with Y = 30 m there, the flown path can cross the threshold up to 30 m off the observed path, outside the
@@ -856,7 +863,7 @@ executor uses only the vocabulary; a parameter mined from data shows that it doe
 | The course of each candidate runway (`candidates.json`) | Conversion of heading words (§5.4) |
 | The airport elevation E (`candidates.json`) | Conversion of level words: a level T is flown at T + E MSL (§5.5, D58) |
 | The distance to the threshold of R | The deceleration to the approach speed (§5.6) |
-| The aircraft: aerodynamic data, installed thrust, published maximum landing mass, published approach speed | Dynamics and "unspecified" speed |
+| The aircraft flown: aerodynamic data, installed thrust, published maximum landing mass, published approach speeds | Dynamics and "unspecified" speed (the middle of the evaluation's speed window, §5.6) |
 
 The executor laws do not read the TCH, the glidepath angle or the DA. Only the judge reads them (§5.8), from
 `candidates.json` (D61). The executor holds nothing of the landed runway or of a procedure: its frame has its origin at
@@ -905,21 +912,29 @@ judge records each limit that bound (§5.8).
 
 ### 5.5 Vertical law
 
-The inner path-angle loop: γ̇* = sat((γ_ref − γ) / τ_γ, ±γ̇_max), τ_γ = 2 s. γ̇_max is twice the smallest rate that
-keeps an entry into the steepest descent class inside its tube: 2 × V·γ_lo² / (2ε), with γ_lo the lower edge of the
-steepest class and ε the narrowest level band of the grid. A level T is the height T + E MSL (D58); h is the height of
-the aircraft above E. The modes choose γ_ref (climbing positive):
+The executor design §7 gives the law (`autopilot/vertical.py`). The words give a class angle γ_k: the nominal angle
+of the descent class, the nominal angle of the climb class (D15), γ_GA for a climb while G is true (below), or 0 for the
+angle word "level". Unless "no level-off" is in force, the words also give a level T, flown at T + E MSL (D58); h is the
+height of the aircraft above E. T and h give the direction; the angle word gives the steepness. The goal angle
+(climbing positive):
 
-| Words in force | Mode | γ_ref |
-|---|---|---|
-| Level T + level | Hold | −(h − T) / (V·τ_h), τ_h = 4·τ_γ = 8 s; within the nominal angle of the steepest descent class and the climb angle (γ_GA while G is true) |
-| Level T + descent class | Descend to T | −nominal angle of the class; level-off starts at V·γ²/(2·γ̇_max) above T |
-| Level T + climb, G false | Climb to T | +nominal angle of the climb class (D15, D28); level-off as above |
-| Level T + climb, G true | Go-around climb to T | +γ_GA, the go-around angle (below); level-off as above |
-| "No level-off" + descent class | Descend | −nominal angle of the class; no level-off |
+| Words in force | Goal angle |
+|---|---|
+| The angle word "level" | 0. The executor does not fly to T: "level" is said only at the first step, and its T is the present height on the grid (executor design D5) |
+| "No level-off" + descent class | −γ_k. No level-off |
+| Level T + a class | −sign(h − T)·γ_k |
 
-A target that the executor has captured (its level-off started) stays captured until a new altitude word or angle word,
-so the mode does not change back and forth at the level.
+1. **Ramp.** A new altitude word or angle word starts a clock. The executor reaches the goal angle L_γ after it hears
+   the word and spreads the change over the time that is left (one cycle at least).
+2. **Stop (executor design D6).** Toward a level, the path angle is not more than the largest angle from which the
+   aircraft can still stop before T at its physical limits: a pull to min(n_max, n_stall), a push to n_min, with the
+   lag of the load factor and the cycle. A closed form gives this angle. Each approximation in it makes the stop
+   earlier, not later.
+3. **Captured.** A level whose stop has started, and the angle word "level", stays captured until a new altitude word
+   or angle word. The executor then flies −sign(h − T)·min(γ_k, γ_stop). While a level is captured, the closed-loop
+   reading starts no angle correction (§4.9).
+4. The inner loop flies γ̇* = (γ_target − γ) / Δt. The inverse solves the load factor for it, within its physical
+   limits. The loop has no path-rate limit of its own.
 
 **The go-around angle (D28).** γ_GA = min(3°, max(1.885°, γ_T)). γ_T is the steady climb angle at the thrust limit and
 the present airspeed: sin γ_T = (T_max − D) / (m·g), with the drag D of the present state at load factor 1 (the
@@ -938,10 +953,11 @@ V_ref = V_g / cos γ (ground speed to airspeed without wind), not below 1.10·V_
 changes at a_max, the largest acceleration of the speed envelope (§3.6, a value of the spec), and goes exponentially
 into the last 5 m/s. A speed word is a step of 5 m/s (D43), so the executor makes each step in a few seconds; the rate
 of a longer change comes from the words. Where the thrust limits cannot give a_max, the thrust limit binds (§5.3), and
-the replay counts it. "Unspecified" is the published approach speed of the type (an indicated airspeed at the maximum
-landing mass), scaled by √(m / maximum landing mass) to the mass of the aircraft and flown as the true airspeed at the
-present density. A flight on a stand-in's dynamics has the stand-in's mass, so it takes the published speed of its own
-type unscaled. The deceleration to it is the larger of a_U = 0.25 m/s² (a speed step of 5 m/s divided by the minimum
+the replay counts it. "Unspecified" is the middle of the evaluation's speed window (`evaluation.speed_gate`; executor
+design §8.1; the user, 2026-10-13), from the published approach speeds of the type flown (a stand-in's on a stand-in's
+dynamics, as the evaluation reads it): the lower edge V_REF,low·√(m / MALW)·√max(n, 1), the upper edge
+V_REF,high·√(m / MALW) + 20 kt, at the mass and the load factor now, flown as the true airspeed at the present
+density. The deceleration to it is the larger of a_U = 0.25 m/s² (a speed step of 5 m/s divided by the minimum
 hold of 20 s) and the rate that reaches it over the straight-line distance to the threshold of R, not more than a_max.
 While G is true, "unspecified" means the pilot's own speed in a missed approach: the executor holds the airspeed that
 the aircraft has at the go-around row (D27; Claude's reading, not checked in the regulation text). A speed word of the
@@ -1086,7 +1102,7 @@ fixed inputs, data by their flights.
 | Landing | the evaluation's verdict on the approach crossing: lateral within half the runway's width, height within ±22 m of LTP + TCH, speed within the flown type's window | D196 (`evaluation/metrics.py` `evaluate_record`) |
 | DA record | vertical ±22 m of the published glidepath; lateral inside the FAS cone at the DA distance; decides no outcome | D38, D196 (`evaluation/thresholds.py`; FAA Order 8260.58D Formula 3-1-1) |
 | Time limit | remaining observed time × 1.5, plus 900 s for each go-around | Fixed choice; the 900 s: the user, 2026-10-02 |
-| Closed-loop reading: tolerances | lateral Y = 30 m, vertical H = 15 m; while "no level-off" is in force lateral Y_final = 15 m, vertical H_final = 7.5 m; a correction starts on the error Δ/2 + L ahead and ends below half the tolerance in force, or at a change of sign, on the error Δ/2 + L/2 ahead; a change of sign beyond the tolerance says the opposite correction in the same row | D32, D53, D66, D197 |
+| Closed-loop reading: tolerances | lateral Y = 30 m, vertical H = 15 m; while "no level-off" is in force lateral Y_final = 15 m, vertical H_final = 7.5 m; a correction starts on the error Δ/2 + L ahead and ends where the error Δ/2 + L/2 ahead reaches zero or changes sign; a change of sign beyond the tolerance says the opposite correction in the same row | D32, D53, D66, D197 |
 | Closed-loop reading: correction | heading: one class (5°) toward the observed path; angle: the next descent class | D32 |
 | Closed-loop reading: observed words | at the first Δ row whose matched observed time is less than Δ/2 before the word's 2 s time (the Δ row nearest to its place; a tie: the later row); a heading word in the frame where it is heard | D42, D45, D46 |
 | Closed-loop reading past the end of the observed path | no correction (one in force ends); lateral error for the readouts, no vertical error | D44 |
@@ -1236,7 +1252,7 @@ One-off scripts, 2026-10-04; information, not a criterion (D7).
   approximately 290 s from 146 m/s to 105 m/s, the executor approximately 160 s. The flown aircraft is 4 km behind;
   after the turns it is 11 km to the side (`timeout`).
 - One correction class (5°) closes 6–9 m/s at a ground speed of 70–100 m/s: 2 km in 4–5 minutes. A new observed heading
-  word ends a correction (§4.9).
+  word ended a correction then (§4.9 before D199).
 - The 8 vertical failures of the DA check (select, 22–54 m above the glidepath at the DA point): in 3, the flown path is
   within 3 m of the observed path and the observed path is 19–23 m above the glidepath; in 3, the flown path is 9–16 m
   above the observed path and the observed path is 12–15 m above the glidepath; in 1, the flown path is 44 m above the
@@ -1342,10 +1358,10 @@ The code of this document (stage A). Line numbers are at `60bbc901` (A43) on `de
 | Columns; "go-around" in the runway column | `instructions/words.py:22` `COLUMNS`, `:26` `RUNWAY_GO_AROUND` |
 | Heading classes relative to the course of R; one test of "the same track" (D46, D48) | `instructions/words.py:79` `Words.heading_class`, `:83` `Words.heading_track_deg`, `:187` `same_track` |
 | The 40 levels, their bands ε (D52) | `instructions/words.py:46` `altitude_tolerances`, `:88` `Words.altitude_index`, `:107` `Words.altitude_tolerance_m` |
-| The vocabulary spec; the reading name | `instructions/spec.py:32` `READING_RULE`, `:49` `VocabularySpec` |
+| The vocabulary spec; the reading name | `instructions/spec.py:32` `READING_RULE`, `:50` `VocabularySpec` |
 | Grammar: rules 1–6 and the runway/G table written once; a row's check; a speaker's column mask (D62, D102) | `instructions/grammar.py:166` `_rules`, `:210` `apply`, `:246` `column_words`, `:255` `column_mask` |
 | Approaches; capture row per approach; heading words relative to the R of each row | `instructions/labeller/lateral.py:33` `Approach`, `:54` `capture_row`, `:72` `per_step_words`, `:106` `read_lateral` |
-| Level test by the piece's own median; held height above E; the go-around climb and the final descent before it (D26); tubes | `instructions/labeller/vertical.py:69` `vertical_pieces`, `:90` `held_height`, `:126` `climb_after`, `:137` `read_vertical`, `:240` `tube_bounds`, `:271` `tube_checks` |
+| Level test by the piece's own median; held height above E; the go-around climb and the final descent before it (D26); tubes | `instructions/labeller/vertical.py:90` `vertical_pieces`, `:113` `held_height`, `:149` `climb_after`, `:160` `read_vertical`, `:273` `tube_bounds`, `:313` `tube_checks` |
 | Speed words per approach; "unspecified" from the capture row | `instructions/labeller/speed.py:95` `read_speed` |
 | Go-around rule (R40's, on the rows) | `instructions/labeller/go_around.py:62` `low_passes`, `:109` `go_arounds` |
 | Landing cut, go-arounds in the gate, approaches, runway words (D19, D26) | `instructions/labeller/read.py:59` `ApproachReading`, `:127` `admit`, `:169` `flight_go_arounds`, `:186` `runway_again_rows`, `:220` `read_flight` |
@@ -1359,15 +1375,16 @@ The code of this document (stage A). Line numbers are at `60bbc901` (A43) on `de
 | Faults of an observed track (D111) | `instructions/faults.py:29` `JUMP_RATIO`, `:31` `AROUND_STEPS`, `:33` `REVERSAL_DEG`, `:45` `track_faults`, `:67` `faulty_flights` |
 | Heading law; conversion with the course of R ("go-around" changes no target, D27) | `autopilot/lateral.py:53` `word_rate`, `:140` `Lateral.word_error`, `:167` `Lateral.rate` |
 | Vertical modes; the go-around angle (D28) | `autopilot/vertical.py:50` `GO_AROUND_MIN_RAD`, `:55` `go_around_angle_rad`, `:89` `Vertical.rate` |
+| "Unspecified" is the middle of the evaluation's speed window, from the flown type (§5.6) | `autopilot/speed.py:41` `approach_speeds`, `:50` `unspecified_ias_mps`; `autopilot/replay.py:201` `flight_approach_speeds` |
 | "Unspecified" under G holds the go-around row's airspeed | `autopilot/speed.py:73` `Speed.hear_go_around`, `:78` `Speed.rate` |
-| The cycle; go-around time; the end of a flight where the judge ends it (D79); a copy of chosen flights | `autopilot/executor.py:61` `GO_AROUND_EXTRA_S`, `:81` `Executor`, `:145` `Executor.take`, `:198` `Executor.cycle` |
-| The single-flight executor (the same laws) | `autopilot/single.py:425` `SingleExecutor`, `:556` `fly` |
+| The cycle; go-around time; the end of a flight where the judge ends it (D79); a copy of chosen flights | `autopilot/executor.py:66` `GO_AROUND_EXTRA_S`, `:87` `Executor`, `:155` `Executor.take`, `:286` `Executor.cycle` |
+| The single-flight executor (the same laws) | `autopilot/single.py:455` `SingleExecutor`, `:624` `fly` |
 | The start rules (D77); a flight rebuilt and compared with its stored signals (§7.2 #4) | `autopilot/params.py:34` `START_RULES`, `:41` `ExecutorParams`; `autopilot/flights.py:94` `require_same_flight`, `:176` `start_state` |
 | R and G per row | `autopilot/sentence.py:62` `_filled` |
 | Outcomes, their order; the landing verdict (D196); the DA record (D38) on each candidate's vertical path (D61); no crossing is an event under G (D33) | `autopilot/judge.py:90` `OUTCOMES`, `:92` `EVENT_ORDER`, `:150` `decision_check`, `:173` `landing_verdict` (D38: `evaluation/thresholds.py` `RNAV_TERMINAL_VERTICAL_BOUND_M`, repository root), `:213` `_outcome`, `:338` `outcome_of`, `:352` `judge` |
-| Opening a spec, with the checks or without (D71, D73); a sentence on Δ; the flights drawn; the readout | `autopilot/replay.py:77` `sentence_on_interval`, `:87` `instructions_of`, `:145` `open_executor`, `:169` `open_spec`, `:181` `group_of`, `:232` `draw_flights`, `:307` `batch_of`, `:461` `summary`; `experiments/executor_replay.py:130` `readout_table` |
-| Closed-loop reading (D32): the matched point, the rows without a correction (D34), the record of D50, the tolerances in force (D66), the errors ahead (D197), the corrections (D53), the flight, its conformance, its replay | `autopilot/closed_loop.py:144` `ObservedPath`, `:224` `ObservedPath.rates`, `:238` `lateral_tolerance_m`, `:246` `vertical_tolerance_m`, `:254` `uncorrected_m`, `:272` `observed_tracks`, `:284` `outside_rows`, `:341` `Corrector`, `:369` `Corrector.row`, `:486` `read`, `:586` `read_chunked`, `:682` `check`, `:735` `require_conforming_closed_loop`, `:756` `replay_batch`; `experiments/instruction_closed_loop.py:142` `summarise`, `:248` `main`; `experiments/executor_replay.py:298` `closed_loop_columns` |
-| The start of a closed loop (D67, D80, D90, D97) | `autopilot/start.py:78` `Move`, `:94` `NO_MOVE`, `:147` `Loop`, `:203` `Loop.step`, `:248` `Loop.halt`, `:254` `Loop.copy`, `:298` `Loop.outcome`, `:427` `start`, `:438` `start_moved` |
+| Opening a spec, with the checks or without (D71, D73); a sentence on Δ; the flights drawn; the readout | `autopilot/replay.py:76` `sentence_on_interval`, `:86` `instructions_of`, `:144` `open_executor`, `:168` `open_spec`, `:180` `group_of`, `:230` `draw_flights`, `:305` `batch_of`, `:459` `summary`; `experiments/executor_replay.py:130` `readout_table` |
+| Closed-loop reading (D32): the matched point, the rows without a correction (D34), the record of D50, the tolerances in force (D66), the errors ahead (D197), the corrections (D53), the flight, its conformance, its replay | `autopilot/closed_loop.py:147` `ObservedPath`, `:227` `ObservedPath.rates`, `:241` `lateral_tolerance_m`, `:249` `vertical_tolerance_m`, `:257` `uncorrected_m`, `:277` `observed_tracks`, `:289` `outside_rows`, `:346` `Corrector`, `:374` `Corrector.row`, `:494` `read`, `:594` `read_chunked`, `:690` `check`, `:743` `require_conforming_closed_loop`, `:764` `replay_batch`; `experiments/instruction_closed_loop.py:142` `summarise`, `:248` `main`; `experiments/executor_replay.py:298` `closed_loop_columns` |
+| The start of a closed loop (D67, D80, D90, D97) | `autopilot/start.py:78` `Move`, `:94` `NO_MOVE`, `:147` `Loop`, `:204` `Loop.step`, `:249` `Loop.halt`, `:255` `Loop.copy`, `:299` `Loop.outcome`, `:428` `start`, `:439` `start_moved` |
 | Executor conformance (§7.2 #3); the behaviour check of D81 | `autopilot/conformance.py:81` `STATE_BOUND_M`, `:88` `MOVED_HORIZONTAL_BOUND_M`, `:203` `MOVED_PATH`, `:204` `MOVED_ORIGIN`, `:217` `fly_moved`, `:240` `MODES`, `:491` `check`, `:529` `require_conforming_executor` |
 | The backend's check of each answer (D73) | `aeroviz_backend/autopilot_segment/fly.py:106` `refuse_past_bound`, `:117` `apart_from_stored`; `errors.py:19` `ExecutorDiffers` (repository root) |
 | FAS cone; DA above the threshold | `flight_scenarios/fas_geometry.py:46` `fas_course_geometry`; `trajectory_data_process/harvest/airports.py:169` `decision_height_above_threshold_m` (repository root) |

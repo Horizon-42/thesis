@@ -1,7 +1,8 @@
 # Superseded decisions and passages: an index for review
 
 **What this file is.** The two-tier design documents hold the current design only. On 2026-10-12 they were rewritten in
-place to match the code of the branch `two-tier2-eval-landing` (commits `04378395`, `ea632d20`, `51a68b8e`). This file
+place to match the code of the branch `two-tier2-eval-landing` (commits `04378395`, `ea632d20`, `51a68b8e`), and on
+2026-10-13 again for commits `e00c8d08` and `d8f21c77`. This file
 keeps each text that the rewrite replaced, word for word, beside the text that replaced it, so that the user can compare
 them. It is not part of the design: no code and no design document cites it. An entry leaves this file when the user
 has reviewed it.
@@ -16,6 +17,15 @@ has reviewed it.
 3. The corrections read the errors ahead by the lead (vocabulary D197): "标注器是看提前量的吧？如果是 那就按1".
 4. Stage A's labelling reads its val days; the test days come at the end (outline D198): "在标注阶段，val可以读。我们要保证的
    是词表标注的上限足够高 test可以放在最后，用来验证整个标注的结果是不是可以泛化的。"
+5. A correction ends at the row with the smallest error left, aimed at the path, not under half the tolerance
+   (vocabulary D197; 2026-10-13): the user chose "改成偏差最小的那行撤回".
+6. "Unspecified" is the middle of the evaluation's speed window (executor design §8.1; 2026-10-13): "未指定速度 应该是一个
+   范围速度 在 v_ref*sqrt(n) 到 v_ref+20kt之间 为什么会在速度门下沿 它们应该是一致的啊", and then "飞中点". No extra
+   limit: "必须保证这个速度不会小于 stall 速度 不会大于最大速度 不过如果v_ref 本身已经保证了这一点 或者dynamic 模型本身会处理这一点
+   那么没必要加额外的限制或判定" (the stall floor of §8.1 holds; the window's upper edge is far below the flap and
+   structural limits).
+7. A near-level piece is a level, a vertical correction moves two classes far off the path, and a new observed heading
+   word does not stop a heading correction (vocabulary D199; 2026-10-13): the user chose "A + C + D1 都采用".
 
 The new decision rows (vocabulary D196, D197; outline D198) are new text, not replacements, so they are not entries
 below; the rewritten rows that cite them are.
@@ -32,7 +42,7 @@ below; the rewritten rows that cite them are.
 | 6 | `vocabulary.md` | D66 | D66 rewritten: Y_final = 15 m added, H_final 10 m → 7.5 m; the reason is the evaluation's verdict (D196) |
 | 7 | `vocabulary.md` | §0.3 the val days | §0.3: the val days are read in the labelling stage (outline D198) |
 | 8 | `vocabulary.md` | §0.4 item 3 | §0.4 item 3: the test days at the end (outline D198) |
-| 9 | `vocabulary.md` | §4.9 lateral and vertical correction | §4.9 lateral and vertical corrections: the tolerance in force (Y_final) and the start / end errors (D197) |
+| 9 | `vocabulary.md` | §4.9 lateral and vertical correction | §4.9 lateral and vertical corrections: the tolerance in force (Y_final) and the start / end errors (D197); a correction ends where the end error reaches zero, not under half the tolerance (the user, 2026-10-13) |
 | 10 | `vocabulary.md` | §4.9 vertical items 2–3 | §4.9 vertical items 2–3: the start / end errors (D197) |
 | 11 | `vocabulary.md` | §4.9 tolerances | §4.9 tolerances: Y_final 15 m, H_final 7.5 m; the reason is the evaluation's verdict (D196) |
 | 12 | `vocabulary.md` | §5.8 runway limit | §5.8: the runway limit tells only a crossing of another candidate (D196) |
@@ -50,6 +60,21 @@ below; the rewritten rows that cite them are.
 | 24 | `executor_first_principles.zh.md` | §10.2 待验证项, V14 pass condition | executor first principles V14: the pass condition reads H_final = 7.5 m (vocabulary D66) |
 | 25 | `vocabulary.md` | §5.8 the DA record, lateral | §5.8 DA record, lateral: the reason 'narrower than the closed loop's 30 m tolerance' removed (Y_final = 15 m is in force at the DA point, D66); the evaluation's lateral gate is read at the threshold (D196) |
 | 26 | `vocabulary.md` | §2 Terms, Judge | §2 Terms: a go-around answers an approach that would fail the landing verdict, not a failed DA check (D196) |
+| 27 | `vocabulary.md` | §4.9 item 2 (who is flown) | the approach speed a flight needs is the flown type's (the user, 2026-10-13) |
+| 28 | `vocabulary.md` | §5.2 what the executor reads | the executor reads the flown type's published speeds for the middle of the evaluation's window (the user, 2026-10-13) |
+| 29 | `vocabulary.md` | §5.6 speed law, "unspecified" | "unspecified" is the middle of the evaluation's speed window, from the flown type (the user, 2026-10-13) |
+| 30 | `vocabulary.md` | O22 | O22 closed: the executor reads the flown type's window, the one the evaluation grades (the user, 2026-10-13) |
+| 31 | `executor_first_principles.zh.md` | §0.2 I3 | I3: the flown type's published approach speeds (two flap configurations) and MALW |
+| 32 | `executor_first_principles.zh.md` | §8.1 目标速度 V* | "unspecified" = the middle of the evaluation's speed window, flown type, mass and n now (the user, 2026-10-13) |
+| 33 | `executor_first_principles.zh.md` | §8.2.2 目标表 | the table follows §8.1 |
+| 34 | `executor_first_principles.zh.md` | §10.2 V2 | V2 checks the middle against the lower edge (v15) |
+| 35 | `executor_first_principles.zh.md` | §13 与评分的关系 | the executor reads the evaluation's speed window, and no other number of it |
+| 36 | `vocabulary.md` | §5.5 Vertical law (the modes and the inner loop) | the vertical law as the executor of 2026-10-12 flies it (executor design §7, D5, D6): "level" flies 0° and does not fly to T, a ramp over L_γ, a physical stop and a captured hold; no τ_h, no γ̇_max. This text had not followed the executor |
+| 37 | `vocabulary.md` | §4.4 Pieces, item 1 (Level) | a near-level piece (within 0.5° of level, at least 20 s) is a level too (D199) |
+| 38 | `vocabulary.md` | §4.9 Lateral correction, items 1 and 3 | a new observed heading word neither ends nor stops a heading correction (D199) |
+| 39 | `vocabulary.md` | §4.9 Vertical correction, item 2 | a vertical correction moves two classes while its start error is more than 2 H (D199) |
+| 40 | `vocabulary.md` | §4.9 Tolerances (D32, D66) | the factor of the two-class step is a constant of the spec too |
+| 41 | `vocabulary.md` | §9.7, the item on one correction class | the rule this measurement ran under is marked as the rule before D199 |
 
 ## Text kept unchanged on purpose
 
@@ -196,7 +221,7 @@ below; the rewritten rows that cite them are.
 
 ### 9. `vocabulary.md`: §4.9 lateral and vertical correction
 
-**What changed:** §4.9 lateral and vertical corrections: the tolerance in force (Y_final) and the start / end errors (D197)
+**What changed:** §4.9 lateral and vertical corrections: the tolerance in force (Y_final) and the start / end errors (D197); a correction ends where the end error reaches zero, not under half the tolerance (the user, 2026-10-13)
 
 **Old text:**
 
@@ -223,16 +248,17 @@ changes now: ė_y is the flown velocity across the matched segment of the observ
 flown vertical rate minus the segment's slope times the flown velocity along it. The START ERROR is e + ė (Δ/2 + L): a
 word said now comes at the Δ row nearest the time at which it must be said, as an observed word does (D45). The END
 ERROR is e + ė (Δ/2 + L/2): the turn back to the observed word takes L, and in that time the aircraft moves half as far
-as at the rate now. At ė = 0 both are the error now.
+as at the rate now. A correction ends at the Δ row nearest the time at which the turn back leaves no error, the row
+where the end error is zero or has the other sign: the end aims at the observed path. At ė = 0 the start error is the
+error now.
 
 **Lateral correction.** The lateral tolerance in force is Y_final while "no level-off" is in force (the final descent)
 and Y elsewhere (D66). In the rules below, Y is the tolerance in force, e_y,on the start error and e_y,off the end error.
 
 1. When |e_y,on| > Y, and the row says no new observed heading word, the labeller says the heading class one step (5°)
    from the observed word in force, toward the observed path.
-2. When |e_y,off| < Y / 2, or e_y,off has the other sign, the labeller says the observed word in force again — except an
-   overshoot (D53): when e_y,off has the other sign and |e_y,off| > Y, it says the opposite correction in the same row
-   (item 1 toward the other side).
+2. When e_y,off is zero or has the other sign, the labeller says the observed word in force again — except an
+   overshoot (D53): when |e_y,off| > Y, it says the opposite correction in the same row (item 1 toward the other side).
 3. A new observed heading word ends a correction. The labeller says the observed word, and the comparison continues.
 
 **Vertical correction.** The vertical tolerance in force is H_final while "no level-off" is in force (the final
@@ -261,9 +287,9 @@ end error.
 2. When e_h,on > H (too high), the labeller says the next steeper descent class. When e_h,on < −H (too low), it says
    the next shallower descent class. From descent 4 there is no steeper class, and from descent 1 no shallower one: then
    there is no correction.
-3. When |e_h,off| < H / 2, or e_h,off has the other sign, the labeller says the observed angle class in force again —
-   except an overshoot (D53): when e_h,off has the other sign and |e_h,off| > H, it says the opposite correction in the
-   same row (item 2, where that class exists). A new observed altitude word or angle word ends a correction.
+3. When e_h,off is zero or has the other sign, the labeller says the observed angle class in force again — except an
+   overshoot (D53): when |e_h,off| > H, it says the opposite correction in the same row (item 2, where that class
+   exists). A new observed altitude word or angle word ends a correction.
 ```
 
 ### 11. `vocabulary.md`: §4.9 tolerances
@@ -418,7 +444,7 @@ every approach crossing beside the verdict; it decides no outcome (D196):
 **New text:**
 
 ```text
-| Closed-loop reading: tolerances | lateral Y = 30 m, vertical H = 15 m; while "no level-off" is in force lateral Y_final = 15 m, vertical H_final = 7.5 m; a correction starts on the error Δ/2 + L ahead and ends below half the tolerance in force, or at a change of sign, on the error Δ/2 + L/2 ahead; a change of sign beyond the tolerance says the opposite correction in the same row | D32, D53, D66, D197 |
+| Closed-loop reading: tolerances | lateral Y = 30 m, vertical H = 15 m; while "no level-off" is in force lateral Y_final = 15 m, vertical H_final = 7.5 m; a correction starts on the error Δ/2 + L ahead and ends where the error Δ/2 + L/2 ahead reaches zero or changes sign; a change of sign beyond the tolerance says the opposite correction in the same row | D32, D53, D66, D197 |
 ```
 
 ### 19. `outline.md`: D85
@@ -559,4 +585,335 @@ A go-around before the DA point answers a failed DA check.
 
 ```text
 A go-around before the DA point answers an approach that would fail the landing verdict (D196).
+```
+
+### 27. `vocabulary.md`: §4.9 item 2 (who is flown)
+
+**What changed:** the approach speed a flight needs is the flown type's (the user, 2026-10-13)
+
+**Old text:**
+
+```text
+   `group_of`). A flight that the replay does not fly (no identified type, no aircraft dynamics, or no published
+   approach speed) gives no training sentence.
+```
+
+**New text:**
+
+```text
+   `group_of`). A flight that the replay does not fly (no identified type, no aircraft dynamics, or no published
+   approach speed of the type it is flown on) gives no training sentence.
+```
+
+### 28. `vocabulary.md`: §5.2 what the executor reads
+
+**What changed:** the executor reads the flown type's published speeds for the middle of the evaluation's window (the user, 2026-10-13)
+
+**Old text:**
+
+```text
+| The aircraft: aerodynamic data, installed thrust, published maximum landing mass, published approach speed | Dynamics and "unspecified" speed |
+```
+
+**New text:**
+
+```text
+| The aircraft flown: aerodynamic data, installed thrust, published maximum landing mass, published approach speeds | Dynamics and "unspecified" speed (the middle of the evaluation's speed window, §5.6) |
+```
+
+### 29. `vocabulary.md`: §5.6 speed law, "unspecified"
+
+**What changed:** "unspecified" is the middle of the evaluation's speed window, from the flown type (the user, 2026-10-13)
+
+**Old text:**
+
+```text
+the replay counts it. "Unspecified" is the published approach speed of the type (an indicated airspeed at the maximum
+landing mass), scaled by √(m / maximum landing mass) to the mass of the aircraft and flown as the true airspeed at the
+present density. A flight on a stand-in's dynamics has the stand-in's mass, so it takes the published speed of its own
+type unscaled.
+```
+
+**New text:**
+
+```text
+the replay counts it. "Unspecified" is the middle of the evaluation's speed window (`evaluation.speed_gate`; executor
+design §8.1; the user, 2026-10-13), from the published approach speeds of the type flown (a stand-in's on a stand-in's
+dynamics, as the evaluation reads it): the lower edge V_REF,low·√(m / MALW)·√max(n, 1), the upper edge
+V_REF,high·√(m / MALW) + 20 kt, at the mass and the load factor now, flown as the true airspeed at the present
+density.
+```
+
+### 30. `vocabulary.md`: O22
+
+**What changed:** O22 closed: the executor reads the flown type's window, the one the evaluation grades (the user, 2026-10-13)
+
+**Old text:**
+
+```text
+| O22 | A flight on a stand-in's dynamics flies the identified type's approach speed, but the evaluation's speed gate reads the flown stand-in's window (v13 replay sample, train, Δ = 2 s: 23 of 98 stand-in flights fail the speed gate) | The user's choice: the speed gate on the identified type, or the stand-in's own approach speed | 5.8 |
+```
+
+**New text:**
+
+(deleted)
+
+### 31. `executor_first_principles.zh.md`: §0.2 I3
+
+**What changed:** I3: the flown type's published approach speeds (two flap configurations) and MALW
+
+**Old text:**
+
+```text
+| I3 | 机体数据 | 气动参数、安装推力、型号的进近速度 |
+```
+
+**New text:**
+
+```text
+| I3 | 机体数据 | 所飞机型的气动参数、安装推力、公布的进近速度（低、高两种襟翼形态）与最大着陆重量 |
+```
+
+### 32. `executor_first_principles.zh.md`: §8.1 目标速度 V*
+
+**What changed:** "unspecified" = the middle of the evaluation's speed window, flown type, mass and n now (the user, 2026-10-13)
+
+**Old text:**
+
+```text
+| "unspecified" | max(V_REF · √max(n,1) · √(ρ_0/ρ)，V_stall(n)) |
+| "unspecified" 且复飞状态 G | 听到复飞时的空速，保持不变 |
+
+- V_REF：型号公布的进近速度（指示空速），按 √(m / MALW) 缩放。乘 √(ρ_0/ρ) 换成真实空速。
+- √n 的依据：失速速度与 √n 成正比。V_REF 是 1 g 的参考速度。这是物理，不是设定值。
+- V_stall(n)：失速速度，物理极限。本设计不加裕度。
+```
+
+**New text:**
+
+```text
+| "unspecified" | max(V_U · √(ρ_0/ρ)，V_stall(n)) |
+| "unspecified" 且复飞状态 G | 听到复飞时的空速，保持不变 |
+
+- V_U：评分速度窗口的中点（`evaluation.speed_gate`；用户 2026-10-13："它们应该是一致的"）。V_U = (V_下 + V_上) / 2，
+  V_下 = V_REF,低 · √(m / MALW) · √max(n,1)，V_上 = V_REF,高 · √(m / MALW) + 20 节。m 是当前质量，n 是当前载荷系数。
+  乘 √(ρ_0/ρ) 换成真实空速。
+- V_REF,低、V_REF,高：所飞机型公布的进近速度（指示空速，最大着陆重量下），低、高两种襟翼形态；只公布一个值的机型两者相同
+  （193 种里 183 种）。替身动力学的航班用替身机型的速度和质量：评分读的也是它。
+- √n 的依据：失速速度与 √n 成正比。V_REF 是 1 g 的参考速度。这是物理，不是设定值。
+- 为什么取中点：下沿 V_REF·√n 是窗口的边。以下沿为目标时，入口处一点坡度（√n 抬高下沿）、质量的变化或 0.1 m/s 的波动
+  就出窗（v15 回放：速度失败 83 % 差不到 0.5 m/s）。中点两侧各留约 10 节。
+- V_stall(n)：失速速度，物理极限。本设计不加裕度。V_U 在窗口两沿之间，上沿 V_REF + 20 节是稳定进近的上限，远低于襟翼
+  限速和 VMO；动力学没有 VMO，上限只有推力范围。
+```
+
+### 33. `executor_first_principles.zh.md`: §8.2.2 目标表
+
+**What changed:** the table follows §8.1
+
+**Old text:**
+
+```text
+| "unspecified" | max(V_REF·√max(n,1)·√(ρ_0/ρ)，V_stall(n)) |
+```
+
+**New text:**
+
+```text
+| "unspecified" | max(V_U·√(ρ_0/ρ)，V_stall(n))（§8.1） |
+```
+
+### 34. `executor_first_principles.zh.md`: §10.2 V2
+
+**What changed:** V2 checks the middle against the lower edge (v15)
+
+**Old text:**
+
+```text
+| V2 | "unspecified" 目标 V_REF·√n，不加余量 | 速度门失败数 | 失败数不高于加 2 m/s 的版本 |
+```
+
+**New text:**
+
+```text
+| V2 | "unspecified" 目标为评分速度窗口的中点（§8.1） | 速度门失败数（闭环与回放） | 失败数低于以下沿为目标的版本（v15） |
+```
+
+### 35. `executor_first_principles.zh.md`: §13 与评分的关系
+
+**What changed:** the executor reads the evaluation's speed window, and no other number of it
+
+**Old text:**
+
+```text
+执行器不读评分模块的数。管子半宽 ε 也只用于验收（§7.1）。
+
+**说明：** "unspecified" 的目标用 V_REF·√n。评分窗口的下沿也是这个值。这是同一个物理公式的两次使用。执行器不读窗口的上沿（V_REF + 20 节）。
+```
+
+**New text:**
+
+```text
+执行器只读评分模块的一样东西：速度窗口（`evaluation.speed_gate` 的下沿公式和上沿的 20 节）。"unspecified" 的目标是它的
+中点（§8.1，用户 2026-10-13）。其余的评分数不读。管子半宽 ε 也只用于验收（§7.1）。
+```
+
+### 36. `vocabulary.md`: §5.5 Vertical law (the modes and the inner loop)
+
+**What changed:** the vertical law as the executor of 2026-10-12 flies it (executor design §7, D5, D6): "level" flies 0° and does not fly to T, a ramp over L_γ, a physical stop and a captured hold; no τ_h, no γ̇_max. This text had not followed the executor
+
+**Old text:**
+
+```text
+The inner path-angle loop: γ̇* = sat((γ_ref − γ) / τ_γ, ±γ̇_max), τ_γ = 2 s. γ̇_max is twice the smallest rate that
+keeps an entry into the steepest descent class inside its tube: 2 × V·γ_lo² / (2ε), with γ_lo the lower edge of the
+steepest class and ε the narrowest level band of the grid. A level T is the height T + E MSL (D58); h is the height of
+the aircraft above E. The modes choose γ_ref (climbing positive):
+
+| Words in force | Mode | γ_ref |
+|---|---|---|
+| Level T + level | Hold | −(h − T) / (V·τ_h), τ_h = 4·τ_γ = 8 s; within the nominal angle of the steepest descent class and the climb angle (γ_GA while G is true) |
+| Level T + descent class | Descend to T | −nominal angle of the class; level-off starts at V·γ²/(2·γ̇_max) above T |
+| Level T + climb, G false | Climb to T | +nominal angle of the climb class (D15, D28); level-off as above |
+| Level T + climb, G true | Go-around climb to T | +γ_GA, the go-around angle (below); level-off as above |
+| "No level-off" + descent class | Descend | −nominal angle of the class; no level-off |
+
+A target that the executor has captured (its level-off started) stays captured until a new altitude word or angle word,
+so the mode does not change back and forth at the level.
+```
+
+**New text:**
+
+```text
+The executor design §7 gives the law (`autopilot/vertical.py`). The words give a class angle γ_k: the nominal angle
+of the descent class, the nominal angle of the climb class (D15), γ_GA for a climb while G is true (below), or 0 for the
+angle word "level". Unless "no level-off" is in force, the words also give a level T, flown at T + E MSL (D58); h is the
+height of the aircraft above E. T and h give the direction; the angle word gives the steepness. The goal angle
+(climbing positive):
+
+| Words in force | Goal angle |
+|---|---|
+| The angle word "level" | 0. The executor does not fly to T: "level" is said only at the first step, and its T is the present height on the grid (executor design D5) |
+| "No level-off" + descent class | −γ_k. No level-off |
+| Level T + a class | −sign(h − T)·γ_k |
+
+1. **Ramp.** A new altitude word or angle word starts a clock. The executor reaches the goal angle L_γ after it hears
+   the word and spreads the change over the time that is left (one cycle at least).
+2. **Stop (executor design D6).** Toward a level, the path angle is not more than the largest angle from which the
+   aircraft can still stop before T at its physical limits: a pull to min(n_max, n_stall), a push to n_min, with the
+   lag of the load factor and the cycle. A closed form gives this angle. Each approximation in it makes the stop
+   earlier, not later.
+3. **Captured.** A level whose stop has started, and the angle word "level", stays captured until a new altitude word
+   or angle word. The executor then flies −sign(h − T)·min(γ_k, γ_stop). While a level is captured, the closed-loop
+   reading starts no angle correction (§4.9).
+4. The inner loop flies γ̇* = (γ_target − γ) / Δt. The inverse solves the load factor for it, within its physical
+   limits. The loop has no path-rate limit of its own.
+```
+
+### 37. `vocabulary.md`: §4.4 Pieces, item 1 (Level)
+
+**What changed:** a near-level piece (within 0.5° of level, at least 20 s) is a level too (D199)
+
+**Old text:**
+
+```text
+1. **Level.** A piece is level when it lasts at least 20 s and every row is within 25 m of the piece's own median. This
+   test is physical and does not use the grid: a test against the 60–450 m steps would miss a level between two grid
+   levels (a level at 630 m is 30 m from both neighbours) or take a slow descent for a level. The word of a level is the
+   grid level nearest to its median. Consecutive level pieces with the same word are one level.
+```
+
+**New text:**
+
+```text
+1. **Level.** A piece is level when it lasts at least 20 s and every row is within 25 m of the piece's own median, or
+   when its path angle is within 0.5° of level (D199). This test is physical and does not use the grid: a test against
+   the 60–450 m steps would miss a level between two grid levels (a level at 630 m is 30 m from both neighbours) or take
+   a slow descent for a level. The angle test reads a near-level piece as a level, not as a descent of class 1 (nominal
+   1.5°). The word of a level is the grid level nearest to its median. Consecutive level pieces with the same word are
+   one level.
+```
+
+### 38. `vocabulary.md`: §4.9 Lateral correction, items 1 and 3
+
+**What changed:** a new observed heading word neither ends nor stops a heading correction (D199)
+
+**Old text:**
+
+```text
+1. When |e_y,on| > Y, and the row says no new observed heading word, the labeller says the heading class one step (5°)
+   from the observed word in force, toward the observed path.
+2. When e_y,off is zero or has the other sign, the labeller says the observed word in force again — except an
+   overshoot (D53): when |e_y,off| > Y, it says the opposite correction in the same row (item 1 toward the other side).
+3. A new observed heading word ends a correction. The labeller says the observed word, and the comparison continues.
+```
+
+**New text:**
+
+```text
+1. When |e_y,on| > Y, the labeller says the heading class one step (5°) from the observed word in force, toward the
+   observed path.
+2. When e_y,off is zero or has the other sign, the labeller says the observed word in force again — except an
+   overshoot (D53): when |e_y,off| > Y, it says the opposite correction in the same row (item 1 toward the other side).
+3. A new observed heading word does not end a correction and does not stop one from starting (D199). While a
+   correction is in force, the row says the new observed word one class toward the observed path, and this word is a
+   correction. When the correction ends at that row, the row says the new observed word.
+```
+
+### 39. `vocabulary.md`: §4.9 Vertical correction, item 2
+
+**What changed:** a vertical correction moves two classes while its start error is more than 2 H (D199)
+
+**Old text:**
+
+```text
+2. When e_h,on > H (too high), the labeller says the next steeper descent class. When e_h,on < −H (too low), it says
+   the next shallower descent class. From descent 4 there is no steeper class, and from descent 1 no shallower one: then
+   there is no correction.
+```
+
+**New text:**
+
+```text
+2. When e_h,on > H (too high), the labeller says the next steeper descent class. When e_h,on < −H (too low), it says
+   the next shallower descent class. From descent 4 there is no steeper class, and from descent 1 no shallower one: then
+   there is no correction. While a correction is in force and its start error on the side it answers is more than 2 H,
+   the labeller says the class two steps from the observed class, where that class exists; when the start error is
+   within 2 H again, one step (D199).
+```
+
+### 40. `vocabulary.md`: §4.9 Tolerances (D32, D66)
+
+**What changed:** the factor of the two-class step is a constant of the spec too
+
+**Old text:**
+
+```text
+**Tolerances (D32, D66).** Y = 30 m, H = 15 m, Y_final = 15 m and H_final = 7.5 m, constants of the labeller in the
+spec.
+```
+
+**New text:**
+
+```text
+**Tolerances (D32, D66).** Y = 30 m, H = 15 m, Y_final = 15 m and H_final = 7.5 m, and the factor 2 of the two-class
+step (D199), constants of the labeller in the spec.
+```
+
+### 41. `vocabulary.md`: §9.7, the item on one correction class
+
+**What changed:** the rule this measurement ran under is marked as the rule before D199
+
+**Old text:**
+
+```text
+- One correction class (5°) closes 6–9 m/s at a ground speed of 70–100 m/s: 2 km in 4–5 minutes. A new observed heading
+  word ends a correction (§4.9).
+```
+
+**New text:**
+
+```text
+- One correction class (5°) closes 6–9 m/s at a ground speed of 70–100 m/s: 2 km in 4–5 minutes. A new observed heading
+  word ended a correction then (§4.9 before D199).
 ```
