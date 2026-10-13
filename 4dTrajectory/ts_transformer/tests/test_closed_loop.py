@@ -195,15 +195,26 @@ def test_a_heading_correction_is_one_class_toward_the_path_and_ends_where_the_er
     assert heading(9, -20.0) == (UNCHANGED, False)               # in force
 
 
-def test_a_new_observed_heading_word_ends_a_correction():
+def test_a_new_observed_heading_word_does_not_stop_a_correction():
+    """§4.9 (the user, 2026-10-13): a new observed heading word neither ends a heading correction nor stops one from
+    starting. While a correction is in force, the row says the new word one class toward the path, and that word is a
+    correction; where the correction ends at that row, the row says the new word itself."""
     words = Words(spec())
-    corrector = Corrector(_grid([_first(words), {}, {HEADING: 2}, {}]), 0, 0, 1, words, [90.0])
+    corrector = Corrector(_grid([_first(words), {}, {HEADING: 2}, {}, {HEADING: 4}]), 0, 0, 1, words, [90.0])
     corrector.row(0, 0.0, 0.0, 900.0, holding=False, past_end=False, rates_mps=STILL)
-    assert int(corrector.row(1, 50.0, 0.0, 900.0, holding=False, past_end=False, rates_mps=STILL)[0][HEADING]) == words.n_heading - 1
-    said, added = corrector.row(2, 50.0, 0.0, 900.0, holding=False, past_end=False, rates_mps=STILL)            # the observed word, not a correction
-    assert int(said[HEADING]) == 2 and not added[HEADING]
-    said, added = corrector.row(3, 50.0, 0.0, 900.0, holding=False, past_end=False, rates_mps=STILL)            # a correction from the new word
-    assert int(said[HEADING]) == 1 and added[HEADING]
+
+    def heading(k, lateral):
+        said, added = corrector.row(k, lateral, 0.0, 900.0, holding=False, past_end=False, rates_mps=STILL)
+        return int(said[HEADING]), bool(added[HEADING]), bool(corrector.uncorrectable[0])
+
+    assert heading(1, 50.0) == (words.n_heading - 1, True, False)
+    assert heading(2, 50.0) == (1, True, False)                  # the new word 2, one class to the left: a correction
+    assert heading(3, 50.0) == (UNCHANGED, False, False)         # in force
+    assert heading(4, 0.0) == (4, False, False)                  # ended at the new word 4: the observed word
+    starts = Corrector(_grid([_first(words), {HEADING: 2}, {}]), 0, 0, 1, words, [90.0])
+    starts.row(0, 0.0, 0.0, 900.0, holding=False, past_end=False, rates_mps=STILL)
+    said, added = starts.row(1, 40.0, 0.0, 900.0, holding=False, past_end=False, rates_mps=STILL)
+    assert int(said[HEADING]) == 1 and added[HEADING] and not starts.uncorrectable[0]   # starts at the new word
 
 
 def test_an_angle_correction_on_a_final_descent_and_none_on_a_level_a_climb_or_beyond_the_classes():
@@ -225,6 +236,8 @@ def test_an_angle_correction_on_a_final_descent_and_none_on_a_level_a_climb_or_b
     assert angle(7, 3.0) == (3, True)                            # the other sign, within H: the observed class
     assert angle(8, 20.0) == (4, True)
     assert angle(9, -20.0) == (2, True)                          # an overshoot beyond H: the shallower class at once (D53)
+    assert 20.0 < words.spec.closed_loop_two_class_factor * float(closed_loop.vertical_tolerance_m(
+        words, words.altitude_no_level_off))                     # every error above: one class
     level = Corrector(_grid([_first(words), *[{}] * 3]), 0, 0, 1, words, [90.0])
     level.row(0, 0.0, 0.0, 900.0, holding=False, past_end=False, rates_mps=STILL)
     assert int(level.row(1, 0.0, 60.0, 960.0, holding=False, past_end=False, rates_mps=STILL)[0][ANGLE]) == UNCHANGED            # a level hold: none
@@ -237,7 +250,7 @@ def test_an_angle_correction_on_a_final_descent_and_none_on_a_level_a_climb_or_b
     shallowest = Corrector(_grid([_first(words, 600.0, 1), *[{}] * 3]), 0, 0, 1, words, [90.0])
     shallowest.row(0, 0.0, 0.0, 900.0, holding=False, past_end=False, rates_mps=STILL)
     assert int(shallowest.row(1, 0.0, -60.0, 900.0, holding=False, past_end=False, rates_mps=STILL)[0][ANGLE]) == UNCHANGED     # none shallower than descent 1
-    assert int(shallowest.row(2, 0.0, 60.0, 900.0, holding=False, past_end=False, rates_mps=STILL)[0][ANGLE]) == 2
+    assert int(shallowest.row(2, 0.0, 60.0, 900.0, holding=False, past_end=False, rates_mps=STILL)[0][ANGLE]) == 3      # beyond 2 H: two classes
     said, added = shallowest.row(3, 0.0, -60.0, 900.0, holding=False, past_end=False, rates_mps=STILL)   # an overshoot with no class beyond
     assert int(said[ANGLE]) == 1 and added[ANGLE]                                         # descent 1: the observed class
 
@@ -349,6 +362,26 @@ def test_a_heading_correction_starts_on_the_error_half_a_row_and_a_lead_ahead_an
     assert heading(every_8s, 16.0, -10.0, -5.0) == (right, True)    # 10 m left, opening: 50 m left 8 s ahead
 
 
+def test_an_angle_correction_moves_two_classes_while_the_error_ahead_is_beyond_the_factor():
+    """§4.9 (the user, 2026-10-13): while the error ahead on the side a correction answers is more than
+    `closed_loop_two_class_factor` × the vertical tolerance in force, the correction is two classes where that class
+    exists; one class once it is within, the observed class where it reaches zero."""
+    words = Words(spec())
+    far = words.spec.closed_loop_two_class_factor * float(closed_loop.vertical_tolerance_m(words,
+                                                                                            words.altitude_no_level_off))
+
+    def angles(observed_class, errors):
+        corrector = Corrector(_grid([_first(words), {ALTITUDE: words.altitude_no_level_off, ANGLE: observed_class},
+                                     *[{}] * len(errors)]), 0, 0, 1, words, [90.0])
+        corrector.row(0, 0.0, 0.0, 900.0, holding=False, past_end=False, rates_mps=STILL)
+        corrector.row(1, 0.0, 0.0, 900.0, holding=False, past_end=False, rates_mps=STILL)
+        return [int(corrector.row(k, 0.0, error, 800.0, holding=False, past_end=False, rates_mps=STILL)[0][ANGLE])
+                for k, error in enumerate(errors, 2)]
+
+    assert angles(1, [far + 5.0, far - 5.0, far + 5.0, 0.0]) == [3, 2, 3, 1]       # too high: two, one, two, observed
+    assert angles(3, [-(far + 5.0), 0.0, far + 5.0]) == [1, 3, 4]                   # too low: two; no class 5: one
+
+
 def test_an_angle_correction_reads_the_height_error_ahead_by_half_a_row_and_the_angle_lead():
     """THE LEAD for the angle words: L_γ in place of L (Δ = 2 s, L_γ = 2 s, L = 4 s: 3 s and 2 s ahead; H = 15 m). The
     vertical marker of a row without a correction (D34) reads the start error too."""
@@ -444,9 +477,8 @@ def test_a_flight_whose_words_leave_an_offset_is_brought_back_by_heading_correct
     observed_held = closed_loop.in_force(reading)[sentence.withheld.observed_row, HEADING]
     steps = (in_force.astype(int) - observed_held.astype(int)) % words.n_heading
     assert set(steps.tolist()) <= {0, 1, words.n_heading - 1}  # at most one class from the observed word
-    # inside a turn every row says a new observed word, which ends a correction (§4.9): the offset the turns leave is
-    # taken out on the straight legs after them, and the final is flown within the tolerance
-    assert np.abs(sentence.withheld.lateral_m).max() > words.spec.closed_loop_lateral_m
+    # a correction goes on through a turn's new observed words (§4.9, the user, 2026-10-13), and the final is flown
+    # within the tolerance
     assert np.abs(sentence.withheld.lateral_m[-len(sentence.withheld.lateral_m) // 4:]).max() < words.spec.closed_loop_lateral_m
 
 
@@ -625,7 +657,7 @@ def test_the_runner_counts_the_flights_without_a_sentence_by_reason():
     refuses give no training sentence, each counted by its reason."""
     from ts_transformer.experiments.instruction_closed_loop import merge_tallies, summarise, tally
 
-    batch, inputs, words = _batch()
+    batch, inputs, words = _batch(4.0)          # at Δ = 4 s the flown path leaves the tolerance on correctable rows
     batch = replace(batch, refused_seen=Counter({"too short": 1}))
     (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
     lateness = closed_loop.heading_lateness_rows(sentence, batch.readings[0].words[batch.sentences[0].first_row:]) * 2.0
@@ -663,7 +695,7 @@ def test_the_rule_of_d50_reads_the_direction_of_the_correction_in_force():
     outside whose error closes fast has none: the rule breaks on some outside rows, not on all. Taken away
     (the observed words alone), the rule breaks on exactly the rows that were outside; turned away from the path, too —
     a word that only cancels a correction, or one on the wrong side, answers nothing."""
-    batch, inputs, words = _batch()
+    batch, inputs, words = _batch(4.0)          # at Δ = 4 s the flown path leaves the tolerance on correctable rows
     (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
     correctable, outside, breaks = _outside(batch, sentence, words)["lateral"]
     assert outside.any() and breaks.sum() < outside.sum()
@@ -911,6 +943,22 @@ def test_read_chunked_puts_each_result_in_its_place(monkeypatch):
             assert result.withheld.outcome == alone.withheld.outcome
 
 
+def test_the_lateness_reads_the_new_observed_heading_words_said_under_a_correction():
+    """A12, D199: a new observed heading word said while a heading correction is in force (one class toward the path, a
+    correction) is still an observed word heard at its row: the lateness reads it."""
+    batch, inputs, words = _batch()
+    (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
+    observed = batch.readings[0].words[batch.sentences[0].first_row:]
+    rows = np.arange(len(observed))
+    heard = np.maximum.accumulate(np.where(observed[:, HEADING] != UNCHANGED, rows, 0))[sentence.withheld.observed_row]
+    passes = np.r_[False, np.diff(heard) != 0] & (sentence.rows.grid[:, HEADING] != UNCHANGED)
+    corrected = passes & sentence.rows.correction[:, HEADING]
+    assert corrected.any() and (passes & ~corrected).any()
+    lateness = closed_loop.heading_lateness_rows(sentence, observed)
+    assert len(lateness) == int(passes.sum())
+    assert np.array_equal(lateness, sentence.withheld.matched_row[passes] - heard[passes])
+
+
 def test_the_rows_without_a_correction_are_marked_for_the_ablation():
     """D34: the rows where §4.9 makes no correction — the first predicted step, a new observed word, a level hold, a climb,
     no class beyond — are marked per column, and each flight's largest error on them is read."""
@@ -919,7 +967,7 @@ def test_the_rows_without_a_correction_are_marked_for_the_ablation():
     corrector.row(0, 0.0, 0.0, 900.0, holding=False, past_end=False, rates_mps=STILL)
     assert corrector.uncorrectable.tolist() == [True, True]                  # the first predicted step
     corrector.row(1, 40.0, 30.0, 900.0, holding=False, past_end=False, rates_mps=STILL)
-    assert corrector.uncorrectable.tolist() == [True, True]                  # a new heading word; no class steeper
+    assert corrector.uncorrectable.tolist() == [False, True]                 # a new heading word, corrected; no class steeper
     corrector.row(2, 40.0, -30.0, 900.0, holding=False, past_end=False, rates_mps=STILL)
     assert corrector.uncorrectable.tolist() == [False, False]                # both corrected
     corrector.row(3, 40.0, -30.0, 600.0, holding=True, past_end=False, rates_mps=STILL)
@@ -1027,7 +1075,7 @@ def test_the_observed_words_wait_while_the_flown_aircraft_is_behind():
     said, added = corrector.row(0, 50.0, 0.0, 900.0, holding=False, past_end=False, rates_mps=STILL)            # behind, and 50 m right: corrected
     assert int(said[HEADING]) == words.n_heading - 1 and added[HEADING]
     said, added = corrector.row(1, 50.0, 0.0, 900.0, holding=False, past_end=False, rates_mps=STILL)            # the word, where it was heard
-    assert int(said[HEADING]) == 2 and not added[HEADING] and corrector.observed_row == 1
+    assert int(said[HEADING]) == 1 and added[HEADING] and corrector.observed_row == 1     # one class left: the correction goes on
     corrector.row(3, 0.0, 0.0, 900.0, holding=False, past_end=False, rates_mps=STILL)
     said, _ = corrector.row(2, 0.0, 0.0, 900.0, holding=False, past_end=False, rates_mps=STILL)                 # a matched point back: no row twice
     assert (said == UNCHANGED).all() and corrector.observed_row == 3
@@ -1038,9 +1086,9 @@ def test_a_flown_aircraft_ahead_passes_two_observed_rows_in_one_and_hears_the_la
     corrector = Corrector(_grid([_first(words), {HEADING: 2, SPEED: words.speed_index(80.0)}, {HEADING: 4}, {}]), 0, 0,
                           1, words, [90.0])
     corrector.row(0, 0.0, 0.0, 900.0, holding=False, past_end=False, rates_mps=STILL)
-    said, added = corrector.row(2, 50.0, 0.0, 900.0, holding=False, past_end=False, rates_mps=STILL)
+    said, added = corrector.row(2, 0.0, 0.0, 900.0, holding=False, past_end=False, rates_mps=STILL)
     assert int(said[HEADING]) == 4 and int(said[SPEED]) == words.speed_index(80.0) and not added.any()
-    assert corrector.observed_row == 2 and corrector.uncorrectable[0]          # a new observed heading word: no correction
+    assert corrector.observed_row == 2
     said, _ = corrector.row(2, 0.0, 0.0, 900.0, holding=False, past_end=False, rates_mps=STILL)                 # nothing new
     assert (said == UNCHANGED).all()
 

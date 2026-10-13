@@ -61,6 +61,9 @@ SUGGESTED: dict[str, Any] = {
     "level_min_s": 20.0,
     # §4.4: a level is a piece whose rows stay within this of its own median (the instruction-v3 band, 25 m)
     "level_band_m": 25.0,
+    # §4.4: or a piece whose path angle is within this of level (the user, 2026-10-13: option A of the in-memory readout
+    # `outputs/POOLED/analyses/landing_options_20261013`)
+    "level_angle_deg": 0.5,
     "climb_angle_max_deg": 15.0,
     "ground_speed_floor_mps": 15.0,
     "ground_speed_ceiling_mps": 350.0,
@@ -89,6 +92,9 @@ SUGGESTED: dict[str, Any] = {
     # the closed-loop reading's tolerances (vocabulary §4.9, D32: the user, 2026-10-03)
     "closed_loop_lateral_m": 30.0,
     "closed_loop_vertical_m": 15.0,
+    # §4.9: an angle correction moves two classes while the error ahead is more than this many vertical tolerances
+    # (the user, 2026-10-13: option C of the same readout)
+    "closed_loop_two_class_factor": 2.0,
 }
 SUGGESTED["heading_tolerance_deg"] = SUGGESTED["heading_step_deg"] / 2 + HEADING_WANDER_ALLOWANCE_DEG
 #: Descent classes: how many, and the outer edges (a slightly negative floor so a flat stretch

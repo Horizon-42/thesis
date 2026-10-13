@@ -58,16 +58,17 @@ no error, the row where e_off reaches zero or has the other sign (the user, 2026
 not at a part of the tolerance). With ė = 0 a correction starts on the error now (Claude's reading of the user's
 choice; vocabulary §4.9 states the errors without the lead):
 
-- lateral: when |e_y,on| > Y and the row says no new observed heading word, the heading class one step (5°)
-  from the observed word in force, toward the path; the observed word again when e_y,off is zero or has the other
-  sign — except an OVERSHOOT (D53): e_y,off has the other sign beyond Y, and the opposite correction is said in the
-  same row; a
-  new observed heading word ends a correction (it is said, and the comparison goes on from the next row); a heading
-  correction in force where "no level-off" is said goes on against the tolerance in force at each row;
+- lateral: when |e_y,on| > Y, the heading class one step (5°) from the observed word in force, toward the path; the
+  observed word again when e_y,off is zero or has the other sign — except an OVERSHOOT (D53): e_y,off has the other
+  sign beyond Y, and the opposite correction is said in the same row. A new observed heading word does not stop a
+  correction (the user, 2026-10-13): while one is in force, the row says the new word one class toward the path, and
+  that word is a correction; a heading correction in force where "no level-off" is said goes on against the tolerance
+  in force at each row;
 - vertical: only while a descent class of the observed words is in force — when e_h,on > H the next steeper descent
-  class, when e_h,on < −H the next shallower (none beyond descent 4 or descent 1); the observed class again when
-  e_h,off is zero or has the other sign — an overshoot beyond H takes the opposite class in the same row where it
-  exists (D53); a new
+  class, when e_h,on < −H the next shallower (none beyond descent 4 or descent 1); while the error ahead on the side
+  the correction answers is more than `closed_loop_two_class_factor` × H, two classes where that class exists (the
+  user, 2026-10-13); the observed class again when e_h,off is zero or has the other sign — an overshoot beyond H takes
+  the opposite class in the same row where it exists (D53); a new
   observed altitude or angle word ends a correction (so a correction never runs across a change of the tolerance: the
   altitude word changes there). A level hold and a climb get none. A
   level reached by a descent says no angle word (the descent class stays in force, `labeller.vertical`), so a LEVEL
@@ -262,13 +263,15 @@ def uncorrected_m(errors: np.ndarray, uncorrectable: np.ndarray) -> float:
 def heading_lateness_rows(sentence: ClosedLoopSentence, observed: np.ndarray) -> np.ndarray:
     """The lateness of each observed heading word a closed-loop sentence says after its first row (vocabulary §12.1 A12): the
     matched point's observed time at the row that says it minus the word's 2 s time, in 2 s rows; ``observed`` the
-    open-loop reading's words from the sentence's first row (a correction is no observed word)."""
+    open-loop reading's words from the sentence's first row. A row says an observed word when it passes a new observed
+    heading word and says a heading word: while a correction is in force, that word is the new word one class toward the
+    path (D199), and it comes at the row where the observed word is heard."""
     rows = np.arange(len(observed))
     word_row = np.maximum.accumulate(np.where(observed[:, HEADING] != UNCHANGED, rows, 0))
     rows, withheld = sentence.rows, sentence.withheld
-    says = (rows.grid[:, HEADING] != UNCHANGED) & ~rows.correction[:, HEADING]
-    says[0] = False
-    return withheld.matched_row[says] - word_row[withheld.observed_row[says]]
+    heard = word_row[withheld.observed_row]
+    says = (rows.grid[:, HEADING] != UNCHANGED) & np.r_[False, np.diff(heard) != 0]
+    return withheld.matched_row[says] - heard[says]
 
 
 def observed_tracks(observed: np.ndarray, words: Words, courses_deg: Sequence[float]) -> tuple[np.ndarray, ...]:
@@ -384,19 +387,19 @@ class Corrector:
         self.observed_row = self.next - 1
         held = self.held[self.observed_row]
         wanted = held.astype(np.int64).copy()
-        #: rows where §4.9 makes no correction of each column (the readings of D34): the first predicted step, a row
-        #: that says a new observed word, past the end of the observed path; vertically also a level hold, no descent
-        #: class, no class beyond it
+        #: rows where §4.9 makes no correction of each column (the readings of D34): the first predicted step, past the
+        #: end of the observed path; vertically also a row that says a new observed altitude or angle word, a level
+        #: hold, no descent class, no class beyond it
         self.uncorrectable = np.ones(2, dtype=bool)
         if not first:
-            self.uncorrectable[0] = observed[HEADING] != UNCHANGED or past_end
+            self.uncorrectable[0] = past_end
             # the errors ahead (THE LEAD): on, for a correction to start; off, for one in force to end
             lateral_on, vertical_on = (error + rate * ahead for error, rate, ahead in
                                        zip((lateral_m, vertical_m), rates_mps, self.on_s, strict=True))
             lateral_off, vertical_off = (error + rate * ahead for error, rate, ahead in
                                          zip((lateral_m, vertical_m), rates_mps, self.off_s, strict=True))
             lateral_tolerance = float(lateral_tolerance_m(self.words, int(held[ALTITUDE])))     # in force at the row
-            if observed[HEADING] != UNCHANGED or past_end:
+            if past_end:
                 self.turn = 0
             elif self.turn and lateral_off * self.turn <= 0.0:
                 # ended; an overshoot beyond the tolerance takes the opposite correction in the same row (D53)
@@ -417,8 +420,10 @@ class Corrector:
             elif (not self.slope and self.words.is_descent(angle) and abs(vertical_on) > tolerance
                   and self.words.is_descent(angle + _sign(vertical_on))):
                 self.slope = _sign(vertical_on)
-            if self.slope:                                 # too high: the next steeper class
-                wanted[ANGLE] = angle + self.slope
+            if self.slope:                                 # too high: a steeper class; two while far too high
+                far = (self.slope * vertical_on > self.words.spec.closed_loop_two_class_factor * tolerance
+                       and self.words.is_descent(angle + 2 * self.slope))
+                wanted[ANGLE] = angle + self.slope * (2 if far else 1)
         said = wanted.copy() if first else np.where(wanted != self.said, wanted, UNCHANGED)
         said[HEADING] = self._heading()
         k, self.rows_said = self.rows_said, self.rows_said + 1
@@ -428,7 +433,8 @@ class Corrector:
             raise Refused(f"closed loop: {error.reason}", f"said row {k}: {error.detail}") from None
         self.said = wanted
         added = (said != UNCHANGED) & ~((observed != UNCHANGED) & (observed == said))
-        added[HEADING] = said[HEADING] != UNCHANGED and observed[HEADING] == UNCHANGED
+        # a heading word is a correction unless it is the observed word said at its row (in the row's frame, D46)
+        added[HEADING] = said[HEADING] != UNCHANGED and (observed[HEADING] == UNCHANGED or self.turn != 0)
         return said.astype(np.int16), np.zeros(len(COLUMNS), dtype=bool) if first else added
 
     def _heading(self) -> int:

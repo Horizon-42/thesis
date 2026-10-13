@@ -223,6 +223,8 @@ def main(argv: list[str] | None = None) -> int:
                              "neighbours + altitude_fit_tolerance (Words.altitude_tolerances)",
             "level_band_m": "chosen: a level piece's rows lie within it of the piece's own median (vocabulary §4.4; see "
                             "sensitivity.level_wander_p95_by_fit_tolerance)",
+            "level_angle_deg": "the user's choice (2026-10-13): a piece flatter than it is a level too (vocabulary §4.4) "
+                               "— not measured here",
             "turn_rate_max_deg_s": "p99.9 of the turn rate on turning rows, up to 0.1°/s",
             "turn_bank_max_deg": "p99.9 of the bank on turning rows, up to 1°",
             "corridor_half_width_m": "p99 offset of the aligned final's nearest distance bin (0–3 km), up to 5 m",
@@ -236,6 +238,8 @@ def main(argv: list[str] | None = None) -> int:
             "closed_loop_final_lateral_m": "the user's choice of Y_final (2026-10-12) — not measured here",
             "closed_loop_final_vertical_m": "the user's choice of H_final (D66), from the measurement of A24 — not "
                                             "measured here",
+            "closed_loop_two_class_factor": "the user's choice (2026-10-13): an angle correction moves two classes "
+                                            "past this many vertical tolerances (vocabulary §4.9) — not measured here",
             "angle_lead_s": "the user's choice of L_γ (executor design D7), from its own measurement (V12) — not "
                             "measured here",
             "speed_lead_s": "the user's choice of L_v (executor design D8), from its own measurement (V12) — not "

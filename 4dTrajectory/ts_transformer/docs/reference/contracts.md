@@ -408,8 +408,9 @@ nothing reads the CIFP after the first runner — and every runway end the harve
 E is `reference.elevation_m`), `spec.json` + `measurements.json`,
 `sentences_{train,select,val}.npz` + `labels.json` + `readout.{json,md}`, `conformance/` (below) and, once an executor spec
 flies them, `closed_loop/` (C38). Every file code reads back carries its format's name (`SIGNALS_SCHEMA`,
-`CANDIDATES_SCHEMA`, `SPEC_SCHEMA` `ts-instruction-spec-v9`, `SENTENCES_SCHEMA` `ts-instruction-sentences-v6` (v8 / v6 since A29, D73: no digest of
-code in either; spec v9 since 2026-10-12: `closed_loop_final_lateral_m`): since A27 (D70) each sentence's stratum by its name, `readout.stratum`
+`CANDIDATES_SCHEMA`, `SPEC_SCHEMA` `ts-instruction-spec-v10`, `SENTENCES_SCHEMA` `ts-instruction-sentences-v6` (v8 / v6 since A29, D73: no digest of
+code in either; spec v9 since 2026-10-12: `closed_loop_final_lateral_m`; v10 since 2026-10-13: `level_angle_deg`,
+`closed_loop_two_class_factor`): since A27 (D70) each sentence's stratum by its name, `readout.stratum`
 of its reading — for readouts and strata, never an input) and is
 refused under any other; **a name changes with its file's shape**, in the same change (2026-09-24, the user's rule). The
 spec's sha covers every word, grid, class, tolerance and the reading rule (`instructions.spec.READING_RULE`,

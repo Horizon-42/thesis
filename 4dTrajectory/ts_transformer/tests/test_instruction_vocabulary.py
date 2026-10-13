@@ -64,6 +64,15 @@ def test_the_final_descent_tolerance_is_at_most_the_vertical_tolerance():
         instruction_spec(closed_loop_final_vertical_m=0.0)
 
 
+def test_the_two_class_factor_is_above_one():
+    """D199: an angle correction moves two classes only while its start error is more than the factor times the
+    tolerance; at 1 or below, every correction would start two classes away."""
+    assert instruction_spec().closed_loop_two_class_factor == 2.0
+    for factor in (1.0, 0.9):
+        with pytest.raises(ValueError, match="at or below 1"):
+            instruction_spec(closed_loop_two_class_factor=factor)
+
+
 def test_the_final_descent_lateral_tolerance_is_at_most_the_lateral_tolerance():
     """Y_final (the user, 2026-10-12), the closed loop's lateral tolerance while "no level-off" is in force, is the
     smaller one; equal to Y is the reading before it."""
