@@ -4,7 +4,8 @@
 place to match the code of the branch `two-tier2-eval-landing` (commits `04378395`, `ea632d20`, `51a68b8e`), and on
 2026-10-13 again for commits `e00c8d08` and `d8f21c77`, for the prior's campaign on the new labels (`7e72a059`,
 B15), for the final's lateral corrections (D201, the branch `two-tier2-centreline`), and for the branch rule and
-the frontend and backend rule (outline §5 rules 1, 8, 10, 11; the branch `two-tier2-backend-orphans`). This file
+the frontend and backend rule (outline §5 rules 1, 8, 10, 11; the branch `two-tier2-backend-orphans`); on 2026-10-14
+for the final's vertical corrections (D203, the branch `two-tier2-glidepath`). This file
 keeps each text that the rewrite replaced, word for word, beside the text that replaced it, so that the user can compare
 them. It is not part of the design: no code and no design document cites it. An entry leaves this file when the user
 has reviewed it.
@@ -41,8 +42,11 @@ has reviewed it.
    "以后不要做任何前端改动 服务的后端，也要我的允许才能改。因为前后端改动意味着重要的设计修改", and "为什么之前就开始改前后端了 …
    这是最后阶段的事情". On 2026-10-13 the user allowed the results route's change and its reader's ("finish backend";
    "允许（推荐）").
+13. On the final the angle corrections aim at the runway's published glidepath, and the corrections go on to the
+   threshold (vocabulary D203; 2026-10-14): after the check of the labels' height at the threshold, the user chose
+   "先修改垂直标注，同时把标注词的修正延长至通过跑道入口".
 
-The new decision rows (vocabulary D196, D197, D201; outline D198) are new text, not replacements, so they are not entries
+The new decision rows (vocabulary D196, D197, D201, D203; outline D198) are new text, not replacements, so they are not entries
 below; the rewritten rows that cite them are.
 
 ## Index
@@ -121,6 +125,15 @@ below; the rewritten rows that cite them are.
 | 70 | `frontend.md` | §3 item 3, the results route, stage B | the prior's campaign has no variant step since B15; the route answers the configuration choice only (`be3cdd49`) |
 | 71 | `frontend.md` | §5.6 the details page of stage D | the backend's stage D route reads a start from the base (the user's permission, 2026-10-13) |
 | 72 | `frontend.md` | §7, the formats | a landing is the evaluation package's verdict on the crossing (vocabulary D196); the DA check stays a record (`288b779b`) |
+| 73 | `vocabulary.md` | §0.1 D44 | on the final the angle corrections aim at the glidepath, and the corrections go on to the threshold (D203) |
+| 74 | `vocabulary.md` | §0.1 D201, the code names, the end of the path and the format | on the final the angle corrections aim at the glidepath, and the corrections go on to the threshold (D203) |
+| 75 | `vocabulary.md` | §4.9 The comparison, the vertical error e_h | on the final the angle corrections aim at the glidepath, and the corrections go on to the threshold (D203) |
+| 76 | `vocabulary.md` | §4.9 Past the end of the observed path (D44) | on the final the angle corrections aim at the glidepath, and the corrections go on to the threshold (D203) |
+| 77 | `vocabulary.md` | §4.9 The errors ahead (D197), ė_h and the end error | on the final the angle corrections aim at the glidepath, and the corrections go on to the threshold (D203) |
+| 78 | `vocabulary.md` | §4.9 The errors ahead (D197), the end error | on the final the angle corrections aim at the glidepath, and the corrections go on to the threshold (D203) |
+| 79 | `vocabulary.md` | §4.9 Vertical correction, item 2 | on the final the angle corrections aim at the glidepath, and the corrections go on to the threshold (D203) |
+| 80 | `vocabulary.md` | §8 Values, closed-loop reading: correction | on the final the angle corrections aim at the glidepath, and the corrections go on to the threshold (D203) |
+| 81 | `vocabulary.md` | §8 Values, past the end of the observed path | on the final the angle corrections aim at the glidepath, and the corrections go on to the threshold (D203) |
 
 ## Text kept unchanged on purpose
 
@@ -1546,4 +1559,176 @@ replace v4: the one published set of v4, `windows_seg60_r5_20261008`, is exporte
 segments: stage A's sample v13, stage B's v6, the window sample v7; the segments `aeroviz-autopilot-segment-v11`,
 `aeroviz-autopilot-prior-segment-v2`, `aeroviz-autopilot-window-segment-v4`. The sets published in the older formats
 are not read.
+```
+
+### 73. `vocabulary.md`: §0.1 D44
+
+**What changed:** on the final the angle corrections aim at the glidepath, and the corrections go on to the threshold (D203)
+
+**Old text:**
+
+```text
+| D44 | No correction past the end of the observed path (the observed slice ends before the threshold; the flown aircraft flies on to it). There the closed-loop reading measures the lateral error against the line of the last segment, for the readouts only, and no vertical error (there is no observed height); it says no lateral or vertical correction: a correction in force ends, and the observed word is said again; the aircraft flies the last observed words to the threshold. The rows count as rows without correction (D34). The DA point always lies before the end of the observed path (§4.9) | Decided | User, 2026-10-04 |
+```
+
+**New text:**
+
+```text
+| D44 | No correction past the end of the observed path off the final (the observed slice ends before the threshold; the flown aircraft flies on to it). There the closed-loop reading measures the lateral error against the line of the last segment, for the readouts only, and no vertical error (there is no observed height); it says no lateral or vertical correction: a correction in force ends, and the observed word is said again. The rows count as rows without correction (D34). On the final the errors are read from the centreline and the glidepath, which go on past the end, and the corrections go on to the threshold (D203) | Decided | User, 2026-10-04; on the final: user, 2026-10-14 (D203) |
+```
+
+### 74. `vocabulary.md`: §0.1 D201, the code names, the end of the path and the format
+
+**What changed:** on the final the angle corrections aim at the glidepath, and the corrections go on to the threshold (D203)
+
+**Old text:**
+
+```text
+| D201 | **On the final the lateral corrections aim at the runway's centreline.** While "no level-off" is in force and the observed heading word in force says the course of the runway in force (the observed aircraft is lined up on its final), e_y is the signed distance of the flown position from that runway's extended centreline (positive to the right) and ė_y the flown velocity across it (`closed_loop.Corrector.lateral_reference`, `closed_loop.centreline_error`); the rules of the lateral correction (§4.9) and Y_final (D66) do not change. Elsewhere e_y is D83's. Past the end of the observed path no correction is said (D44); the e_y the readouts read there is the centreline's while the last observed row is on the lined-up final. The stored e_y is the one the corrections read, so the rule of D50 and the readings of D34 read it too; the closed-loop format is `ts-instruction-closed-loop-v10`. Why: the prior sees the centreline and never the observed path. With the corrections aimed at the observed path, the labels answer the centreline offset softly: on the select days' final (2–8 km before the threshold, the course in force), rows 15–25 m off the centreline turned back in 34–38 % net (88–90 % against the observed path), because the observed tracks scatter about the centreline (median −0.7 m, 10 %–90 % −11.8 to +8.8 m) inside Y_final; B15's folds then settled 20–40 m off the centreline on an airport they did not train on and failed the evaluation's lateral gate (`readouts/2026-10-13_b15_prior.zh.md`). Measured in memory on 5,000 random train flights of v17 (1,000 an airport, seed 1337, Δ = 4 s): landed 97.66 → 98.92 % (72 flights landed that did not, 9 the reverse), heading words 48.5 → 43.1 a sentence, rows 15–25 m off the centreline turned back 98 % net; Y_final 7.5 m was worse (94.08 % alone, 95.10 % with the centreline) (`outputs/POOLED/analyses/final_centreline_labels_20261013`). The cost: the labels lie farther from the observed track (|e_y| from the observed path, the median of the flights' medians 8.3 → 11.4 m). The condition "lined up" is needed: from "no level-off" alone the turn onto the final is pulled toward the centreline (100 flights: 8 timeouts) | Decided | User, 2026-10-13 ("采用，做 v18 并重跑 B") |
+```
+
+**New text:**
+
+```text
+| D201 | **On the final the lateral corrections aim at the runway's centreline.** While "no level-off" is in force and the observed heading word in force says the course of the runway in force (the observed aircraft is lined up on its final), e_y is the signed distance of the flown position from that runway's extended centreline (positive to the right) and ė_y the flown velocity across it (`closed_loop.Corrector.final_runway`, `closed_loop.final_errors`); the rules of the lateral correction (§4.9) and Y_final (D66) do not change. Elsewhere e_y is D83's. The centreline goes on past the end of the observed path, and so do the corrections (D203). The stored e_y is the one the corrections read, so the rule of D50 and the readings of D34 read it too; the closed-loop format was `ts-instruction-closed-loop-v10` (D203: v11). Why: the prior sees the centreline and never the observed path. With the corrections aimed at the observed path, the labels answer the centreline offset softly: on the select days' final (2–8 km before the threshold, the course in force), rows 15–25 m off the centreline turned back in 34–38 % net (88–90 % against the observed path), because the observed tracks scatter about the centreline (median −0.7 m, 10 %–90 % −11.8 to +8.8 m) inside Y_final; B15's folds then settled 20–40 m off the centreline on an airport they did not train on and failed the evaluation's lateral gate (`readouts/2026-10-13_b15_prior.zh.md`). Measured in memory on 5,000 random train flights of v17 (1,000 an airport, seed 1337, Δ = 4 s): landed 97.66 → 98.92 % (72 flights landed that did not, 9 the reverse), heading words 48.5 → 43.1 a sentence, rows 15–25 m off the centreline turned back 98 % net; Y_final 7.5 m was worse (94.08 % alone, 95.10 % with the centreline) (`outputs/POOLED/analyses/final_centreline_labels_20261013`). The cost: the labels lie farther from the observed track (|e_y| from the observed path, the median of the flights' medians 8.3 → 11.4 m). The condition "lined up" is needed: from "no level-off" alone the turn onto the final is pulled toward the centreline (100 flights: 8 timeouts) | Decided | User, 2026-10-13 ("采用，做 v18 并重跑 B") |
+```
+
+### 75. `vocabulary.md`: §4.9 The comparison, the vertical error e_h
+
+**What changed:** on the final the angle corrections aim at the glidepath, and the corrections go on to the threshold (D203)
+
+**Old text:**
+
+```text
+- the vertical error e_h is the flown height minus the observed height.
+```
+
+**New text:**
+
+```text
+- the vertical error e_h is the flown height minus the observed height; on the final (where e_y is read from the
+  centreline), the flown height above that runway's published glidepath: its TCH and angle on the straight line
+  with the earth's curvature (§9.3), so LTP + TCH at the threshold, the evaluation's reference there (D203).
+```
+
+### 76. `vocabulary.md`: §4.9 Past the end of the observed path (D44)
+
+**What changed:** on the final the angle corrections aim at the glidepath, and the corrections go on to the threshold (D203)
+
+**Old text:**
+
+```text
+**Past the end of the observed path (D44).** The observed slice ends before the threshold, and the flown aircraft flies
+on to it: approximately 150 m (median), at most approximately 750 m (§9.9). There the path continues along the line of
+its last segment, and the lateral error is measured against that line for the readouts; no vertical error is measured
+there. The labeller says no correction there, lateral or vertical: a correction in force ends at the end of the path,
+and the observed word of its column is said again (in the readouts this word counts as a correction word; a speaker and
+the executor read every word alike). The aircraft flies the last observed words to the threshold. These rows count as
+rows without correction (D34). Why: there is no observation there; the slope of one 2 s segment is not a measurement
+(the ADS-B altitude has steps of 7.6 m, so one segment can be approximately ±3° wrong, ±20 m over 400 m); and the DA
+point, 0.9–2.1 km before the threshold, always lies before the end of the observed path, so the DA record (D38) does
+not change.
+```
+
+**New text:**
+
+```text
+**Past the end of the observed path (D44, D203).** The observed slice ends before the threshold, and the flown
+aircraft flies on to it: approximately 150 m (median), at most approximately 750 m (§9.9). On the final the errors are
+read from the centreline and the glidepath, which go on past the end: there the labeller corrects as before the end, to
+the threshold (D203). Off the final the path continues along the line of its last segment, and the lateral error is
+measured against that line for the readouts; no vertical error is measured there. The labeller says no correction there,
+lateral or vertical: a correction in force ends at the end of the path, and the observed word of its column is said
+again (in the readouts this word counts as a correction word; a speaker and the executor read every word alike). The
+aircraft flies the last observed words on. These rows count as rows without correction (D34). Why: off the final there is
+no reference there; the slope of one 2 s segment is not a measurement (the ADS-B altitude has steps of 7.6 m, so one
+segment can be approximately ±3° wrong, ±20 m over 400 m). On the final the references are the runway's, not the
+observed path's, and without a correction past the end the labels crossed the threshold 1–4 m higher than at the end of
+the observed path (D203).
+```
+
+### 77. `vocabulary.md`: §4.9 The errors ahead (D197), ė_h and the end error
+
+**What changed:** on the final the angle corrections aim at the glidepath, and the corrections go on to the threshold (D203)
+
+**Old text:**
+
+```text
+centreline (D201) (positive to the right), ė_h the
+flown vertical rate minus the segment's slope times the flown velocity along it. The START ERROR
+```
+
+**New text:**
+
+```text
+centreline (D201) (positive to the right), ė_h the
+flown vertical rate minus the segment's slope times the flown velocity along it, or on the final minus the rate at which
+the glidepath's height under the aircraft changes (D203). The START ERROR
+```
+
+### 78. `vocabulary.md`: §4.9 The errors ahead (D197), the end error
+
+**What changed:** on the final the angle corrections aim at the glidepath, and the corrections go on to the threshold (D203)
+
+**Old text:**
+
+```text
+where the end error is zero or has the other sign: the end aims at the path e_y is read from (the observed path; on
+the final, the centreline, D201). At ė = 0 the start error is the
+```
+
+**New text:**
+
+```text
+where the end error is zero or has the other sign: the end aims at the path the error is read from (the observed
+path; on the final, the centreline and the glidepath, D201, D203). At ė = 0 the start error is the
+```
+
+### 79. `vocabulary.md`: §4.9 Vertical correction, item 2
+
+**What changed:** on the final the angle corrections aim at the glidepath, and the corrections go on to the threshold (D203)
+
+**Old text:**
+
+```text
+2. When e_h,on > H (too high), the labeller says the next steeper descent class.
+```
+
+**New text:**
+
+```text
+2. When e_h,on > H (too high; on the final, above the glidepath: D203), the labeller says the next steeper descent
+   class.
+```
+
+### 80. `vocabulary.md`: §8 Values, closed-loop reading: correction
+
+**What changed:** on the final the angle corrections aim at the glidepath, and the corrections go on to the threshold (D203)
+
+**Old text:**
+
+```text
+| Closed-loop reading: correction | heading: one class (5°) toward the observed path; angle: the next descent class | D32 |
+```
+
+**New text:**
+
+```text
+| Closed-loop reading: correction | heading: one class (5°) toward the observed path; angle: the next descent class toward it; on the final toward the centreline and the published glidepath | D32, D201, D203 |
+```
+
+### 81. `vocabulary.md`: §8 Values, past the end of the observed path
+
+**What changed:** on the final the angle corrections aim at the glidepath, and the corrections go on to the threshold (D203)
+
+**Old text:**
+
+```text
+| Closed-loop reading past the end of the observed path | no correction (one in force ends); lateral error for the readouts, no vertical error | D44 |
+```
+
+**New text:**
+
+```text
+| Closed-loop reading past the end of the observed path | on the final, corrections from the centreline and the glidepath to the threshold; off the final, no correction (one in force ends), lateral error for the readouts, no vertical error | D44, D203 |
 ```

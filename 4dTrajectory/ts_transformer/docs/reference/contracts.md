@@ -742,3 +742,9 @@ replay's outcome (`tests/test_start.py`). The artefact's formats do not change.
 heading word in force says the course of the runway in force, e_y (and the stored `lateral_m`) is the distance from that
 runway's extended centreline, and the heading corrections aim there (vocabulary D201; `Corrector.lateral_reference`,
 `centreline_error`).
+
+**2026-10-14**: `ts-instruction-closed-loop-v11` — on the final (the condition of v10), e_h (and the stored
+`vertical_m`) is the flown height above that runway's published glidepath, and the angle corrections aim there; the
+centreline and the glidepath go on past the end of the observed path, so on the final the corrections go on to the
+threshold and `vertical_m` is a number there (vocabulary D203; `Corrector.final_runway`, `final_errors`). Off the final,
+past the end, v10's rule (D44).

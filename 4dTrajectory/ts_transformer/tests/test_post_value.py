@@ -335,7 +335,9 @@ def _weights(model) -> str:
 #: Written again on 2026-10-13 (two-tier2-eval-landing): the executor of `ts-executor-spec-v11` (223f1e30) and the
 #: closed-loop sentences of vocabulary D197–D199 (after 04378395, by 0ac795e5) moved it; the judge of D196 and the
 #: merge of dev-two-tier did not. Since then it pins this code itself.
-VALUE_BEFORE_D173 = "dd10b9e7d09f12e42c3589345d12468b7e44a823688b62cd747c411cc3109fc8"
+#: Written again on 2026-10-14 (two-tier2-glidepath): the closed-loop sentences of vocabulary D203 moved it (the
+#: fixture's observed final runs up to 31 m above the published glidepath; its angle corrections now aim at the glidepath).
+VALUE_BEFORE_D173 = "652bf0e43556a9d240b1fe6f1a1463b73526d2e519567617fe3043bf601e9a68"
 
 
 def test_with_d173_s_defaults_a_value_campaign_is_the_code_s_before_bit_for_bit(setup, tmp_path, monkeypatch):

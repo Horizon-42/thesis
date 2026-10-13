@@ -1,5 +1,21 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-14 — the labels on the final aim at the glidepath, and their corrections go on to the threshold (vocabulary D203)
+
+- Why: B16's held-out folds failed the vertical gate only by crossing too high, and the labels themselves crossed the
+  threshold high: on the final they followed the observed paths, which lie above the published glidepath (at 1 km,
+  median −0.2 to +3.7 m an airport, KMSY +6.7 m; KMSY's runways 11 and 02 are flown at 3.12° and 3.18° against the
+  published 3.00°), and past the end of the observed path (212–532 m before the threshold) they said no correction.
+- `autopilot/closed_loop.py`: on the final (D201's condition, `Corrector.final_runway`, was `lateral_reference`) e_h is
+  the flown height above the runway's published glidepath and ė_h its rate (`final_errors`, was `centreline_error`);
+  the centreline and the glidepath go on past the end of the observed path, so there, on the final, the errors are
+  measured and the corrections go on to the threshold (`Corrector.row(unmeasured=…)`, was `past_end`). Off the final
+  D44 holds. Closed-loop format `ts-instruction-closed-loop-v11`.
+- In memory on 5,000 train flights of v18 (Δ = 4 s): landed 98.92 → 99.62 % (35 fixed, 0 broken), the crossing above
+  the glidepath p10–p90 −3.8…+10.2 → −0.3…+6.6 m, angle words 25.4 → 16.5 a sentence
+  (`outputs/POOLED/analyses/final_glidepath_labels_20261014`; readout
+  `docs/two_tier/readouts/2026-10-14_glidepath_labels.zh.md`).
+
 ### 2026-10-13 — the prior campaign starts a fold's next steps early (prior D202)
 
 - `prior_campaign` starts the next two steps after the running one with `--gate` when they are a fold's steps (its

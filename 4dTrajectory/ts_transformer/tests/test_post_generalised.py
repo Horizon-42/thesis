@@ -158,9 +158,11 @@ def stage_c_campaign_scenario(s, tmp_path, monkeypatch) -> dict[str, str]:
 #: flown part (the values before pass at 6c3cd8f6), and the closed-loop sentences of vocabulary D197–D199 (after
 #: 04378395, by 0ac795e5) moved the parts that train. The judge of D196 (04378395) and the merge of dev-two-tier moved
 #: none. A part that neither flies nor trains keeps c7a0b6b0's value. Since then the digests pin this code itself.
+#: Written again on 2026-10-14 (two-tier2-glidepath): the closed-loop sentences of vocabulary D203 moved the part that
+#: trains (the fixture's angle corrections now aim at the published glidepath); the drawn part did not move.
 CAMPAIGN_BEFORE_GENERALISATION = {
     "campaign drawn": "8fc7f7f85d726b1dcf6c59f027c9c2b2c82bb873dcda59d6e48ed11b7ac45b77",
-    "campaign updated": "6057c93633848cceb4afcf6435f3d7dce20c5313dd1fbad989cbc0da3e45959b",
+    "campaign updated": "6d9b7c6a52bd4433bfa9e9390e5a50a5de8e9c4c5660737a78de3f4f3442f768",
 }
 
 

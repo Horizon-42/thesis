@@ -259,7 +259,9 @@ def load_sentences(directory: Path, split: str, spec: VocabularySpec,
 #: ``crossed_off_runway`` are gone (the decision-altitude check stays, a record on the crossing).
 #: v10 (D201, the user, 2026-10-13): on the final, once the observed aircraft is lined up, the heading corrections aim at
 #: the runway's centreline and `lateral_m` is the distance from it (`autopilot.closed_loop`, ON THE FINAL).
-CLOSED_LOOP_SCHEMA = "ts-instruction-closed-loop-v10"
+#: v11 (D203, the user, 2026-10-14): on the final the angle corrections aim at the runway's published glidepath and
+#: `vertical_m` is the height above it; there the corrections go on past the end of the observed path to the threshold.
+CLOSED_LOOP_SCHEMA = "ts-instruction-closed-loop-v11"
 #: Every array a closed-loop file holds.
 CLOSED_LOOP_FIELDS = {"schema", "spec_sha256", "executor_params_sha256", "row_interval_s", "start_row", "signal_index",
                       "first_row", "offsets", "state_offsets", "words", "correction", "states", "on_interval",
@@ -314,7 +316,9 @@ class Withheld:
     outcome: str
     timed_out: bool             # the judge's outcome is "timeout" (D90: no reader holds the time limit)
     lateral_m: np.ndarray       # [M] e_y at each said row (D83; on the final from the centreline, D201)
-    vertical_m: np.ndarray      # [M] e_h at each said row (NaN past the end of the observed path, D44)
+    #: [M] e_h at each said row (on the final from the glidepath, D203; NaN past the end of the observed path off the
+    #: final, D44)
+    vertical_m: np.ndarray
     #: [M, 2] bool: the rows where §4.9 makes no heading / angle correction (the readings of D34)
     uncorrectable: np.ndarray
     #: [M] the last 2 s row of the open-loop reading, from the sentence's first row, whose words have been said at each
