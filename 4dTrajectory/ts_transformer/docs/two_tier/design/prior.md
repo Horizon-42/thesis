@@ -35,8 +35,8 @@ The decision numbers are shared by all documents (outline §3).
 | D24 | A candidate vector has no constant of its runway: no length, no elevation, no layout relative to R. Such a value comes back only as a variant that D39 selects (§2) | Decided | User, 2026-10-03 |
 | D25 | At each Δ of the ablation (2, 4, 8 s), the motion inputs of a row come from the 2 s before the row (§2). (The Δ values: D25 in the vocabulary) | Decided | User, 2026-10-03 |
 | D31 | The prior's training stops on the select days (§5). (The multi-aircraft part: D31 in the post-training) | Decided | User, 2026-10-03 |
-| D39 | The prior's design is chosen by leave-one-airport-out cross-validation (5 folds: train on four airports, read the fifth). Two variants: `full` (§2) and `constants` (`full` and, in each candidate vector, the runway's length and threshold elevation). `constants` is chosen only if it is better by more than twice the seed scale (§5) | Decided | User, 2026-10-04 |
-| D40 | Hyperparameters: configuration A (§5) is the start. The same folds compare four configurations (A, a smaller model, a larger model, a stronger regularization); the one with the fewest parameters within twice the seed scale of the best is chosen (§5); a tie of parameters among them goes to the lower score (A and D have one shape). Every configuration has attention heads 32 wide: A 6 heads, B (d_model 128) 4, C (d_model 256) 8 | Decided | User, 2026-10-04; the head width: user, 2026-10-04, on Claude's proposal; the tie: user, 2026-10-05 |
+| D39 | The prior's design is chosen by leave-one-airport-out cross-validation (5 folds: train on four airports, read the fifth). The variant is `full` (§2). The variant `constants` (`full` and, in each candidate vector, the runway's length and threshold elevation) is not run: in B5 (on `v12_20261005`) it scored worse than `full` by 6 seed scales, and a runway constant is an airport identity (D24) | Decided | User, 2026-10-04; `constants` not run: user, 2026-10-13 |
+| D40 | Hyperparameters: configuration A (§5) is the start. The same folds compare A and a larger model, C; the one with the fewest parameters within twice the seed scale of the best is chosen (§5). Every configuration has attention heads 32 wide: A 6 heads, C (d_model 256) 8. A smaller model (B, d_model 128) and a stronger regularization (D) are not run: in B5 (on `v12_20261005`) B scored worst, by 21 seed scales, and D as A (`prior_base_20261006/choice_configuration.json`) | Decided | User, 2026-10-04; the head width: user, 2026-10-04, on Claude's proposal; A and C only: user, 2026-10-13 |
 | D41 | The design runs at an airport that is not in the training data: the number of candidates is not fixed; every input has a fixed physical scale, never a statistic of the training data; each fold of D39 flies the full closed loop at its held-out airport. The altitude words are above the airport elevation (D58), so the levels of an approach lie in the 60 m segment at any airport (§6) | Decided | User, 2026-10-04 |
 | D58 | The prior's own height is the height above the airport elevation E, as the altitude words are (vocabulary, D58). The prior gets neither E nor the MSL height (D24), so it cannot know where the round MSL levels that controllers assign lie (§2). (The words: D58 in the vocabulary) | Decided | User, 2026-10-04 |
 | D60 | Row 0 of an aircraft has no motion inputs: no state 2 s before it is stored. There, the ground speed, the vertical rate and the motion direction in each candidate vector (sine, cosine) are 0, and the own input `no_motion` is 1 (0 at every other row). The same at every Δ, in training, in closed loop and in a loop of several aircraft. Never a stored or fitted velocity, which reads rows after the row (§2) | Decided | User, 2026-10-04, on Claude's proposal |
@@ -63,7 +63,9 @@ The decision numbers are shared by all documents (outline §3).
 
 ### 0.2 Open items
 
-None.
+- The Training results page reads a campaign's `choice_variant.json` (`aeroviz_backend/training_results.py`); a B15
+  campaign (`ts-prior-campaign-v4`) has none. A change of the backend and the frontend: the user's last stage, with
+  the user's permission.
 
 ### 0.3 Implementation
 
@@ -77,6 +79,7 @@ The commits, test counts and measurements of every milestone are in `readouts/20
 | B6 | Done: the export, the view and the live segment (`b079ebef`, `ce601bd7`, `aac93945`, `201b4afd`, `a280d984`, `df68c927`); B5's sets published as `prior_sets_20261006` (`493dbe2b`: each fold of configuration C at its held-out airport, select days; the base's claimed val set), 10 flights × 2 sentences a set, `aeroviz-training-prior-sample-v3`; checked in the browser and on 40 sentences flown live. The view changes with the one layout of the three stages (frontend §3, D133). Exported again in the new format on 2026-10-07 by stage D's implementer (`index_prior_v3.json`, naming the base's speed readout `outputs/POOLED/speed/prior_base_20261006`; the old sets kept as `<set-id>.v3-old`; the base's `SHA256SUMS` checked before and after; log §6) |
 | B7 | Done 2026-10-06 (`d1386a77`): `docs/reference/runners.md` R56–R62; the code index of §11 |
 | B14 (D138) | Built and reviewed: `65adf480`; merged into `dev-two-tier`. Its real-data check done 2026-10-06 by stage D's implementer: B5's fold `C_full_s1337/KRDU` spoken again with `BATCH` on the select days, all 400 sentences word for word its readout's (log §6). The per-aircraft form and its check once a process are retired by outline D187 (stage D's implementer, D184) |
+| B15 | Built on `two-tier2-eval-landing` (`7e72a059`): `prior_select` compares A and C only, `prior_campaign` runs 15 training runs and the base (`ts-prior-campaign-v4`), the variant `full` a setting; `prior_behaviour` follows. Before it, the prior's code read `v17_20261013` with no change: `prior_train`, `prior_free_generation` and `prior_validation` (select) on a sample of 20 sentences an airport (train kept 39,091, fault 495, outcome 940; select kept 5,835; B5's base on v12: 39,154 / 5,861); the GPU peak of configuration C at the formal size 2.42 GB |
 | Multi-aircraft control D190 (2) | Built by stage D's implementer (outline D184) on `dev-multi-control`, 7893d787; not merged: the copies a speaker takes of a line hold their rows to where they part once (`prior/model.py` `Front`, `Past.together` chooses the front; `Past.taken` deleted); a line reads its front `COPIED` (bit for bit) or `MERGED` (no copy, the last bits), `Speaker(…, attention=)`; a past with no front (training, prior_behaviour) computes as before: prior_behaviour the same bytes (stage D's log §20; §7 items 1 and 3 name `Past.taken`: stage D's requests item 87) |
 | Claude's checks | At `5313b6cd` (`readouts/2026-10-05_stage_b_check.zh.md`; corrections B10, D105–D108) at `44f6000f` (`readouts/2026-10-05_stage_b_check_2.zh.md`; corrections B12, D119–D122), of B12 at `2190fe0a` (`readouts/2026-10-06_stage_b_b12_check.zh.md`; corrections B13, D127, D128), and of B13 at `142272f0` (`readouts/2026-10-06_stage_b_b13_check.zh.md`: no S1, no correction; its findings on the behaviour check's coverage are dropped, outline D131). None found a leak into an input, a mask or a choice |
 
@@ -89,6 +92,9 @@ Proposals (where the design says nothing): none open.
    `prior_sets_20261006` are exported again in a new sample format, with the same ids (the base and the folds read only).
 2. B14 (outline D138), after vocabulary A44 and post-training C13, before stage C's next campaign.
 3. The post-training (`post_training.md`) reads only §7 and B5's base (`prior_base_20261006`).
+4. B15 (the user, 2026-10-13): the campaign on `v17_20261013` / `v22_20261013` from a run worktree at `two-tier2`.
+   B5's base and the stage C and D models trained from it read `v12_20261005`, which the code of `two-tier2` does not
+   open.
 
 ---
 
@@ -330,26 +336,24 @@ after its training. The goal is a new airport, so the folds are airports, not da
 
 | Step | Runs | Training runs |
 |---|---|---|
-| 1 | Variant `full`, four configurations, each on the 5 folds, seed 1337. A: the start. B: d_model 128, 4 heads, feed-forward 512. C: d_model 256, 8 heads, feed-forward 1,024. D: dropout 0.2, weight decay 0.05. B, C and D have the layers and the learning rate of A; every head is 32 wide | 20 |
+| 1 | Two configurations, each on the 5 folds, seed 1337. A: the start. C: d_model 256, 8 heads, feed-forward 1,024, the layers and the learning rate of A; every head is 32 wide | 10 |
 | 2 | The seed scale: configuration A with the seed 2024, on the 5 folds | 5 |
-| 3 | Variant `constants` with the configuration chosen after step 2, on the 5 folds, seed 1337 | 5 |
-| 4 | The base: the chosen configuration and variant on all five airports, seed 1337, stopped on their select days; then its one validation readout | 1 |
+| 3 | The base: the chosen configuration on all five airports, seed 1337, stopped on their select days; then its one validation readout | 1 |
 
 The rules, fixed before the runs:
 
 - **The score** of a run is the mean, over the 5 folds, of the per-step loss on the held-out airport's select days.
 - **The seed scale** is the absolute difference between the scores of configuration A at the two seeds.
 - **Configuration:** among the configurations whose score is within twice the seed scale of the best (the bound
-  included), the one with the fewest parameters; a tie of parameters goes to the lower score (A and D have one shape)
-  (D40).
-- **Variant:** `constants` only if its score is lower than that of `full` (same configuration) by more than twice the
-  seed scale; else `full`.
+  included), the one with the fewest parameters (D40).
+- **Variant:** `full` in every run (D39).
 - **Readouts of each fold, not used for the choice:** the runway word of the first predicted step at the held-out
   airport (top-1: the model's most probable runway class there, teacher-forced up to that row); free generation at the
   held-out airport on its select days (200 flights × 2 sentences, drawn from every flight with the seed 1337): its
   outcomes (vocabulary §6, item 6), the words for each column, the go-arounds and the probability of "go-around" on the
   final (D72), the flights outside the selection apart (D75, D111).
-- **The base's one validation readout (D85):** on the validation days of every airport, the per-step loss under
+- **The base's one validation readout (D85: one read for each labelled artefact):** on the validation days of every
+  airport, the per-step loss under
   `landed` and the share of the labelled words that the procedure masks block (`prior_validation`); free generation
   (200 flights × 2 sentences an airport, as a fold's; `prior_free_generation`). Each of the two claims its read (D118
   item 3, D119).
@@ -496,7 +500,8 @@ At `d14a2f76` (B13, the close of stage B). Paths relative to `4dTrajectory/ts_tr
 runner of stage A. From 2026-10-06 one implementer builds the milestones of every stage (outline §5 rule 1: stage
 D's, which takes over stage B's remaining steps on `dev-two-tier-v4`); the prior still reads the vocabulary only through its public interface (vocabulary §6).
 Tests use synthetic artefacts; a check on real data reads the formal artefact on the train and select days only (D85).
-The formal runs read `v12_20261005` / `v17_20261005` at Δ = 4 s. The rules of outline §5 apply.
+The formal runs read `v17_20261013` / `v22_20261013` at Δ = 4 s (B15); B5 read `v12_20261005` / `v17_20261005`. The rules
+of outline §5 apply.
 
 | Milestone | What it built | Decisions | State |
 |---|---|---|---|
@@ -515,6 +520,7 @@ The formal runs read `v12_20261005` / `v17_20261005` at Δ = 4 s. The rules of o
 | B6 | The Training view of stage B | Outline §6, D109, D127 | Done |
 | B7 | The close of stage B | — | Done |
 | B14 | The procedure masks over the batch | Outline D138, D139 | Built and reviewed (`65adf480`); its real-data check first after C10 |
+| B15 | The campaign on the labels of D196–D199 (`v17_20261013` / `v22_20261013`): configurations A and C, A's second seed, the variant `full`, the base and its validation readout | D39, D40, D85 | Built (`7e72a059`); the run is next |
 
 The specifications of the milestones that are done are in `readouts/2026-10-05_stage_b_implementation_log.md` §3.
 

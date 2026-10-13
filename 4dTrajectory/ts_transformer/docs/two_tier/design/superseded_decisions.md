@@ -2,7 +2,8 @@
 
 **What this file is.** The two-tier design documents hold the current design only. On 2026-10-12 they were rewritten in
 place to match the code of the branch `two-tier2-eval-landing` (commits `04378395`, `ea632d20`, `51a68b8e`), and on
-2026-10-13 again for commits `e00c8d08` and `d8f21c77`. This file
+2026-10-13 again for commits `e00c8d08` and `d8f21c77`, and for the prior's campaign on the new labels (`7e72a059`,
+B15). This file
 keeps each text that the rewrite replaced, word for word, beside the text that replaced it, so that the user can compare
 them. It is not part of the design: no code and no design document cites it. An entry leaves this file when the user
 has reviewed it.
@@ -26,6 +27,10 @@ has reviewed it.
    structural limits).
 7. A near-level piece is a level, a vertical correction moves two classes far off the path, and a new observed heading
    word does not stop a heading correction (vocabulary D199; 2026-10-13): the user chose "A + C + D1 都采用".
+8. The prior is trained on the new labels with a smaller cross-validation (prior D39, D40, B15; 2026-10-13): "should run
+   cv, but maybe not 30 runs; see what's is necessary and what's not", then the choice "A + C, with seed pair".
+9. The new labels' base reads the val days once (outline D85; 2026-10-13): "allow; and we difinately have whole new
+   dataset, why this only read once check still work for this new dataset?".
 
 The new decision rows (vocabulary D196, D197; outline D198) are new text, not replacements, so they are not entries
 below; the rewritten rows that cite them are.
@@ -75,6 +80,18 @@ below; the rewritten rows that cite them are.
 | 39 | `vocabulary.md` | §4.9 Vertical correction, item 2 | a vertical correction moves two classes while its start error is more than 2 H (D199) |
 | 40 | `vocabulary.md` | §4.9 Tolerances (D32, D66) | the factor of the two-class step is a constant of the spec too |
 | 41 | `vocabulary.md` | §9.7, the item on one correction class | the rule this measurement ran under is marked as the rule before D199 |
+| 42 | `prior.md` | D39 | the variant is `full`; `constants` is not run (B5's score, D24) |
+| 43 | `prior.md` | D40 | configurations A and C only; B and D are not run (B5's scores); the tie rule, which only A and D could need, goes |
+| 44 | `prior.md` | §5 Cross-validation, the steps | two configurations (A, C), no variant step: 15 runs and the base |
+| 45 | `prior.md` | §5 Cross-validation, the rules | no tie rule; the variant is given, not chosen |
+| 46 | `prior.md` | §5 The base's one validation readout | the base reads the val days once for each labelled artefact (D85) |
+| 47 | `prior.md` | §12 Rules, the formal runs | the formal runs read the labels of D196–D199 (B15) |
+| 48 | `prior.md` | §0.2 Open items | the results page reads a variant choice that B15's campaign does not write |
+| 49 | `outline.md` | D85 | one val read for each stage and each labelled artefact |
+| 50 | `outline.md` | §1 `vocabulary.md` state | the formal artefact is v17_20261013 / v22_20261013 |
+| 51 | `outline.md` | §1 `prior.md` state | B15 is built |
+| 52 | `vocabulary.md` | §0.3 the formal artefact | the formal artefact is v17_20261013 / v22_20261013 |
+| 53 | `vocabulary.md` | §0.3 D196–D199 row, its last sentences | the frontend and backend part is committed (288b779b) |
 
 ## Text kept unchanged on purpose
 
@@ -82,8 +99,7 @@ below; the rewritten rows that cite them are.
   `unstable_at_minimums` and `crossed_too_high` of A15–A24, and the DA check failures of select at Δ = 2 s): these are
   measurements made with the judge of their time. They stay as measured.
 - `frontend.md`: the Training view still draws the DA point, its chip and its label as before; the evaluation's verdict
-  is added as text only. That frontend change is the user's last stage and is not committed, so the view's design is
-  not rewritten yet.
+  is added as text only. That frontend change is committed (`288b779b`); `frontend.md` is not rewritten for it yet.
 - `executor_first_principles.zh.md` §17.4 ("角度类别、名义角、高度网格、ε、H、H_final 都不变"): it says what that design kept;
   it stays true.
 - The readouts (`docs/two_tier/readouts/`) are records of their day and are not rewritten.
@@ -916,4 +932,215 @@ step (D199), constants of the labeller in the spec.
 ```text
 - One correction class (5°) closes 6–9 m/s at a ground speed of 70–100 m/s: 2 km in 4–5 minutes. A new observed heading
   word ended a correction then (§4.9 before D199).
+```
+
+### 42. `prior.md`: D39
+
+**What changed:** the variant is `full`; `constants` is not run (B5's score, D24)
+
+**Old text:**
+
+```text
+| D39 | The prior's design is chosen by leave-one-airport-out cross-validation (5 folds: train on four airports, read the fifth). Two variants: `full` (§2) and `constants` (`full` and, in each candidate vector, the runway's length and threshold elevation). `constants` is chosen only if it is better by more than twice the seed scale (§5) | Decided | User, 2026-10-04 |
+```
+
+**New text:**
+
+```text
+| D39 | The prior's design is chosen by leave-one-airport-out cross-validation (5 folds: train on four airports, read the fifth). The variant is `full` (§2). The variant `constants` (`full` and, in each candidate vector, the runway's length and threshold elevation) is not run: in B5 (on `v12_20261005`) it scored worse than `full` by 6 seed scales, and a runway constant is an airport identity (D24) | Decided | User, 2026-10-04; `constants` not run: user, 2026-10-13 |
+```
+
+### 43. `prior.md`: D40
+
+**What changed:** configurations A and C only; B and D are not run (B5's scores); the tie rule, which only A and D could need, goes
+
+**Old text:**
+
+```text
+| D40 | Hyperparameters: configuration A (§5) is the start. The same folds compare four configurations (A, a smaller model, a larger model, a stronger regularization); the one with the fewest parameters within twice the seed scale of the best is chosen (§5); a tie of parameters among them goes to the lower score (A and D have one shape). Every configuration has attention heads 32 wide: A 6 heads, B (d_model 128) 4, C (d_model 256) 8 | Decided | User, 2026-10-04; the head width: user, 2026-10-04, on Claude's proposal; the tie: user, 2026-10-05 |
+```
+
+**New text:**
+
+```text
+| D40 | Hyperparameters: configuration A (§5) is the start. The same folds compare A and a larger model, C; the one with the fewest parameters within twice the seed scale of the best is chosen (§5). Every configuration has attention heads 32 wide: A 6 heads, C (d_model 256) 8. A smaller model (B, d_model 128) and a stronger regularization (D) are not run: in B5 (on `v12_20261005`) B scored worst, by 21 seed scales, and D as A (`prior_base_20261006/choice_configuration.json`) | Decided | User, 2026-10-04; the head width: user, 2026-10-04, on Claude's proposal; A and C only: user, 2026-10-13 |
+```
+
+### 44. `prior.md`: §5 Cross-validation, the steps
+
+**What changed:** two configurations (A, C), no variant step: 15 runs and the base
+
+**Old text:**
+
+```text
+| 1 | Variant `full`, four configurations, each on the 5 folds, seed 1337. A: the start. B: d_model 128, 4 heads, feed-forward 512. C: d_model 256, 8 heads, feed-forward 1,024. D: dropout 0.2, weight decay 0.05. B, C and D have the layers and the learning rate of A; every head is 32 wide | 20 |
+| 2 | The seed scale: configuration A with the seed 2024, on the 5 folds | 5 |
+| 3 | Variant `constants` with the configuration chosen after step 2, on the 5 folds, seed 1337 | 5 |
+| 4 | The base: the chosen configuration and variant on all five airports, seed 1337, stopped on their select days; then its one validation readout | 1 |
+```
+
+**New text:**
+
+```text
+| 1 | Two configurations, each on the 5 folds, seed 1337. A: the start. C: d_model 256, 8 heads, feed-forward 1,024, the layers and the learning rate of A; every head is 32 wide | 10 |
+| 2 | The seed scale: configuration A with the seed 2024, on the 5 folds | 5 |
+| 3 | The base: the chosen configuration on all five airports, seed 1337, stopped on their select days; then its one validation readout | 1 |
+```
+
+### 45. `prior.md`: §5 Cross-validation, the rules
+
+**What changed:** no tie rule; the variant is given, not chosen
+
+**Old text:**
+
+```text
+- **Configuration:** among the configurations whose score is within twice the seed scale of the best (the bound
+  included), the one with the fewest parameters; a tie of parameters goes to the lower score (A and D have one shape)
+  (D40).
+- **Variant:** `constants` only if its score is lower than that of `full` (same configuration) by more than twice the
+  seed scale; else `full`.
+```
+
+**New text:**
+
+```text
+- **Configuration:** among the configurations whose score is within twice the seed scale of the best (the bound
+  included), the one with the fewest parameters (D40).
+- **Variant:** `full` in every run (D39).
+```
+
+### 46. `prior.md`: §5 The base's one validation readout
+
+**What changed:** the base reads the val days once for each labelled artefact (D85)
+
+**Old text:**
+
+```text
+- **The base's one validation readout (D85):** on the validation days of every airport,
+```
+
+**New text:**
+
+```text
+- **The base's one validation readout (D85: one read for each labelled artefact):** on the validation days of every
+  airport,
+```
+
+### 47. `prior.md`: §12 Rules, the formal runs
+
+**What changed:** the formal runs read the labels of D196–D199 (B15)
+
+**Old text:**
+
+```text
+The formal runs read `v12_20261005` / `v17_20261005` at Δ = 4 s. The rules of outline §5 apply.
+```
+
+**New text:**
+
+```text
+The formal runs read `v17_20261013` / `v22_20261013` at Δ = 4 s (B15); B5 read `v12_20261005` / `v17_20261005`. The rules
+of outline §5 apply.
+```
+
+### 48. `prior.md`: §0.2 Open items
+
+**What changed:** the results page reads a variant choice that B15's campaign does not write
+
+**Old text:**
+
+```text
+### 0.2 Open items
+
+None.
+```
+
+**New text:**
+
+```text
+### 0.2 Open items
+
+- The Training results page reads a campaign's `choice_variant.json` (`aeroviz_backend/training_results.py`); a B15
+  campaign (`ts-prior-campaign-v4`) has none. A change of the backend and the frontend: the user's last stage, with
+  the user's permission.
+```
+
+### 49. `outline.md`: D85
+
+**What changed:** one val read for each stage and each labelled artefact
+
+**Old text:**
+
+```text
+the train and select rows give the same order, but the validation days are read one time for each stage. Stage A's labelling reads its val days (D198) | Decided | User, 2026-10-05, on Claude's review of stage A |
+```
+
+**New text:**
+
+```text
+the train and select rows give the same order, but the validation days are read one time for each stage and each labelled artefact (new labels are a new data set: their base has its own one read). Stage A's labelling reads its val days (D198) | Decided | User, 2026-10-05, on Claude's review of stage A; one read for each labelled artefact: user, 2026-10-13 |
+```
+
+### 50. `outline.md`: §1 `vocabulary.md` state
+
+**What changed:** the formal artefact is v17_20261013 / v22_20261013
+
+**Old text:**
+
+```text
+the formal artefact `v12_20261005` / `v17_20261005` and the Training view (`closed_loop_v12_20261005`) done,
+```
+
+**New text:**
+
+```text
+the formal artefact `v17_20261013` / `v22_20261013` (D196–D199, on `two-tier2`; before it `v12_20261005` / `v17_20261005`, with its Training view `closed_loop_v12_20261005`) done,
+```
+
+### 51. `outline.md`: §1 `prior.md` state
+
+**What changed:** B15 is built
+
+**Old text:**
+
+```text
+B6's sets published (`prior_sets_20261006`);
+```
+
+**New text:**
+
+```text
+B6's sets published (`prior_sets_20261006`); B15, the campaign on `v17_20261013` (configurations A and C), built on `two-tier2`;
+```
+
+### 52. `vocabulary.md`: §0.3 the formal artefact
+
+**What changed:** the formal artefact is v17_20261013 / v22_20261013
+
+**Old text:**
+
+```text
+| The formal artefact | `instruction_language/v12_20261005`, `executor/v17_20261005` (A34; read-only, `SHA256SUMS`);
+```
+
+**New text:**
+
+```text
+| The formal artefact | `instruction_language/v17_20261013`, `executor/v22_20261013` (D199, the next row; read-only, `SHA256SUMS`), read by the prior's B15. Before it: `instruction_language/v12_20261005`, `executor/v17_20261005` (A34; read-only, `SHA256SUMS`);
+```
+
+### 53. `vocabulary.md`: §0.3 D196–D199 row, its last sentences
+
+**What changed:** the frontend and backend part is committed (288b779b)
+
+**Old text:**
+
+```text
+The frontend and backend part of D196 is not committed: the user's last stage. Not merged: the user merges |
+```
+
+**New text:**
+
+```text
+The frontend and backend part: `288b779b`. The local branch `two-tier2` holds the branch; not pushed |
 ```

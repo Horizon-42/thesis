@@ -1586,33 +1586,34 @@ its options: the split and the device); `--split select --smoke` reads the selec
 val). Writes a new `--out`: `config.json`, then `readout.json` (`ts-prior-validation-v3`). 161 s for the base of B5.
 Tests: `tests/test_prior_validation.py`.
 
-### R59 · `run_ts.py prior_select` — the choices of the cross-validation (prior design §5; D39, D40)
+### R59 · `run_ts.py prior_select` — the choice of the cross-validation (prior design §5; D39, D40)
 
-2026-10-05. `--step configuration` after steps 1 and 2: the score of an arm is the mean held-out loss of its five folds;
-the seed scale the difference of configuration A's two seeds; among the configurations within twice the seed scale of the
-best, the fewest parameters, a tie of parameters to the lower score (the user, 2026-10-05). `--step variant` after step
-3: `constants` only if better than `full` by more than twice the seed scale. A fold is read only complete and of its arm
-(every shape and training value, the seed, the selection `landed`, one data identity) and with a finite score. Writes
-`choice_<step>.json` once (`ts-prior-choice-v1`). The campaign runs it; its rules are part of the behaviour check.
-Tests: `tests/test_prior_campaign.py`.
+2026-10-05; B15 2026-10-13. After steps 1 and 2: the score of an arm is the mean held-out loss of its five folds; the
+seed scale the difference of configuration A's two seeds; among the configurations (A and C) within twice the seed
+scale of the best, the fewest parameters. The variant is `full` (`prior_select.VARIANT`, D39). A fold is read only
+complete and of its arm (every shape and training value, the seed, the selection `landed`, one data identity) and with
+a finite score. Writes `choice_configuration.json` once (`ts-prior-choice-v1`). The campaign runs it; its rule is part
+of the behaviour check. B5 (2026-10-05, `ts-prior-campaign-v3`) also compared B and D and chose the variant
+(`choice_variant.json`). Tests: `tests/test_prior_campaign.py`.
 
-### R60 · `run_ts.py prior_campaign` — B5 as one campaign: 31 training runs, the choices, the base and its val readout (prior design §5, §12 B5; D108)
+### R60 · `run_ts.py prior_campaign` — the cross-validation and the base as one campaign: 15 fold runs, the choice, the base and its val readout (prior design §5, §12 B5, B15; D108)
 
-2026-10-05. Steps, one at a time on the GPU, each a runner in its own process with its log: configurations A, B, C, D
-(variant `full`, seed 1337) and A again (seed 2024) on the five folds, each fold's free generation at its held-out
-airport (select, 200 flights × 2); `prior_select --step configuration`; the chosen configuration's `constants` folds;
-`prior_select --step variant`; the base on every airport, `prior_validation` and `prior_free_generation --split val`.
-Every training run reads `landed`. Before each step: a clean tree (unless a smoke) and the behaviour check
-(`prior_behaviour`, R61) giving the start's answer bit for bit — its settings (seeds, selection, configurations, free
-generation, temperature, D68's bound) are the code on the disk's; a difference stops the campaign by name; each step's
+2026-10-05; B15 2026-10-13. Steps, one at a time on the GPU, each a runner in its own process with its log:
+configurations A and C (variant `full`, seed 1337) and A again (seed 2024) on the five folds, each fold's free
+generation at its held-out airport (select, 200 flights × 2); `prior_select`; the base on every airport,
+`prior_validation` and `prior_free_generation --split val`. Every training run reads `landed`. Before each step: a
+clean tree (unless a smoke) and the behaviour check (`prior_behaviour`, R61) giving the start's answer bit for bit — its
+settings (seeds, selection, variant, configurations, free generation, temperature, D68's bound) are the code on the
+disk's; a difference stops the campaign by name; each step's
 commit is recorded as information only. Resumable: a step is done when its last file exists; a step a kill left is moved
 aside as `<dir>.aborted-<UTC>` and run again; a done val step's claim is marked spent if a kill left it unmarked. `--smoke
-N` runs every step small. Writes `campaign.json` (`ts-prior-campaign-v3`), the steps' directories, `logs/`. B5
-(`prior_base_20261006`, 2026-10-05 22:40 → 10-06 07:12 UTC, 65 steps): configuration C, variant `full`; the readout
-`docs/two_tier/readouts/2026-10-06_b5_campaign.zh.md`. Tests: `tests/test_prior_campaign.py`.
+N` runs every step small. Writes `campaign.json` (`ts-prior-campaign-v4`), the steps' directories, `logs/`. B5
+(`prior_base_20261006`, v3 with B, D and the variant step: 2026-10-05 22:40 → 10-06 07:12 UTC, 65 steps): configuration
+C, variant `full`; the readout `docs/two_tier/readouts/2026-10-06_b5_campaign.zh.md`. Tests:
+`tests/test_prior_campaign.py`.
 
-    python run_ts.py prior_campaign --instructions 4dTrajectory/outputs/POOLED/instruction_language/v12_20261005 \
-        --executor 4dTrajectory/outputs/POOLED/executor/v17_20261005 --row-interval-s 4 \
+    python run_ts.py prior_campaign --instructions 4dTrajectory/outputs/POOLED/instruction_language/v17_20261013 \
+        --executor 4dTrajectory/outputs/POOLED/executor/v22_20261013 --row-interval-s 4 \
         --out 4dTrajectory/outputs/POOLED/prior/<campaign id>
 
 ### R61 · `run_ts.py prior_behaviour` — the behaviour check of the prior's code on fixed inputs (prior design §12 B10, B12, B13; D108)
