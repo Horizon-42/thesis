@@ -430,14 +430,16 @@ DOWNWIND_BASE_FINAL = [(60, 0.0, 100.0, 0.0), *_turn(-90.0, 100.0), (20, 0.0, 90
 
 
 def _batch(interval_s=2.0, legs=DOWNWIND_BASE_FINAL, track_deg=270.0, altitude_m=1110.0, speeds=None, cut=0,
-           final_vertical_m=15.0):
+           final_vertical_m=15.0, end_n=0.0, **changes):
     """A synthetic flight's batch, its executor inputs at the first predicted step and the words; ``speeds``: the speed
     words its open-loop reading says instead of the observed ones, ``{2 s row: m/s}`` (none: the observed words);
     ``cut``: the observed flight and its reading end that many 2 s rows early (the slice stops short of the threshold);
-    ``final_vertical_m``: H_final (D66; H = 15 m, the reading before D66)."""
-    one, geometry = spec(closed_loop_final_vertical_m=final_vertical_m), instruction_airport()
+    ``final_vertical_m``: H_final (D66; H = 15 m, the reading before D66); ``end_n``: the observed flight's north offset,
+    m (0: its final on the centreline; a positive offset puts it left of the course 090°); ``changes``: other values
+    of the spec."""
+    one, geometry = spec(closed_loop_final_vertical_m=final_vertical_m, **changes), instruction_airport()
     words = Words(one)
-    signals = instruction_flight(*fly_legs(legs, track_deg, altitude_m, -400.0, 0.0))
+    signals = instruction_flight(*fly_legs(legs, track_deg, altitude_m, -400.0, end_n))
     reading = read_flight(signals, geometry, one, words)
     if speeds is not None or cut:
         grid = reading.words.copy()
@@ -480,6 +482,49 @@ def test_a_flight_whose_words_leave_an_offset_is_brought_back_by_heading_correct
     # a correction goes on through a turn's new observed words (§4.9, the user, 2026-10-13), and the final is flown
     # within the tolerance
     assert np.abs(sentence.withheld.lateral_m[-len(sentence.withheld.lateral_m) // 4:]).max() < words.spec.closed_loop_lateral_m
+
+
+def test_the_lateral_reference_is_the_runway_in_force_on_the_final_once_the_observed_word_says_its_course():
+    """D201 (the user, 2026-10-13): e_y is read from the centreline of the runway in force while "no level-off" is in
+    force and the observed heading word in force says that runway's course; from the observed path at the first
+    predicted step, before the final descent and while the observed word says another track."""
+    words = Words(spec())
+    final = {ALTITUDE: words.altitude_no_level_off, ANGLE: 3}
+    corrector = Corrector(_grid([_first(words, 600.0, 2), {}, final, {HEADING: 2}, {HEADING: 0}, {}]), 0, 0, 1, words,
+                          [90.0])
+
+    def reference(k):
+        found = corrector.lateral_reference(k)
+        corrector.row(k, 0.0, 0.0, 600.0, holding=False, past_end=False, rates_mps=STILL)
+        return found
+
+    assert [reference(k) for k in range(6)] == [None, None, 0, None, 0, 0]
+    assert closed_loop.centreline_error(-1000.0, 18.0, 92.0, 70.0, instruction_airport().candidates[0]) == \
+        pytest.approx((-18.0, 70.0 * math.sin(math.radians(2.0))))       # left of the course 090°, turning right
+
+
+def test_on_the_final_the_corrections_bring_the_flight_to_the_centreline_and_not_to_an_offset_observed_path():
+    """D201: the observed final runs 18 m left of the centreline, beyond Y_final (15 m). On the lined-up final the
+    flown path stays within Y_final of the centreline and is not taken to the observed path (the rule before D201 would
+    correct toward it); the stored e_y there is the distance from the centreline, before the final the distance from the
+    observed path."""
+    batch, inputs, words = _batch(4.0, end_n=18.0, closed_loop_final_lateral_m=15.0)
+    (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
+    every, start = 2, sentence.rows.start
+    signals = batch.signals[0]
+    span = len(batch.readings[0].words) - batch.sentences[0].first_row
+    path = ObservedPath(signals.e_m[:span], signals.n_m[:span], smooth(truncated(signals, span), words.spec).altitude_m,
+                        start * every)
+    marked = sentence.rows.states[sentence.rows.on_interval][start:]
+    from_path = np.array([path.match(*row[:3]).lateral_m for row in marked])
+    candidate = batch.geometries[0].candidates[0]
+    from_centre = np.array([closed_loop.centreline_error(*row[[0, 1, 3, 4]], candidate)[0] for row in marked])
+    stored = sentence.withheld.lateral_m
+    centre_rows = np.isclose(stored, from_centre, atol=1e-9) & ~np.isclose(stored, from_path, atol=1e-9)
+    assert centre_rows.sum() > 10 and centre_rows[-1]
+    assert (centre_rows | np.isclose(stored, from_path, atol=1e-9)).all()
+    assert (np.abs(from_centre[centre_rows]) < words.spec.closed_loop_final_lateral_m).all()
+    assert abs(from_path[-1]) > words.spec.closed_loop_final_lateral_m
 
 
 def _replayed(batch, inputs, sentence, params, words, monkeypatch):

@@ -737,3 +737,8 @@ replay's outcome (`tests/test_start.py`). The artefact's formats do not change.
 
 **2026-10-12**: `ts-instruction-closed-loop-v9` — the outcomes are the judge's of C33 (2026-10-12): `landed` /
 `landing_failed` for an approach crossing, by the evaluation's verdict.
+
+**2026-10-13**: `ts-instruction-closed-loop-v10` — on the final, while "no level-off" is in force and the observed
+heading word in force says the course of the runway in force, e_y (and the stored `lateral_m`) is the distance from that
+runway's extended centreline, and the heading corrections aim there (vocabulary D201; `Corrector.lateral_reference`,
+`centreline_error`).

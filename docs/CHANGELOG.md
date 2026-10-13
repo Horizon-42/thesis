@@ -1,5 +1,25 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-13 — on the final the labels' lateral corrections aim at the centreline (D201)
+
+B15's folds failed the evaluation's lateral gate at the airports they did not train on: they flew a line 20–40 m off
+the centreline to the threshold (readout `2026-10-13_b15_prior.zh.md`). The labels' final corrections aimed at the
+observed path, which scatters about the centreline inside Y_final (15 m), so against the centreline they turned back only
+34–38 % net at 15–25 m off. The user (2026-10-13) chose to change the labels and train B again on them (v18, B16).
+
+- `autopilot/closed_loop.py`: `Corrector.lateral_reference` — while "no level-off" is in force and the observed heading
+  word in force says the course of the runway in force, the next row's e_y and ė_y are read from that runway's extended
+  centreline (`centreline_error`); elsewhere from the observed path as before. Past the end of the observed path no
+  correction is said, as before.
+  The stored `lateral_m` is the e_y the corrections read.
+- `instructions/artefact.py`: `ts-instruction-closed-loop-v10`; the v17 artefact's closed-loop files are refused by the
+  new code (B15 and the windows census of 2026-10-13 stay on disk, read-only).
+- Measured in memory on 5,000 train flights of v17 at Δ = 4 s (`outputs/POOLED/analyses/final_centreline_labels_20261013`):
+  landed 97.66 → 98.92 %, heading words 48.5 → 43.1 a sentence, rows 15–25 m off the centreline turned back 98 % net.
+  The condition "lined up" is needed: from "no level-off" alone the turn onto the final is pulled toward the centreline.
+- Design: vocabulary D201, §4.9; contract C38. Stale: every v17-based closed-loop reading (a new artefact v18 is built
+  from this commit).
+
 ### 2026-10-13 — stage D starts from the base; per-segment credit on stage D's grid (D200)
 
 The user (2026-10-13) asked for one method of branch training for stages C and D, chosen by a comparison of D143's

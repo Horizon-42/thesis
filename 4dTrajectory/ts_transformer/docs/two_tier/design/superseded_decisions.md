@@ -2,8 +2,8 @@
 
 **What this file is.** The two-tier design documents hold the current design only. On 2026-10-12 they were rewritten in
 place to match the code of the branch `two-tier2-eval-landing` (commits `04378395`, `ea632d20`, `51a68b8e`), and on
-2026-10-13 again for commits `e00c8d08` and `d8f21c77`, and for the prior's campaign on the new labels (`7e72a059`,
-B15). This file
+2026-10-13 again for commits `e00c8d08` and `d8f21c77`, for the prior's campaign on the new labels (`7e72a059`,
+B15), and for the final's lateral corrections (D201, the branch `two-tier2-centreline`). This file
 keeps each text that the rewrite replaced, word for word, beside the text that replaced it, so that the user can compare
 them. It is not part of the design: no code and no design document cites it. An entry leaves this file when the user
 has reviewed it.
@@ -31,8 +31,11 @@ has reviewed it.
    cv, but maybe not 30 runs; see what's is necessary and what's not", then the choice "A + C, with seed pair".
 9. The new labels' base reads the val days once (outline D85; 2026-10-13): "allow; and we difinately have whole new
    dataset, why this only read once check still work for this new dataset?".
+10. On the final, once the observed aircraft is lined up, the lateral corrections aim at the runway's centreline, and
+   the labels and the prior are built again (vocabulary D201; 2026-10-13): after the diagnosis of B15's held-out
+   folds, the user chose "采用，做 v18 并重跑 B（推荐）".
 
-The new decision rows (vocabulary D196, D197; outline D198) are new text, not replacements, so they are not entries
+The new decision rows (vocabulary D196, D197, D201; outline D198) are new text, not replacements, so they are not entries
 below; the rewritten rows that cite them are.
 
 ## Index
@@ -92,6 +95,12 @@ below; the rewritten rows that cite them are.
 | 51 | `outline.md` | §1 `prior.md` state | B15 is built |
 | 52 | `vocabulary.md` | §0.3 the formal artefact | the formal artefact is v17_20261013 / v22_20261013 |
 | 53 | `vocabulary.md` | §0.3 D196–D199 row, its last sentences | the frontend and backend part is committed (288b779b) |
+| 54 | `vocabulary.md` | §4.9 The comparison, the lateral error e_y | on the final, once the observed aircraft is lined up, the lateral corrections aim at the centreline (D201) |
+| 55 | `vocabulary.md` | §4.9 The errors ahead (D197), ė_y and the end error | on the final, once the observed aircraft is lined up, the lateral corrections aim at the centreline (D201) |
+| 56 | `vocabulary.md` | §4.9 The errors ahead (D197), the end error | on the final, once the observed aircraft is lined up, the lateral corrections aim at the centreline (D201) |
+| 57 | `vocabulary.md` | §4.9 Lateral correction, item 1 | on the final, once the observed aircraft is lined up, the lateral corrections aim at the centreline (D201) |
+| 58 | `vocabulary.md` | §4.9 Lateral correction, item 3 | on the final, once the observed aircraft is lined up, the lateral corrections aim at the centreline (D201) |
+| 59 | `vocabulary.md` | §0.1 D83, its first sentence | on the final, once the observed aircraft is lined up, the lateral corrections aim at the centreline (D201) |
 
 ## Text kept unchanged on purpose
 
@@ -1143,4 +1152,106 @@ The frontend and backend part of D196 is not committed: the user's last stage. N
 
 ```text
 The frontend and backend part: `288b779b`. The local branch `two-tier2` holds the branch; not pushed |
+```
+
+### 54. `vocabulary.md`: §4.9 The comparison, the lateral error e_y
+
+**What changed:** on the final, once the observed aircraft is lined up, the lateral corrections aim at the centreline (D201)
+
+**Old text:**
+
+```text
+  segment where the path turns there by more than 170° (D83);
+```
+
+**New text:**
+
+```text
+  segment where the path turns there by more than 170° (D83); on the final, while "no level-off" is in force and the
+  observed heading word in force says the course of the runway in force (the observed aircraft is lined up), the
+  signed distance of the flown position from that runway's extended centreline, positive to the right (D201);
+```
+
+### 55. `vocabulary.md`: §4.9 The errors ahead (D197), ė_y and the end error
+
+**What changed:** on the final, once the observed aircraft is lined up, the lateral corrections aim at the centreline (D201)
+
+**Old text:**
+
+```text
+changes now: ė_y is the flown velocity across the matched segment of the observed path (positive to the right), ė_h the
+```
+
+**New text:**
+
+```text
+changes now: ė_y is the flown velocity across the matched segment of the observed path, or on the final across the
+centreline (D201) (positive to the right), ė_h the
+```
+
+### 56. `vocabulary.md`: §4.9 The errors ahead (D197), the end error
+
+**What changed:** on the final, once the observed aircraft is lined up, the lateral corrections aim at the centreline (D201)
+
+**Old text:**
+
+```text
+where the end error is zero or has the other sign: the end aims at the observed path. At ė = 0 the start error is the
+```
+
+**New text:**
+
+```text
+where the end error is zero or has the other sign: the end aims at the path e_y is read from (the observed path; on
+the final, the centreline, D201). At ė = 0 the start error is the
+```
+
+### 57. `vocabulary.md`: §4.9 Lateral correction, item 1
+
+**What changed:** on the final, once the observed aircraft is lined up, the lateral corrections aim at the centreline (D201)
+
+**Old text:**
+
+```text
+1. When |e_y,on| > Y, the labeller says the heading class one step (5°) from the observed word in force, toward the
+   observed path.
+```
+
+**New text:**
+
+```text
+1. When |e_y,on| > Y, the labeller says the heading class one step (5°) from the observed word in force, toward the
+   observed path (on the final, toward the centreline: D201).
+```
+
+### 58. `vocabulary.md`: §4.9 Lateral correction, item 3
+
+**What changed:** on the final, once the observed aircraft is lined up, the lateral corrections aim at the centreline (D201)
+
+**Old text:**
+
+```text
+   correction is in force, the row says the new observed word one class toward the observed path, and this word is a
+```
+
+**New text:**
+
+```text
+   correction is in force, the row says the new observed word one class toward the path e_y is read from, and this word is a
+```
+
+### 59. `vocabulary.md`: §0.1 D83, its first sentence
+
+**What changed:** on the final, once the observed aircraft is lined up, the lateral corrections aim at the centreline (D201)
+
+**Old text:**
+
+```text
+The lateral error e_y of the closed-loop reading is the signed distance of the flown position from the observed path: from the line through the observed 2 s rows near the matched point (its segments, not their extensions), positive to the right of the path (§4.9).
+```
+
+**New text:**
+
+```text
+The lateral error e_y of the closed-loop reading is the signed distance of the flown position from the observed path: from the line through the observed 2 s rows near the matched point (its segments, not their extensions), positive to the right of the path (§4.9); on the final, once the observed aircraft is lined up, e_y is read from the runway's centreline instead (D201).
 ```

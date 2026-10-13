@@ -42,6 +42,15 @@ measured against that line, for the readouts only; e_h is NaN there (no observed
 is no measurement), the reading says no correction, a correction in force ends, and the rows count as rows without
 correction (D34).
 
+ON THE FINAL (D201, the user, 2026-10-13): while "no level-off" is in force and the observed heading word in force says
+the course of the runway in force (the observed aircraft is lined up on its final), e_y is the flown position's distance
+right of that runway's extended centreline, and ė_y the flown velocity across it (`Corrector.lateral_reference`,
+`centreline_error`). The heading corrections there aim at the centreline, not at the observed path: a prior sees the
+centreline and never the observed path, and against the centreline corrections that follow the observed path are soft
+(readout `2026-10-13_b15_prior.zh.md`). Past the end of the observed path no correction is said (above); the e_y the
+readouts read there is the centreline's while the last observed row is on the lined-up final. The rest of the comparison
+(e_h, the matched point) is unchanged.
+
 THE CORRECTIONS (`Corrector`), with Y the lateral tolerance in force (`lateral_tolerance_m`; the user, 2026-10-12) and
 H the vertical tolerance in force (`vertical_tolerance_m`, D66): `closed_loop_final_lateral_m` (Y_final) and
 `closed_loop_final_vertical_m` (H_final) while "no level-off" is in force — the final descent, told by the words — and
@@ -58,7 +67,8 @@ no error, the row where e_off reaches zero or has the other sign (the user, 2026
 not at a part of the tolerance). With ė = 0 a correction starts on the error now (Claude's reading of the user's
 choice; vocabulary §4.9 states the errors without the lead):
 
-- lateral: when |e_y,on| > Y, the heading class one step (5°) from the observed word in force, toward the path; the
+- lateral: when |e_y,on| > Y, the heading class one step (5°) from the observed word in force, toward the path (on
+  the final, toward the centreline: ON THE FINAL); the
   observed word again when e_y,off is zero or has the other sign — except an OVERSHOOT (D53): e_y,off has the other
   sign beyond Y, and the opposite correction is said in the same row. A new observed heading word does not stop a
   correction (the user, 2026-10-13): while one is in force, the row says the new word one class toward the path, and
@@ -85,10 +95,11 @@ THE RESULT (`ClosedLoopSentence`): the said words from the first predicted step 
 correction: every word that is not an observed word said at its row), the states on the data's 2 s rows from the
 sentence's first row to its last said row, the Δ rows marked (D51) — observed before the first predicted step, flown
 from it (position in the airport frame, MSL height, track, ground speed, vertical rate; a flown 2 s row between two Δ
-rows is the executor's state at the end of its cycle there) — e_y, e_h at each said row, the matched point's observed time and the last 2 s row whose
-observed words have been said at each row, whether its outcome is a timeout (D90), and its OUTCOME (D74: the
-judge's, `judge.outcome_of`, on what the reading's executor flew from the first predicted step to its end). Flown
-again from the same state on its own rows (the replay: `replay_batch`, under the same time limit), a
+rows is the executor's state at the end of its cycle there) — e_y (the one the corrections read: from the observed
+path, or on the final from the centreline, D201), e_h at each said row, the matched point's observed time and the last
+2 s row whose observed words have been said at each row, whether its outcome is a timeout (D90), and its OUTCOME
+(D74: the judge's, `judge.outcome_of`, on what the reading's executor flew from the first predicted step to its end).
+Flown again from the same state on its own rows (the replay: `replay_batch`, under the same time limit), a
 closed-loop sentence gives the same states on every 2 s row.
 """
 
@@ -112,6 +123,7 @@ from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.replay import Batch, subset
 from ts_transformer.autopilot.spec import params_sha256
 from ts_transformer.autopilot.start import Loop, start_row
+from ts_transformer.instructions.airport import RunwayCandidate, relative_to_runway
 from ts_transformer.instructions.artefact import (
     CLOSED_LOOP_DIRECTORY, STATE_COLUMNS, ClosedLoopSentence, SentenceRows, Withheld,
 )
@@ -236,6 +248,15 @@ class ObservedPath:
         v_n = ground_speed_mps * math.cos(math.radians(track_deg))
         slope = float(self.height[i + 1] - self.height[i]) / length
         return (v_e * dn - v_n * de) / length, vertical_rate_mps - slope * (v_e * de + v_n * dn) / length
+
+
+def centreline_error(e_m: float, n_m: float, track_deg: float, ground_speed_mps: float,
+                     candidate: RunwayCandidate) -> tuple[float, float]:
+    """``(e_y, ė_y)`` against the extended centreline of ``candidate`` (module docstring, ON THE FINAL): the flown
+    position's distance right of it, m, and the flown velocity across it, m/s, right positive; ``track_deg`` a compass
+    track."""
+    right = float(relative_to_runway(e_m, n_m, track_deg, 0.0, candidate).right_of_course_m)
+    return right, ground_speed_mps * math.sin(math.radians(track_deg - candidate.course_deg))
 
 
 def lateral_tolerance_m(words: Words, altitude: np.ndarray | int) -> np.ndarray:
@@ -375,10 +396,10 @@ class Corrector:
             past_end: bool, rates_mps: tuple[float, float]) -> tuple[np.ndarray, np.ndarray]:
         """The next said row's words and which are corrections: the observed words not said before up to (not at) Δ/2 after the
         matched point's observed time ``matched_row`` (the first predicted step: after its own), and the corrections from
-        the errors and their rates ``rates_mps`` (ė_y, ė_h; `ObservedPath.rates`), the flown height above the airport
-        elevation E there (D58), whether the executor holds the level in force (``holding``) and whether the
-        matched point is past the end of the observed path (``past_end``, module docstring); refused when the grammar
-        refuses the row."""
+        the errors and their rates ``rates_mps`` (ė_y, ė_h; `ObservedPath.rates`, or on the final `centreline_error`),
+        the flown height above the airport elevation E there (D58), whether the executor holds the level in force
+        (``holding``) and whether the matched point is past the end of the observed path (``past_end``, module
+        docstring); refused when the grammar refuses the row."""
         first = self.said is None
         self.matched_row = float(self.start) if first else matched_row
         last = min(last_heard_row(self.matched_row, self.every), len(self.observed) - 1)
@@ -436,6 +457,19 @@ class Corrector:
         # a heading word is a correction unless it is the observed word said at its row (in the row's frame, D46)
         added[HEADING] = said[HEADING] != UNCHANGED and (observed[HEADING] == UNCHANGED or self.turn != 0)
         return said.astype(np.int16), np.zeros(len(COLUMNS), dtype=bool) if first else added
+
+    def lateral_reference(self, matched_row: float) -> int | None:
+        """The candidate whose centreline the next row's e_y is read from (module docstring, ON THE FINAL): the
+        runway in force at the last observed row that row hears (as `row` finds it), while "no level-off" is in force
+        there and the observed heading word in force says that runway's course. None: e_y from the observed path; also
+        at the first predicted step, which reads no error."""
+        if self.said is None:
+            return None
+        row = max(self.next, min(last_heard_row(matched_row, self.every), len(self.observed) - 1) + 1) - 1
+        runway = int(self.runway[row])
+        final = int(self.held[row][ALTITUDE]) == self.words.altitude_no_level_off
+        lined_up = self.words.heading_class(float(self.track[row]), float(self.courses_deg[runway])) == 0
+        return runway if final and lined_up else None
 
     def _heading(self) -> int:
         """The row's heading word (module docstring, D46): when the observed word in force or the correction changed,
@@ -540,6 +574,11 @@ def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Word
             match = paths[f].match(float(flown[0]), float(flown[1]), float(flown[2]))
             rates = paths[f].rates(float(flown[3]), float(flown[4]), float(flown[5]))
             lateral, vertical = match.lateral_m, match.vertical_m
+            reference = correctors[f].lateral_reference(match.row)
+            if reference is not None:                      # on the final: from the centreline (D201)
+                lateral, lateral_rate = centreline_error(float(flown[0]), float(flown[1]), float(flown[3]),
+                                                         float(flown[4]), batch.geometries[j].candidates[reference])
+                rates = (lateral_rate, rates[1])
             try:
                 height = float(flown[2]) - batch.geometries[j].elevation_m       # above E, as the grammar reads it (D58)
                 words_row, mask = correctors[f].row(match.row, lateral, vertical, height, holding=bool(captured[f]),
