@@ -2,8 +2,8 @@
 O15) — what must be known before the campaign's first round: how many speaking workers fit. No criterion is applied
 (D7): the report goes to the user, who sets the campaign.
 
-WHAT IT MEASURES, from stage D's start (`multi_train.stage_d`: the round of stage C given, its token part at zero), on
-round 0's draw at the formal counts (its batches by span recorded):
+WHAT IT MEASURES, from stage D's start (`multi_train.stage_d`: the round of stage C given, or the base, D200; its token
+part at zero), on round 0's draw at the formal counts (its batches by span recorded):
 
 - **One speaking worker** (``--speak-workers`` of 2 or more, on ``--speak-device``, by default ``--device``): its peaks
   of the host and of the GPU (none on the CPU) on the first batch of each span and the batch of the most rows
@@ -20,6 +20,7 @@ written after each part, under ``--out`` (a new directory); a campaign reads it 
     python run_ts.py multi_profile --prior <the base> --instructions <A34's artefact> --executor <its spec> \\
         --windows <stage C's census> --start-campaign <stage C's campaign> --start-round <r> --out <a new directory> \\
         (multi_train's settings) --speak-workers N [--speak-device cpu]
+    (from the base: --traffic-hidden … --traffic-heads … in place of --start-campaign and --start-round)
 """
 
 from __future__ import annotations
@@ -36,15 +37,16 @@ import torch
 
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
 from ts_transformer.experiments.multi_train import (
-    MEASURE_MARGIN, MULTI_PROFILE_SCHEMA, add_arguments, settings_from, span_key, stage_d, with_margin,
+    MEASURE_MARGIN, MULTI_PROFILE_SCHEMA, add_arguments, settings_from, span_key, stage_d, start_from, with_margin,
 )
 from ts_transformer.experiments.post_profile import memory
 from ts_transformer.experiments.post_train import (
     Context, Speakers, Stage, available_memory, measured_batches, open_context, pass_memory_of, speak_device_refused,
-    start_of, workers_fit,
+    workers_fit,
 )
 from ts_transformer.experiments.post_window_loop import checked_edges
 from ts_transformer.io_utils import utc_now, write_json_atomic
+from ts_transformer.post.branches import branch_rows
 from ts_transformer.post.scene import Window
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
@@ -95,9 +97,9 @@ def main(argv: list[str] | None = None) -> int:
     refused = speak_device_refused(args.speak_device, args.speak_workers, args.device)
     if refused is not None:
         parser.error(refused)
-    source = args.start_campaign if args.start_campaign.is_absolute() else REPO_ROOT / args.start_campaign
     try:
-        start = start_of(source, args.start_round, formal=False)        # a profile is no campaign: no formal start
+        start = start_from(args, formal=False)                          # a profile is no campaign: no formal start
+        settings = settings_from(args, start)
     except ValueError as refused:
         parser.error(str(refused))
     prior_dir, instructions, executor, census, procedure_root, out = (
@@ -105,13 +107,16 @@ def main(argv: list[str] | None = None) -> int:
                                                           args.procedure_root, args.out))
     if out.exists():
         parser.error(f"{out} exists: a profile writes a new directory")
-    settings = settings_from(args, start)
     _, opened, _ = require_conforming_closed_loop(instructions, executor)          # D69: the checks run here (D73)
     edges_reference = census / "conformance" / "edges.npz"
     checked_edges(edges_reference)                                                 # D104
     device = torch.device(args.device)
     context = open_context(prior_dir, instructions, executor, edges_reference, torch.device("cpu"), procedure_root,
                            formal=False)
+    try:                                            # D200, as stage C's D170: refused before the workers
+        branch_rows(context.interval_s, settings.branch_every_s)
+    except ValueError as refused:
+        parser.error(f"--branch-every-s: {refused}")
     stage = stage_d()
     stage.start(context, settings)                        # refused by name before the workers and the output (D164)
     # one worker is measured: the campaign's rule of where batches are spoken (D191) does not reach it

@@ -240,6 +240,54 @@ def test_with_segments_each_row_of_a_first_sentence_is_in_one_group_and_a_contin
         branch_points(FIRST, LENGTH, DELTA, every_s=6.0)
 
 
+def test_segment_credit_ends_at_the_varied_aircrafts_next_branch_point_where_it_comes_first():
+    """D200: a later aircraft of stage D's grid has its first point off the window's grid, its next point less than
+    ``segment_rows`` rows after it: that group counts its rows up to that next point only, every said row of the first
+    sentence then in exactly one group; a group without a next point (its last) counts its full segment."""
+    from ts_transformer.tests.test_post_loss import FIRST, LENGTH, WORDS, _base, _spoken, _trained
+    from ts_transformer.tests.support import prior_sentence
+
+    rng = np.random.default_rng(4)
+    rows = [prior_sentence(rng, WORDS, candidates=2, rows=LENGTH, first_step=FIRST) for _ in range(3)]
+    _, permitted, _, _ = _spoken(_trained(_base()))
+    tokens = [np.zeros((0, len(TOKEN_FEATURES)), dtype=np.float32)] * LENGTH
+
+    def sentence(i, reward):
+        return Sentence(rows[i], permitted.select([i]), tokens, reward)
+
+    every = 5
+    points = [FIRST, FIRST + 2, FIRST + 7, FIRST + 12]                      # its own first step, then the grid
+    nexts = points[1:] + [None]
+    groups = [Group(0, b, sentence(0, 0.0), (sentence(1, 1.0), sentence(2, 0.0)), next_branch=n)
+              for b, n in zip(points, nexts)]
+    cut = [samples([g], CPU, segment_rows=every).counted for g in groups]
+    firsts = torch.stack([c[0] for c in cut]).sum(dim=0)
+    assert (firsts[FIRST:FIRST + 17] == 1).all() and not firsts[:FIRST].any() and not firsts[FIRST + 17:].any()
+    assert cut[0][1, FIRST:FIRST + 2].all() and not cut[0][1, FIRST + 2:].any()      # up to its next point only
+    assert cut[3][1, FIRST + 12:FIRST + 17].all() and not cut[3][1, FIRST + 17:].any()  # the last: its segment
+    unbounded = [samples([g], CPU).counted for g in groups]                   # no segment credit: to the event
+    assert [int(u[0].sum()) for u in unbounded] == [LENGTH - b for b in points]
+
+
+def test_a_groups_next_branch_point_is_its_aircrafts_next_point(setup):
+    """D200: `branch_round` gives each group its varied aircraft's next branch point (a Δ row), None at its last;
+    stage C's points are a segment apart, so its segment credit is the same as before. Stage C's points every row,
+    the first three kept (three groups)."""
+    s = setup
+    model = _with_module(s["base"])
+    every_row = post_branches.stage_c_rules(1337, 0, DELTA, DELTA)
+    rules = replace(every_row, varied=lambda *args: [(v, p[:3]) for v, p in every_row.varied(*args)])
+    (window,) = s["windows"]
+    found = branch_round(model, lambda flights: s["moved_loop"](start_move_of(window)), [window], [0], {0: s["stored"]},
+                         s["flights"], s["geometries"], {s["geometry"].code: s["roster"]}, s["finals"], s["words"],
+                         interval_s=DELTA, variant="full", edges_reference=s["reference"],
+                         faults={s["geometry"].code: {}}, device=CPU, seed=1337, round_=0, split="train",
+                         continuations=2, rules=rules)
+    branches = [g.branch for g in found.groups]
+    assert len(branches) == 3 and branches == sorted(branches)
+    assert [g.next_branch for g in found.groups] == [b + 1 for b in branches[:-1]] + [None]
+
+
 
 def test_an_aircraft_ended_at_its_first_predicted_step_before_a_row_flown_has_its_observed_rows():
     """Stage D's branch copy (MC6, 2026-10-09): in a loop of later joins there is no observe phase, so an aircraft the

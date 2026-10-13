@@ -25,7 +25,7 @@ from ts_transformer.post.branches import EQUAL, GROUP_WEIGHTS, MINORITY_SIDE
 from ts_transformer.tests.support import INSTRUCTION_STEP_S
 from ts_transformer.tests.test_multi_windows import built  # noqa: F401
 from ts_transformer.tests.test_post_branches import _ahead
-from ts_transformer.tests.test_post_train import _context, _settings, short_round
+from ts_transformer.tests.test_post_train import _Spoken, _context, _settings, short_round
 from ts_transformer.tests.test_post_window_loop import setup  # noqa: F401
 
 
@@ -45,8 +45,6 @@ def _multi_settings(spans_s=(1.0,), **changed):
 def test_a_batch_is_spoken_with_its_campaigns_front_attention(monkeypatch, branching, attention):
     """D190 (2): stage D's batch gives its window loops its loop options and the campaign's
     `MultiSettings.front_attention`, its branch points D143's or found backward."""
-    from ts_transformer.tests.test_post_train import _Spoken
-
     seen = {}
 
     def spoken(*args, **kwargs):
@@ -99,9 +97,9 @@ def test_the_data_weight_defaults_to_the_code_before_it_and_reaches_the_pass(mon
         _multi_settings(data_weight=-0.5)
     seen = {}
     monkeypatch.setattr(multi_train, "train_pass", lambda *args, **kwargs: seen.update(kwargs) or {})
-    multi_train.stage_d().train("model", "context", "optimizer", "directory", _multi_settings(data_weight=0.25), "rng",
-                                part_width=7, round_=0, companion=None)
-    assert seen == {"part_width": 7, "data_weight": 0.25, "group_weight": EQUAL}
+    multi_train.stage_d().train("model", SimpleNamespace(interval_s=INSTRUCTION_STEP_S), "optimizer", "directory",
+                                _multi_settings(data_weight=0.25), "rng", part_width=7, round_=0, companion=None)
+    assert seen == {"part_width": 7, "segment_rows": None, "data_weight": 0.25, "group_weight": EQUAL}
 
 
 def test_the_batch_bounds_default_to_the_code_before_them_and_are_refused_out_of_range():
@@ -134,9 +132,91 @@ def test_the_group_weight_defaults_to_the_code_before_it_and_reaches_the_pass(mo
     assert tuple(option.choices) == GROUP_WEIGHTS
     seen = {}
     monkeypatch.setattr(multi_train, "train_pass", lambda *args, **kwargs: seen.update(kwargs) or {})
-    multi_train.stage_d().train("model", "context", "optimizer", "directory", _multi_settings(group_weight=MINORITY_SIDE),
-                                "rng", part_width=7, round_=0, companion=None)
+    multi_train.stage_d().train("model", SimpleNamespace(interval_s=INSTRUCTION_STEP_S), "optimizer", "directory",
+                                _multi_settings(group_weight=MINORITY_SIDE), "rng", part_width=7, round_=0,
+                                companion=None)
     assert seen["group_weight"] == MINORITY_SIDE
+
+
+def test_the_grids_interval_and_segment_credit_default_to_the_code_before_them_and_reach_the_round(monkeypatch):
+    """D200: `MultiSettings.branch_every_s` (D143's 120 s) and `segment_only` (False) default to the code before them (a
+    record without them reads so), are refused out of range and with branch points found backward, are read from
+    ``--branch-every-s`` and ``--segment-only``; the grid's rules take the interval and the pass the segment's rows."""
+    from ts_transformer.multi.backward import BACKWARD, MAJORITY
+    from ts_transformer.post.branches import BRANCH_EVERY_S, branch_rows
+
+    settings = _multi_settings()
+    assert (settings.branch_every_s, settings.segment_only) == (BRANCH_EVERY_S, False)
+    recorded = asdict(settings)
+    del recorded["branch_every_s"], recorded["segment_only"]
+    assert MultiSettings(**recorded) == settings
+    with pytest.raises(ValueError, match="branch_every_s"):
+        _multi_settings(branch_every_s=0.0)
+    for branching in (BACKWARD, MAJORITY):
+        _multi_settings(branching=branching)
+        for wrong in ({"segment_only": True}, {"branch_every_s": 60.0}):
+            with pytest.raises(ValueError, match="are the grid's"):
+                _multi_settings(branching=branching, **wrong)
+    parser = argparse.ArgumentParser()
+    multi_train.add_arguments(parser)
+    by_dest = {a.dest: a for a in parser._actions}
+    assert by_dest["branch_every_s"].default == BRANCH_EVERY_S and by_dest["segment_only"].default is False
+    seen = {}
+    monkeypatch.setattr(multi_train, "train_pass", lambda *args, **kwargs: seen.update(kwargs) or {})
+    segments = _multi_settings(branch_every_s=60.0, segment_only=True)
+    multi_train.stage_d().train("model", SimpleNamespace(interval_s=INSTRUCTION_STEP_S), "optimizer", "directory",
+                                segments, "rng", part_width=7, round_=0, companion=None)
+    assert seen["segment_rows"] == branch_rows(INSTRUCTION_STEP_S, 60.0) == 60.0 / INSTRUCTION_STEP_S
+    asked = []
+    monkeypatch.setattr(multi_train.credit, "rules", lambda *args: asked.append(args) or {})
+    monkeypatch.setattr(multi_train, "Rules", lambda **fields: fields)
+    def spoken(*args, **kwargs):
+        raise _Spoken
+
+    monkeypatch.setattr(multi_train, "branch_round", spoken)
+    monkeypatch.setattr(multi_train, "loop_options", lambda context: {})
+    with pytest.raises(_Spoken):
+        multi_train.speak_batch(None, _speak_context(), [], [], segments, 3, None, 0)
+    assert asked == [(segments.seed, 3, INSTRUCTION_STEP_S, 60.0)]
+
+
+def _speak_context():
+    """What `multi_train.speak_batch` reads of a context before its loops."""
+    return SimpleNamespace(splits={"train": {"sentences": {}, "flights": {}, "faults": {}}},
+                           start_loop=lambda split, batch: None, geometries={}, rosters={}, finals={}, words=None,
+                           interval_s=INSTRUCTION_STEP_S, variant="full", edges_reference=None,
+                           device=torch.device("cpu"))
+
+
+def test_a_start_from_the_base_takes_its_own_traffic_shape_a_start_from_a_round_its_campaigns():
+    """D200: `MultiSettings.start` None (the base) goes with a positive traffic shape, a start from a round of stage C
+    with none (its campaign's shape, D164; a record without the fields reads so); the runner's `start_from` gives None
+    without ``--start-campaign``, and refuses by name a campaign without its round and a shape beside a round."""
+    settings = _multi_settings()
+    assert (settings.traffic_hidden, settings.traffic_heads) == (None, None)
+    recorded = asdict(settings)
+    del recorded["traffic_hidden"], recorded["traffic_heads"]
+    assert MultiSettings(**recorded) == settings
+    base = _multi_settings(start=None, traffic_hidden=16, traffic_heads=4)
+    assert base.start is None
+    for wrong in ({"start": None}, {"start": None, "traffic_hidden": 16}, {"start": None, "traffic_hidden": 0,
+                                                                            "traffic_heads": 4},
+                  {"traffic_hidden": 16, "traffic_heads": 4}, {"traffic_hidden": 16}):
+        with pytest.raises(ValueError, match="traffic shape"):
+            _multi_settings(**wrong)
+
+    def args(**given):
+        return SimpleNamespace(**{"start_campaign": None, "start_round": None, "traffic_hidden": None,
+                                  "traffic_heads": None, **given})
+
+    assert multi_train.start_from(args(traffic_hidden=16, traffic_heads=4), formal=True) is None
+    with pytest.raises(ValueError, match="go together"):
+        multi_train.start_from(args(start_round=3, traffic_hidden=16, traffic_heads=4), formal=False)
+    with pytest.raises(ValueError, match="go with a start from the base"):
+        multi_train.start_from(args(), formal=False)
+    for shape in ({"traffic_hidden": 16, "traffic_heads": 4}, {"traffic_heads": 4}):
+        with pytest.raises(ValueError, match="go with a start from the base"):
+            multi_train.start_from(args(start_campaign="c", start_round=0, **shape), formal=False)
 
 
 def test_each_kinds_count_is_split_equally_by_span():
@@ -363,6 +443,45 @@ def test_a_round_of_stage_d_from_a_round_of_stage_c_end_to_end(setup, tmp_path, 
     assert resumed["start"] == identity_c and len(resumed["rounds"]) == 2      # a resumed stage reads the start again
     with pytest.raises(SystemExit, match="a ts-post-train-v1 campaign, not"):
         post_train.open_campaign(tmp_path / "stage_c", {"settings": {}}, {"head": "x", "dirty": False}, {}, **options)
+
+
+def test_a_round_of_stage_d_from_the_base_end_to_end(setup, tmp_path, monkeypatch):
+    """D200: stage D's start from the base is the base with zero-output traffic modules of the campaign's seed and shape
+    (`post_train.traffic_model`) and the token part at zero; its checkpoint's identity names the base and that shape as
+    its start; `round_model` opens the round and refuses another shape; a resume continues the campaign."""
+    from ts_transformer.post.traffic_attention import TrafficConfig
+
+    s = setup
+    short_round(monkeypatch, s)
+    context = _context(s)
+    window = replace(_ahead(s["windows"][0]), span_s=1.0)                  # of the campaign's span
+    monkeypatch.setattr(multi_train, "draw_windows",
+                        lambda context, settings, rng: ([window], {"drawn": {REAL_KIND: 1}}))
+    settings = _multi_settings(rounds=1, start=None, traffic_hidden=16, traffic_heads=4)
+    stage = stage_d()
+    model, _ = stage.start(context, settings)
+    plain = post_train.traffic_model(context, settings.seed, TrafficConfig(16, 4)).state_dict()
+    parts = model.state_dict()
+    assert {n for n in parts if ".part." in n} and all(not parts[n].any() for n in parts if ".part." in n)
+    assert set(parts) - set(plain) == {n for n in parts if ".part." in n}
+    assert all(torch.equal(parts[n], v) for n, v in plain.items())          # the base with D29's traffic modules
+    out = tmp_path / "stage_d"
+    options = dict(schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER, settings_type=MultiSettings)
+    paths = {key: str(tmp_path / "inputs" / key) for key in post_train.INPUT_PATHS}
+    post_train.open_campaign(out, {**paths, "settings": asdict(settings), "smoke": True}, {"head": "x", "dirty": False},
+                             {}, **options)
+    post_train.run_campaign(out, settings, context, stage=stage)
+    identity = torch.load(out / "round_0" / "checkpoint.pt", weights_only=False)["identity"]
+    assert identity["start"] == {"base": context.base_identity, "traffic": TrafficConfig(16, 4).to_dict()}
+    assert not multi_train.round_model(context, settings, out, 0).training
+    with pytest.raises(ValueError, match="another start, base"):
+        multi_train.round_model(context, replace(settings, traffic_hidden=8), out, 0)
+    raised = replace(settings, rounds=2)
+    post_train.open_campaign(out, {**paths, "settings": asdict(raised), "smoke": True}, {"head": "y", "dirty": False},
+                             {}, **options)
+    post_train.run_campaign(out, raised, context, stage=stage_d())
+    resumed = torch.load(out / "round_1" / "checkpoint.pt", weights_only=False)["identity"]
+    assert resumed["start"] == identity["start"] and len(resumed["rounds"]) == 2
 
 
 def test_stage_ds_start_is_refused_by_name_through_the_one_function(setup, tmp_path, monkeypatch):
@@ -595,13 +714,15 @@ def test_a_landed_aircraft_counts_in_the_readout_only_where_the_loop_judges_it(b
 def test_the_runner_records_stage_ds_campaign_and_opens_its_context_formal_or_smoke(tmp_path, monkeypatch):
     """§7 row 4 (the review of MC4, S2-4 b): `multi_train.main` opens its context formal unless ``--smoke`` (D132,
     D164), checks the start before its campaign record, records `MULTI_CAMPAIGN_SCHEMA` with stage D's claim reader,
-    and runs stage D's stage."""
+    and runs stage D's stage; D200: from the base without a source to check, and a grid interval that is not a whole
+    number of rows refused by name before the start and the campaign record."""
     from dataclasses import dataclass
 
     @dataclass
     class FakeContext:                                             # what main replaces: its device and its base
         device: torch.device
         base: torch.nn.Module
+        interval_s: float = INSTRUCTION_STEP_S
 
     calls = []
     start = {"campaign": "c", "round": 0, "checkpoint_sha256": "0" * 64}
@@ -631,13 +752,23 @@ def test_the_runner_records_stage_ds_campaign_and_opens_its_context_formal_or_sm
     for extra, formal in (([], True), (["--smoke"], False)):
         calls.clear()
         assert multi_train.main(argv + extra) == 0
-        assert calls == [("start_of", formal)] + [("finished", tmp_path / "c")] * formal + [
+        assert calls == [("start_of", formal)] + [("finished", multi_train.REPO_ROOT / "c")] * formal + [
             ("spans", [300.0, 600.0]), ("context", formal), ("start", start),
             ("campaign", {"schema": MULTI_CAMPAIGN_SCHEMA, "reader": MULTI_CLAIM_READER,
                           "settings_type": MultiSettings, "restart_round": False}), ("run", True)]
     calls.clear()
     assert multi_train.main(argv + ["--smoke", "--restart-round"]) == 0                   # D185
     assert [k["restart_round"] for name, k in calls if name == "campaign"] == [True]
+    base = argv[:argv.index("--start-campaign")] + argv[argv.index("--start-round") + 2:] + [
+        "--traffic-hidden", "16", "--traffic-heads", "4"]
+    calls.clear()
+    assert multi_train.main(base) == 0                                                    # D200: from the base
+    assert [name for name, _ in calls] == ["spans", "context", "start", "campaign", "run"]
+    assert ("start", None) in calls
+    calls.clear()
+    with pytest.raises(SystemExit):
+        multi_train.main(base + ["--branch-every-s", "5"])                    # not a whole number of rows
+    assert [name for name, _ in calls] == ["spans", "context"]
 
 
 def test_the_time_the_aircraft_take(built):

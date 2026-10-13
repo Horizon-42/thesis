@@ -280,6 +280,7 @@ def test_the_branch_points_of_a_varied_aircraft():
     assert points(aircraft, 2, DELTA) == [10]
     assert points([_a("x", 0.0, 4, 100)], 0, DELTA) == branch_points(4, 100, DELTA)   # one aircraft: stage C's
     assert points([anchor, _a("y", 0.0, 50, 50)], 1, DELTA) == []        # ended at its first step: none
+    assert points(aircraft, 1, DELTA, every_s=60.0) == [50, 64, 79, 94, 109, 124, 139]   # D200: the grid every 60 s
 
 
 def test_stage_ds_numbers_are_each_aircrafts_own():

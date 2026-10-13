@@ -114,6 +114,10 @@ class Group:
     continuations: tuple[Sentence, ...]
     #: the aircraft it varies: its place among the window's commanded aircraft (module docstring)
     varied: int = 0
+    #: that aircraft's next branch point (a Δ row, as ``branch``; None: after its last, or not given): segment credit
+    #: (`samples`' ``segment_rows``) ends there too (D200: stage D's later aircraft has its first point off the window's
+    #: grid, so its next point comes before ``segment_rows`` rows)
+    next_branch: int | None = None
 
     @property
     def sentences(self) -> tuple[Sentence, ...]:
@@ -142,8 +146,9 @@ def samples(groups: Sequence[Group], device: torch.device, part_width: int = 0, 
             scale: float = 1.0) -> Samples:
     """The loss's batch of the samples of ``groups`` (`post.loss.Samples`): every sentence of every informative group,
     its advantage on the rows from its group's branch point on up to its event (``Sentence.until``; and only there) —
-    or, with ``segment_rows`` (P55), only up to ``segment_rows`` rows after the branch point (the next branch point; the
-    later words left to the later groups) —, the speaker's records joined and the tokens padded to the longest sentence
+    or, with ``segment_rows`` (P55), only up to ``segment_rows`` rows after the branch point or up to the varied aircraft's
+    next branch point (``Group.next_branch``, D200), whichever is earlier (the later words left to the later groups) —,
+    the speaker's records joined and the tokens padded to the longest sentence
     (with a caller's token part of ``part_width``, `traffic_attention.traffic_of`). Each advantage times ``scale`` (a
     group's weight, D195)."""
     items = [(sentence, advantage, group.branch) for group in groups if group.informative
@@ -161,8 +166,9 @@ def samples(groups: Sequence[Group], device: torch.device, part_width: int = 0, 
         until = torch.tensor([length if s.until is None else s.until for s, _, _ in items], device=device)[:, None]
         counted = counted & (steps < until)
     if segment_rows is not None:
-        branch = torch.tensor([b for _, _, b in items], device=device)[:, None]
-        counted = counted & (steps < branch + segment_rows)
+        ends = [g.branch + segment_rows if g.next_branch is None else min(g.branch + segment_rows, g.next_branch)
+                for g in groups if g.informative for _ in g.sentences]          # in the order of ``items``
+        counted = counted & (steps < torch.tensor(ends, device=device)[:, None])
     advantage = torch.tensor([a * scale for _, a, _ in items], dtype=torch.float32, device=device)[:, None] * counted
     return Samples(rows, Permitted.join([s.permitted for s, _, _ in items]), traffic_of(tokens, device, part_width),
                    advantage, counted)

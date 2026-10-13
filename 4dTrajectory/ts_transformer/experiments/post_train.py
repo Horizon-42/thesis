@@ -2082,13 +2082,19 @@ def open_campaign(out: Path, inputs: dict[str, Any], git: dict[str, Any], checks
     return record
 
 
-def start_model(context: Context, settings: Settings) -> tuple[Prior, torch.optim.Optimizer]:
-    """The model at the start (D29: the base with zero-output traffic modules, their other weights drawn from the
-    campaign's seed, so a campaign is the same from its start) and its optimizer."""
+def traffic_model(context: Context, seed: int, traffic: TrafficConfig) -> Prior:
+    """D29: the base with zero-output traffic modules of shape ``traffic``, their other weights drawn from ``seed`` (so
+    a campaign is the same from its start), on the context's device, in eval mode. Stage C's start (`start_model`) and
+    stage D's start from the base (`multi_train.stage_d`) use it."""
     model = copy.deepcopy(context.base)
-    torch.manual_seed(settings.seed)
-    add_traffic_attention(model, TrafficConfig(settings.traffic_hidden, settings.traffic_heads))
-    model.to(context.device).eval()
+    torch.manual_seed(seed)
+    add_traffic_attention(model, traffic)
+    return model.to(context.device).eval()
+
+
+def start_model(context: Context, settings: Settings) -> tuple[Prior, torch.optim.Optimizer]:
+    """The model at the start (`traffic_model` of the campaign's seed and traffic shape) and its optimizer."""
+    model = traffic_model(context, settings.seed, TrafficConfig(settings.traffic_hidden, settings.traffic_heads))
     return model, torch.optim.AdamW(parameter_groups(model, settings.prior_lr, settings.traffic_lr),
                                     weight_decay=settings.weight_decay)
 

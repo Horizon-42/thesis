@@ -1649,7 +1649,9 @@ checkpoint.
   `post_ceiling` (R64) and `post_diagnose` (R66) read any campaign on the speak device alone, as its readout was read.
 - Stage D's `multi_train` takes `--front-attention`, `--cpu-workers`, `--cpu-batches` and `--cpu-period` alike; its
   workers are sized from `--profile` (`multi_profile`) and, with CPU workers, `--cpu-profile` (a `multi_profile
-  --speak-device cpu` of the same inputs and settings).
+  --speak-device cpu` of the same inputs and settings). D200: without `--start-campaign`/`--start-round` it starts
+  from the base, its traffic shape `--traffic-hidden`/`--traffic-heads`; `--branch-every-s` and `--segment-only`
+  (the grid only) as stage C's P55, a group's credit ending at the varied aircraft's next branch point.
 - A clean tree unless `--smoke`; formal runs from a detached run worktree (D163).
 - Writes `campaign.json` (`ts-post-train-v1`) and, for each round, `round.json` and `checkpoint.pt`
   (`ts-post-checkpoint-v1`).

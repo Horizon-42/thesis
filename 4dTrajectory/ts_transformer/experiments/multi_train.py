@@ -10,9 +10,11 @@ parts (`stage_d`):
   masks, stage C's traffic shape and that round, a formal campaign from a formal one, a seed other than the source's,
   each refused by name; a formal start also from a campaign that has done every round, `require_finished`, D166
   item 19), with stage D's token part added to its traffic attention (`multi.tokens`,
-  `multi-commanded-tokens-v1`, its projection at zero: the start says what the round says) and a new optimizer. The pull
-  is to the base, as in every stage of the post-training. A resume and a speaking worker load a state into the model of
-  that shape (stage C's start model of the source campaign's settings, with the token part).
+  `multi-commanded-tokens-v1`, its projection at zero: the start says what the round says) and a new optimizer. Or
+  (D200; no ``--start-campaign``) the base itself, with zero-output traffic modules of the campaign's seed and its
+  traffic shape (``--traffic-hidden``, ``--traffic-heads``; `post_train.traffic_model`, D29) and the token part at zero.
+  The pull is to the base, as in every stage of the post-training. A resume and a speaking worker load a state into the
+  model of that shape (stage C's start model of the source campaign's settings, or the base's, with the token part).
 - **The draw of a round** (D146, `draw_windows`): each kind's count in equal parts of the spans L (``--spans-s``,
   `span_counts`); the train days' real windows in a permutation by the seed and the round, each in turn an anchor
   (`multi.windows.Anchors`) of each kind still short: its span drawn with the round's numbers among the spans of that
@@ -39,7 +41,9 @@ parts (`stage_d`):
   each update (`post.loss.update_step`), `post.loss.DATA_WEIGHT` the default. ``--group-weight``
   (`MultiSettings.group_weight`, D195; the user, 2026-10-11): each group's weight in the pass
   (`post.branches.GROUP_WEIGHTS`), `EQUAL` the default; with `MINORITY_SIDE` each batch's record holds its groups'
-  minority sides (``group_minorities``), from which the pass takes the round's mean.
+  minority sides (``group_minorities``), from which the pass takes the round's mean. ``--branch-every-s`` and
+  ``--segment-only`` (D200, with `GRID` only): the grid's interval (D143's 120 s the default), and a group's advantage
+  only up to the varied aircraft's next branch point (stage C's P55; default: up to its event).
 - **The selection readout** (§5 item 2, `selection_windows`, `read_batch`, `selection_readout`): at most
   ``select_per_airport`` real windows of each span of each airport of the select days, their anchors in an order drawn
   once with the seed (D146's rule), the first pass only, each aircraft with its own numbers (the same every round). By
@@ -48,14 +52,14 @@ parts (`stage_d`):
   silent aircraft, the rows of the speed-word mask, the faulty points (post-training D114), and the losses of
   separation by pair (`multi.separation.PAIRS`; judged again on the states flown, `multi.census.flown_positions`, the
   census's rule). No criterion is applied (D7).
-- **The identity** (§7 row 3): `MULTI_CHECKPOINT_SCHEMA`, the start's identity, the procedure masks, the token part's
+- **The identity** (§7 row 3): `MULTI_CHECKPOINT_SCHEMA`, the start's identity (`start_identity`), the procedure masks, the token part's
   format and features, the seed, the spans and their counts (`span_counts`), the kinds and c_min, and each round's
   windows by their anchors, spans, commanded flights and shifts (`window_record`).
 
 THE CHECKS, as stage C's: the closed loop's (D69, with the labeller's and the executor's) and the edge features' (D104).
 A formal campaign (not ``--smoke``) runs from a clean checkout (a run worktree at the merged commit, outline D163; its
 intent is written by hand before the publication, not checked here), on stage B's formal base, from a formal campaign
-of stage C. Its campaign record is `MULTI_CAMPAIGN_SCHEMA`, resumable as stage C's (`post_train.open_campaign` with stage
+of stage C or from the base. Its campaign record is `MULTI_CAMPAIGN_SCHEMA`, resumable as stage C's (`post_train.open_campaign` with stage
 D's format and reader). Its speaking workers (``--speak-workers`` above 1) are sized from stage D's profile of these
 inputs and settings (``--profile``, `profiled_fit`: the profile's measure with its margin and the memory free now, each
 worker's GPU capped at its share), never measured before a run (the user, 2026-10-07); ``--speak-device`` puts them on
@@ -69,6 +73,7 @@ executor.
         --windows <stage C's census: its edge reference> --start-campaign <stage C's campaign> --start-round <r> \\
         --out 4dTrajectory/outputs/POOLED/multi/<campaign id> --rounds … --spans-s 300 600 1200 --c-min … \
         --batch-rows 64 48 24 (every count given)
+    (from the base, D200: --traffic-hidden 64 --traffic-heads 4 in place of --start-campaign and --start-round)
 
 The readout also gives the time the aircraft take (§5 item 4, O18; `multi.timing`): each landing's delay against its
 record (p50, p90), the spacing at the threshold of successive landings on one runway (p1, p5, p50) beside the records' of
@@ -94,7 +99,7 @@ from ts_transformer.experiments.post_branches import Rules, backward_round, bran
 from ts_transformer.experiments.post_train import (
     Context, Speakers, Stage, available_memory, batches, cpu_workers_refused, done_rounds, open_campaign, open_context,
     round_start, run_campaign, save_batch_file, settings_of, source_campaign, speak_device_refused, speak_round,
-    start_checkpoint, start_model, start_of, train_pass, workers_fit,
+    start_checkpoint, start_model, start_of, traffic_model, train_pass, workers_fit,
 )
 from ts_transformer.experiments.post_window_loop import LANDED, LOST_SEPARATION, WindowLoop, checked_edges
 from ts_transformer.multi import credit
@@ -106,11 +111,11 @@ from ts_transformer.multi.timing import (
 )
 from ts_transformer.multi.tokens import PART_FEATURES, TOKENS_SCHEMA, TokenPart
 from ts_transformer.multi.windows import COMPRESSED, KINDS, REAL_KIND, Anchors, Drawn, compressed, left_out
-from ts_transformer.post.branches import CONTINUATIONS, EQUAL, GROUP_WEIGHTS, MINORITY_SIDE
+from ts_transformer.post.branches import BRANCH_EVERY_S, CONTINUATIONS, EQUAL, GROUP_WEIGHTS, MINORITY_SIDE, branch_rows
 from ts_transformer.post.loss import DATA_WEIGHT
 from ts_transformer.post.scene import Window
 from ts_transformer.post.window_lists import identity_of
-from ts_transformer.post.traffic_attention import add_token_part, parameter_groups
+from ts_transformer.post.traffic_attention import TrafficConfig, add_token_part, parameter_groups
 from ts_transformer.prior.model import COPIED, FRONT_ATTENTIONS, Prior
 from ts_transformer.prior.procedure import PROCEDURE_MASKS
 from ts_transformer.repo_layout import REPO_ROOT, git_state
@@ -157,8 +162,9 @@ class MultiSettings:
     data_sentences: int
     select_per_airport: int
     #: the start (D164): round ``round`` of stage C's campaign ``campaign`` (repository-relative) and its checkpoint's
-    #: ``checkpoint_sha256`` (`post_train.start_of`)
-    start: dict[str, Any]
+    #: ``checkpoint_sha256`` (`post_train.start_of`); or None (D200): the base with zero-output traffic modules of the
+    #: shape `traffic_hidden`, `traffic_heads` (`post_train.traffic_model`)
+    start: dict[str, Any] | None
     #: where a round's branch points are (D182, MC12): `GRID`, D143's (the default: the behaviour before D182; a record
     #: without the setting reads as it), or `BACKWARD` / `MAJORITY`, found back from each varied aircraft's event with
     #: point B (D182) or the majority point (D192) (`multi.backward`)
@@ -186,6 +192,18 @@ class MultiSettings:
     #: a batch whose sum of commanded aircraft squared reaches this is spoken on the speak device (`post_train.Settings
     #: .gpu_squares`, `post_train.batch_kinds`); a resume may change it; the default 0: off (a record without it reads so)
     gpu_squares: int = 0
+    #: the traffic shape of a start from the base (D200; `TrafficConfig`: the token network's hidden width and the
+    #: attention's heads), given with ``start`` None only; a start from a round of stage C takes its campaign's shape
+    #: (D164; the default None: the behaviour before D200, a record without them reads so)
+    traffic_hidden: int | None = None
+    traffic_heads: int | None = None
+    #: D200: the interval of the grid's branch points (`multi.credit.points`), s; D143's `BRANCH_EVERY_S`, the default
+    #: (the behaviour before D200; a record without it reads so); with `GRID` only
+    branch_every_s: float = BRANCH_EVERY_S
+    #: D200: a group's advantage and pull only on the rows from its branch point to the next one (stage C's P55,
+    #: `post.branches.samples`' ``segment_rows``); False, the default: up to the event (the behaviour before D200; a
+    #: record without it reads so); with `GRID` only
+    segment_only: bool = False
 
     def __post_init__(self) -> None:
         if set(self.per_kind) != set(KINDS) or min(self.per_kind.values()) < 0 or not any(self.per_kind.values()):
@@ -200,8 +218,18 @@ class MultiSettings:
                self.select_per_airport) <= 0:
             raise ValueError("rounds, batch rows, continuations, groups an update, data sentences and select windows "
                              "are positive")
-        if set(self.start) != {"campaign", "round", "checkpoint_sha256"}:
+        if self.start is not None and set(self.start) != {"campaign", "round", "checkpoint_sha256"}:
             raise ValueError(f"a start is its campaign, round and checkpoint_sha256, not {sorted(self.start)}")
+        shape = (self.traffic_hidden, self.traffic_heads)
+        if (self.start is None and (None in shape or min(shape) <= 0)) or (self.start is not None
+                                                                          and shape != (None, None)):
+            raise ValueError(f"a traffic shape (traffic_hidden, traffic_heads) {shape}: positive with a start from the "
+                             f"base, none with a start from a round of stage C (its campaign's shape, D164)")
+        if not self.branch_every_s > 0:
+            raise ValueError(f"branch_every_s {self.branch_every_s}: positive")
+        if self.branching != GRID and (self.segment_only or self.branch_every_s != BRANCH_EVERY_S):
+            raise ValueError(f"segment_only and branch_every_s are the grid's (branching {GRID!r}), not "
+                             f"{self.branching!r}'s")
         if self.branching not in BRANCHINGS:
             raise ValueError(f"branching {self.branching!r} is none of {BRANCHINGS}")
         if self.front_attention not in FRONT_ATTENTIONS:
@@ -326,7 +354,7 @@ def speak_batch(model: Prior, context: Context, windows: Sequence[Window], place
     batch = [windows[p] for p in places]
     common = dict(interval_s=context.interval_s, variant=context.variant, edges_reference=context.edges_reference,
                   faults=train["faults"], device=context.device, split="train", continuations=settings.continuations,
-                  rules=Rules(**credit.rules(settings.seed, round_, context.interval_s)),
+                  rules=Rules(**credit.rules(settings.seed, round_, context.interval_s, settings.branch_every_s)),
                   loop_options={**loop_options(context), "attention": settings.front_attention})
     data = (model, context.start_loop("train", batch), batch, places, train["sentences"], train["flights"],
             context.geometries, context.rosters, context.finals, context.words)
@@ -529,7 +557,7 @@ def round_model(context: Context, settings: MultiSettings, out: Path, round_: in
                 "token_part": {"schema": TOKENS_SCHEMA, "features": list(PART_FEATURES)}, "seed": settings.seed,
                 "spans_s": list(settings.spans_s), "per_kind": settings.per_kind, "per_span": span_counts(settings),
                 "c_min": settings.c_min}
-    start = torch.load(start_checkpoint(settings.start), weights_only=False, map_location="cpu")["identity"]
+    start = start_identity(context, settings)
     if ({k: held[k] for k in expected} != expected or held["start"] != start
             or held["start"]["base"] != context.base_identity or len(held["rounds"]) != round_ + 1):
         raise ValueError(f"{out}/round_{round_}: a checkpoint of another start, base, masks, token part, settings or "
@@ -659,6 +687,21 @@ def require_finished(campaign: Path) -> None:
                          f"stage D starts from a campaign that has done every round (D166 item 19)")
 
 
+def start_identity(context: Context, settings: MultiSettings) -> dict[str, Any]:
+    """The identity of a campaign's start in its checkpoints (§7 row 3): from the base (D200), the base's identity and
+    the traffic shape; from a round of stage C (D164), that round's checkpoint identity."""
+    if settings.start is None:
+        return {"base": context.base_identity,
+                "traffic": TrafficConfig(settings.traffic_hidden, settings.traffic_heads).to_dict()}
+    return torch.load(start_checkpoint(settings.start), weights_only=False, map_location="cpu")["identity"]
+
+
+def segment_rows_of(settings: MultiSettings, interval_s: float) -> int | None:
+    """D200: the rows from a branch point to the next (`MultiSettings.branch_every_s` in Δ rows) where the campaign
+    counts only them (`MultiSettings.segment_only`); None: up to the event."""
+    return branch_rows(interval_s, settings.branch_every_s) if settings.segment_only else None
+
+
 # ---- the stage
 def stage_d() -> Stage:
     """Stage D's parts of a round (module docstring)."""
@@ -666,11 +709,15 @@ def stage_d() -> Stage:
     started: dict[str, Any] = {}
 
     def shaped(context: Context, settings: MultiSettings) -> Prior:
-        """The model of stage D's shape: stage C's start model of the source campaign's settings, with the token
-        part (its weights at zero)."""
-        source = settings_of(source_campaign(REPO_ROOT / settings.start["campaign"], settings.start["round"],
-                                             formal=context.formal))
-        model, _ = start_model(context, source)
+        """The model of stage D's shape, with the token part (its weights at zero): from the base (D200), the base
+        with zero-output traffic modules of the campaign's seed and traffic shape (`post_train.traffic_model`); from a
+        round of stage C, stage C's start model of the source campaign's settings."""
+        if settings.start is None:
+            model = traffic_model(context, settings.seed, TrafficConfig(settings.traffic_hidden, settings.traffic_heads))
+        else:
+            source = settings_of(source_campaign(REPO_ROOT / settings.start["campaign"], settings.start["round"],
+                                                 formal=context.formal))
+            model, _ = start_model(context, source)
         add_token_part(model, TokenPart.width, TOKENS_SCHEMA)
         return model.to(context.device).eval()
 
@@ -683,6 +730,8 @@ def stage_d() -> Stage:
         return model, optimizer_of(model, settings)
 
     def start(context: Context, settings: MultiSettings) -> tuple[Prior, torch.optim.Optimizer]:
+        if settings.start is None:                                     # D200: the start is the shaped base itself
+            return shape(context, settings)
         source, identity = round_start(context, settings.start, settings.seed)        # D164: refused by name
         if context.formal:
             require_finished(REPO_ROOT / settings.start["campaign"])
@@ -692,9 +741,8 @@ def stage_d() -> Stage:
         return model, optimizer_of(model, settings)
 
     def identity(context: Context, settings: MultiSettings, out: Path, rounds: int) -> dict[str, Any]:
-        if "identity" not in started:                                             # a resumed campaign
-            started["identity"] = torch.load(start_checkpoint(settings.start), weights_only=False,
-                                             map_location="cpu")["identity"]
+        if "identity" not in started:                                 # a resumed campaign, or a start from the base
+            started["identity"] = start_identity(context, settings)
         return {"schema": MULTI_CHECKPOINT_SCHEMA, "start": started["identity"], "procedure_masks": PROCEDURE_MASKS,
                 "token_part": {"schema": TOKENS_SCHEMA, "features": list(PART_FEATURES)}, "seed": settings.seed,
                 "spans_s": list(settings.spans_s), "per_kind": settings.per_kind, "per_span": span_counts(settings),
@@ -711,6 +759,7 @@ def stage_d() -> Stage:
                  part_width=TokenPart.width, batches=span_batches,
                  train=lambda model, context, optimizer, directory, settings, rng, *, part_width, round_, companion:
                  train_pass(model, context, optimizer, directory, settings, rng, part_width=part_width,
+                            segment_rows=segment_rows_of(settings, context.interval_s),
                             data_weight=settings.data_weight, group_weight=settings.group_weight))
 
 
@@ -723,8 +772,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--windows", type=Path, required=True,
                         help="stage C's census (post_windows), whose conformance/edges.npz is the edge reference (D104)")
     parser.add_argument("--procedure-root", type=Path, default=DEFAULT_PROCEDURE_ROOT)
-    parser.add_argument("--start-campaign", type=Path, required=True, help="stage C's campaign (post_train)")
-    parser.add_argument("--start-round", type=int, required=True, help="its chosen round (§5 item 1, D164)")
+    parser.add_argument("--start-campaign", type=Path,
+                        help="stage C's campaign (post_train), with --start-round (D164); not given: the base (D200)")
+    parser.add_argument("--start-round", type=int, help="its chosen round (§5 item 1, D164)")
+    parser.add_argument("--traffic-hidden", type=int, help="D200: a start from the base: the traffic shape's hidden width")
+    parser.add_argument("--traffic-heads", type=int, help="D200: a start from the base: the traffic shape's heads")
     parser.add_argument("--rounds", type=int, required=True)
     for kind in KINDS:
         parser.add_argument(f"--windows-{kind}", type=int, required=True, help=f"the {kind} windows of a round (O16)")
@@ -743,6 +795,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--branching", choices=BRANCHINGS, default=GRID,
                         help="D182, D192: the branch points, D143's grid (default) or found back from each event "
                              "with point B (backward) or the majority point (majority)")
+    parser.add_argument("--branch-every-s", type=float, default=MultiSettings.branch_every_s,
+                        help="D200: the interval of the grid's branch points, s (default: D143's)")
+    parser.add_argument("--segment-only", action="store_true",
+                        help="D200: a group's advantage only up to the next branch point (default: up to the event)")
     parser.add_argument("--front-attention", choices=FRONT_ATTENTIONS, default=COPIED,
                         help="D190 (2): how a window's copies read the front they hold once (copied: bit for bit; "
                              "merged: no copy)")
@@ -765,13 +821,30 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
                         help="the speaking workers' device (default: --device); e.g. cpu beside a pass on cuda (D180)")
 
 
-def settings_from(args: argparse.Namespace, start: dict[str, Any]) -> MultiSettings:
-    """The settings of `add_arguments`' ``args`` with the start ``start`` (`post_train.start_of`)."""
+def start_from(args: argparse.Namespace, *, formal: bool) -> dict[str, Any] | None:
+    """The start of `add_arguments`' ``args``: None (the base, D200) without ``--start-campaign``; else the record of
+    that round (`post_train.start_of`; the source's rules refused by name, ``formal`` as there). ``--start-campaign`` and
+    ``--start-round`` go together, the traffic shape with the base only (refused by name)."""
+    if (args.start_campaign is None) != (args.start_round is None):
+        raise ValueError("--start-campaign and --start-round go together (a round of stage C; neither: the base)")
+    given = (args.traffic_hidden, args.traffic_heads)
+    if (args.start_campaign is None and None in given) or (args.start_campaign is not None and given != (None, None)):
+        raise ValueError("--traffic-hidden and --traffic-heads go with a start from the base (D200); a start from a "
+                         "round of stage C takes its campaign's traffic shape (D164)")
+    if args.start_campaign is None:
+        return None
+    source = args.start_campaign if args.start_campaign.is_absolute() else REPO_ROOT / args.start_campaign
+    return start_of(source, args.start_round, formal=formal)
+
+
+def settings_from(args: argparse.Namespace, start: dict[str, Any] | None) -> MultiSettings:
+    """The settings of `add_arguments`' ``args`` with the start ``start`` (`start_from`)."""
     return MultiSettings(args.rounds, {kind: getattr(args, f"windows_{kind}") for kind in KINDS}, args.spans_s,
                          args.c_min, args.batch_rows, args.continuations, args.seed, args.prior_lr, args.traffic_lr,
                          args.weight_decay, args.update_groups, args.data_sentences, args.select_per_airport, start,
                          args.branching, args.front_attention, args.cpu_batches, args.cpu_period, args.data_weight,
-                         args.group_weight, args.batch_squares, args.gpu_squares)
+                         args.group_weight, args.batch_squares, args.gpu_squares, args.traffic_hidden,
+                         args.traffic_heads, args.branch_every_s, args.segment_only)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -805,17 +878,16 @@ def main(argv: list[str] | None = None) -> int:
                      "from it)")
     if (args.cpu_workers > 0) != (args.cpu_profile is not None):
         parser.error("--cpu-profile goes with --cpu-workers (the CPU workers are sized from it)")
-    source = args.start_campaign if args.start_campaign.is_absolute() else REPO_ROOT / args.start_campaign
     try:
-        start = start_of(source, args.start_round, formal=not args.smoke)            # D164: the start's setting
-        if not args.smoke:
-            require_finished(source)                                                  # D166 item 19
+        start = start_from(args, formal=not args.smoke)                               # D164, D200: the start's setting
+        if start is not None and not args.smoke:
+            require_finished(REPO_ROOT / start["campaign"])                           # D166 item 19
+        settings = settings_from(args, start)
     except ValueError as refused:
         parser.error(str(refused))
     prior_dir, instructions, executor, census, procedure_root, out = (
         p if p.is_absolute() else REPO_ROOT / p for p in (args.prior, args.instructions, args.executor, args.windows,
                                                           args.procedure_root, args.out))
-    settings = settings_from(args, start)
     refused = cpu_workers_refused(args.cpu_workers, settings.cpu_batches,
                                   torch.device(args.speak_device or args.device))           # D191
     if refused is not None:
@@ -832,6 +904,10 @@ def main(argv: list[str] | None = None) -> int:
                            formal=not args.smoke)
     if args.executor_device == "cpu":                # S1: set before the fork, so each worker gets it
         context = replace(context, executor_device=torch.device("cpu"))
+    try:                                            # D200, as stage C's D170: refused before the workers
+        branch_rows(context.interval_s, settings.branch_every_s)
+    except ValueError as refused:
+        parser.error(f"--branch-every-s: {refused}")
     stage = stage_d()
     stage.start(context, settings)                  # refused by name before the workers and campaign.json (D164)
     inputs = {"prior": str(prior_dir), "instructions": str(instructions), "executor": str(executor),

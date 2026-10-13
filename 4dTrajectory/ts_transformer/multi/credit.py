@@ -7,7 +7,8 @@ training (post-training §9 item 6, `experiments.post_branches.Rules`, which `ru
 - **The varied aircraft** (`varied`, D143): each commanded aircraft with r < 1, and each commanded aircraft of a loss
   of separation that one of them answers for (the other aircraft of that loss, even with r = 1).
 - **Their branch points** (`points`, D143): a varied aircraft v's own first predicted step and the points of the
-  window's grid after it — the anchor's first predicted step and every `BRANCH_EVERY_S` after it — before v's event:
+  window's grid after it — the anchor's first predicted step and every `BRANCH_EVERY_S` after it (D200: or the
+  campaign's interval) — before v's event:
   the step of its own end, or of the earliest loss that it is in (answering or not), whichever is earlier. Ticks of
   the window's grid (the loop's ticks). With one commanded aircraft, stage C's points (post-training D37).
 - **The numbers** (§3.3, D142): each commanded aircraft's own stream, from the seed, the round, the window's place in
@@ -22,7 +23,7 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from ts_transformer.post.branches import branch_points
+from ts_transformer.post.branches import BRANCH_EVERY_S, branch_points
 
 
 @dataclass(frozen=True)
@@ -68,11 +69,11 @@ def event(aircraft: Sequence[Aircraft], v: int) -> int:
     return min([aircraft[v].end] + losses)
 
 
-def points(aircraft: Sequence[Aircraft], v: int, interval_s: float) -> list[int]:
+def points(aircraft: Sequence[Aircraft], v: int, interval_s: float, every_s: float = BRANCH_EVERY_S) -> list[int]:
     """The branch points of aircraft ``v`` (module docstring), ticks: its first predicted step, then the window's grid
-    (from the anchor's first predicted step, ``aircraft[0]``'s) after it, before its event."""
+    (from the anchor's first predicted step, ``aircraft[0]``'s, every ``every_s``) after it, before its event."""
     first, end = aircraft[v].first_step, event(aircraft, v)
-    grid = [t for t in branch_points(aircraft[0].first_step, end, interval_s) if t > first]
+    grid = [t for t in branch_points(aircraft[0].first_step, end, interval_s, every_s) if t > first]
     return ([first] if first < end else []) + grid
 
 
@@ -98,11 +99,12 @@ def aircraft_of(loop: Any, rows: Sequence[int], results: Sequence[Any]) -> list[
     return out
 
 
-def rules(seed: int, round_: int, interval_s: float) -> dict[str, Any]:
-    """Stage D's rules of branch training (module docstring), as the fields of `experiments.post_branches.Rules`."""
+def rules(seed: int, round_: int, interval_s: float, every_s: float = BRANCH_EVERY_S) -> dict[str, Any]:
+    """Stage D's rules of branch training (module docstring), as the fields of `experiments.post_branches.Rules`; the
+    grid every ``every_s`` (D143's `BRANCH_EVERY_S`, or the campaign's `MultiSettings.branch_every_s`, D200)."""
     def chosen(window: Any, loop: Any, rows: Sequence[int], results: Sequence[Any]) -> list[tuple[int, list[int]]]:
         aircraft = aircraft_of(loop, rows, results)
-        return [(v, points(aircraft, v, interval_s)) for v in varied(aircraft)]
+        return [(v, points(aircraft, v, interval_s, every_s)) for v in varied(aircraft)]
 
     return dict(first=lambda place, member: first_numbers(seed, round_, place, member),
                 continuation=lambda place, member, v, tick, k: continuation_numbers(seed, round_, place, member, tick, k),

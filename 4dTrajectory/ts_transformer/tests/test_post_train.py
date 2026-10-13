@@ -1504,8 +1504,8 @@ def test_the_minority_side_weight_scales_each_group_by_its_side_over_the_round_s
 
 def test_stage_c_s_pass_clips_and_passes_as_its_settings_say(monkeypatch):
     """D168, D169: stage C's pass (`STAGE_C`, `STAGE_C_LANDED`) hands `Settings.clip_norm` to `post.loss.passes` and
-    makes `Settings.epochs` passes, each with its own numbers (`pass_orders`); stage D's (its settings name neither,
-    only the data weight) clips nothing and makes one pass."""
+    makes `Settings.epochs` passes, each with its own numbers (`pass_orders`); stage D's (its settings name neither)
+    clips nothing and makes one pass, here without segment credit (its own: test_multi_train)."""
     from ts_transformer.experiments.multi_train import stage_d
 
     seen, numbers = [], []
@@ -1526,9 +1526,9 @@ def test_stage_c_s_pass_clips_and_passes_as_its_settings_say(monkeypatch):
         assert stage.train(None, context, None, None, here, rng, part_width=0, round_=0, companion=None) == {
             "updates": 0, "passes": [{"updates": 0}, {"updates": 0}]}
         assert numbers[-2] is rng and numbers[-1] is not rng
-    stage_d().train(None, context, None, None, SimpleNamespace(data_weight=1.0, group_weight=EQUAL),
-                    np.random.default_rng(0),
-                    part_width=0, round_=0, companion=None)
+    stage_d().train(None, context, None, None, SimpleNamespace(data_weight=1.0, group_weight=EQUAL, segment_only=False,
+                                                               branch_every_s=120.0),
+                    np.random.default_rng(0), part_width=0, round_=0, companion=None)
     assert seen == [(0.5, 2), (0.5, 2), (None, 1)]
     assert segments == [15, 15, None]          # D170: 60 s in 4 s rows, stage C's branch pass only; stage D's none
 

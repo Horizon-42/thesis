@@ -178,9 +178,11 @@ def branch_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop,
                     b_copy = members[v]
                     kept.append(Sentence(*made[b_copy], reward, _until(copies, b_copy, len(windows[w].joined))))
                 join = int(second.speaking.join_ticks[second.members[k][v]])
+                following = next((p for p in dict(varied[k])[v] if p > t), None)       # D200: its next branch point
                 groups.append((k, Group(places[w], t - join, Sentence(rows, permitted, tokens, rules.reward(ends[w]),
                                                                        _until(first, b_first, len(windows[w].joined))),
-                                        tuple(kept), varied=v)))
+                                        tuple(kept), varied=v,
+                                        next_branch=None if following is None else following - join)))
             del copies, drawn, ends_k, made     # released before the next point's copies (D183 (4)): one set alive
             done = np.zeros(len(second.order), dtype=bool)
             for k in range(len(again)):

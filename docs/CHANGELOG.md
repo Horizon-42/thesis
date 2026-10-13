@@ -1,5 +1,23 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-13 — stage D starts from the base; per-segment credit on stage D's grid (D200)
+
+The user (2026-10-13) asked for one method of branch training for stages C and D, chosen by a comparison of D143's
+grid every 120 s (credit to the event), the grid every 60 s with credit only up to the next branch point (stage C's
+P55) and `majority` (D192), all three in stage D's windows from the new base (multi-aircraft control D200). Two campaign
+settings of `multi_train` make it possible, each default the behaviour before it:
+
+- A start from the base (`MultiSettings.start` None; no `--start-campaign`): `post_train.traffic_model` (the base with
+  D29's zero-output traffic modules, now shared with stage C's `start_model`) of `--traffic-hidden`/`--traffic-heads`,
+  the token part at zero; the checkpoints name `{base, traffic}` as their start (`multi_train.start_identity`).
+- `--branch-every-s` and `--segment-only` (the grid only). A group now carries its varied aircraft's next branch point
+  (`post.branches.Group.next_branch`, set by `post_branches.branch_round`), and segment credit ends there too: stage D's
+  later aircraft has its first point off the window's grid. Stage C's points are a segment apart, so its credit is the
+  same as before.
+
+Forced later (the last stage, needs the user's permission): `aeroviz_backend/training_results.py` `multi_rounds` reads
+the start as a round of stage C and fails on a campaign from the base.
+
 ### 2026-10-13 — ts runners archived: settled readouts, plan v3's no-token line, unused one-tier runners
 
 The user's decision (2026-10-13), after a census of `experiments/` against the formal two-tier chain (labelling A,
