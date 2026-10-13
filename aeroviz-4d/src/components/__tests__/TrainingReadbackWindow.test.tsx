@@ -109,20 +109,22 @@ describe("TrainingReadbackWindow", () => {
     const reading = trainingReadingOf(selection.flight, selection.vocabulary.stepS, 2);
     const heading = reading.events.filter((event) => event.correction && event.says.column === "heading").length;
     expect(chart("Heading chart").querySelectorAll("polygon.training-readback-correction")).toHaveLength(heading);
-    expect(chart("Plan view").querySelectorAll(".training-readback-correction")).toHaveLength(9);
+    expect(chart("Plan view").querySelectorAll(".training-readback-correction")).toHaveLength(21);
     expect(chart("Speed chart").querySelectorAll("polygon.training-readback-correction")).toHaveLength(
       reading.events.filter((event) => event.correction && event.says.column === "speed").length);
   });
 
-  it("writes the flown flight's outcome, the crossing and the DA check's values below the charts", () => {
+  it("writes the flown flight's outcome, the crossing, the DA check's values and the evaluation's verdict below the charts", () => {
     open(2);
     const slot = screen.getByLabelText("The flown flight");
-    expect(slot.textContent).toContain("unstable at minimums at 511 s");
-    expect(slot.textContent).toContain("crossing 15.5 m right of the centreline, 41.8 m above the threshold");
+    expect(slot.textContent).toContain("landing failed at 500 s");
+    expect(slot.textContent).toContain("crossing 19.3 m left of the centreline, 45.0 m above the threshold");
     expect(slot.textContent).toContain("DA check failed");
-    expect(slot.textContent).toContain("15.5 m right of the centreline, cone half width 116.3 m ✓");
-    expect(slot.textContent).toContain("26.8 m above the glidepath ✗");
-    expect(slot.textContent).toContain("at 157 m MSL");
+    expect(slot.textContent).toContain("19.3 m left of the centreline, cone half width 115.9 m ✓");
+    expect(slot.textContent).toContain("30.0 m above the glidepath ✗");
+    expect(slot.textContent).toContain("at 160 m MSL");
+    expect(slot.textContent).toContain("evaluation failed · 19.3 m off the centreline (at most 22.9 m) ✓ · "
+      + "29.9 m from LTP + TCH (-22 to +22 m) ✗ · 73.5 m/s (67.8–78.1 m/s) ✓");
     // the DA point is drawn in the plan and on the altitude chart
     expect(chart("Plan view").querySelector('g[aria-label="the decision-altitude point"]')).toBeTruthy();
     expect(chart("Altitude chart").querySelector("circle title")!.textContent).toContain("DA check failed");
@@ -143,6 +145,12 @@ describe("TrainingReadbackWindow", () => {
     expect(slot.textContent).toContain("reached the point where the next heading word is said");
     cleanup();
     open(2, ALL, 100, null, liveSegment(1));
+    expect(screen.getByLabelText("The autopilot, live").textContent).toContain("the evaluation failed the crossing");
+    expect(screen.getByLabelText("The autopilot, live").textContent).not.toContain("(a correction)");
+    cleanup();
+    // the fixture's last heading word is not a correction: the same answer with the mark set is named one
+    const final = liveSegment(1);
+    open(2, ALL, 100, null, { ...final, segment: { ...final.segment, correction: true } });
     expect(screen.getByLabelText("The autopilot, live").textContent).toContain("(a correction)");
   });
 

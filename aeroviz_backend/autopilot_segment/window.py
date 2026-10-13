@@ -53,8 +53,10 @@ from aeroviz_backend.autopilot_segment.prior import apart_from_exported, on_word
 #: anything else by name. A name changes with the payload's shape, on both sides, in one change. v1 (C11, 2026-10-05):
 #: stage A's segment answer with the window and the round whose sentence it flew. v2 (frontend D156, 2026-10-07): the
 #: request names the commanded aircraft (``aircraft``), the answer gives it back with the window's end in that round. v3
-#: (frontend F3, 2026-10-08): the request names the stage whose index lists the set (``stage``, C or D).
-SCHEMA = "aeroviz-autopilot-window-segment-v3"
+#: (frontend F3, 2026-10-08): the request names the stage whose index lists the set (``stage``, C or D). v4 (the user,
+#: 2026-10-12): a crossing's ``evaluation`` (the evaluation's verdict on an approach crossing, `judge.landing_verdict`)
+#: beside its ``decision`` (the decision-altitude check, a record); the outcomes ``landed`` / ``landing_failed``.
+SCHEMA = "aeroviz-autopilot-window-segment-v4"
 #: Each stage's window sets (frontend §5.7: one format, the stage the index file's).
 STAGE_FILES = {"C": post_files.FILES, "D": post_files.MULTI_FILES}
 #: The round of a set's ``model.rounds`` that names the model at the start of the campaign (`post_training_export.START`).

@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { TRAINING_LOST_SEPARATION, TRAINING_OUTCOMES } from "../trainingSample";
 import {
-  checkMark, crossingText, decisionText, formatElapsed, replayText, TRAINING_OUTCOME_TAG, TRAINING_OUTCOME_TEXT,
+  checkMark, crossingText, decisionText, formatElapsed, landingText, replayText, TRAINING_OUTCOME_TAG, TRAINING_OUTCOME_TEXT,
 } from "../trainingText";
 import { stageASample } from "./stageA";
 
@@ -20,14 +20,18 @@ describe("the outcome wording", () => {
     expect(Object.keys(TRAINING_OUTCOME_TEXT).sort()).toEqual([...TRAINING_OUTCOMES, TRAINING_LOST_SEPARATION].sort());
   });
 
-  it("says where the threshold was crossed and the DA check's two values with their marks", () => {
+  it("says where the threshold was crossed, the DA check's two values and the evaluation's three, with their marks", () => {
     const { replay } = stageASample().flights[0].closedLoop["2"];
-    expect(crossingText(replay.crossing!)).toBe("15.5 m right of the centreline, 41.8 m above the threshold");
+    expect(crossingText(replay.crossing!)).toBe("19.3 m left of the centreline, 45.0 m above the threshold");
     expect(decisionText(replay.crossing!.decision!)).toBe(
-      "DA check failed · 15.5 m right of the centreline (cone half width 116.3 m) ✓ · 26.8 m above the glidepath ✗");
-    expect(replayText(replay)).toContain("unstable at minimums");
+      "DA check failed · 19.3 m left of the centreline (cone half width 115.9 m) ✓ · 30.0 m above the glidepath ✗");
+    expect(landingText(replay.crossing!.evaluation!)).toBe("evaluation failed · 19.3 m off the centreline (at most 22.9 m) ✓ · "
+      + "29.9 m from LTP + TCH (-22 to +22 m) ✗ · 73.5 m/s (67.8–78.1 m/s) ✓");
+    expect(replayText(replay)).toContain("the evaluation failed the crossing");
+    expect(replayText(replay)).toContain("evaluation failed · 19.3 m off the centreline");
     expect(replayText({ ...replay, crossing: null })).toContain("no threshold crossing");
     expect(replayText({ ...replay, crossing: { ...replay.crossing!, decision: null } })).toContain("no DA check");
+    expect(replayText({ ...replay, crossing: { ...replay.crossing!, evaluation: null } })).not.toContain("evaluation failed ·");
   });
 
   it("writes an elapsed time in the unit it rounds to", () => {

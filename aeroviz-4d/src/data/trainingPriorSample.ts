@@ -59,8 +59,9 @@ export const TRAINING_PRIOR_INDEX_SCHEMA = "aeroviz-training-prior-index-v3";
 /** MIRROR of `INDEX_FILE`: an index of its own beside stage A's `index_v5.json`, which this reader never reads. */
 export const TRAINING_PRIOR_INDEX_FILE = "index_prior_v3.json";
 /** MIRROR of `SAMPLE_SCHEMA`: a prior set's sample (v3: each prior sentence's track written unrounded, D127; v5: the
- *  vocabulary's `angleLeadS` and `speedLeadS`, a tube's and a speed span's `firstRow`, executor design D7, D8). */
-export const TRAINING_PRIOR_SAMPLE_SCHEMA = "aeroviz-training-prior-sample-v5";
+ *  vocabulary's `angleLeadS` and `speedLeadS`, a tube's and a speed span's `firstRow`, executor design D7, D8; v6:
+ *  the outcomes `landed` / `landing_failed` and the crossing's `evaluation` (the evaluation's landing verdict, the user 2026-10-12) beside its DA check). */
+export const TRAINING_PRIOR_SAMPLE_SCHEMA = "aeroviz-training-prior-sample-v6";
 /** MIRROR of `SET_KIND`: the flights of one free-generation readout. */
 export const TRAINING_PRIOR_SET_KIND = "prior-free-generation";
 /** MIRROR of the procedure masks' columns (`prior.procedure.ProcedureMasks.columns`, by `COLUMNS` name): the blocked words are

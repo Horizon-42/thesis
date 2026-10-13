@@ -5,7 +5,7 @@ compared with what the set's sample shows of the same flight —
 - the flown states on the 2 s rows both have, against the sample's closed-loop states (written at 0.1 m, so within the
   rounding, `ROUNDING_M`); against the artefact's stored states the service itself refuses an answer past the executor
   conformance's bound (`fly.apart_from_stored`, D73);
-- a word flown to its outcome (its column's last): the outcome and the crossing with its decision-altitude check, equal
+- a word flown to its outcome (its column's last): the outcome and the crossing with its decision-altitude check and the evaluation's verdict, equal
   to the sample's replay.
 
 It is a runner: before its work it runs the labeller's, the executor's and the closed loop's checks for each set's

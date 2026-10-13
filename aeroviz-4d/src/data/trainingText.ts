@@ -11,7 +11,10 @@ import {
   TRAINING_AUTOPILOT_SEGMENT_END,
   type TrainingAutopilotView,
 } from "./trainingAutopilot";
-import type { TrainingColumn, TrainingCrossing, TrainingDecision, TrainingFlownEnd, TrainingReplay } from "./trainingSample";
+import type {
+  TrainingColumn, TrainingCrossing, TrainingDecision, TrainingFlownEnd, TrainingLandingEvaluation, TrainingLandingGate,
+  TrainingReplay,
+} from "./trainingSample";
 
 /** The five columns as the views name them. */
 export const TRAINING_COLUMN_LABEL: Record<TrainingColumn, string> = {
@@ -29,10 +32,8 @@ export const TRAINING_COLUMN_MEANING: Record<TrainingColumn, string> = {
 
 /** How the executor's flight ended (the judge's outcomes, `autopilot/judge.py`), in words. */
 export const TRAINING_OUTCOME_TEXT: Record<TrainingFlownEnd, string> = {
-  landed: "landed: crossed the threshold lined up, inside the runway limit, after a decision-altitude check that passed",
-  unstable_at_minimums: "crossed the threshold on the runway, but unstable at minimums: the decision-altitude check failed or had no point",
-  crossed_too_high: "crossed the threshold on the runway's centreline, too high to land",
-  crossed_off_runway: "crossed the threshold wide of the runway",
+  landed: "landed: crossed the threshold lined up, and the evaluation passed the crossing (lateral, vertical and speed)",
+  landing_failed: "crossed the threshold lined up, but the evaluation failed the crossing (lateral, vertical or speed)",
   crossed_other_runway: "crossed another runway's threshold, lined up to land on it",
   ground_contact: "reached the threshold's elevation before the threshold",
   timeout: "did not get there within its time limit",
@@ -43,9 +44,7 @@ export const TRAINING_OUTCOME_TEXT: Record<TrainingFlownEnd, string> = {
 /** The same, as a short tag: the flight list, the bar's chip. */
 export const TRAINING_OUTCOME_TAG: Record<TrainingFlownEnd, string> = {
   landed: "landed",
-  unstable_at_minimums: "unstable at minimums",
-  crossed_too_high: "too high",
-  crossed_off_runway: "off the runway",
+  landing_failed: "landing failed",
   crossed_other_runway: "other runway",
   ground_contact: "ground contact",
   timeout: "timed out",
@@ -72,13 +71,26 @@ export function decisionText(decision: TrainingDecision): string {
     `${checkMark(decision.verticalOk)}`;
 }
 
-/** A flown flight's end as one line: its outcome, the crossing and the DA check. */
+/** The evaluation's landing verdict in one line: pass or fail, and each of its three gates — the value, its bounds and
+ *  its mark. */
+export function landingText(evaluation: TrainingLandingEvaluation): string {
+  const ok = (gate: TrainingLandingGate) => checkMark(!evaluation.violations.includes(gate));
+  const [low, high] = evaluation.verticalBoundsM;
+  const [slow, fast] = evaluation.speedBoundsMps;
+  return `evaluation ${evaluation.passed ? "passed" : "failed"} · ` +
+    `${Math.abs(evaluation.lateralM).toFixed(1)} m off the centreline (at most ${evaluation.lateralBoundM.toFixed(1)} m) ` +
+    `${ok("lateral")} · ${evaluation.verticalM.toFixed(1)} m from LTP + TCH (${low.toFixed(0)} to +${high.toFixed(0)} m) ` +
+    `${ok("vertical")} · ${evaluation.speedMps.toFixed(1)} m/s (${slow.toFixed(1)}–${fast.toFixed(1)} m/s) ${ok("speed")}`;
+}
+
+/** A flown flight's end as one line: its outcome, the crossing, the DA check and the evaluation's landing verdict. */
 export function replayText(replay: TrainingReplay): string {
   const crossing = replay.crossing;
   return [
     TRAINING_OUTCOME_TEXT[replay.outcome],
     crossing === null ? "no threshold crossing" : crossingText(crossing),
     crossing === null ? null : crossing.decision === null ? "no DA check (none was made)" : decisionText(crossing.decision),
+    crossing === null || crossing.evaluation === null ? null : landingText(crossing.evaluation),
   ].filter((part) => part !== null).join(" · ");
 }
 

@@ -39,7 +39,7 @@ import {
 } from "../utils/trainingWordColors";
 import { closedCycleTimeS, sentenceWordAt, trainingBandLabel, wordsOutside, type TrainingColumn, type TrainingReading, type TrainingSelection } from "../data/trainingSample";
 import { autopilotColour, type TrainingAutopilotSegment } from "../data/trainingAutopilot";
-import { checkMark, crossingText, replayText, segmentEndText, TRAINING_OUTCOME_TAG } from "../data/trainingText";
+import { checkMark, crossingText, landingText, replayText, segmentEndText, TRAINING_OUTCOME_TAG } from "../data/trainingText";
 import useMeasuredWidth from "../hooks/useMeasuredWidth";
 import TrainingWindow from "./training/TrainingWindow";
 import { SwatchIcon, type Swatch } from "./training/chartKit";
@@ -148,6 +148,8 @@ export default function TrainingReadbackWindow(props: TrainingReadbackWindowProp
                       at {replay.crossing.decision.heightMslM.toFixed(0)} m MSL
                     </>
                   )}
+                {replay.crossing === null || replay.crossing.evaluation === null ? null
+                  : ` · ${landingText(replay.crossing.evaluation)}`}
                 {/* landed but not as said: the words that left their envelopes (the outcome says the rest) */}
                 {replay.outcome === "landed" && !replay.flewTheSentence && replay.envelopes !== null
                   ? ` · landed, but ${wordsOutside(replay.envelopes)} words left their envelopes` : ""}

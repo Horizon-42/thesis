@@ -47,7 +47,10 @@ from aeroviz_backend.autopilot_segment.payload import segment_payload
 #: MIRROR of `aeroviz-4d/src/data/trainingPriorAutopilot.ts` (`TRAINING_PRIOR_AUTOPILOT_SCHEMA`); the reader refuses
 #: anything else by name. A name changes with the payload's shape, on both sides, in one change. v1 (B6, 2026-10-05):
 #: stage A's segment answer with the sentence it flew (a sample of the prior's, or the closed-loop sentence).
-SCHEMA = "aeroviz-autopilot-prior-segment-v1"
+#: v2 (the user, 2026-10-12: a crossing's ``evaluation`` (the evaluation's verdict on an approach crossing,
+#: `judge.landing_verdict`) beside its ``decision`` (the decision-altitude check, a record); the outcomes ``landed`` /
+#: ``landing_failed``.
+SCHEMA = "aeroviz-autopilot-prior-segment-v2"
 #: The request's ``sentence`` that names the flight's closed-loop sentence. MIRROR of `trainingPriorAutopilot.ts`
 #: (`TRAINING_PRIOR_CLOSED_LOOP`).
 CLOSED_LOOP = "closedLoop"

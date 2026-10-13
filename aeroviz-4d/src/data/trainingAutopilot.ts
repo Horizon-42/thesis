@@ -43,8 +43,8 @@ import { TRAINING_AUTOPILOT_COLOR, TRAINING_FAILURE_COLOR } from "../utils/train
 /** MIRROR of `aeroviz_backend/autopilot_segment/payload.py` `SCHEMA`: the backend's answer; anything else is refused by
  *  name. A name changes with the payload's shape, on both sides, in one change. */
 /** v10 (executor design draft 5): the thrust, bank and load factor are what the actuators had reached, not the
- *  commands. */
-export const TRAINING_AUTOPILOT_SCHEMA = "aeroviz-autopilot-segment-v10";
+ *  commands. v11: the outcomes `landed` / `landing_failed` and the crossing's `evaluation` (the evaluation's landing verdict, the user 2026-10-12) beside its DA check. */
+export const TRAINING_AUTOPILOT_SCHEMA = "aeroviz-autopilot-segment-v11";
 /** MIRROR of `payload.py` `SEGMENT_END`: the flight reached the point where its word's segment stops. */
 export const TRAINING_AUTOPILOT_SEGMENT_END = "segment_end";
 export const TRAINING_AUTOPILOT_PATH = "/autopilot/segment";

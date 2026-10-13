@@ -11,11 +11,11 @@
    "file": "fixture_set/sample.json",
    "flights": 1,
    "formats": {
-    "spec": "ts-instruction-spec-v8",
+    "spec": "ts-instruction-spec-v10",
     "sentences": "ts-instruction-sentences-v6",
-    "closedLoop": "ts-instruction-closed-loop-v8",
-    "candidates": "ts-instruction-candidates-v4",
-    "executorSpec": "ts-executor-spec-v10"
+    "closedLoop": "ts-instruction-closed-loop-v9",
+    "candidates": "ts-instruction-candidates-v5",
+    "executorSpec": "ts-executor-spec-v11"
    },
    "cohort": {
     "splits": {
