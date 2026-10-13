@@ -22,12 +22,12 @@ repository root; `readouts/` is `docs/two_tier/readouts/`. The documents of the 
 
 | Document | Part | Stage | State |
 |---|---|---|---|
-| `vocabulary.md` | The words, the labeller (open-loop and closed-loop reading), the executor, the judge | A | A0–A43 done and merged into `dev-two-tier`; the formal artefact `v17_20261013` / `v22_20261013` (D196–D199, on `two-tier2`; before it `v12_20261005` / `v17_20261005`, with its Training view `closed_loop_v12_20261005`) done, the superseded artefacts deleted; Claude's check of A32–A40 done; no milestone open; the replay of the val days waits for the user (vocabulary §0.4) |
-| `prior.md` | The prior: inputs, outputs, decoding and its masks, training, a new airport | B | Closed (B0–B13 done, B7 on 2026-10-06): B5's campaign `prior_base_20261006` done (configuration C, variant `full`, the base and its one validation readout); B6's sets published (`prior_sets_20261006`); B15, the campaign on `v17_20261013` (configurations A and C), built on `two-tier2`; `dev-two-tier` = `dev-two-tier-v4` = `dev-two-tier-v4-prior` (the code at `d14a2f76`) |
-| `post_training.md` | The post-training in windows of traffic with one commanded aircraft | C | Merged into `dev-two-tier` (2026-10-06); C0–C9 and C11 (the window view) done (C8 on B5's base); C10 and its validation readout built, the formal run waits for O13 and the user's criteria; C12 left. Further work on `dev-two-tier-v4` (§5 rule 1) |
-| `multi_control.md` | The multi-aircraft control: every arrival of a window's span commanded; the window's reward and its credit by one varied aircraft; the model in two versions (the other aircraft's words in force, then their intent); what it needs of the other stages' public interfaces | D | Written and decided 2026-10-06 (D140–D153); nothing built; MC0 and MC1 next (§4 item 7), its formal runs after C10's chosen round |
-| `frontend.md` | The Training view of every stage: its rules, the one layout, each stage's view (stage D's: stage C's window view with several commanded aircraft), the shared controls (the cursor slider), the backend's Training routes, the content and formats of the Training sets | — (fronter) | Written 2026-10-06 (moved from this outline's §6, D133–D136 and D109 with it; D154–D156 new). The one layout built on `dev-two-tier-v4`, its steps after C10 stage D's implementer's; F1–F4 not started |
-| This outline | The principles, the shared rules, the plan | — | Holds the principles, the shared rules (§5) and the plan (§4); the Training view moved to `frontend.md` (2026-10-06) |
+| `vocabulary.md` | The words, the labeller (open-loop and closed-loop reading), the executor, the judge | A | A0–A44 done; no milestone open. The formal artefact `v18_20261013` / `v23_20261013` (D196–D199, D201), read by B16; before it `v17_20261013` / `v22_20261013` (read by B15) and `v12_20261005` / `v17_20261005` (read by B5's base and the stage C and D models; its Training view `closed_loop_v12_20261005`). The test days check the labelling at the end (D198) |
+| `prior.md` | The prior: inputs, outputs, decoding and its masks, training, a new airport | B | B0–B15 done. B5's base `prior_base_20261006` (on v12; configuration C) is the start of the stage C and D models. B15 `prior_b15_20261013` (on v17): configuration C chosen, the base lands 90.3 % of the val days, the folds 50–63 % at their held-out airports (cause: the labels' soft lateral centring, vocabulary D201). B16, B15's campaign on v18, is next |
+| `post_training.md` | The post-training in windows of traffic with one commanded aircraft | C | C0–C11 and C13–C27 done; C12 (the close) left. The user's chosen round: `post_seg60_20261007` round 5 (D7), its one validation readout 88.9 % landed; its sets published |
+| `multi_control.md` | The multi-aircraft control: every arrival of a window's span commanded; the window's reward and its credit by one varied aircraft; the model in two versions (the other aircraft's words in force, then their intent); what it needs of the other stages' public interfaces | D | Version 1 done (MC0–MC7, MC11–MC14): the formal campaign `multi_train_majority_formal_20261011`, 12 rounds; the user's chosen round 7, its one validation readout 83.9 % landed, 63.8 % of its aircraft passed by the evaluation package; its sets published; the report `readouts/2026-10-12_stage_d_report.md`. D200 (one method of branch training for C and D) built, its comparison held by the user. Version 2 (MC8–MC10) not started |
+| `frontend.md` | The Training view of every stage: its rules, the one layout, each stage's view (stage D's: stage C's window view with several commanded aircraft), the shared controls (the cursor slider), the backend's Training routes, the content and formats of the Training sets | — | F0–F5 done; the evaluation's landing verdict (`288b779b`) and the results route of B15's and D200's campaigns (`be3cdd49`) done. A change waits for the user's permission (§5 rule 11) |
+| This outline | The principles, the shared rules, the plan | — | The principles (§2), the shared decisions (§3), the plan (§4), the rules (§5) |
 
 How a stage is reviewed against its design (leaks, what each consumer may read, the procedure, a checklist for each
 stage) is in the review guide, `docs/two_tier/review_guide.md`; it is not a design document.
@@ -112,76 +112,28 @@ they came from. Each document lists the identities of its parts.
 |---|---|---|
 | Outline | D7, D20, D21, D55, D85, D95, D131, D138, D139, D158, D163, D184, D187, D198 | — |
 | Training view (`frontend.md`) | D109, D133–D136, D154–D156, D159, D160, D177, D178 | — |
-| Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62, D66, D67, D69–D71, D73, D74, D77–D84, D86–D90, D97, D102, D111, D126, D196, D197 | O8, O22, O23 |
+| Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62, D66, D67, D69–D71, D73, D74, D77–D84, D86–D90, D97, D102, D111, D126, D196, D197, D199, D201 | O8, O22, O23 |
 | Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60, D63–D65, D68, D72, D75, D96, D105–D108, D111, D118–D122, D126–D128 | — |
 | Post-training | D29–D31, D36, D37, D76, D91–D94, D98–D101, D103–D105, D107, D110, D112–D117, D123–D125, D129, D130, D132, D137, D157, D161, D162, D165, D167–D171, D173–D176, D185 | O15 |
-| Multi-aircraft control | D140–D153, D164, D166, D172, D179–D183, D186, D188–D195 | O18–O21 |
+| Multi-aircraft control | D140–D153, D164, D166, D172, D179–D183, D186, D188–D195, D200 | O18–O21 |
 
-The next free numbers: D196, O22.
+The next free numbers: D202, O24.
 
 ---
 
 ## 4 Plan
 
-1. Stage A (vocabulary §0.4): A19 and A20, the user's choice of the altitude grid, A22 (the vertical path of each
-   candidate, the state columns and the grammar's column mask in the public interface, D61, D62), A21 (the formal
-   artefact and the readings of D34), Claude's check, A24 (the vertical tolerance of the final descent, D66: measured,
-   the user chooses), A26 (the start of a closed loop in the public interface, D67), A27 (each flight's stratum in
-   the sentence file, D70), A25 (the formal artefact again), A28 (the start opens the executor spec, D71), A29 (no code
-   fingerprint, D73), A31 (each closed-loop sentence's outcome, D74), A30 (the formal artefact once more), A23 (the
-   Training view of stage A). The user compares the readings of D34 and chooses Δ (D7, D11): Δ = 4 s. Then the
-   corrections of Claude's review of 2026-10-05 (vocabulary D77–D84, D85): A36 first (one function of A23's export
-   for stage B's Training view, prior B6), A32 (the code), A33 (the measurements; the user chooses the start rule of
-   D77), A34 (the formal artefact once more), A35 (the Training sets again); D86 (the export reads no formal replay row) in A32.
-2. Stage B (prior §0.4): the prior from the start, chosen by cross-validation over the airports, and the base model.
-   Stage B is developed in parallel with the end of stage A (the user, 2026-10-04). A milestone of stage B starts when
-   the parts of stage A that it reads are on `dev-two-tier-v4`. The formal runs of stage B waited for Claude's check of
-   stage A (done: `readouts/2026-10-05_stage_a_check_a32_a40.zh.md`), the user's choice of Δ (4 s) and A34's artefact. B9 (the interface for stage C, prior D96) and B10 (the
-   corrections of Claude's check of stage B, prior D105–D108) come before B5's formal campaign (D95). B12 (the
-   corrections of Claude's second check, prior D119–D122) and B13 (the corrections of Claude's check of B12, prior D127,
-   D128) are merged. B5's campaign ran on B12's code (2026-10-05 22:40 to 2026-10-06 07:12 UTC); B13 leaves its results
-   valid. The Training view of stage B (prior B6) is published, and stage B is closed (prior B7, 2026-10-06).
-3. Stage C (post-training §0.4): the post-training in windows of traffic with one aircraft commanded. Stage C is
-   developed in parallel with the end of stage B (D95). A milestone of stage C starts when the parts of stages A and B
-   that it reads are on its branch; what it needs of their public interfaces is made by them (vocabulary D97, prior
-   D96). Its formal runs wait for B5's base and Claude's check of stage B. It ends with the Training view of stage C.
-   C10 is done (2026-10-06 22:46, ten rounds). The user continues it to 14 rounds as the same campaign (post-training
-   D157, C14), by stage C's implementer (the user, 2026-10-06): its code on `dev-two-tier-v4-post`, its rounds 10–13
-   after the user's merge of that branch, C13's check on the GPU and the other GPU and timing steps of item 6; then the user's criterion (D7) over the 14 rounds and the validation readout.
-4. Each stage ends with its own Training view (`frontend.md`): the backend's live executor, the export and the frontend
-   follow the stage, so that the user sees what the stage does in the frontend (the user, 2026-10-04). From 2026-10-06
-   the Training view has its own design document and its own implementer, fronter (frontend D154).
-5. The one layout of the three stages' Training views (frontend §3, D133–D136): stage B's implementer, on
-   `dev-two-tier-v4` (§5 rule 1); the results page, the envelopes and the shared parts of the exports, the speed runner
-   and the base's speed readout (frontend §3 item 10), then the Training sets of stages A and B exported again. It is
-   built; its steps after C10 change no file of the view (frontend §3 item 9).
-6. The speed of the closed loop (D138), by stage B's implementer on `dev-two-tier-v4` (§5 rule 1), before stage C's next
-   campaign: vocabulary A44 first, since C13 uses it, then post-training C13 and prior B14. Each is measured after it is
-   built (`post_profile` at C10's settings, `model_speed` of frontend §3 item 10). Nothing of it is merged into `dev-two-tier`
-   while C10 runs. Items 5 and 6 are built and reviewed; their steps after C10 are done (2026-10-07, by stage D's
-   implementer, stage B's log §6): B14's real-data check word for word, C13's GPU check identical (the weights within
-   float rounding), the base's speed readout, the sets of stages A and B exported again in the new formats (the old
-   sets moved aside as `<id>.v10-old` and `<id>.v3-old`, the user's choice), the browser check.
-7. Stage D (multi-aircraft control §0.4), by stage D's implementer on `dev-multi-control` (§5 rule 1), after the
-   user's decisions of its §0.1 (all decided 2026-10-06): MC0 (the interfaces of stages A, B and C that it needs, D150, D149, D152) and
-   MC1 (the census). Their code and their tests on synthetic inputs while C10 runs; their checks on real data and the
-   census after C10 ends, after the steps of items 5 and 6 that wait for C10. The order of the work: while C10 runs,
-   MC0's and MC1's code; when C10 ends, first the steps of items 5 and 6 (they hold back the merge of
-   `dev-two-tier-v4`), then MC0's checks on real data and MC1's census. While C14's rounds run (item 3), the
-   multi-aircraft control's code and tests on synthetic inputs only (§5 rule 13); its checks on real data and its
-   census after C14. Version 1's formal campaign after the chosen round of the 14; version 2 (D153) after version 1's.
-8. The Training view (frontend §0.4), by fronter on `dev-frontend` (§5 rule 1): F1 (the cursor slider) and F2 (windows
-   of several commanded aircraft, with stage C's) now, light on the host while C10 runs; F3 (stage D's parts) after
-   stage D's MC0; F4 (stage D's export and sets) after its MC4.
-9. Every branch but the multi-aircraft control's is merged into `dev-two-tier` (the user, 2026-10-06: merge what can
-   be merged and go on from the newest commit): `dev-two-tier-v4` with the frontend document and C14's design
-   (`7e581b88`), and `dev-traffic-scenarios` (the optimizer's, outside this design, `780b7bfc`). The work goes on from
-   there: stage D's implementer brings `dev-two-tier-v4` level with `dev-two-tier` (a fast-forward) and does the steps
-   of item 6 on it; stage C's implementer brings `dev-two-tier-v4-post` level with `dev-two-tier` and builds C14 on
-   it; `dev-multi-control` merges `dev-two-tier`; fronter's `dev-frontend` is made from
-   `dev-two-tier`. Not merged, kept as records: `dev-kaus-parts` and `dev-airport-embedding` (D158), `dev-step9-one-commanded`
-   (the archived multi-aircraft design's step 9) and `wip-r32-leg-timing` (not adopted).
-10. The user merges (§5 rule 11).
+Stages A–D are built: each stage's §0.3 gives its state, its implementation log the steps. What is left, in this order:
+
+1. The labels again, with the final's lateral corrections aimed at the centreline (vocabulary D201): the formal
+   artefact `v18_20261013` / `v23_20261013` and its readout (vocabulary §0.4).
+2. B16 (prior §0.4): B15's campaign on that artefact; its report gives the folds' landed share at their held-out
+   airports against B15's.
+3. One method of branch training for stages C and D (multi-aircraft control D200). Its comparison is held (the user,
+   2026-10-13: "先查原因，对照暂缓"); Claude's proposal: run it from B16's base on v18.
+4. Version 2 of the multi-aircraft control (multi-aircraft control D153, MC8–MC10).
+5. The test days at the end: the check of the labelling (D198), KAUS in its three parts (D158).
+6. The frontend and the backend change last, each change with the user's permission (§5 rule 11).
 
 ---
 
@@ -190,38 +142,15 @@ The next free numbers: D196, O22.
 These rules hold at every stage. The plan of each stage is in its document; before a milestone, read the design
 sections that it names.
 
-1. The branches. The main parts of stages A, B and C are merged into `dev-two-tier` (2026-10-06). From then on, every
-   stage develops on one branch, `dev-two-tier-v4`, in the worktree `.claude/worktrees/two-tier-v4` (the user,
-   2026-10-06), so that a review reads one difference (`dev-two-tier...dev-two-tier-v4`):
-   - before its first commit, and before a milestone that a new design commit holds, the implementer brings
-     `dev-two-tier-v4` level with `dev-two-tier` (a fast-forward, or a merge of `dev-two-tier` when both moved);
-   - work begun on another branch (stage B's `dev-training-layout`) is merged into `dev-two-tier-v4` and goes on there;
-     a stage branch whose work is all in `dev-two-tier` (`dev-two-tier-v4-prior`) is deleted with
-     its worktree;
-   - the user merges `dev-two-tier-v4` into `dev-two-tier` (rule 11).
-
-   One implementer develops for every stage: stage D's (the user, 2026-10-06; it takes over stage B's implementer's
-   remaining steps, §4 items 5 and 6). Stages A's and B's implementers have no work. Stage C's builds and runs C14, C10's
-   later rounds (the user, 2026-10-06), on `dev-two-tier-v4-post` in `.claude/worktrees/two-tier-v4-post`, first
-   brought level with `dev-two-tier` (a fast-forward), and changes no other code. Stage D's implementer keeps two branches: the work of §4 items 5 and 6 on `dev-two-tier-v4`
-   (worktree `.claude/worktrees/two-tier-v4`), and the multi-aircraft control on its own branch `dev-multi-control` in
-   the worktree `.claude/worktrees/multi-control`, made from `dev-two-tier-v4`, so that the merge of
-   `dev-two-tier-v4` does not wait for the multi-aircraft control's review. It
-   brings `dev-multi-control` level with `dev-two-tier-v4` (a merge) before each milestone and before its report; it
-   changes the code of stages A, B and C only where multi-aircraft control §6 says, each change written in that
-   stage's public interface first; the user merges `dev-multi-control`. On the host, the measurements of §4 items 5
-   and 6 after C10 (rule 13) come before the multi-aircraft control's runs on real data. The implementer stages files by explicit paths and reads
-   `git diff --cached --stat` before each commit. A formal build or run starts from a run worktree at the commit that
-   the user merged (D163), never from a development worktree or the main checkout; it reads recorded paths through
-   `this_checkout` (post-training D157).
-   After the merge of §4 item 9, stage D's implementer removes the worktrees and deletes the branches whose work is all
-   in `dev-two-tier` (each worktree's data links unlinked first; `git branch -d`, never `-D`).
-
-   The Training view (`frontend.md`) has an implementer of its own, fronter (the user, 2026-10-06; frontend D154), on
-   its own branch `dev-frontend` in the worktree `.claude/worktrees/frontend`, made from `dev-two-tier` and merged
-   level with it before each milestone; the user merges `dev-frontend`. Fronter changes the Training view's files and
-   the Training exports with their files' modules (frontend §8), and no other code of a stage. Stage D's implementer
-   does not change those files; it runs the exports of A's and B's sets after C10 (§4 item 5).
+1. The branches (the user, 2026-10-13: "two-tier2 维护这个就行 其他的都是临时分支"). The user keeps one branch,
+   `two-tier2`. A change is built on a temporary branch from `two-tier2`, in its own worktree; after its review and
+   tests, `two-tier2` is moved to it by its ref (`git update-ref refs/heads/two-tier2 <new> <old>`, never a merge
+   inside a checkout), and the temporary branch and its worktree are deleted (each worktree's data links unlinked
+   first; `git branch -d`, never `-D`). No other branch moves: not `dev-two-tier` (the main checkout, from which the frontend and the backend
+   run), not a stage branch. A push of `two-tier2` waits for the user's word. The implementer stages files by
+   explicit paths and reads `git diff --cached --stat` before each commit. A formal build or run starts from a run
+   worktree at a `two-tier2` commit (D163), never from a development worktree or the main checkout; it reads
+   recorded paths through `this_checkout` (post-training D157).
 
    The code keeps its stages' order of imports (`tests/test_architecture.py`): `instructions/` imports neither
    `autopilot/` nor `prior/`, and so on; a change of a stage's public interface is written in that stage's document
@@ -248,7 +177,7 @@ sections that it names.
    limit for each airport) goes to a tmp or scratch directory. It uses the spec that the user chose (D15), and its
    flights are a random sample for each airport and split, seed 1337 (D55). The replay of the val days and every
    criterion wait for the user (D7). Never write into an existing directory under `4dTrajectory/outputs/`.
-8. Do not touch the checkouts of running experiments (`.claude/worktrees/step9-run` and others) or the main checkout.
+8. Do not touch the run worktrees of running builds and campaigns, or the main checkout.
 9. A defect that you find outside the milestone goes to `docs/code-health-followups.md` (an entry and a table row), not
    into the change.
 10. The stage's implementation log is the implementer's, and the only text about a stage that the implementer writes
@@ -260,14 +189,16 @@ sections that it names.
     are the plan that the implementer follows. When a milestone is done, Claude moves its specification to the log. The implementer
     changes no other part of a design document: not the decisions, the design sections, the plan, the values or the key
     code index. (Stage B: `readouts/2026-10-05_stage_b_implementation_log.md`.) A gap in the design, or a reading that needs a change of the design, goes to the user; Claude writes the
-    text that the user decides. The log is committed to `dev-two-tier` (the user's checkout), with explicit paths. At
+    text that the user decides. The log is committed to `two-tier2` (rule 1), with explicit paths. At
     the end of a stage, the report gives the new code index, and Claude puts it into the key code index of the
     document.
-11. The user merges a branch into `dev-two-tier`, not before the Training view of its stage (`frontend.md`): before it, the
-    backend's live executor (`aeroviz_backend/autopilot_segment/`) and the Training view of the branch do not work. A
-    merge also moves the main checkout's services to the new formats; the sets published in the old formats stay on
-    disk, and the new frontend does not read them (principle 8). Until the user merges, the user sees a stage on a test
-    stack from its worktree (frontend §2 item 5).
+11. The frontend and the backend change last (the user, 2026-10-12: "以后不要做任何前端改动 服务的后端，也要我的
+    允许才能改。因为前后端改动意味着重要的设计修改"; "这是最后阶段的事情"). A change of `aeroviz-4d` (its code, tests and
+    fixtures) or of `aeroviz_backend` waits for the user's permission, after the numbers of the main task. A change of
+    a format that the Training view or the backend's live executor (`aeroviz_backend/autopilot_segment/`) reads first
+    lists what it forces there; until the user allows it, its mirror tests stay red and are named in the commit. The
+    sets published in an old format stay on disk, and the new frontend does not read them (principle 8). The
+    services run from the main checkout, which the user moves.
 12. A value that a runner fits from data and the user chooses (D15) is measured on all train days in a scratch
     directory, directly after the milestone that writes the runner. This measurement is not a formal build: it writes
     nothing under `4dTrajectory/outputs/`. Report the fitted values and their candidates to the user, and wait for the

@@ -84,8 +84,8 @@ the measurements behind it are in §6 or in the readout named.
 
 ### 0.3 Implementation
 
-The status (outline §5 rule 10). Branch `dev-two-tier-v4-post`, worktree `.claude/worktrees/two-tier-v4-post`; the
-commits, the tests and the readings are in the implementation log.
+The status (outline §5 rule 10); the commits, the tests and the readings are in the implementation log,
+`readouts/2026-10-05_stage_c_implementation_log.md`. Every part below is in `two-tier2`.
 
 | Milestone | State |
 |---|---|
@@ -106,37 +106,22 @@ commits, the tests and the readings are in the implementation log.
 | C24 (D175) | Code `5880f26e` (reviewed, two rounds), merged into `dev-two-tier` (`bf2a4f04`, the user's word). Read 2026-10-08: `outputs/POOLED/post/diagnose_post_seg60_20261007_r5_20261008` and `diagnose_post_train_20261006_r8_20261008` (read-only); traffic off lands 5.5 points lower on P55 r5 and 4.8 on C10 r8; 79 % of P55's losses 10–20 km out, 10 % in conflict at the start (log §30; the experiment log) |
 | C25 (D176) | Code `c7e41626` (reviewed, two rounds), merged into `dev-two-tier` (`6c7a1970`, the user's word). The list `outputs/POOLED/post/windows_lost_separation_select_20261008` (193 windows, read-only) written by the runner; it names the same windows as the hand-made index, which is deleted (log §30) |
 | C26 (§9 item 8, frontend D177 (15)) | Code `aff8d279` (reviewed): `WindowLoop.fault_readings(w)`, a read-only view of a window's steps read so far with the keys of its recorded aircraft reading a faulty point there; merged into `dev-two-tier` (`db78830d`, the user's word); fronter's export then reads it (log §30) |
-| §9 item 13 (frontend D178 (6)) | Code `8baf6468` (small change, no agent review): `post.window_lists.identity_of(stage, window)`; on `dev-two-tier-v4-post`, not yet merged (log §30) |
+| §9 item 13 (frontend D178 (6)) | Code `8baf6468` (small change, no agent review): `post.window_lists.identity_of(stage, window)` (log §30) |
 | The validation readout of the chosen round | Done 2026-10-08: the user chose `post_seg60_20261007` round 5 (D7); val read once: landed 88.9 %, mean reward 0.880 (log §30; the experiment log) |
-| The validation readout of the chosen round | Built and reviewed on synthetic artefacts (`post_validation`, `0c95a821`, log §23; D132 `483b81d7`) |
 | C27 (D185) | Built by stage D's implementer on `dev-multi-control`, merged into `dev-two-tier` (88b5d671): 33e24bbe (a round resumed by its batches, `--restart-round`), the resume through the speaking workers tested (646ffb3a) (stage D's log §17) |
 | Multi-aircraft control D190 (2) | Built by stage D's implementer on `dev-multi-control`, merged into `dev-two-tier` (88b5d671), 7893d787: a window's copies hold the speaker's rows to where they part once; `Settings.front_attention` (`--front-attention`, `copied` the default, bit for bit: window_behaviour on post_seg60 r5 the same behaviour; `merged`: the same words and states on its first batch, 608 continuations) (stage D's log §20) |
 | Multi-aircraft control D191 | Built by stage D's implementer on `dev-multi-control`, merged into `dev-two-tier` (88b5d671) (5b4cd739, e2b69736): `Settings.cpu_batches` / `cpu_period` and `--cpu-workers` (speaking workers on the CPU beside the GPU's, each batch by a rule; the default every batch on the speak device, a stage C campaign's digests bit for bit); a resume may change the CPU's rule (`RESUME_MAY_CHANGE`), every readout on the speak device, `post_ceiling` and `post_diagnose` without `--cpu-workers` (c7c35b67) (stage D's log §21, §22) |
 | Multi-aircraft control D193 (1) (2) | Built by stage D's implementer, merged into `dev-two-tier` (88b5d671): `Context.executor_device` (S1, 2961b99a; the default `speak` bit for bit); the rows not flown read their tokens in one call per window, `post.edges.each_tokens` (S2, 88a3990e; bit for bit) (stage D's log §22) |
 | Multi-aircraft control D193 (3) (4) | Built by stage D's implementer, merged into `dev-two-tier` (19d90d45). (3) 9d6886ec: `WindowLoop.landings` removed (`SpeakingLoop.landings(flight)`), `WindowLoop.results(rows)` per row, `WindowLoop.samples` from `SpeakingLoop.permitted(flights)` (each flight's own record, requests_from_d item 99), `backward_round`'s groups read from the joint loop without a copy; a stage C campaign's digests bit for bit (window_behaviour on seg60). (4) 22fd1031: `Speakers` `host_budget`, `cpu_deferred`, `HostMemoryError`, `deferred` by device kind; stage C's campaign unchanged (no host budget) (stage D's log §22) |
-| C12 | After C10 |
+| C12 | Open: the close of stage C (§8) |
 
 ### 0.4 Plan
 
-1. C10, C13 and C14 are done: `post_train_20261006` has 14 rounds (log §26, §27; stage B's log §6 for C13's check).
-2. C15 (D161, the ceiling readout: `outputs/POOLED/post/ceiling_20261007`, log §28) and C16 (D162) are done.
-3. C17–C20 (D165, D167–D169) are built. The campaigns are experiments within the design: their settings and intents
-   in `docs/experiments/intents.json`, their results in stage C's log, each run from a run worktree (outline D163) with
-   no other job on the host or the GPU. C21–C25 (D170, D171, D173, D175, D176) are built; C26 (frontend D177 (15))
-   next; fronter's F5 builds on C25; the campaigns are the user's choice.
-4. The validation readout of the round that the user chooses, then its speed (frontend §3 item 10, `model_speed`), with
-   no other job on the host or the GPU.
-5. C12.
-6. The window view (C11) and the window export change with the one layout of the three stages' Training views (outline
-   §6.2, D133–D135: the results page, the rounds' envelopes, one block of a flown sentence), built by stage B's
-   implementer.
-7. The generalisations of §9 marked "to be built" (multi-aircraft control D149, its MC0), by stage D's implementer
-   on `dev-multi-control` (outline §5 rule 1), each checked against stage C's code before the change, bit for bit;
-   nothing of them goes into C10's worktree.
-
-Every other milestone from now on is built by stage D's implementer (it takes over stage B's) on `dev-two-tier-v4`, in the worktree
-`.claude/worktrees/two-tier-v4` (outline §5 rule 1); C26 by stage C's implementer on `dev-two-tier-v4-post` (worktree
-`.claude/worktrees/two-tier-v4-post`), first brought level with `dev-two-tier`.
+1. Stage C's campaigns are done. The user's chosen round is `post_seg60_20261007` round 5 (D7); its one validation
+   readout landed 88.9 %; its sets are published (frontend F5). Stage D starts from it (multi-aircraft control D164)
+   or from the base (multi-aircraft control D200).
+2. One method of branch training for stages C and D: multi-aircraft control D200, its comparison held by the user.
+3. C12, the close of stage C.
 
 ---
 

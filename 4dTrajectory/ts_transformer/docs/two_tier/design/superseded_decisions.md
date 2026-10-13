@@ -3,7 +3,8 @@
 **What this file is.** The two-tier design documents hold the current design only. On 2026-10-12 they were rewritten in
 place to match the code of the branch `two-tier2-eval-landing` (commits `04378395`, `ea632d20`, `51a68b8e`), and on
 2026-10-13 again for commits `e00c8d08` and `d8f21c77`, for the prior's campaign on the new labels (`7e72a059`,
-B15), and for the final's lateral corrections (D201, the branch `two-tier2-centreline`). This file
+B15), for the final's lateral corrections (D201, the branch `two-tier2-centreline`), and for the branch rule and
+the frontend and backend rule (outline §5 rules 1, 8, 10, 11; the branch `two-tier2-backend-orphans`). This file
 keeps each text that the rewrite replaced, word for word, beside the text that replaced it, so that the user can compare
 them. It is not part of the design: no code and no design document cites it. An entry leaves this file when the user
 has reviewed it.
@@ -34,6 +35,12 @@ has reviewed it.
 10. On the final, once the observed aircraft is lined up, the lateral corrections aim at the runway's centreline, and
    the labels and the prior are built again (vocabulary D201; 2026-10-13): after the diagnosis of B15's held-out
    folds, the user chose "采用，做 v18 并重跑 B（推荐）".
+11. One branch is kept, `two-tier2`; every other branch is temporary (outline §5 rules 1, 8, 10; 2026-10-13): "为啥要碰
+   dev-two-tier？ 还有，two-tier2 维护这个就行 其他的都是临时分支。注意这很重要".
+12. The frontend and the backend change last, each change with the user's permission (outline §5 rule 11; 2026-10-12):
+   "以后不要做任何前端改动 服务的后端，也要我的允许才能改。因为前后端改动意味着重要的设计修改", and "为什么之前就开始改前后端了 …
+   这是最后阶段的事情". On 2026-10-13 the user allowed the results route's change and its reader's ("finish backend";
+   "允许（推荐）").
 
 The new decision rows (vocabulary D196, D197, D201; outline D198) are new text, not replacements, so they are not entries
 below; the rewritten rows that cite them are.
@@ -101,6 +108,19 @@ below; the rewritten rows that cite them are.
 | 57 | `vocabulary.md` | §4.9 Lateral correction, item 1 | on the final, once the observed aircraft is lined up, the lateral corrections aim at the centreline (D201) |
 | 58 | `vocabulary.md` | §4.9 Lateral correction, item 3 | on the final, once the observed aircraft is lined up, the lateral corrections aim at the centreline (D201) |
 | 59 | `vocabulary.md` | §0.1 D83, its first sentence | on the final, once the observed aircraft is lined up, the lateral corrections aim at the centreline (D201) |
+| 60 | `outline.md` | §5 rule 1, the branches and the implementers | one branch, `two-tier2`; every other branch is temporary (the user, 2026-10-13) |
+| 61 | `outline.md` | §5 rule 10, where the log is committed | one branch, `two-tier2`; every other branch is temporary (the user, 2026-10-13) |
+| 62 | `outline.md` | §5 rule 11, the Training view and the merge | the frontend and the backend change last, each change with the user's permission (the user, 2026-10-12) |
+| 63 | `outline.md` | §5 rule 8, the checkouts not to touch | one branch, `two-tier2`; every other branch is temporary (the user, 2026-10-13) |
+| 64 | `prior.md` | §12 Rules, the artefact of the formal runs | the labels and the prior are built again with the final's corrections at the centreline (vocabulary D201) |
+| 65 | `multi_control.md` | §0.1 D200, its last sentence | the backend's stage D route reads a start from the base (the user's permission, 2026-10-13) |
+| 66 | `frontend.md` | §3 item 2, the readouts of an item (stage A, stage B) | a landing is the evaluation package's verdict on the crossing (vocabulary D196); the DA check stays a record (`288b779b`) |
+| 67 | `frontend.md` | §3 item 7, one flown sentence | a landing is the evaluation package's verdict on the crossing (vocabulary D196); the DA check stays a record (`288b779b`) |
+| 68 | `frontend.md` | §4.1 stage A, the sets | a landing is the evaluation package's verdict on the crossing (vocabulary D196); the DA check stays a record (`288b779b`) |
+| 69 | `frontend.md` | §4.1 stage A, the view | a landing is the evaluation package's verdict on the crossing (vocabulary D196); the DA check stays a record (`288b779b`) |
+| 70 | `frontend.md` | §3 item 3, the results route, stage B | the prior's campaign has no variant step since B15; the route answers the configuration choice only (`be3cdd49`) |
+| 71 | `frontend.md` | §5.6 the details page of stage D | the backend's stage D route reads a start from the base (the user's permission, 2026-10-13) |
+| 72 | `frontend.md` | §7, the formats | a landing is the evaluation package's verdict on the crossing (vocabulary D196); the DA check stays a record (`288b779b`) |
 
 ## Text kept unchanged on purpose
 
@@ -108,7 +128,9 @@ below; the rewritten rows that cite them are.
   `unstable_at_minimums` and `crossed_too_high` of A15–A24, and the DA check failures of select at Δ = 2 s): these are
   measurements made with the judge of their time. They stay as measured.
 - `frontend.md`: the Training view still draws the DA point, its chip and its label as before; the evaluation's verdict
-  is added as text only. That frontend change is committed (`288b779b`); `frontend.md` is not rewritten for it yet.
+  is added as text only (`288b779b`), and only the passages that name the verdict are rewritten.
+- The status tables and plans (each document's §0.2–§0.4, the outline's §1 and §4) were brought up to the state of
+  2026-10-13; git keeps their old text, and they are not entries.
 - `executor_first_principles.zh.md` §17.4 ("角度类别、名义角、高度网格、ε、H、H_final 都不变"): it says what that design kept;
   it stays true.
 - The readouts (`docs/two_tier/readouts/`) are records of their day and are not rewritten.
@@ -1254,4 +1276,274 @@ The lateral error e_y of the closed-loop reading is the signed distance of the f
 
 ```text
 The lateral error e_y of the closed-loop reading is the signed distance of the flown position from the observed path: from the line through the observed 2 s rows near the matched point (its segments, not their extensions), positive to the right of the path (§4.9); on the final, once the observed aircraft is lined up, e_y is read from the runway's centreline instead (D201).
+```
+
+### 60. `outline.md`: §5 rule 1, the branches and the implementers
+
+**What changed:** one branch, `two-tier2`; every other branch is temporary (the user, 2026-10-13)
+
+**Old text:**
+
+```text
+1. The branches. The main parts of stages A, B and C are merged into `dev-two-tier` (2026-10-06). From then on, every
+   stage develops on one branch, `dev-two-tier-v4`, in the worktree `.claude/worktrees/two-tier-v4` (the user,
+   2026-10-06), so that a review reads one difference (`dev-two-tier...dev-two-tier-v4`):
+   - before its first commit, and before a milestone that a new design commit holds, the implementer brings
+     `dev-two-tier-v4` level with `dev-two-tier` (a fast-forward, or a merge of `dev-two-tier` when both moved);
+   - work begun on another branch (stage B's `dev-training-layout`) is merged into `dev-two-tier-v4` and goes on there;
+     a stage branch whose work is all in `dev-two-tier` (`dev-two-tier-v4-prior`) is deleted with
+     its worktree;
+   - the user merges `dev-two-tier-v4` into `dev-two-tier` (rule 11).
+
+   One implementer develops for every stage: stage D's (the user, 2026-10-06; it takes over stage B's implementer's
+   remaining steps, §4 items 5 and 6). Stages A's and B's implementers have no work. Stage C's builds and runs C14, C10's
+   later rounds (the user, 2026-10-06), on `dev-two-tier-v4-post` in `.claude/worktrees/two-tier-v4-post`, first
+   brought level with `dev-two-tier` (a fast-forward), and changes no other code. Stage D's implementer keeps two branches: the work of §4 items 5 and 6 on `dev-two-tier-v4`
+   (worktree `.claude/worktrees/two-tier-v4`), and the multi-aircraft control on its own branch `dev-multi-control` in
+   the worktree `.claude/worktrees/multi-control`, made from `dev-two-tier-v4`, so that the merge of
+   `dev-two-tier-v4` does not wait for the multi-aircraft control's review. It
+   brings `dev-multi-control` level with `dev-two-tier-v4` (a merge) before each milestone and before its report; it
+   changes the code of stages A, B and C only where multi-aircraft control §6 says, each change written in that
+   stage's public interface first; the user merges `dev-multi-control`. On the host, the measurements of §4 items 5
+   and 6 after C10 (rule 13) come before the multi-aircraft control's runs on real data. The implementer stages files by explicit paths and reads
+   `git diff --cached --stat` before each commit. A formal build or run starts from a run worktree at the commit that
+   the user merged (D163), never from a development worktree or the main checkout; it reads recorded paths through
+   `this_checkout` (post-training D157).
+   After the merge of §4 item 9, stage D's implementer removes the worktrees and deletes the branches whose work is all
+   in `dev-two-tier` (each worktree's data links unlinked first; `git branch -d`, never `-D`).
+
+   The Training view (`frontend.md`) has an implementer of its own, fronter (the user, 2026-10-06; frontend D154), on
+   its own branch `dev-frontend` in the worktree `.claude/worktrees/frontend`, made from `dev-two-tier` and merged
+   level with it before each milestone; the user merges `dev-frontend`. Fronter changes the Training view's files and
+   the Training exports with their files' modules (frontend §8), and no other code of a stage. Stage D's implementer
+   does not change those files; it runs the exports of A's and B's sets after C10 (§4 item 5).
+```
+
+**New text:**
+
+```text
+1. The branches (the user, 2026-10-13: "two-tier2 维护这个就行 其他的都是临时分支"). The user keeps one branch,
+   `two-tier2`. A change is built on a temporary branch from `two-tier2`, in its own worktree; after its review and
+   tests, `two-tier2` is moved to it by its ref (`git update-ref refs/heads/two-tier2 <new> <old>`, never a merge
+   inside a checkout), and the temporary branch and its worktree are deleted (each worktree's data links unlinked
+   first; `git branch -d`, never `-D`). No other branch moves: not `dev-two-tier` (the main checkout, from which the frontend and the backend
+   run), not a stage branch. A push of `two-tier2` waits for the user's word. The implementer stages files by
+   explicit paths and reads `git diff --cached --stat` before each commit. A formal build or run starts from a run
+   worktree at a `two-tier2` commit (D163), never from a development worktree or the main checkout; it reads
+   recorded paths through `this_checkout` (post-training D157).
+```
+
+### 61. `outline.md`: §5 rule 10, where the log is committed
+
+**What changed:** one branch, `two-tier2`; every other branch is temporary (the user, 2026-10-13)
+
+**Old text:**
+
+```text
+The log is committed to `dev-two-tier` (the user's checkout), with explicit paths.
+```
+
+**New text:**
+
+```text
+The log is committed to `two-tier2` (rule 1), with explicit paths.
+```
+
+### 62. `outline.md`: §5 rule 11, the Training view and the merge
+
+**What changed:** the frontend and the backend change last, each change with the user's permission (the user, 2026-10-12)
+
+**Old text:**
+
+```text
+11. The user merges a branch into `dev-two-tier`, not before the Training view of its stage (`frontend.md`): before it, the
+    backend's live executor (`aeroviz_backend/autopilot_segment/`) and the Training view of the branch do not work. A
+    merge also moves the main checkout's services to the new formats; the sets published in the old formats stay on
+    disk, and the new frontend does not read them (principle 8). Until the user merges, the user sees a stage on a test
+    stack from its worktree (frontend §2 item 5).
+```
+
+**New text:**
+
+```text
+11. The frontend and the backend change last (the user, 2026-10-12: "以后不要做任何前端改动 服务的后端，也要我的
+    允许才能改。因为前后端改动意味着重要的设计修改"; "这是最后阶段的事情"). A change of `aeroviz-4d` (its code, tests and
+    fixtures) or of `aeroviz_backend` waits for the user's permission, after the numbers of the main task. A change of
+    a format that the Training view or the backend's live executor (`aeroviz_backend/autopilot_segment/`) reads first
+    lists what it forces there; until the user allows it, its mirror tests stay red and are named in the commit. The
+    sets published in an old format stay on disk, and the new frontend does not read them (principle 8). The
+    services run from the main checkout, which the user moves.
+```
+
+### 63. `outline.md`: §5 rule 8, the checkouts not to touch
+
+**What changed:** one branch, `two-tier2`; every other branch is temporary (the user, 2026-10-13)
+
+**Old text:**
+
+```text
+8. Do not touch the checkouts of running experiments (`.claude/worktrees/step9-run` and others) or the main checkout.
+```
+
+**New text:**
+
+```text
+8. Do not touch the run worktrees of running builds and campaigns, or the main checkout.
+```
+
+### 64. `prior.md`: §12 Rules, the artefact of the formal runs
+
+**What changed:** the labels and the prior are built again with the final's corrections at the centreline (vocabulary D201)
+
+**Old text:**
+
+```text
+The formal runs read `v17_20261013` / `v22_20261013` at Δ = 4 s (B15); B5 read `v12_20261005` / `v17_20261005`.
+```
+
+**New text:**
+
+```text
+The formal runs read `v18_20261013` / `v23_20261013` at Δ = 4 s (B16); B15 read `v17_20261013` / `v22_20261013`, B5 `v12_20261005` / `v17_20261005`.
+```
+
+### 65. `multi_control.md`: §0.1 D200, its last sentence
+
+**What changed:** the backend's stage D route reads a start from the base (the user's permission, 2026-10-13)
+
+**Old text:**
+
+```text
+The backend's stage D route reads the start as a round of stage C; a campaign from the base shown in the frontend needs that route changed (the last stage, the user's permission).
+```
+
+**New text:**
+
+```text
+The backend's stage D route answers a start from the base with why it has no readout (`be3cdd49`, the user's permission).
+```
+
+### 66. `frontend.md`: §3 item 2, the readouts of an item (stage A, stage B)
+
+**What changed:** a landing is the evaluation package's verdict on the crossing (vocabulary D196); the DA check stays a record (`288b779b`)
+
+**Old text:**
+
+```text
+     DA check); B — this sentence (the outcome and its time, the DA check, the go-arounds) and, at the cursor, the
+```
+
+**New text:**
+
+```text
+     evaluation's verdict, the DA check); B — this sentence (the outcome and its time, the evaluation's verdict, the DA
+     check, the go-arounds) and, at the cursor, the
+```
+
+### 67. `frontend.md`: §3 item 7, one flown sentence
+
+**What changed:** a landing is the evaluation package's verdict on the crossing (vocabulary D196); the DA check stays a record (`288b779b`)
+
+**Old text:**
+
+```text
+     the block of every sentence that the executor flew, in every stage: the outcome, the end cycle, the crossing and
+     the DA check, the track
+```
+
+**New text:**
+
+```text
+     the block of every sentence that the executor flew, in every stage: the outcome, the end cycle, the crossing with
+     the evaluation's verdict (`crossing.evaluation`: the verdict, the failed gates, each gate's value with its bounds)
+     and the DA check, the track
+```
+
+### 68. `frontend.md`: §4.1 stage A, the sets
+
+**What changed:** a landing is the evaluation package's verdict on the crossing (vocabulary D196); the DA check stays a record (`288b779b`)
+
+**Old text:**
+
+```text
+  word marked, and its flown states; the judge's outcome and the DA check; the attitudes.
+```
+
+**New text:**
+
+```text
+  word marked, and its flown states; the judge's outcome (`landed` is the evaluation's verdict, vocabulary D196),
+  the verdict and the DA check; the attitudes.
+```
+
+### 69. `frontend.md`: §4.1 stage A, the view
+
+**What changed:** a landing is the evaluation package's verdict on the crossing (vocabulary D196); the DA check stays a record (`288b779b`)
+
+**Old text:**
+
+```text
+  correction words marked; a tab for each Δ; the flown path beside the observed one; the outcome and the DA point.
+```
+
+**New text:**
+
+```text
+  correction words marked; a tab for each Δ; the flown path beside the observed one; the outcome, the evaluation's
+  verdict in one line (the read-back window, the replay line) and the DA point.
+```
+
+### 70. `frontend.md`: §3 item 3, the results route, stage B
+
+**What changed:** the prior's campaign has no variant step since B15; the route answers the configuration choice only (`be3cdd49`)
+
+**Old text:**
+
+```text
+· **The choice**: each configuration's and variant's score over its folds, the seed scale, the chosen configuration and variant | the free-generation `readout.json` of `source.readout`; `history.json` of the prior; `validation/readout.json` beside the base; `choice_configuration.json`, `choice_variant.json` of the campaign; the speed readout that `source.speed` names |
+```
+
+**New text:**
+
+```text
+· **The choice**: each configuration's score over its folds, the seed scale, the chosen configuration (the variant is `full`, prior B15) | the free-generation `readout.json` of `source.readout`; `history.json` of the prior; `validation/readout.json` beside the base; `choice_configuration.json` of the campaign; the speed readout that `source.speed` names |
+```
+
+### 71. `frontend.md`: §5.6 the details page of stage D
+
+**What changed:** the backend's stage D route reads a start from the base (the user's permission, 2026-10-13)
+
+**Old text:**
+
+```text
+counted once a pair; the results route takes `stage=D` and reads stage D's campaign.
+```
+
+**New text:**
+
+```text
+counted once a pair; the results route takes `stage=D` and reads stage D's campaign. A campaign's start has no
+readout of stage D's windows: a round of stage C was read on stage C's windows, and the base (multi-aircraft control
+D200) on none; the route answers why.
+```
+
+### 72. `frontend.md`: §7, the formats
+
+**What changed:** a landing is the evaluation package's verdict on the crossing (vocabulary D196); the DA check stays a record (`288b779b`)
+
+**Old text:**
+
+```text
+replace v4: the one published set of v4, `windows_seg60_r5_20261008`, is exported again in v5 (the user,
+2026-10-08).
+```
+
+**New text:**
+
+```text
+replace v4: the one published set of v4, `windows_seg60_r5_20261008`, is exported again in v5 (the user,
+2026-10-08). The evaluation's landing verdict (vocabulary D196, `288b779b`) renames the samples and the live
+segments: stage A's sample v13, stage B's v6, the window sample v7; the segments `aeroviz-autopilot-segment-v11`,
+`aeroviz-autopilot-prior-segment-v2`, `aeroviz-autopilot-window-segment-v4`. The sets published in the older formats
+are not read.
 ```

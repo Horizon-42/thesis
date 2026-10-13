@@ -1,5 +1,15 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-13 — the labels on the final aim at the centreline: v18 / v23 built; the two-tier design docs brought up to date
+
+- `instruction_language/v18_20261013` + `executor/v23_20261013` (D201, from `b8426ff5`, read-only): closed loop at
+  Δ = 4 s landed train 97.62 → 98.69 %, val 97.55 → 98.59 % against v17; the evaluation's failures halve (887 → 453);
+  heading words at Δ = 4 s 48.3 → 43.0 a sentence. Readout `docs/two_tier/readouts/2026-10-13_d201_labels.zh.md`.
+  The superseded v13–v16 / executors v18–v21 are deleted (the user's word; their `.run` logs kept).
+- The design docs' status tables and plans are rewritten to the state of 2026-10-13; the outline's rules 1, 8, 10 and
+  11 now say the user's two rules: one branch, `two-tier2`, every other temporary; the frontend and the backend change
+  last, with the user's permission. The replaced rule texts are entries 60–72 of `design/superseded_decisions.md`.
+
 ### 2026-10-13 — the Training results route on a v4 prior campaign and a stage D start from the base; orphans deleted
 
 The user's order (2026-10-13): finish the backend, delete the orphan modules (on two-tier2 only).

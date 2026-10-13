@@ -56,22 +56,16 @@ Fronter keeps this table and its log, `readouts/2026-10-06_fronter_implementatio
 | F1 The cursor slider (D155) | Done: `e6f5c5fd`, the three small points `8c4d6af4` on `dev-frontend` (reviewed; browser-checked) |
 | F2 Windows of several commanded aircraft: the format, stage C's export, the view's readers (D156) | Done: `05963721`, `1452cccb` on `dev-frontend` (reviewed; browser-checked on a v4 smoke set) |
 | F3 Stage D's parts of the window view (D156) | Done: `a7ab9bb6` on `dev-frontend` (reviewed; tests; stage D's browser check is F4's) |
-| F4 Stage D's export and sets | Export and smoke set done: `7b3e7ae5` on `dev-frontend` (reviewed, browser-checked on the test stack); formal sets after MC6, their intent first |
+| F4 Stage D's export and sets | Done: `7b3e7ae5` (reviewed, browser-checked on the test stack); the formal campaign's round 7 published 2026-10-12: `majority_formal_r7_drawn_20261012`, `majority_formal_r7_not_landed_20261012` |
 | F5 Sets of listed windows (D176) and D177's changes | Done: `b8646c12`, the speed unbinding and `model_speed`'s sample `2972cf9f` (reviewed, merged); `windows_seg60_r5_20261008` in v5 and the listed sets `loss_windows_seg60_20261008`, `loss_windows_c10_20261008` published |
 | The start's name after D162 (§4.3) | Done: `f10e9ee5`, the start's readout `a9d296d5` (reviewed, merged) |
 | Stage C's first formal set (P55 round 5) | Published 2026-10-08: `windows_seg60_r5_20261008`, five airports, 163 windows (browser-checked) |
+| The evaluation's landing verdict (vocabulary D196) | Done: `288b779b` (the samples, the live segments, the read-back window and the replay line; the DA check drawn as before) |
+| The results route: B15's campaign (no variant step) and a stage D start from the base (D200) | Done: `be3cdd49` (the user's permission, 2026-10-13) |
 
 ### 0.4 Plan
 
-1. F0 first (the user, 2026-10-07): after the step in progress is committed, before any other.
-2. F1 on fronter's branch (§8).
-3. F2: the window sample of several commanded aircraft with stage C's windows of one.
-4. F3 after stage D's MC0 is on `dev-two-tier` (post-training §9 items 1, 3 and 8: a window of several commanded
-   aircraft, its losses, its loop), on fixtures that stage C's export writes for a synthetic window of two.
-5. F4 after stage D's MC4 (its runners): its export and a smoke set; its formal sets after MC6, their intent first.
-6. F5 after stage C's C25 (post-training D176): sets of listed windows, the sample v5.
-
-The user merges fronter's branch.
+No part is open. A change of the view or of the backend waits for the user's permission (outline §5 rule 11).
 
 ---
 
@@ -140,7 +134,8 @@ envelopes of their words, because their exports wrote none (D135).
      item's own sentences, as the number landed of all (stage A: its closed-loop sentences, one for each Δ; B: the
      prior's samples; C: the rounds, and the count of other aircraft), with each sentence's outcome in the tooltip;
    - the readouts of the item, one line each: stage A — the flown flight at the tab's Δ (the outcome and its time, the
-     DA check); B — this sentence (the outcome and its time, the DA check, the go-arounds) and, at the cursor, the
+     evaluation's verdict, the DA check); B — this sentence (the outcome and its time, the evaluation's verdict, the DA
+     check, the go-arounds) and, at the cursor, the
      probability of "go-around", whether the procedure permits one, on final or not and the count of words blocked in
      each masked column (the probability of "go-around" along the sentence is drawn on the track of the cursor slider);
      C — this round (the outcome, the reward, the loss of separation or none) and the window (its kind,
@@ -202,7 +197,7 @@ envelopes of their words, because their exports wrote none (D135).
    | Stage | Sections after "The set and the experiment" | Read from (named by the set's `source` / `model`) |
    |---|---|---|
    | A | **Labelling**: labelled and refused, the reasons of the refusals, by airport — train and select only · **Closed loop**: the executor's replay of the closed-loop sentences of each split of the set at each Δ (landed and each other outcome) · **Flown flights**: the set's own flights at each Δ · **Vocabulary** | `instruction_language/<artefact>/readout.json` (its train and select blocks); `executor/<spec>/replay-closed-<split>-<Δ>s/replay.json` |
-   | B | **Free generation**: the readout the set was made from — the outcomes by airport and by stratum, the sentences inside the selection and outside it (for a faulty track, for the outcome), the words per sentence beside the labelled ones; beside it the set's own sentences counted · **Training**: the loss per epoch on train and select, the best epoch · **Validation** (the base's val set only): the teacher-forced loss per step and per column, the share of the labelled words that the procedure masks block · **Speed** (item 10) · **The choice**: each configuration's and variant's score over its folds, the seed scale, the chosen configuration and variant | the free-generation `readout.json` of `source.readout`; `history.json` of the prior; `validation/readout.json` beside the base; `choice_configuration.json`, `choice_variant.json` of the campaign; the speed readout that `source.speed` names |
+   | B | **Free generation**: the readout the set was made from — the outcomes by airport and by stratum, the sentences inside the selection and outside it (for a faulty track, for the outcome), the words per sentence beside the labelled ones; beside it the set's own sentences counted · **Training**: the loss per epoch on train and select, the best epoch · **Validation** (the base's val set only): the teacher-forced loss per step and per column, the share of the labelled words that the procedure masks block · **Speed** (item 10) · **The choice**: each configuration's score over its folds, the seed scale, the chosen configuration (the variant is `full`, prior B15) | the free-generation `readout.json` of `source.readout`; `history.json` of the prior; `validation/readout.json` beside the base; `choice_configuration.json` of the campaign; the speed readout that `source.speed` names |
    | C | **Rounds**: each round of the campaign — the reward, landed, the losses of separation, the go-arounds · **Speed** (item 10, after C10) · **The checks**: the labeller's and the executor's checks at the campaign's start · **The window**: its kind, its moves, its other aircraft, the round's end, the threshold, the rows where the speed-word mask acted, the faulty points | `campaign.json` and `round_<n>/round.json` of `model.campaign`; the speed readout that `source.speed` names |
    | D | **Rounds**: each round — W per commanded aircraft, landed, go-arounds, silent aircraft, the losses of separation by pair (multi-aircraft control D145), the share of informative groups · **Speed** · **The checks** · **The window**: its kind and c, its commanded aircraft (each one's join time and outcome), its recorded aircraft, the losses by pair, the end | as stage C, of stage D's campaign |
 
@@ -247,8 +242,9 @@ envelopes of their words, because their exports wrote none (D135).
 
 7. **Shared parts, not copies**, in the exports and in the views:
    - **One flown sentence.** One function of stage A's Training export (vocabulary §6 item 8, `flown_sentence`) gives
-     the block of every sentence that the executor flew, in every stage: the outcome, the end cycle, the crossing and
-     the DA check, the track to the outcome on the 2 s rows, unrounded (the rule of prior D127, now for every stage),
+     the block of every sentence that the executor flew, in every stage: the outcome, the end cycle, the crossing with
+     the evaluation's verdict (`crossing.evaluation`: the verdict, the failed gates, each gate's value with its bounds)
+     and the DA check, the track to the outcome on the 2 s rows, unrounded (the rule of prior D127, now for every stage),
      the attitude and the envelopes. A stage adds only its own fields (B: the timeout, the blocked words; C: the
      reward, the loss of separation). Today three copies build this block (stage A's `replay_payload`, B's
      `fly_again`, C's `sentence_payload`) and none of B's or C's has the envelopes. The labelled sentence keeps
@@ -352,9 +348,11 @@ C11 in the stages' implementation logs) and as §3 lays it out. The cursor slide
 
 - **Sets.** For each airport, a seeded sample of select and train flights (seed 1337), from the formal artefact: the
   observed track; the labelled sentence on the 2 s rows; at Δ = 2, 4 and 8 s the closed-loop sentence, each correction
-  word marked, and its flown states; the judge's outcome and the DA check; the attitudes.
+  word marked, and its flown states; the judge's outcome (`landed` is the evaluation's verdict, vocabulary D196),
+  the verdict and the DA check; the attitudes.
 - **View.** The five columns (runway and G, heading relative to the course of R, altitude above E, angle, speed); the
-  correction words marked; a tab for each Δ; the flown path beside the observed one; the outcome and the DA point.
+  correction words marked; a tab for each Δ; the flown path beside the observed one; the outcome, the evaluation's
+  verdict in one line (the read-back window, the replay line) and the DA point.
 - **Live.** A click on a word flies its segment with the single-flight executor (`autopilot/single.py`) under the
   formal artefact's executor spec (`POST /autopilot/segment`). The view refuses an old format by name.
 
@@ -463,7 +461,9 @@ exported track, or with another outcome, as every live segment (D127).
 ### 5.6 The details page
 
 The two sections of §3 item 3: the models' statistics of stage D's rounds, with the losses of separation by pair
-counted once a pair; the results route takes `stage=D` and reads stage D's campaign.
+counted once a pair; the results route takes `stage=D` and reads stage D's campaign. A campaign's start has no
+readout of stage D's windows: a round of stage C was read on stage C's windows, and the base (multi-aircraft control
+D200) on none; the route answers why.
 
 ### 5.7 The set and its format
 
@@ -560,7 +560,10 @@ C's `index_post_v2.json` and sample v3. Stage D's view (D156) renames stage C's:
 the window segment's request. Stage C had no published set, so no set of C was exported again. The window sample v5
 and the indexes `index_post_v4.json` and `index_multi_v2.json` (post-training D176: the cohort `drawn` or `listed`)
 replace v4: the one published set of v4, `windows_seg60_r5_20261008`, is exported again in v5 (the user,
-2026-10-08).
+2026-10-08). The evaluation's landing verdict (vocabulary D196, `288b779b`) renames the samples and the live
+segments: stage A's sample v13, stage B's v6, the window sample v7; the segments `aeroviz-autopilot-segment-v11`,
+`aeroviz-autopilot-prior-segment-v2`, `aeroviz-autopilot-window-segment-v4`. The sets published in the older formats
+are not read.
 
 ---
 

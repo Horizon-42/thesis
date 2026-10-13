@@ -63,9 +63,7 @@ The decision numbers are shared by all documents (outline §3).
 
 ### 0.2 Open items
 
-- The Training results page reads a campaign's `choice_variant.json` (`aeroviz_backend/training_results.py`); a B15
-  campaign (`ts-prior-campaign-v4`) has none. A change of the backend and the frontend: the user's last stage, with
-  the user's permission.
+None.
 
 ### 0.3 Implementation
 
@@ -79,22 +77,20 @@ The commits, test counts and measurements of every milestone are in `readouts/20
 | B6 | Done: the export, the view and the live segment (`b079ebef`, `ce601bd7`, `aac93945`, `201b4afd`, `a280d984`, `df68c927`); B5's sets published as `prior_sets_20261006` (`493dbe2b`: each fold of configuration C at its held-out airport, select days; the base's claimed val set), 10 flights × 2 sentences a set, `aeroviz-training-prior-sample-v3`; checked in the browser and on 40 sentences flown live. The view changes with the one layout of the three stages (frontend §3, D133). Exported again in the new format on 2026-10-07 by stage D's implementer (`index_prior_v3.json`, naming the base's speed readout `outputs/POOLED/speed/prior_base_20261006`; the old sets kept as `<set-id>.v3-old`; the base's `SHA256SUMS` checked before and after; log §6) |
 | B7 | Done 2026-10-06 (`d1386a77`): `docs/reference/runners.md` R56–R62; the code index of §11 |
 | B14 (D138) | Built and reviewed: `65adf480`; merged into `dev-two-tier`. Its real-data check done 2026-10-06 by stage D's implementer: B5's fold `C_full_s1337/KRDU` spoken again with `BATCH` on the select days, all 400 sentences word for word its readout's (log §6). The per-aircraft form and its check once a process are retired by outline D187 (stage D's implementer, D184) |
-| B15 | Built on `two-tier2-eval-landing` (`7e72a059`): `prior_select` compares A and C only, `prior_campaign` runs 15 training runs and the base (`ts-prior-campaign-v4`), the variant `full` a setting; `prior_behaviour` follows. Before it, the prior's code read `v17_20261013` with no change: `prior_train`, `prior_free_generation` and `prior_validation` (select) on a sample of 20 sentences an airport (train kept 39,091, fault 495, outcome 940; select kept 5,835; B5's base on v12: 39,154 / 5,861); the GPU peak of configuration C at the formal size 2.42 GB |
-| Multi-aircraft control D190 (2) | Built by stage D's implementer (outline D184) on `dev-multi-control`, 7893d787; not merged: the copies a speaker takes of a line hold their rows to where they part once (`prior/model.py` `Front`, `Past.together` chooses the front; `Past.taken` deleted); a line reads its front `COPIED` (bit for bit) or `MERGED` (no copy, the last bits), `Speaker(…, attention=)`; a past with no front (training, prior_behaviour) computes as before: prior_behaviour the same bytes (stage D's log §20; §7 items 1 and 3 name `Past.taken`: stage D's requests item 87) |
+| B15 | Done 2026-10-13 (code `7e72a059`, run from the run worktree `run-b15` at `0ac795e5`): `4dTrajectory/outputs/POOLED/prior/prior_b15_20261013` (`ts-prior-campaign-v4`, on `v17_20261013` / `v22_20261013` at Δ = 4 s; read-only, `SHA256SUMS`, 201 files). Chosen: configuration C (score 1.981; A 2.041 and 2.019 at its two seeds, the seed scale 0.0225). The base's val read: landed 90.3 %. The folds' landed share at their held-out airports: C 62.8 %, A 50.2 % and 54.5 % (B5 on v12, under the judge before D196: 82.6, 82.9, 86.3 %). The diagnosis: the folds settle 20–40 m off the centreline and fail the evaluation's lateral gate; the labels answer the centreline offset softly (vocabulary D201). Readout `readouts/2026-10-13_b15_prior.zh.md` |
+| B16 | B15's campaign on `v18_20261013` / `v23_20261013` (vocabulary D201; the user, 2026-10-13: "采用，做 v18 并重跑 B"): next |
+| Multi-aircraft control D190 (2) | Built by stage D's implementer (outline D184), 7893d787, merged (88b5d671): the copies a speaker takes of a line hold their rows to where they part once (`prior/model.py` `Front`, `Past.together` chooses the front; `Past.taken` deleted); a line reads its front `COPIED` (bit for bit) or `MERGED` (no copy, the last bits), `Speaker(…, attention=)`; a past with no front (training, prior_behaviour) computes as before: prior_behaviour the same bytes (stage D's log §20; §7 items 1 and 3 name `Past.taken`: stage D's requests item 87) |
 | Claude's checks | At `5313b6cd` (`readouts/2026-10-05_stage_b_check.zh.md`; corrections B10, D105–D108) at `44f6000f` (`readouts/2026-10-05_stage_b_check_2.zh.md`; corrections B12, D119–D122), of B12 at `2190fe0a` (`readouts/2026-10-06_stage_b_b12_check.zh.md`; corrections B13, D127, D128), and of B13 at `142272f0` (`readouts/2026-10-06_stage_b_b13_check.zh.md`: no S1, no correction; its findings on the behaviour check's coverage are dropped, outline D131). None found a leak into an input, a mask or a choice |
 
 Proposals (where the design says nothing): none open.
 
 ### 0.4 Plan
 
-1. Stage B is closed. Its implementer builds the one layout of the three stages' Training views (frontend §3,
-   D133–D135): the results page, the envelopes of the prior's sentences and the shared parts of the exports; B6's sets
-   `prior_sets_20261006` are exported again in a new sample format, with the same ids (the base and the folds read only).
-2. B14 (outline D138), after vocabulary A44 and post-training C13, before stage C's next campaign.
-3. The post-training (`post_training.md`) reads only §7 and B5's base (`prior_base_20261006`).
-4. B15 (the user, 2026-10-13): the campaign on `v17_20261013` / `v22_20261013` from a run worktree at `two-tier2`.
-   B5's base and the stage C and D models trained from it read `v12_20261005`, which the code of `two-tier2` does not
-   open.
+1. B16: B15's campaign (configurations A and C, A's second seed, the base and its one val read) on `v18_20261013` /
+   `v23_20261013`, from a run worktree at a `two-tier2` commit; its report gives the folds' landed share at their
+   held-out airports against B15's, and the evaluation's failed gates.
+2. B5's base and the stage C and D models trained from it read `v12_20261005`, which the code of `two-tier2` does not
+   open. Multi-aircraft control D200's comparison names B15's base; Claude's proposal: B16's.
 
 ---
 
@@ -500,7 +496,7 @@ At `d14a2f76` (B13, the close of stage B). Paths relative to `4dTrajectory/ts_tr
 runner of stage A. From 2026-10-06 one implementer builds the milestones of every stage (outline §5 rule 1: stage
 D's, which takes over stage B's remaining steps on `dev-two-tier-v4`); the prior still reads the vocabulary only through its public interface (vocabulary §6).
 Tests use synthetic artefacts; a check on real data reads the formal artefact on the train and select days only (D85).
-The formal runs read `v17_20261013` / `v22_20261013` at Δ = 4 s (B15); B5 read `v12_20261005` / `v17_20261005`. The rules
+The formal runs read `v18_20261013` / `v23_20261013` at Δ = 4 s (B16); B15 read `v17_20261013` / `v22_20261013`, B5 `v12_20261005` / `v17_20261005`. The rules
 of outline §5 apply.
 
 | Milestone | What it built | Decisions | State |
@@ -520,7 +516,8 @@ of outline §5 apply.
 | B6 | The Training view of stage B | Outline §6, D109, D127 | Done |
 | B7 | The close of stage B | — | Done |
 | B14 | The procedure masks over the batch | Outline D138, D139 | Built and reviewed (`65adf480`); its real-data check first after C10 |
-| B15 | The campaign on the labels of D196–D199 (`v17_20261013` / `v22_20261013`): configurations A and C, A's second seed, the variant `full`, the base and its validation readout | D39, D40, D85 | Built (`7e72a059`); the run is next |
+| B15 | The campaign on the labels of D196–D199 (`v17_20261013` / `v22_20261013`): configurations A and C, A's second seed, the variant `full`, the base and its validation readout | D39, D40, D85 | Done |
+| B16 | B15's campaign on the labels of D201 (`v18_20261013` / `v23_20261013`), the same settings | D39, D40, D85 | Next |
 
 The specifications of the milestones that are done are in `readouts/2026-10-05_stage_b_implementation_log.md` §3.
 
