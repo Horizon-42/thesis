@@ -13,7 +13,7 @@ from ts_transformer.instructions.artefact import STATE_COLUMNS, signals_flights
 from ts_transformer.instructions.words import HEADING, RUNWAY, Words
 from ts_transformer.prior.batch import CANDIDATE_FEATURES, OWN_FEATURES
 from ts_transformer.prior.inputs import (
-    GLIDEPATH_HEIGHT_SCALE_M, SPEED_SCALE_MPS, VERTICAL_RATE_SCALE_MPS, sentence_rows, since_input,
+    PATH_OFFSET_SCALE_M, SPEED_SCALE_MPS, VERTICAL_RATE_SCALE_MPS, sentence_rows, since_input,
 )
 from ts_transformer.prior.landings import (
     LANDINGS_WINDOW_S, Landing, LandingIndex, read_roster_landings, roster_landings, utc_s,
@@ -235,9 +235,25 @@ def test_the_height_above_the_glidepath_against_a_hand_computation():
     d = -e                                                     # "09": threshold at the origin, course 090°
     radius = curvature_radius_m(35.0, 90.0)
     glidepath = TEST_TCH_M + d * np.tan(np.radians(TEST_GLIDEPATH_DEG)) + d * d / (2 * radius)
-    expected = np.arcsinh(((h - 100.0) - glidepath) / GLIDEPATH_HEIGHT_SCALE_M)                 # D65
+    expected = np.arcsinh(((h - 100.0) - glidepath) / PATH_OFFSET_SCALE_M)                      # D65
     assert candidate(rows, 0, "height_above_glidepath")[j] == pytest.approx(expected, rel=1e-5)
     assert own(rows, "height_above_elevation")[j] == pytest.approx((h - INSTRUCTION_AIRPORT_ELEVATION_M) / 1000.0)
+
+
+def test_the_offset_right_of_the_centreline_is_on_the_glidepath_s_scale():
+    """The user, 2026-10-13 ("should align lateral and vertical input"): right of the centreline goes in as asinh(d /
+    100 m), as the height above the glidepath does. Candidate "09" of the parallel airport runs east from the origin:
+    right is south."""
+    from ts_transformer.prior.inputs import state_inputs
+
+    geometry = parallel_airport()
+    at = np.array([[-3000.0, -30.0, 500.0], [-3000.0, 12.0, 500.0]])
+    before = at - np.array([140.0, 0.0, 0.0])
+    _, candidates = state_inputs(at, before, np.ones(2, bool), np.zeros((2, len(geometry.candidates))), geometry,
+                                 "full", 2.0)
+    right = candidates[:, 0, CANDIDATE_FEATURES.index("right_of_final")]
+    assert geometry.candidates[0].ident == "09" and PATH_OFFSET_SCALE_M == 100.0
+    assert right == pytest.approx(np.arcsinh(np.array([30.0, -12.0]) / PATH_OFFSET_SCALE_M), rel=1e-9)
 
 
 def test_the_rows_from_the_first_predicted_step_are_the_flown_states():

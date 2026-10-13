@@ -2,8 +2,10 @@
 the Δ rows of one aircraft.
 
 **Scales** (D41): every input is a physical value divided by a constant in SI units, never a statistic of the data.
-The distances along and across a candidate go in as asinh(d / `DISTANCE_SCALE_M`): linear within a few hundred metres
-of a final, logarithmic out to the 25 km of the slice.
+The distance along a candidate goes in as asinh(d / `DISTANCE_SCALE_M`): linear within a few hundred metres of the
+threshold, logarithmic out to the 25 km of the slice. The two offsets from a final's path, across (right of the
+centreline) and in height (above the glidepath), go in on one finer scale, asinh(d / `PATH_OFFSET_SCALE_M`): the
+landing asks for the same accuracy in both (the user, 2026-10-13: "should align lateral and vertical input").
 
 **Motion** (D25, D60): the ground speed, the vertical rate and the direction of motion of a row come from the
 displacement between the 2 s row before it and the row, at every Δ — only positions and heights, never the stored
@@ -30,9 +32,9 @@ from ts_transformer.prior.landings import LandingIndex, utc_s
 #: Fixed scales of the inputs (D41), SI.
 DISTANCE_SCALE_M = 1_000.0
 HEIGHT_SCALE_M = 1_000.0
-#: The height above a glidepath goes in as asinh(h / `GLIDEPATH_HEIGHT_SCALE_M`): linear near the glidepath, compressed
-#: far from it (D65).
-GLIDEPATH_HEIGHT_SCALE_M = 100.0
+#: The offsets from a final's path, right of the centreline and above the glidepath, go in as asinh(d /
+#: `PATH_OFFSET_SCALE_M`): linear near the path, compressed far from it (D65; the lateral one since 2026-10-13).
+PATH_OFFSET_SCALE_M = 100.0
 SPEED_SCALE_MPS = 100.0
 VERTICAL_RATE_SCALE_MPS = 10.0
 #: The runway length of the variant ``constants`` (D39).
@@ -129,11 +131,11 @@ def state_inputs(at: np.ndarray, before: np.ndarray, known: np.ndarray, landings
         sine, cosine = direction_inputs(move.track_deg, candidate.course_deg, move.known)
         glidepath = published_glidepath_height_m(geometry, k, relative.before_threshold_m)
         values = {"before_threshold": scaled_distance(relative.before_threshold_m),
-                  "right_of_final": scaled_distance(relative.right_of_course_m),
+                  "right_of_final": np.arcsinh(relative.right_of_course_m / PATH_OFFSET_SCALE_M),
                   "height_above_threshold": relative.height_above_threshold_m / HEIGHT_SCALE_M,
                   "motion_minus_course_sin": sine, "motion_minus_course_cos": cosine,
                   "height_above_glidepath": np.arcsinh((relative.height_above_threshold_m - glidepath)
-                                                       / GLIDEPATH_HEIGHT_SCALE_M),
+                                                       / PATH_OFFSET_SCALE_M),
                   "landings_30min": landings[:, k] / LANDINGS_SCALE,
                   "length": np.full(count, candidate.length_m / LENGTH_SCALE_M),
                   "threshold_elevation": np.full(count, candidate.elevation_m / HEIGHT_SCALE_M)}

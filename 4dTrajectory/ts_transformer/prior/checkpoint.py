@@ -37,8 +37,9 @@ from ts_transformer.repo_layout import REPO_ROOT, repo_relative
 #: The prior of two-tier v4 (prior design, 2026-10-04): five columns, no airport or row-position embedding, RoPE on
 #: seconds, candidate tokens of any number. The checkpoints of the instruction-v3 prior (v3–v5) are not opened.
 #: v7 (B8, D75): the identity holds the selection of the sentences (`prior.selection.selection_record`). v8 (B10, B11,
-#: D111): the selection leaves out the flights with a faulty observed track and counts them apart.
-CHECKPOINT_SCHEMA = "ts-prior-checkpoint-v8"
+#: D111): the selection leaves out the flights with a faulty observed track and counts them apart. v9 (2026-10-13): the
+#: offset right of a final's centreline goes in on the glidepath's scale (`inputs.PATH_OFFSET_SCALE_M`), not 1 km.
+CHECKPOINT_SCHEMA = "ts-prior-checkpoint-v9"
 
 
 class Checkpoint(NamedTuple):
