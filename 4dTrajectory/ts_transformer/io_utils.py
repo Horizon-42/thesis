@@ -11,7 +11,11 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
+import sys
 from typing import Any
+
+#: The line a campaign writes to a gated step's stdin when the step's turn comes (`wait_for_turn`).
+GO = "go"
 
 
 def utc_now() -> str:
@@ -49,3 +53,13 @@ def file_sha256(path: Path) -> str:
             digest.update(chunk)
     return digest.hexdigest()
 
+
+def wait_for_turn(gated: bool) -> None:
+    """A gated step (``--gate``) waits here for its turn: a line ``go`` on stdin from the campaign that started it early,
+    so that its CPU work before this call overlaps the step before it. A step stops by name when stdin ends or gives
+    another line (its campaign stopped before its turn). An ungated step goes on at once."""
+    if not gated:
+        return
+    line = sys.stdin.readline()
+    if line.strip() != GO:
+        raise SystemExit(f"stopped before this step's turn: stdin gave {line!r}, not {GO!r}")

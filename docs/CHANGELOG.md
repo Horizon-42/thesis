@@ -1,5 +1,16 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-13 — the prior campaign starts a fold's next steps early (prior D202)
+
+- `prior_campaign` starts the next two steps after the running one with `--gate` when they are a fold's steps (its
+  free generation, the next fold's training run): their checks and data are made on the CPU while the GPU trains, and
+  each waits for its turn (`io_utils.wait_for_turn`) before it uses the GPU, reads an earlier step's output or writes a
+  file. One step on the GPU at a time, in the plan's order; the base's steps and the val readers start at their turn.
+- `prior_train --gate` waits after its data; `prior_free_generation --gate` makes its checks before it reads the prior
+  run (the option checks and the checks moved ahead of the val lock; the order of the lock and the claim is unchanged).
+- `campaign.json` and the settings keep their format: B16 resumes on this code. Expected saving: about 3 min a training
+  run and 1.5 min a free generation (B15's timings).
+
 ### 2026-10-13 — the labels on the final aim at the centreline: v18 / v23 built; the two-tier design docs brought up to date
 
 - `instruction_language/v18_20261013` + `executor/v23_20261013` (D201, from `b8426ff5`, read-only): closed loop at

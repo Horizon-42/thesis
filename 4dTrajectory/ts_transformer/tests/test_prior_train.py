@@ -248,6 +248,29 @@ def test_the_runner_trains_a_smoke_run_into_a_new_directory(tmp_path, monkeypatc
         prior_train.main(argv)                                       # never over an existing run
 
 
+def test_a_run_started_early_makes_its_checks_then_waits_for_its_turn_before_it_writes(tmp_path, monkeypatch):
+    """`--gate` (a campaign's step started early): with no turn given, the run stops before it writes a file; given its
+    turn, it trains the run an ungated one trains."""
+    import io
+
+    from ts_transformer.prior.checkpoint import load_checkpoint
+    from ts_transformer.prior.source import artefact_identity
+
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    with pytest.raises(SystemExit, match="stopped before this step's turn"):
+        run_runner(tmp_path, monkeypatch, "--gate")
+    assert not (tmp_path / "run").exists()
+    runs = {}
+    for name, more in (("gated", ("--gate",)), ("ungated", ())):
+        (tmp_path / name).mkdir()
+        monkeypatch.setattr("sys.stdin", io.StringIO("go\n"))
+        artefact, landings, out, _, checked = run_runner(tmp_path / name, monkeypatch, *more)
+        assert len(checked) == 1
+        runs[name] = load_checkpoint(out / "checkpoint.pt", artefact_identity(artefact, 4.0, landings, "landed"))
+    gated, ungated = (runs[name].model.state_dict() for name in ("gated", "ungated"))
+    assert all(torch.equal(gated[key], ungated[key]) for key in ungated)
+
+
 def test_a_landed_run_trains_on_the_landed_sentences_and_a_run_under_another_rule_is_refused(tmp_path, monkeypatch):
     """B8, D75: of two flights a split, the second's stored outcome not a landing, `landed` trains and stops on the
     first alone and records the counts; the checkpoint is refused against the identity of `all`, by name."""

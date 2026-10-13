@@ -11,6 +11,9 @@ a run that would not fit (``memory.json``).
 ``--memory-check-only`` stops after the check (it writes ``config.json`` and ``memory.json``): the check at the formal
 size before a formal run, from any tree.
 
+``--gate`` (a campaign's step started early, `prior_campaign`): the checks and the data of the run are made, then the
+run waits for its turn (`io_utils.wait_for_turn`) before it uses the device or writes a file.
+
 Writes into ``--out`` (a new directory, never over an existing one; a clean tree unless ``--sample``, a SMOKE option
 that trains on a random sample of N sentences of each airport and split, seed 1337, D55, and says so in
 ``config.json``): ``checkpoint.pt`` (`prior.checkpoint`, the identity of the data, §8 item 1), ``config.json``,
@@ -36,7 +39,7 @@ import torch
 from flight_scenarios.procedure_final import DEFAULT_PROCEDURE_ROOT
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
 from ts_transformer.instructions.artefact import load_candidates, load_day_split
-from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
+from ts_transformer.io_utils import file_sha256, utc_now, wait_for_turn, write_json_atomic
 from ts_transformer.prior.batch import VARIANTS
 from ts_transformer.prior.checkpoint import CHECKPOINT_SCHEMA, save_checkpoint
 from ts_transformer.prior.model import Prior, PriorConfig
@@ -84,6 +87,8 @@ def main(argv: list[str] | None = None) -> int:
                              "training (§12 B3: the check at the formal size before a formal run)")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--procedure-root", type=Path, default=DEFAULT_PROCEDURE_ROOT)
+    parser.add_argument("--gate", action="store_true",
+                        help="wait for a line `go` on stdin before the device is used (a campaign's step started early)")
     shape = {item.name: item.default for item in fields(PriorConfig) if item.name in SHAPE}
     for name, default in shape.items():
         parser.add_argument(f"--{name.replace('_', '-')}", type=type(default), default=default)
@@ -110,6 +115,7 @@ def main(argv: list[str] | None = None) -> int:
     # validation readout (D85)
     totals = selection_totals(identity["selection"])
     print(json.dumps({"artefact_selection": {split: totals[split] for split in ("train", "select")}}), flush=True)
+    wait_for_turn(args.gate)
     config = TrainConfig(**{item.name: getattr(args, item.name) for item in fields(TrainConfig)})
     torch.manual_seed(config.seed)
     model = Prior(PriorConfig.from_words(source.words, args.variant,

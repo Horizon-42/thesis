@@ -1,7 +1,7 @@
 """B5's campaign and its choices (prior §5, §12 B5): the rules of §5 on synthetic scores, a fold read only when it is
 complete and its own, the plan of the 15 fold runs and the base, a whole campaign flown with a stand-in for the runners
-(the choice made by `prior_select` itself), a resume after a kill, the refusal of other inputs, and the behaviour check
-before each step in place of a commit (D108)."""
+(the choice made by `prior_select` itself), a resume after a kill, the refusal of other inputs, the behaviour check
+before each step in place of a commit (D108), and the steps started early (each on the GPU only at its turn)."""
 
 from __future__ import annotations
 
@@ -119,17 +119,22 @@ def test_the_plan_holds_15_training_runs_and_the_base_only_once_the_choice_is_ma
 
 
 class StandIn:
-    """The runners, as the campaign sees them: each writes its step's files; `prior_select` is the real one. A fold's
-    loss: configuration C best, by more than twice the seed scale."""
+    """The runners, as the campaign sees them: each step started (``started``: its name, whether early) returns a
+    process (`StandInChild`) that writes its step's files when it is waited for; `prior_select` is the real one. ``ran``:
+    the steps whose turn came, in order; ``stopped``: the steps stopped before they ran. A fold's loss: configuration C
+    best, by more than twice the seed scale."""
 
     LOSS = {"A_full_s1337": 1.50, "A_full_s2024": 1.51, "C_full_s1337": 1.45}
 
     def __init__(self, fail_at: str | None = None):
-        self.ran, self.fail_at = [], fail_at
+        self.ran, self.started, self.stopped, self.turns, self.fail_at = [], [], [], [], fail_at
 
-    def __call__(self, step, log, started):
+    def __call__(self, step, log, early):
+        self.started.append((step.name, early))
+        return StandInChild(self, step, log)
+
+    def run(self, step, log):
         self.ran.append(step.name)
-        started(4242)
         log.write_text("stand-in")
         if step.name == self.fail_at:
             step.out.mkdir(parents=True)           # a kill: the directory without its last file
@@ -150,6 +155,31 @@ class StandIn:
         return 0
 
 
+class StandInChild:
+    """A step's process as the campaign sees it (`prior_campaign.Child`): its turn (`go`) comes only when every step
+    whose turn came before it has ended; it runs when it is waited for."""
+
+    pid = 4242
+
+    def __init__(self, owner, step, log):
+        self.owner, self.step, self.log, self.turn, self.ended = owner, step, log, False, False
+
+    def go(self):
+        assert all(child.ended for child in self.owner.turns), f"{self.step.name}: its turn while a step still runs"
+        self.turn = True
+        self.owner.turns.append(self)
+
+    def wait(self):
+        assert self.turn, f"{self.step.name} waited for before its turn"
+        self.ended = True
+        return self.owner.run(self.step, self.log)
+
+    def stop(self):
+        if not self.ended:
+            self.ended = True
+            self.owner.stopped.append(self.step.name)
+
+
 def test_a_campaign_runs_every_step_once_makes_its_choices_and_resumes_after_a_kill(tmp_path, monkeypatch):
     monkeypatch.setattr(campaign_module, "load_candidates", lambda instructions: dict.fromkeys(AIRPORTS))
     campaign = tmp_path / "campaign"
@@ -168,9 +198,17 @@ def test_a_campaign_runs_every_step_once_makes_its_choices_and_resumes_after_a_k
     assert json.loads((campaign / "campaign.json").read_text())["running"] is None
     assert runner.ran[0] == "C_full_s1337/KCCC"                         # the killed step again, first
     assert not set(runner.ran) & set(killed.ran[:-1])                  # nothing done is run again
+    # the steps the killed campaign started early were stopped before their turn, and the resume ran them
+    assert killed.stopped == ["C_full_s1337/KCCC/free_generation", "C_full_s1337/KDDD"]
+    assert set(killed.stopped) <= set(runner.ran)
+    # early: a fold's steps, never the choice or the base's (a reader of the val days among them); at most `AHEAD`
+    assert {name for name, early in runner.started if early} == {
+        name for name in runner.ran if name.count("/") >= 1 and not name.startswith("base/")} - {runner.ran[0]}
+    assert all(name.startswith("choice") or name.startswith("base/") or name == runner.ran[0]
+               for name, early in runner.started if not early)
     stored = json.loads((campaign / "campaign.json").read_text())
     assert stored["schema"] == campaign_module.CAMPAIGN_SCHEMA and stored["behaviour"] == same(None)
-    assert [s["git"]["head"][0] for s in stored["steps"]] == ["a"] * len(killed.ran) + ["c"] * len(runner.ran)
+    assert [s["git"]["head"][0] for s in stored["steps"]] == ["a"] * len(killed.started) + ["c"] * len(runner.started)
     assert [a["step"] for a in stored["aborted"]] == ["C_full_s1337/KCCC"]
     assert (campaign / "C_full_s1337" / Path(stored["aborted"][0]["moved_to"]).name).exists()
     configuration = json.loads((campaign / "choice_configuration.json").read_text())
@@ -242,7 +280,7 @@ def test_a_campaign_stops_when_its_code_behaves_otherwise_or_its_tree_has_change
         with pytest.raises(SystemExit, match="free_generation"):
             campaign_module.open_campaign(tmp_path / "new", tmp_path / "artefact", tmp_path / "executor", 4.0, git,
                                           behaviour=lambda i: {**same(i), "settings": disk["settings"]})
-    assert runner.ran == []                                            # nothing ran
+    assert runner.ran == [] and runner.started == []                   # nothing started
     stored = json.loads((campaign / "campaign.json").read_text())
     stored["running"] = {"step": "A_full_s1337/KAAA", "pid": 4242, "utc": "x"}
     (campaign / "campaign.json").write_text(json.dumps(stored))
@@ -397,3 +435,31 @@ def test_a_resume_marks_spent_the_claim_of_a_val_step_killed_after_its_readout(t
                                  "cpu", StandIn(), lambda line: None, lambda: git, behaviour=same)
     spent = [json.loads((run / f"val_read_{step.runner}.json").read_text()) for step in val]
     assert len(spent) == 2 and all("spent_utc" in claim for claim in spent)
+
+
+def test_a_step_started_early_waits_for_its_turn_and_a_stopped_one_never_runs_on(tmp_path, monkeypatch):
+    """`Child` on real processes (a stand-in `run_ts.py`): a step started early takes ``--gate`` and goes on at `GO`; a
+    step started at its turn goes on at once with no stdin; `stop` ends a step that waits."""
+    script = tmp_path / "run_ts.py"
+    script.write_text("import sys\nprint(sys.argv[1:], repr(sys.stdin.readline()), flush=True)\n")
+    monkeypatch.setattr(campaign_module, "REPO_ROOT", tmp_path)
+    step = campaign_module.Step("A/KAAA", "prior_train", ("--out", "x"), tmp_path / "x", tmp_path / "x" / "done",
+                                early=True)
+    early = campaign_module.Child(step, tmp_path / "early.log", True)
+    early.go()
+    assert early.wait() == 0
+    assert (tmp_path / "early.log").read_text() == "['prior_train', '--out', 'x', '--gate'] 'go\\n'\n"
+    now = campaign_module.Child(step, tmp_path / "now.log", False)
+    assert now.wait() == 0
+    assert (tmp_path / "now.log").read_text() == "['prior_train', '--out', 'x'] ''\n"
+    script.write_text("import sys, time\nsys.stdin.readline()\ntime.sleep(60)\n")
+    stopped = campaign_module.Child(step, tmp_path / "stopped.log", True)
+    stopped.stop()
+    assert stopped.process.returncode not in (None, 0)
+    stopped.stop()                                                       # again: nothing
+    # a step started early that fails before its turn (its checks): its turn gives its exit code, nothing hangs
+    script.write_text("import sys\nprint('a check failed', flush=True)\nsys.exit(3)\n")
+    failed = campaign_module.Child(step, tmp_path / "failed.log", True)
+    failed.process.wait()
+    failed.go()
+    assert failed.wait() == 3 and (tmp_path / "failed.log").read_text() == "a check failed\n"

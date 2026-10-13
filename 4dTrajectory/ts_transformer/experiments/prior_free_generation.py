@@ -27,7 +27,7 @@ from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import ClosedLoopSentence, closed_loop_sentences, load_spec, signals_flights
 from ts_transformer.instructions.faults import faulty_flights
 from ts_transformer.instructions.words import COLUMNS, UNCHANGED, Words
-from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
+from ts_transformer.io_utils import file_sha256, utc_now, wait_for_turn, write_json_atomic
 from ts_transformer.prior.checkpoint import (CLAIM_SPENT_BY, claim_validation_read, lock_val_read, open_prior,
                                              readable_identity, settle_written_claim, spend_validation_claim)
 from ts_transformer.prior.source import require_selection_of
@@ -169,7 +169,10 @@ def main(argv: list[str] | None = None) -> int:
     ``--smoke``): ``config.json``, ``sentences.jsonl`` (one row a sentence: its flight, sample, outcome, crossing, the
     go-arounds), ``sentences.npz`` (the words, the states, the probability and permission of "go-around" and the rows on
     the final, each sentence's by its offsets) and ``readout.json`` (`readout`, all samples together, the flights the
-    prior's selection keeps and those it leaves out for each reason apart: `selection.SIDES`, D75, D111)."""
+    prior's selection keeps and those it leaves out for each reason apart: `selection.SIDES`, D75, D111).
+
+    ``--gate`` (a campaign's step started early, `prior_campaign`): the options and the checks first, then the step waits
+    for its turn (`io_utils.wait_for_turn`) before it reads the prior run, the val read's lock or the output."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--prior", type=Path, required=True, help="a prior_train run's directory")
     parser.add_argument("--instructions", type=Path, required=True)
@@ -184,20 +187,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--out", type=Path, required=True, help="a new directory")
     parser.add_argument("--smoke", action="store_true", help="SMOKE: allowed from a tree with changes; recorded")
+    parser.add_argument("--gate", action="store_true",
+                        help="wait for a line `go` on stdin before the prior run is read (a campaign's step started early)")
     args = parser.parse_args(argv)
     absolute = [p if p.is_absolute() else REPO_ROOT / p for p in (args.prior, args.instructions, args.executor, args.out)]
     prior_dir, instructions, executor_dir, out = absolute
-    # the val read's lock, before the output is looked at, kept to the end (D128)
-    if not (prior_dir / "config.json").is_file():
-        parser.error(f"{prior_dir} is no prior_train run (no config.json)")
-    held = lock_val_read(prior_dir, CLAIM_READER) if args.split == "val" else None  # noqa: F841
-    if out.exists() and args.split == "val":
-        settle_written_claim(prior_dir, CLAIM_READER, out)                # a kill after its readout (D128)
-    if out.exists() and not (out / CLAIM_SPENT_BY).exists():
-        parser.error(f"{out} exists without its {CLAIM_SPENT_BY}: a run that stopped; move it aside "
-                     f"({out.name}.aborted-<UTC>, outline E8) and run again to the same output")
-    if out.exists():
-        parser.error(f"{out} exists; a readout is never overwritten")
     small = [name for name in ("per_airport", "samples", "chunk") if getattr(args, name) < 1]
     if small:                                   # options are checked before the val read is claimed (D119, D128)
         parser.error(f"--{small[0].replace('_', '-')} is at least 1")
@@ -209,6 +203,18 @@ def main(argv: list[str] | None = None) -> int:
     if git["dirty"] and not args.smoke:
         parser.error("a readout that is not a smoke needs a clean tree")
     _, opened, _ = require_conforming_closed_loop(instructions, executor_dir)   # D69: the checks run here (D73)
+    wait_for_turn(args.gate)
+    # the val read's lock, before the output is looked at, kept to the end (D128)
+    if not (prior_dir / "config.json").is_file():
+        parser.error(f"{prior_dir} is no prior_train run (no config.json)")
+    held = lock_val_read(prior_dir, CLAIM_READER) if args.split == "val" else None  # noqa: F841
+    if out.exists() and args.split == "val":
+        settle_written_claim(prior_dir, CLAIM_READER, out)                # a kill after its readout (D128)
+    if out.exists() and not (out / CLAIM_SPENT_BY).exists():
+        parser.error(f"{out} exists without its {CLAIM_SPENT_BY}: a run that stopped; move it aside "
+                     f"({out.name}.aborted-<UTC>, outline E8) and run again to the same output")
+    if out.exists():
+        parser.error(f"{out} exists; a readout is never overwritten")
     device = torch.device(args.device)
 
     prior = open_prior(prior_dir, instructions)        # its record, checkpoint and procedure masks (§7 item 1, D106)

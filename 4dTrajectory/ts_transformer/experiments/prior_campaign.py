@@ -28,6 +28,14 @@ each training run on a random sample of N sentences of each airport and split (`
 generation of `SMOKE_FLIGHTS` flights, every runner told it is a smoke; from a tree with changes too. Its numbers are
 no result. The record says so, and `prior_select` reads a smoke campaign's folds only.
 
+STEPS STARTED EARLY (the user, 2026-10-13: the GPU never waits for a step's CPU work). While a step runs, the next
+`AHEAD` steps of the plan that may start early (`Step.early`: a fold's training run and its free generation; never a
+reader of the val days) are started with ``--gate``: each makes its checks (D69, D73) and, a training run, its data on
+the CPU, then waits for its turn (`io_utils.wait_for_turn`) before it uses the device, reads an earlier step's output or
+writes a file. Their turns come in the plan's order, each when the step before it has ended: one step at a time on the
+GPU, and every result as from a step started at its turn. A stopped campaign stops the steps it started early; such a
+step wrote nothing, and a resume starts it again.
+
 RESUMABLE. A step is done when its own last file is there (`Step.done`); a run is never repeated. A step's directory
 without that file is a step a crash or a kill left (outline: E8): it is moved aside as ``<dir>.aborted-<UTC>``, the move
 recorded in ``campaign.json``, and the step runs again. Each step's output goes to ``logs/<step>.log``.
@@ -52,7 +60,7 @@ from typing import Any, Callable, NamedTuple, Sequence
 from ts_transformer.experiments.prior_free_generation import TEMPERATURE
 from ts_transformer.experiments.prior_select import CONFIGURATIONS, SELECTION, VARIANT, arm_name
 from ts_transformer.instructions.artefact import load_candidates
-from ts_transformer.io_utils import utc_now, write_json_atomic
+from ts_transformer.io_utils import GO, utc_now, write_json_atomic
 from ts_transformer.prior.checkpoint import settle_written_claim
 from ts_transformer.prior.speaker import MOST_GO_AROUNDS
 from ts_transformer.prior.training_files import CLAIM_READER
@@ -72,6 +80,9 @@ CONFIGURATION_FLAGS = {name: tuple(item for key, value in values.items()
 FREE_GENERATION = {"per_airport": 200, "samples": 2, "seed": 1337, "chunk": 400}
 #: A smoke campaign's free generation: flights of each airport.
 SMOKE_FLIGHTS = 5
+#: How many steps after the running one are started early (module docstring): a fold's free generation and the next
+#: fold's training run make their CPU work while a training run holds the GPU.
+AHEAD = 2
 #: The readers of the val days: each claims the base's val read under its runner's name (D119, D128).
 VAL_READERS = ("prior_validation", CLAIM_READER)
 
@@ -82,6 +93,7 @@ class Step(NamedTuple):
     argv: tuple[str, ...]
     out: Path                   # what it writes: a directory, or a file of the campaign
     done: Path                  # its last file: the step is done when this exists
+    early: bool = False         # may start early, before its turn (module docstring): it takes ``--gate``
 
 
 def smoke_flags(record: dict[str, Any]) -> tuple[tuple[str, ...], tuple[str, ...], int]:
@@ -103,14 +115,14 @@ def fold_steps(campaign: Path, record: dict[str, Any], configuration: str, seed:
                         (*common, "--row-interval-s", f"{record['row_interval_s']:g}", "--variant", VARIANT,
                          "--selection", SELECTION, "--held-out", airport, "--seed", str(seed), "--device", device,
                          *CONFIGURATION_FLAGS[configuration], *sample, "--out", str(run)),
-                        run, run / "held_out.json"))
+                        run, run / "held_out.json", early=True))
         generation = run / "free_generation"
         out.append(Step(f"{arm}/{airport}/free_generation", "prior_free_generation",
                         ("--prior", str(run), *common, "--split", "select", "--airports", airport,
                          "--per-airport", str(flights), "--samples", str(FREE_GENERATION["samples"]),
                          "--seed", str(FREE_GENERATION["seed"]), "--chunk", str(FREE_GENERATION["chunk"]),
                          "--device", device, *smoke, "--out", str(generation)),
-                        generation, generation / "readout.json"))
+                        generation, generation / "readout.json", early=True))
     return out
 
 
@@ -148,19 +160,41 @@ def plan(campaign: Path, record: dict[str, Any], device: str) -> list[Step]:
     return steps
 
 
-def run_step(step: Step, log: Path, started: Callable[[int], None]) -> int:
-    """``python run_ts.py <runner> <argv>`` from the repository, its output into ``log``; its exit code. ``started``
-    is told the child's PID; the child is stopped if this process is stopped (it never runs on alone)."""
-    with open(log, "w", encoding="utf-8") as stream:
-        child = subprocess.Popen([sys.executable, str(REPO_ROOT / "run_ts.py"), step.runner, *step.argv], cwd=REPO_ROOT,
-                                 stdout=stream, stderr=subprocess.STDOUT)
-        started(child.pid)
+class Child:
+    """A step's process (`python run_ts.py <runner> <argv>` from the repository, its output into its log). A step started
+    early takes ``--gate`` and waits on its stdin for `GO` (`go`); a step started at its turn goes on at once."""
+
+    def __init__(self, step: Step, log: Path, early: bool):
+        self.stream = open(log, "w", encoding="utf-8")
+        argv = (*step.argv, "--gate") if early else step.argv
+        self.process = subprocess.Popen([sys.executable, str(REPO_ROOT / "run_ts.py"), step.runner, *argv],
+                                        cwd=REPO_ROOT, stdout=self.stream, stderr=subprocess.STDOUT, text=True,
+                                        stdin=subprocess.PIPE if early else subprocess.DEVNULL)
+        self.pid = self.process.pid
+
+    def go(self) -> None:
+        """Its turn: `GO` to a step started early. A step that has already stopped (an error in its CPU work) gives its
+        exit code to `wait`."""
+        if self.process.stdin is None:
+            return
         try:
-            return child.wait()
+            self.process.stdin.write(GO + "\n")
+            self.process.stdin.close()
+        except BrokenPipeError:
+            pass
+
+    def wait(self) -> int:
+        try:
+            return self.process.wait()
         finally:
-            if child.poll() is None:
-                child.terminate()
-                child.wait()
+            self.stop()
+
+    def stop(self) -> None:
+        """Stops the process if it still runs (a stopped campaign never leaves a step running alone); again, nothing."""
+        if self.process.poll() is None:
+            self.process.terminate()
+            self.process.wait()
+        self.stream.close()
 
 
 def alive_step(running: dict[str, Any] | None) -> bool:
@@ -246,24 +280,24 @@ def settle_val_steps(campaign: Path, record: dict[str, Any], steps: Sequence[Ste
 
 
 def run_campaign(campaign: Path, record: dict[str, Any], device: str,
-                 runner: Callable[[Step, Path, Callable[[int], None]], int], log: Callable[[str], None],
+                 start: Callable[[Step, Path, bool], Any], log: Callable[[str], None],
                  tree: Callable[[], dict[str, Any]], behaviour: Callable[[str], dict[str, Any]] = run_behaviour) -> None:
-    """Every step not yet done, in order, one at a time (module docstring); the plan read again after each step (a
-    choice adds the steps after it). Before each step the tree (``tree``: `git_state`) must be clean unless a smoke,
-    and the behaviour check (``behaviour``) must give the campaign's answer (D108); the step's commit is recorded.
-    Stops at the first step that fails, naming its log."""
+    """Every step not yet done, in order (module docstring); the plan read again after each step (a choice adds the
+    steps after it). ``start(step, log, early)`` starts a step's process (`Child`). Before a step starts, at its turn or
+    early, the tree (``tree``: `git_state`) must be clean unless a smoke, and the behaviour check (``behaviour``) must
+    give the campaign's answer (D108); the step's commit is recorded. Stops at the first step that fails, naming its
+    log, and stops every step it started."""
     (campaign / "logs").mkdir(exist_ok=True)
+    early: dict[str, Any] = {}                    # the steps started early, by name, each waiting for its turn
+    children: list[Any] = []                      # every step this call started: none runs on after it
 
     def save() -> None:
         write_json_atomic(campaign / "campaign.json", record)
 
-    while True:
-        steps = plan(campaign, record, device)
-        settle_val_steps(campaign, record, steps)
-        pending = [step for step in steps if not step.done.exists()]
-        if not pending:
-            break
-        step = pending[0]
+    def logfile(step: Step) -> Path:
+        return campaign / "logs" / f"{step.name.replace('/', '__')}.log"
+
+    def launch(step: Step, ahead: bool) -> Any:
         now = tree()
         if now["dirty"] and record["smoke"] is None:
             raise SystemExit(f"the tree has uncommitted changes before {step.name}; a campaign runs on a clean checkout")
@@ -279,23 +313,40 @@ def run_campaign(campaign: Path, record: dict[str, Any], device: str,
             aside = step.out.with_name(f"{step.out.name}.aborted-{utc_now().replace(':', '')}")
             step.out.rename(aside)
             record["aborted"].append({"step": step.name, "moved_to": str(aside), "utc": utc_now()})
-            save()
             log(f"{step.name}: an unfinished output moved aside to {aside.name}")
-        started = time.perf_counter()
-        log(f"{step.name}: {step.runner} ({len(steps) - len(pending) + 1} of {len(steps)} planned so far)")
-        logfile = campaign / "logs" / f"{step.name.replace('/', '__')}.log"
-
-        def running(pid: int, name: str = step.name) -> None:
-            record["running"] = {"step": name, "pid": pid, "utc": utc_now()}
-            save()
-
-        code = runner(step, logfile, running)
-        record["running"] = None
         save()
-        if code != 0 or not step.done.exists():
-            raise SystemExit(f"{step.name} failed (exit {code}); its log: {logfile}")
-        log(f"{step.name}: done in {time.perf_counter() - started:.0f} s")
-    log(f"{campaign}: every step done")
+        if ahead:
+            log(f"{step.name}: {step.runner} started early, waits for its turn")
+        children.append(start(step, logfile(step), ahead))
+        return children[-1]
+
+    try:
+        while True:
+            steps = plan(campaign, record, device)
+            settle_val_steps(campaign, record, steps)
+            pending = [step for step in steps if not step.done.exists()]
+            if not pending:
+                break
+            step = pending[0]
+            child = early.pop(step.name, None) or launch(step, False)
+            started = time.perf_counter()
+            log(f"{step.name}: {step.runner} ({len(steps) - len(pending) + 1} of {len(steps)} planned so far)")
+            record["running"] = {"step": step.name, "pid": child.pid, "utc": utc_now()}
+            save()
+            child.go()
+            for later in pending[1:1 + AHEAD]:
+                if later.early and later.name not in early:
+                    early[later.name] = launch(later, True)
+            code = child.wait()
+            record["running"] = None
+            save()
+            if code != 0 or not step.done.exists():
+                raise SystemExit(f"{step.name} failed (exit {code}); its log: {logfile(step)}")
+            log(f"{step.name}: done in {time.perf_counter() - started:.0f} s")
+        log(f"{campaign}: every step done")
+    finally:
+        for child in children:
+            child.stop()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -320,10 +371,10 @@ def main(argv: list[str] | None = None) -> int:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         parser.error(f"{campaign} is run by another process")
-    # a stop (SIGTERM) unwinds through `run_step`, which stops the step's child
+    # a stop (SIGTERM) unwinds through `run_campaign` and `Child.wait`, which stop every step's child
     signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(f"stopped (signal {signum})"))
     record = open_campaign(campaign, instructions, executor, args.row_interval_s, git, args.smoke)
-    run_campaign(campaign, record, args.device, run_step, lambda line: print(f"{utc_now()} {line}", flush=True),
+    run_campaign(campaign, record, args.device, Child, lambda line: print(f"{utc_now()} {line}", flush=True),
                  git_state)
     return 0
 

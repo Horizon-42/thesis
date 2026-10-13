@@ -303,6 +303,18 @@ def test_the_runner_writes_its_sentences_and_readout(tmp_path, monkeypatch, caps
             "--split", "train", "--per-airport", "1", "--samples", "2", "--device", "cpu", "--out", str(out), "--smoke"]
     assert runner.main(argv) == 0
     assert checked == [(directory, tmp_path / "executor")]
+    # a step started early (`--gate`): its checks first, then its turn, before the prior run is read; at its turn it
+    # gives what a step started at its turn gives
+    import io
+
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    with pytest.raises(SystemExit, match="stopped before this step's turn"):
+        runner.main(["--prior", str(tmp_path / "none"), *argv[2:-3], "--out", str(tmp_path / "early"), "--smoke", "--gate"])
+    assert len(checked) == 2 and not (tmp_path / "early").exists()
+    monkeypatch.setattr("sys.stdin", io.StringIO("go\n"))
+    assert runner.main([*argv[:-3], "--out", str(tmp_path / "early"), "--smoke", "--gate"]) == 0
+    with np.load(out / "sentences.npz") as now, np.load(tmp_path / "early" / "sentences.npz") as early:
+        assert all(np.array_equal(now[key], early[key]) for key in now.files)
     # D119: the options are checked before the val read is claimed — an airport not of the artefact claims nothing
     monkeypatch.setattr(runner, "git_state", lambda: {"head": "test", "dirty": False})
     (tmp_path / "stopped").mkdir()                       # what a run stopped while writing leaves (D119)
