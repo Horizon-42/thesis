@@ -1,21 +1,19 @@
-"""B5: the cross-validation and the base as one campaign (prior design §5, §12 B5; D39–D41, D75) — the 31 training runs
-from one commit on a clean checkout, one at a time on the GPU, each fold's readouts, the choices between the steps, and
-the base with its one validation readout.
+"""B5: the cross-validation and the base as one campaign (prior design §5, §12 B5; D39–D41, D75) — the 15 training runs
+of the folds and the base's, from one commit on a clean checkout, one at a time on the GPU, each fold's readouts, the
+choice between the steps, and the base with its one validation readout.
 
 THE STEPS, in order (each a runner of the prior, run as its own process, its output in its own directory):
 
-1. Variant `full`, configurations A, B, C, D (`CONFIGURATION_FLAGS`), the first seed, each on the 5 folds (leave one
-   airport out): `prior_train --held-out <airport>`, then the fold's free generation at its held-out airport
+1. Configurations A and C (`CONFIGURATION_FLAGS`), the first seed, each on the 5 folds (leave one airport out):
+   `prior_train --held-out <airport>`, then the fold's free generation at its held-out airport
    (`prior_free_generation --split select`, `FREE_GENERATION` flights × samples).
 2. Configuration A, the second seed, on the 5 folds, each with its free generation.
-   → `prior_select --step configuration`.
-3. Variant `constants`, the chosen configuration, the first seed, on the 5 folds, each with its free generation.
-   → `prior_select --step variant`.
-4. The base: the chosen configuration and variant on all five airports (`prior_train`, no held-out airport), then its
-   one validation readout: `prior_validation` and `prior_free_generation --split val`.
+   → `prior_select` (the configuration).
+3. The base: the chosen configuration on all five airports (`prior_train`, no held-out airport), then its one
+   validation readout: `prior_validation` and `prior_free_generation --split val`.
 
-Every training run reads the sentences of the selection `landed` (D75). No criterion is applied to the readouts: the
-user reads them (D7).
+Every training run reads the sentences of the selection `landed` (D75) with the variant `full` (`prior_select.VARIANT`).
+No criterion is applied to the readouts: the user reads them (D7).
 
 ONE BEHAVIOUR (D108). The campaign runs on a clean checkout. At its start it runs the behaviour check of the prior's
 code on fixed inputs (`prior_behaviour`, its own process: two steps of training on a fixed synthetic set and some rows
@@ -52,7 +50,7 @@ from pathlib import Path
 from typing import Any, Callable, NamedTuple, Sequence
 
 from ts_transformer.experiments.prior_free_generation import TEMPERATURE
-from ts_transformer.experiments.prior_select import CONFIGURATIONS, SELECTION, arm_name
+from ts_transformer.experiments.prior_select import CONFIGURATIONS, SELECTION, VARIANT, arm_name
 from ts_transformer.instructions.artefact import load_candidates
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.prior.checkpoint import settle_written_claim
@@ -62,7 +60,8 @@ from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 #: The format of ``campaign.json``. v2 (B10, D108): the answer of the behaviour check and each step's commit (no commit
 #: of the campaign compared). v3 (B12, D108): the settings in the behaviour check's answer (the code on the disk's).
-CAMPAIGN_SCHEMA = "ts-prior-campaign-v3"
+#: v4 (the user, 2026-10-13): configurations A and C only, the variant `full` given (a setting), no variant step.
+CAMPAIGN_SCHEMA = "ts-prior-campaign-v4"
 #: The two seeds of §5 (the second: step 2's seed scale). The values are Claude's (§0.3).
 SEEDS = (1337, 2024)
 #: §5's configurations (`prior_select.CONFIGURATIONS`) as `prior_train`'s flags of the same names.
@@ -85,11 +84,6 @@ class Step(NamedTuple):
     done: Path                  # its last file: the step is done when this exists
 
 
-def _choice(campaign: Path, step: str) -> str | None:
-    path = campaign / f"choice_{step}.json"
-    return json.loads(path.read_text(encoding="utf-8"))["chosen"] if path.exists() else None
-
-
 def smoke_flags(record: dict[str, Any]) -> tuple[tuple[str, ...], tuple[str, ...], int]:
     """A smoke campaign's flags of `prior_train` and of the readouts, and its flights of a free generation."""
     if record["smoke"] is None:
@@ -97,17 +91,16 @@ def smoke_flags(record: dict[str, Any]) -> tuple[tuple[str, ...], tuple[str, ...
     return ("--sample", str(record["smoke"]["sample"])), ("--smoke",), SMOKE_FLIGHTS
 
 
-def fold_steps(campaign: Path, record: dict[str, Any], configuration: str, variant: str, seed: int, device: str
-               ) -> list[Step]:
+def fold_steps(campaign: Path, record: dict[str, Any], configuration: str, seed: int, device: str) -> list[Step]:
     """One arm's 5 folds, each its training run then its free generation at its held-out airport."""
-    arm = arm_name(configuration, variant, seed)
+    arm = arm_name(configuration, VARIANT, seed)
     common = ("--instructions", record["instructions"], "--executor", record["executor"])
     sample, smoke, flights = smoke_flags(record)
     out = []
     for airport in record["airports"]:
         run = campaign / arm / airport
         out.append(Step(f"{arm}/{airport}", "prior_train",
-                        (*common, "--row-interval-s", f"{record['row_interval_s']:g}", "--variant", variant,
+                        (*common, "--row-interval-s", f"{record['row_interval_s']:g}", "--variant", VARIANT,
                          "--selection", SELECTION, "--held-out", airport, "--seed", str(seed), "--device", device,
                          *CONFIGURATION_FLAGS[configuration], *sample, "--out", str(run)),
                         run, run / "held_out.json"))
@@ -122,29 +115,21 @@ def fold_steps(campaign: Path, record: dict[str, Any], configuration: str, varia
 
 
 def plan(campaign: Path, record: dict[str, Any], device: str) -> list[Step]:
-    """Every step the campaign holds so far (module docstring), in order: the steps after a choice only once it is
+    """Every step the campaign holds so far (module docstring), in order: the steps after the choice only once it is
     made."""
     first, second = record["seeds"]
-    steps = [step for c in CONFIGURATIONS for step in fold_steps(campaign, record, c, "full", first, device)]
-    steps += fold_steps(campaign, record, "A", "full", second, device)
+    steps = [step for c in CONFIGURATIONS for step in fold_steps(campaign, record, c, first, device)]
+    steps += fold_steps(campaign, record, "A", second, device)
     choice = campaign / "choice_configuration.json"
-    steps.append(Step("choice_configuration", "prior_select", ("--campaign", str(campaign), "--step", "configuration"),
-                      choice, choice))
-    configuration = _choice(campaign, "configuration")
-    if configuration is None:
+    steps.append(Step("choice_configuration", "prior_select", ("--campaign", str(campaign)), choice, choice))
+    if not choice.exists():
         return steps
-    steps += fold_steps(campaign, record, configuration, "constants", first, device)
-    choice = campaign / "choice_variant.json"
-    steps.append(Step("choice_variant", "prior_select", ("--campaign", str(campaign), "--step", "variant"),
-                      choice, choice))
-    variant = _choice(campaign, "variant")
-    if variant is None:
-        return steps
+    configuration = json.loads(choice.read_text(encoding="utf-8"))["chosen"]
     common = ("--instructions", record["instructions"], "--executor", record["executor"])
     sample, smoke, flights = smoke_flags(record)
     base = campaign / "base"
     steps.append(Step("base/run", "prior_train",
-                      (*common, "--row-interval-s", f"{record['row_interval_s']:g}", "--variant", variant,
+                      (*common, "--row-interval-s", f"{record['row_interval_s']:g}", "--variant", VARIANT,
                        "--selection", SELECTION, "--seed", str(first), "--device", device,
                        *CONFIGURATION_FLAGS[configuration], *sample, "--out", str(base / "run")),
                       base / "run", base / "run" / "procedure_masks.json"))       # `prior_train`'s last file
@@ -197,10 +182,10 @@ def run_behaviour(instructions: str) -> dict[str, Any]:
 
 
 def settings() -> dict[str, Any]:
-    """What the campaign's code decides of its steps beside the prior's code: the seeds, the selection, each
-    configuration's flags, the free generation of a fold and of a smoke, free generation's temperature and bound of
-    go-arounds (D68). The behaviour check's process gives them as the code on the disk sets them (D108)."""
-    return {"seeds": list(SEEDS), "selection": SELECTION,
+    """What the campaign's code decides of its steps beside the prior's code: the seeds, the selection, the variant,
+    each configuration's flags, the free generation of a fold and of a smoke, free generation's temperature and bound
+    of go-arounds (D68). The behaviour check's process gives them as the code on the disk sets them (D108)."""
+    return {"seeds": list(SEEDS), "selection": SELECTION, "variant": VARIANT,
             "configurations": {name: list(flags) for name, flags in CONFIGURATION_FLAGS.items()},
             "free_generation": FREE_GENERATION, "smoke_flights": SMOKE_FLIGHTS, "temperature": TEMPERATURE,
             "most_go_arounds": MOST_GO_AROUNDS}

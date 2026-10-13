@@ -3,15 +3,15 @@ synthetic set, and the words and probabilities the speaker says with fixed numbe
 JSON. With them: the configuration values a run reads from the code (`TrainConfig`'s and `PriorConfig`'s defaults:
 `prior_train`'s), the first-step runway readout of the trained model, the teacher-forced loss of the variant
 `constants`, the inputs of fixed rows (`inputs.state_inputs` of both variants with the landings counted by a
-`LandingIndex`, `inputs.Heard.inputs` after the words said), the inputs of a fixed sentence (`inputs.sentence_rows`,
-its flight key of the real format), the step of a speaker's closed loop (`prior_speaking_loop.SpeakingLoop`) on an
-executor that flies straight (`Straight`): its words, states and records; the selection (`selection.left_out`) over
-every rule, stored outcome and mark; `prior_select`'s rules on a fixed table of scores (`select_rules`: a tie of
-parameters, a score at exactly twice the seed scale, a seed scale of 0); and the campaign's settings
-(`prior_campaign.settings`: the seeds, the selection, the configurations, free generation, the temperature, D68's
-bound) as the code on the disk sets them (D108). `prior_campaign` runs it as its own process at its start and before
-each step, and stops when the answer differs: results of different code are compared once the code is shown to behave
-the same on fixed inputs, never by an equal commit (the user, 2026-10-02; no code fingerprint, 2026-10-04).
+`LandingIndex`, `inputs.Heard.inputs` after the words said), the inputs of a fixed sentence (`inputs.sentence_rows`, its
+flight key of the real format), the step of a speaker's closed loop (`prior_speaking_loop.SpeakingLoop`) on an executor
+that flies straight (`Straight`): its words, states and records; the selection (`selection.left_out`) over every rule,
+stored outcome and mark; `prior_select`'s rule on fixed tables of scores (`select_rules`: a score at exactly twice the
+seed scale, a seed scale of 0); and the campaign's settings (`prior_campaign.settings`: the seeds, the selection, the
+variant, the configurations, free generation, the temperature, D68's bound) as the code on the disk sets them (D108).
+`prior_campaign` runs it as its own process at its start and before each step, and stops when the answer differs:
+results of different code are compared once the code is shown to behave the same on fixed inputs, never by an equal
+commit (the user, 2026-10-02; no code fingerprint, 2026-10-04).
 
 The fixed inputs: the artefact's vocabulary spec and its first airport's candidates and finals (the procedure masks
 the speaker speaks under), configuration A's shape (`PriorConfig`'s defaults) and training values (`TrainConfig`'s), a
@@ -229,8 +229,8 @@ def selection_rules() -> dict[str, Any]:
 
 
 def campaign_plan() -> list[list[Any]]:
-    """`prior_campaign.plan` of a fixed formal record, both choices made (configuration B, variant `constants`): each
-    step's name, runner and arguments (the campaign's directory as ``<campaign>``)."""
+    """`prior_campaign.plan` of a fixed formal record, the choice made (configuration C): each step's name, runner and
+    arguments (the campaign's directory as ``<campaign>``)."""
     import tempfile
 
     from ts_transformer.experiments.prior_campaign import SEEDS, plan
@@ -239,8 +239,7 @@ def campaign_plan() -> list[list[Any]]:
               "seeds": list(SEEDS), "smoke": None}
     with tempfile.TemporaryDirectory() as directory:
         campaign = Path(directory)
-        for step, chosen in (("configuration", "B"), ("variant", "constants")):
-            (campaign / f"choice_{step}.json").write_text(json.dumps({"chosen": chosen}), encoding="utf-8")
+        (campaign / "choice_configuration.json").write_text(json.dumps({"chosen": "C"}), encoding="utf-8")
         return [[step.name, step.runner, [str(a).replace(directory, "<campaign>") for a in step.argv]]
                 for step in plan(campaign, record, "cuda")]
 
@@ -256,31 +255,22 @@ def free_generation_draw() -> list[int]:
 
 
 def select_rules() -> dict[str, Any]:
-    """`prior_select`'s rules (§5, D40) on fixed tables of scores, each at an edge: configurations tied in parameters
-    within twice the seed scale (the lower score), a score at exactly twice the seed scale (within), a seed scale of 0
-    (the best alone), and the variant at exactly twice the seed scale (kept `full`) and with a seed scale of 0."""
-    from ts_transformer.experiments.prior_select import arm_name, choose_configuration, choose_variant
+    """`prior_select`'s rule (§5, D40) on fixed tables of scores, each at an edge: a score at exactly twice the seed
+    scale (within), a seed scale of 0 (the best alone)."""
+    from ts_transformer.experiments.prior_select import VARIANT, arm_name, choose_configuration
 
     seeds = (1, 2)
 
-    def table(scores: dict[str, float], parameters: dict[str, int], second: float) -> dict[str, dict[str, Any]]:
-        """Each configuration's arm (variant `full`, the first seed) and configuration A's at the second seed."""
-        out = {arm_name(c, "full", seeds[0]): {"score": v, "parameters": parameters[c]} for c, v in scores.items()}
-        out[arm_name("A", "full", seeds[1])] = {"score": second, "parameters": parameters["A"]}
+    def table(scores: dict[str, float], second: float) -> dict[str, dict[str, Any]]:
+        """Each configuration's arm (the first seed) and configuration A's at the second seed."""
+        parameters = {"A": 100, "C": 300}
+        out = {arm_name(c, VARIANT, seeds[0]): {"score": v, "parameters": parameters[c]} for c, v in scores.items()}
+        out[arm_name("A", VARIANT, seeds[1])] = {"score": second, "parameters": parameters["A"]}
         return out
 
-    parameters = {"A": 100, "B": 200, "C": 300, "D": 100}
-    # scale 0.25: all four within 1.5 (C at exactly it); A and D tie in parameters, D the lower score
-    tie = table({"A": 1.25, "B": 1.0, "C": 1.5, "D": 1.125}, parameters, 1.5)
-    edge = table({"A": 1.5, "B": 1.0, "C": 2.0, "D": 1.75}, parameters, 1.75)       # A at exactly best + 2 · 0.25
-    zero = table({"A": 1.25, "B": 1.0, "C": 1.5, "D": 1.125}, parameters, 1.25)     # scale 0: B alone
-    variant_edge = {**table({"A": 1.5}, parameters, 1.625),                         # scale 0.125: 0.25 is not more
-                    arm_name("A", "constants", seeds[0]): {"score": 1.25, "parameters": 100}}
-    variant_zero = {**table({"A": 1.5}, parameters, 1.5),
-                    arm_name("A", "constants", seeds[0]): {"score": 1.375, "parameters": 100}}
-    return {"tie": choose_configuration(tie, seeds), "edge": choose_configuration(edge, seeds),
-            "zero": choose_configuration(zero, seeds), "variant_edge": choose_variant(variant_edge, "A", seeds),
-            "variant_zero": choose_variant(variant_zero, "A", seeds)}
+    edge = table({"A": 1.5, "C": 1.0}, 1.75)           # scale 0.25: A at exactly best + 2 · 0.25, within: A chosen
+    zero = table({"A": 1.25, "C": 1.0}, 1.25)          # scale 0: C alone
+    return {"edge": choose_configuration(edge, seeds), "zero": choose_configuration(zero, seeds)}
 
 
 def behaviour(words: Words, finals: Sequence[Final], days: DaySplit) -> dict[str, Any]:
