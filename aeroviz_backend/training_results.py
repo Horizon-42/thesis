@@ -36,9 +36,6 @@ OUTPUTS = REPO_ROOT / "4dTrajectory" / "outputs"
 STAGES = {"A": stage_a_files.FILES, "B": prior_files.FILES, "C": post_files.FILES, "D": post_files.MULTI_FILES}
 #: Stage A's labelling and closed loop: these splits only (never val, vocabulary D85).
 STAGE_A_SPLITS = ("train", "select")
-#: The variants whose scores a variant choice holds: MIRROR of `experiments/prior_select.py` `choose_variant`, which
-#: writes them by these names (a runner the backend does not import).
-CHOICE_VARIANTS = ("full", "constants")
 #: The reader of the base's teacher-forced validation readout (`experiments/prior_validation.py`'s claim).
 VALIDATION_READER = "prior_validation"
 
@@ -192,23 +189,20 @@ class TrainingResults:
                                          for side, airports in readout["masks_on_labelled_words"].items()}}
 
     def choice(self, model: Mapping[str, Any]) -> dict[str, Any]:
-        """The campaign's two choices (the configuration, the variant): the campaign is the nearest directory above the
-        prior run that holds ``campaign.json``."""
+        """The campaign's choice of the configuration (prior §5): the campaign is the nearest directory above the prior
+        run that holds ``campaign.json``. The design has no variant step (B15: the variant is `full`); the variant choice
+        that an older campaign holds is not answered."""
         prior = self.prior_dir(model)
         outputs = self.outputs.resolve()
         campaign = next((d for d in prior.resolve().parents if d.is_relative_to(outputs) and (d / "campaign.json").is_file()),
                         None)
         if campaign is None:
             raise Unreadable(f"{model['prior']} belongs to no campaign under the outputs (no campaign.json above it)")
-        def step(made: Mapping[str, Any]) -> dict[str, Any]:
-            return {"arms": {name: {"score": arm["score"], "folds": arm["folds"]} for name, arm in made["arms"].items()},
-                    "seedScale": made["seed_scale"], "chosen": made["chosen"]}
-
-        configuration = self.read(campaign / "choice_configuration.json")
-        variant = self.read(campaign / "choice_variant.json")
-        return {"configuration": {**step(configuration), "bestScore": configuration["best_score"],
-                                  "within": configuration["within"]},
-                "variant": {**step(variant), "scores": {name: variant[name] for name in CHOICE_VARIANTS}}}
+        made = self.read(campaign / "choice_configuration.json")
+        return {"configuration": {"arms": {name: {"score": arm["score"], "folds": arm["folds"]}
+                                           for name, arm in made["arms"].items()},
+                                  "seedScale": made["seed_scale"], "chosen": made["chosen"],
+                                  "bestScore": made["best_score"], "within": made["within"]}}
 
     # ---- stage C
     def rounds(self, campaign: str) -> dict[str, Any]:
@@ -252,8 +246,8 @@ class TrainingResults:
         """Stage D's rounds (frontend §5.6): what each spoke (its windows, the commanded aircraft's reward sum and
         outcomes) and its readout by airport — the airport's ``all`` span and ``all`` kind: its windows and commanded
         aircraft, their reward sum, outcomes, go-arounds and silent ones, and the windows with a loss of each pair
-        (`multi.separation.PAIRS`, once a pair a window). The start (stage C's round, D164) is read on stage C's windows,
-        never stage D's: no readout of it, and why."""
+        (`multi.separation.PAIRS`, once a pair a window). The start has no readout of stage D's windows, and the answer
+        says why: stage C's round (D164) is read on stage C's windows, the base (D200) on none."""
         record = self.read(f"{campaign}/campaign.json")
         out = []
         while self.path(f"{campaign}/round_{len(out)}/round.json").is_file():
@@ -264,9 +258,10 @@ class TrainingResults:
                         "selection": {code: self.multi_cell(spans["all"]["all"])
                                       for code, spans in made["selection_readout"].items()}})
         start = record["inputs"]["settings"]["start"]
-        return {"started": record["started_utc"], "rounds": out,
-                "start": {"selection": None, "why": f"the start, round {start['round']} of stage C's {start['campaign']}, "
-                                                    f"was read on stage C's windows, not stage D's"}}
+        why = ("the start is the base, which has no selection readout of windows" if start is None else
+               f"the start, round {start['round']} of stage C's {start['campaign']}, was read on stage C's windows, "
+               f"not stage D's")
+        return {"started": record["started_utc"], "rounds": out, "start": {"selection": None, "why": why}}
 
     @staticmethod
     def multi_cell(cell: Mapping[str, Any]) -> dict[str, Any]:

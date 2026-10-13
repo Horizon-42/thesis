@@ -64,9 +64,6 @@ def world(tmp_path):
     arms = {"arms": {"C_full": {"score": 1.36, "folds": {"KXXX": 1.3}}}, "seed_scale": 0.002, "best_score": 1.36,
             "within": ["C"], "chosen": "C"}
     write(campaign / "choice_configuration.json", arms)
-    # the variant step's own fields (prior_select): each variant's score, no best score
-    write(campaign / "choice_variant.json", {"arms": arms["arms"], "seed_scale": 0.002, "full": 1.36, "constants": 1.37,
-                                             "chosen": "full"})
     prior = campaign / "base" / "run"
     write(prior / "config.json", {})
     write(prior / "history.json", {"best_epoch": 2, "epochs": [
@@ -126,7 +123,7 @@ def world(tmp_path):
         **e, "model": {**e["model"], "campaign": str(multi)}}, index_file=post_files.MULTI_INDEX_FILE)
     return {"results": {stage: TrainingResults(roots[stage], outputs) for stage in "ABCD"},
             "airports": dict(zip("ABCD", (airport_a, airport_b, airport_c, airport_d))), "outputs": outputs, "roots": roots,
-            "post": post, "source": source}
+            "post": post, "source": source, "multi": multi}
 
 
 def answered(world, stage, set_id):
@@ -148,7 +145,9 @@ def test_stage_b_answers_its_results_and_the_val_days_only_for_the_claimed_set(w
     sections = answered(world, "B", "fixture_set")
     assert sections["freeGeneration"]["sides"]["inside"]["KXXX"]["vectored"]["goArounds"] == 1
     assert sections["training"]["bestEpoch"] == 2 and sections["choice"]["configuration"]["chosen"] == "C"
-    assert sections["choice"]["variant"]["scores"] == {"full": 1.36, "constants": 1.37}
+    assert sections["choice"]["configuration"] == {"arms": {"C_full": {"score": 1.36, "folds": {"KXXX": 1.3}}},
+                                                   "seedScale": 0.002, "chosen": "C", "bestScore": 1.36, "within": ["C"]}
+    assert list(sections["choice"]) == ["ok", "configuration"]                 # no variant step (B15)
     assert sections["validation"] == {"ok": False, "problem": sections["validation"]["problem"]}
     assert "claimed validation readout" in sections["validation"]["problem"]
     val = answered(world, "B", "fixture_val")
@@ -199,6 +198,10 @@ def test_stage_d_answers_its_rounds_by_their_all_cells_and_why_its_start_has_no_
     start = sections["rounds"]["start"]
     assert start["selection"] is None and "stage C's windows" in start["why"]
     assert sections["checks"]["checks"] == {"labeller": {"flights": 3}}
+    record = json.loads((world["multi"] / "campaign.json").read_text())        # a campaign from the base (D200)
+    (world["multi"] / "campaign.json").write_text(json.dumps({**record, "inputs": {"settings": {"start": None}}}))
+    start = answered(world, "D", "fixture-windows-two")["rounds"]["start"]
+    assert start["selection"] is None and "the base" in start["why"]
     # stage C's index does not list it, nor stage D's stage C's set
     assert world["results"]["C"].answer("C", world["airports"]["D"], "fixture-windows-two")[0] == 404
 

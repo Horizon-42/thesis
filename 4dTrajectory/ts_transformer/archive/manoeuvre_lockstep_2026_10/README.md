@@ -28,4 +28,6 @@ The runners.md entries R8 and R9 are in `docs/reference/entries.md`; the live R8
 stays. The publisher keeps its `manoeuvre_lockstep` / `failure_modes` record blocks, so the published categories stay
 readable; the campaign trees under `4dTrajectory/outputs/KRDU/experiments/` stay where they are.
 
-What stays live with no live caller now (not deleted; the user decides): `inference/export.copy_record_subset`.
+Deleted from the live code on 2026-10-13 (the user's order): `inference/export.copy_record_subset` with
+`metrics_from_row`, its only user. `executor_failure_modes` here does not import any more; the deleted code is at
+two-tier2 `b8426ff5`.

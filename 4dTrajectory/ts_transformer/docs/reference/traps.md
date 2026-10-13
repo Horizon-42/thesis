@@ -105,7 +105,7 @@ rebased — same rule, new IDs.
 - **A runway / configuration model cannot be judged on the per-flight split** — same-day flights
   share the configuration, and hourly wind / time of day fingerprint it: the per-flight model read
   KSJC's two 30L-closure days at 100 %, the day-blocked one at 55–57 % (B1 97–98 %). The R series
-  splits by OPERATING day (`data/runway_context.operational_day`, cut at 09Z — a UTC-date cut splits
+  splits by OPERATING day (now `data/day_split.operational_day`, cut at 09Z — a UTC-date cut splits
   the evening peak); plan §13.
 
 ### T5 · the objective must score velocity

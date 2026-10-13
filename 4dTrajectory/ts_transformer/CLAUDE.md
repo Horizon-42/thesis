@@ -385,7 +385,7 @@ post-training (R15–R22, R35, R38), `heading_lead_ablation` (R23), the multi-ai
 - Arrival separation is a DISTANCE rule compared on the APPROACH CLOCK —
   `inference/runway_schedule.py` is the one definition, every value cited (T3).
 - A runway / configuration model cannot be judged on the per-flight split — split by OPERATING
-  day (`data/runway_context.operational_day`, 09Z cut) (T4).
+  day (`data/day_split.operational_day`, 09Z cut) (T4).
 - The objective must score VELOCITY, not just position (T5).
 - Bank unsupervised lands BELOW a trivial baseline; `simple-v3` fixes it (0.124 → 0.735) (T6).
 - Three causes of the bank wiggle (segment count, budget, conditioning capacity) are NOT it — do

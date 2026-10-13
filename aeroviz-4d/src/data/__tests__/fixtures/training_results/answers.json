@@ -220,23 +220,7 @@
       "C"
      ]
     },
-    "ok": true,
-    "variant": {
-     "arms": {
-      "C_full": {
-       "folds": {
-        "KXXX": 1.3
-       },
-       "score": 1.36
-      }
-     },
-     "chosen": "full",
-     "scores": {
-      "constants": 1.37,
-      "full": 1.36
-     },
-     "seedScale": 0.002
-    }
+    "ok": true
    },
    "freeGeneration": {
     "ok": true,
@@ -307,23 +291,7 @@
       "C"
      ]
     },
-    "ok": true,
-    "variant": {
-     "arms": {
-      "C_full": {
-       "folds": {
-        "KXXX": 1.3
-       },
-       "score": 1.36
-      }
-     },
-     "chosen": "full",
-     "scores": {
-      "constants": 1.37,
-      "full": 1.36
-     },
-     "seedScale": 0.002
-    }
+    "ok": true
    },
    "freeGeneration": {
     "ok": true,

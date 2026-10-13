@@ -31,6 +31,8 @@ The runners.md entry R3 is in `docs/reference/entries.md`; the live file keeps i
 passages on `cv`, `plot_results`, `history_ablation`, `coordinate_ablation` and `predictability_report` are in
 `docs/cut_sections.md`. Their outputs on disk stay where they are.
 
-What stays live with no live caller now (not deleted; the user decides): `data/runway_features.py` (R1's features; its
-other users were archived on 2026-09 and 2026-10-04) and `inference/arm_readout.py` (the arm table of
-`compare_frame_arms` and the two residual readouts); each keeps its own live test.
+Deleted from the live code on 2026-10-13 (the user's order), each with no live caller left: `data/runway_features.py`
+(R1's features) with `data/runway_context.py` (its only reader; R0's baselines) and both tests, `inference/arm_readout.py` with its test (the arm table of `compare_frame_arms` and the two residual
+readouts), `repo_layout.EXPERIMENTS_MAIN` (read by `cv.py`) and `outputs/control/latent.displacement_verdict` with its
+ruler `DEAD_MEAN_DISPLACEMENT_SIGMA` (read by `latent_readout.py`). The runners here that import them do not import any
+more; the deleted code is at two-tier2 `b8426ff5`.

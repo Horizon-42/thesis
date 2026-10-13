@@ -1,5 +1,20 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-13 — the Training results route on a v4 prior campaign and a stage D start from the base; orphans deleted
+
+The user's order (2026-10-13): finish the backend, delete the orphan modules (on two-tier2 only).
+
+- `aeroviz_backend/training_results.py`: stage B's `choice` answers the configuration choice only (the design has no
+  variant step since B15; a v3 campaign's variant choice is not answered, no branch on the version); the mirror
+  `CHOICE_VARIANTS` is gone. Stage D's `rounds.start` of a campaign from the base (D200) answers why it has no readout
+  instead of failing. The frontend reader `trainingSetResults.ts` no longer reads `choice.variant` (the user's
+  permission); the results fixture written again.
+- Deleted with no live caller (their archived readers no longer import; the code is at `b8426ff5`):
+  `data/runway_features.py`, `data/runway_context.py` (its only reader) and both tests, `inference/arm_readout.py` and
+  its test, `inference/export.copy_record_subset` with `metrics_from_row`, `repo_layout.EXPERIMENTS_MAIN`,
+  `outputs/control/latent.displacement_verdict` with `DEAD_MEAN_DISPLACEMENT_SIGMA`, and `multi_train.selection_readout`'s
+  `window_ends`. Trap T4 now names `data/day_split.operational_day`.
+
 ### 2026-10-13 — on the final the labels' lateral corrections aim at the centreline (D201)
 
 B15's folds failed the evaluation's lateral gate at the airports they did not train on: they flew a line 20–40 m off

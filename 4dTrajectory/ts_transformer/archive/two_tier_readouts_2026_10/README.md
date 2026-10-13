@@ -25,5 +25,6 @@ One EXCERPT: `tests/test_multi_windows_runner.py` — the header, imports and th
 The runners.md entries (R51, R52, R55, R70, R71, R74) are in `docs/reference/entries.md`; the live file keeps a heading
 line each. Their outputs on disk stay where they are.
 
-What stays live with no live caller now (not deleted; the user decides): `multi_train.selection_readout`'s
-`window_ends` argument (only `multi_val_evaluation` passed it).
+Deleted from the live code on 2026-10-13 (the user's order): `multi_train.selection_readout`'s `window_ends` argument
+(only `multi_val_evaluation` passed it). `multi_val_evaluation` here does not run any more; at two-tier2 `b8426ff5` it
+does.

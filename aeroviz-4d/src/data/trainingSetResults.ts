@@ -57,10 +57,6 @@ export interface TrainingChoiceConfiguration extends TrainingChoiceStep {
   bestScore: number;
   within: string[];
 }
-/** The variant's choice: each variant's score. */
-export interface TrainingChoiceVariant extends TrainingChoiceStep {
-  scores: Counts;
-}
 export interface TrainingRoundResult {
   round: number;
   speaking: { windows: number; rewardSum: number; outcomes: Counts };
@@ -78,7 +74,7 @@ export interface TrainingStageBResults {
     sides: Record<string, Record<string, Record<string, TrainingFreeGenerationCell>>> }>;
   training: TrainingResultSection<{ bestEpoch: number; epochs: Array<{ epoch: number; trainLossPerStep: number; selectLossPerStep: number }> }>;
   validation: TrainingResultSection<{ lossPerStep: number; perColumn: Counts; masksOnLabelledWords: Record<string, Record<string, Counts>> }>;
-  choice: TrainingResultSection<{ configuration: TrainingChoiceConfiguration; variant: TrainingChoiceVariant }>;
+  choice: TrainingResultSection<{ configuration: TrainingChoiceConfiguration }>;
 }
 /** The selection readout of the round a campaign starts from (post-training D162, frontend §4.3): ``selection`` null
  *  with ``why`` when that campaign read other select windows. The round is the set's `model.start` (the same record). */
@@ -111,7 +107,7 @@ export interface TrainingMultiRoundResult {
 }
 export interface TrainingStageDResults {
   stage: "D";
-  /** ``start``: stage C's round, read on stage C's windows — never a readout here, only why (frontend §5.6). */
+  /** ``start``: stage C's round (read on stage C's windows) or the base (D200) — never a readout here, only why (frontend §5.6). */
   rounds: TrainingResultSection<{ started: string; rounds: TrainingMultiRoundResult[]; start: TrainingStartReadout }>;
   checks: TrainingResultSection<{ checks: Record<string, unknown> }>;
 }
@@ -197,10 +193,8 @@ export function parseTrainingSetResults(ok: boolean, raw: unknown, setId: string
         }),
         choice: section(sections, "choice", (s) => {
           const configuration = s.child("configuration");
-          const variant = s.child("variant");
           return {
             configuration: { ...choiceStep(configuration), bestScore: configuration.number("bestScore"), within: configuration.strings("within") },
-            variant: { ...choiceStep(variant), scores: variant.record("scores", asNumber) },
           };
         }),
       };
@@ -210,7 +204,7 @@ export function parseTrainingSetResults(ok: boolean, raw: unknown, setId: string
         stage, provenance,
         rounds: section(sections, "rounds", (s) => {
           const start = startOf(s.child("start"))!;
-          if (start.selection !== null) s.fail("stage D's start was read on stage C's windows: no readout of it");
+          if (start.selection !== null) s.fail("stage D's start has no readout of stage D's windows");
           return {
             started: s.string("started"),
             rounds: s.children("rounds").map((r) => {

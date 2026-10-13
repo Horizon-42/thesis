@@ -155,9 +155,9 @@ rebased — same rule, new IDs.
   `component_kl_nats_per_flight`, NOT to the charged `kl_nats_per_flight`** (free bits and
   the mixture estimator separate the two). Read them with `latent_readout` (archived 2026-10-13, `archive/one_tier_runners_2026_10/`)
   `--history <run>/history.json` (which needs no `--arm`: this is the epoch-1 reading), or off
-  a checkpoint with the archived `latent_probe` (`archive/one_tier_oneoffs_2026_10/`); the gate sentence is
-  `outputs.control.latent.displacement_verdict` and its ruler `DEAD_MEAN_DISPLACEMENT_SIGMA`, so no
-  surface restates either. A scalar auxiliary target concentrates the information in ONE
+  a checkpoint with the archived `latent_probe` (`archive/one_tier_oneoffs_2026_10/`). The gate is a median
+  displacement above one prior sigma (L2.f); its sentence and ruler (`displacement_verdict`,
+  `DEAD_MEAN_DISPLACEMENT_SIGMA`) left the live code with their last readers on 2026-10-13 (at two-tier2 `b8426ff5`). A scalar auxiliary target concentrates the information in ONE
   dimension, so on such an arm the median displacement can miss what `component_kl_per_dim`
   shows — and that target is an INPUT of the posterior encoder, so a small `latent_aux`
   proves nothing on its own.
