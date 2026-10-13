@@ -1,0 +1,52 @@
+% Experimental results of the two-tier model (English version of two_tier_results.tex, 2026-10-12).
+% Requires: \usepackage{booktabs,multirow}
+% Explanation and data sources: two_tier_results.md. The "TBD" cells of Table 2 are to be replaced when the
+% validation readings are finished.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Single-aircraft closed-loop generation on the validation split of the labelled data set}
+  \label{tab:two_tier_val_single}
+  \begin{tabular}{lrrcc}
+    \toprule
+    \multirow{2}{*}{Model} & \multirow{2}{*}{Trajectories} & \multirow{2}{*}{Landing rate} & arc ADE (m) & arc FDE (m) \\
+     & & & mean / median & mean / median \\
+    \midrule
+    Labelled instructions, closed-loop replay (reference) & 947   & 100.0\% & 83 / 69      & 132 / 103 \\
+    \midrule
+    Base model                                            & 1\,894 & 94.6\%  & 1\,444 / 315 & 775 / 192 \\
+    Stage C, round 5 (C-r5)                               & 1\,894 & 97.9\%  & 1\,242 / 298 & 708 / 190 \\
+    Stage D, round 7 (D-r7)                               & 1\,894 & 96.9\%  & 1\,248 / 295 & 674 / 195 \\
+    \bottomrule
+  \end{tabular}
+  \par\smallskip
+  \parbox{0.95\linewidth}{\footnotesize
+    200 validation flights are drawn at random at each of the 5 airports (the same flights for all three models), and
+    each flight is generated twice. Only flights in the prior's selection are counted: those whose labelled outcome is a
+    landing and whose observed track has no fault, 947 flights in all. arc ADE: the generated and the observed
+    trajectory are each parametrised by normalised horizontal arc length, and the 3D distance is averaged at the arc
+    fractions $k/64$ ($k=1,\dots,64$). arc FDE: the 3D distance at arc fraction 1 (the end point). The reference row is
+    the error of the labelled instruction sentences, replayed through the executor, against the observed track.}
+\end{table}
+
+\begin{table}[htbp]
+  \centering
+  \caption{Multi-aircraft closed-loop control on the traffic windows of the validation split (post-training)}
+  \label{tab:two_tier_val_multi}
+  \begin{tabular}{lrcc}
+    \toprule
+    Model & Controlled aircraft & Landing rate & Loss-of-separation rate \\
+    \midrule
+    Base model              & TBD & TBD & TBD \\
+    Stage C, round 5 (C-r5) & TBD & TBD & TBD \\
+    Stage D, round 7 (D-r7) & TBD & TBD & TBD \\
+    \bottomrule
+  \end{tabular}
+  \par\smallskip
+  \parbox{0.95\linewidth}{\footnotesize
+    Multi-aircraft traffic windows of stage D (durations 5, 10 and 20\,min; 100 real windows for each airport and
+    duration); the three models use the same windows and the same random numbers. The denominator of each rate is the
+    number of controlled aircraft. Loss of separation: the distance between a controlled aircraft and another aircraft
+    falls below the separation rule and the controlled aircraft is responsible for it. The base model runs with the
+    output of the traffic module set to zero.}
+\end{table}
