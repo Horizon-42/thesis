@@ -27,7 +27,7 @@ from ts_transformer.post.scene import INSERTED, INSERTED_SUFFIX, MovedScene, air
 from ts_transformer.post.traffic_attention import TrafficConfig, add_traffic_attention, traffic_modules
 from ts_transformer.prior.batch import variant_features
 from ts_transformer.prior.inputs import LANDINGS_SCALE
-from ts_transformer.prior.landings import Landing, LandingIndex, utc_s
+from ts_transformer.prior.landings import LANDINGS_WINDOW_S, Landing, LandingIndex, utc_s
 from ts_transformer.prior.model import Prior, PriorConfig
 from ts_transformer.prior.procedure import Final
 from ts_transformer.prior.speaker import MOST_GO_AROUNDS
@@ -166,7 +166,9 @@ def test_the_landing_context_counts_the_windows_landings_never_the_commanded_air
     feature = variant_features("full").index("landings_30min")
     assert np.allclose(rows.candidates[:, 0, feature], counts / LANDINGS_SCALE)
     without_insert = s["roster"].counts_before(times, without=s["key"])[:, 0]
-    assert (counts == without_insert + (times > own.landing_s + shift)).all()     # the inserted landing, from its time
+    inserted_at = own.landing_s + shift
+    in_window = (times > inserted_at) & (times <= inserted_at + LANDINGS_WINDOW_S)
+    assert (counts == without_insert + in_window).all()     # the inserted landing, from its time, for 30 min
     assert (counts > without_insert).any()
 
 

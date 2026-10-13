@@ -154,9 +154,13 @@ def stage_c_campaign_scenario(s, tmp_path, monkeypatch) -> dict[str, str]:
 
 #: `stage_c_campaign_scenario`'s digests, written by stage C's campaign before the stage skeleton (c7a0b6b0's
 #: `run_campaign`, the CPU, one thread).
+#: Written again on 2026-10-13 (two-tier2-eval-landing): the executor of `ts-executor-spec-v11` (223f1e30) moved every
+#: flown part (the values before pass at 6c3cd8f6), and the closed-loop sentences of vocabulary D197–D199 (after
+#: 04378395, by 0ac795e5) moved the parts that train. The judge of D196 (04378395) and the merge of dev-two-tier moved
+#: none. A part that neither flies nor trains keeps c7a0b6b0's value. Since then the digests pin this code itself.
 CAMPAIGN_BEFORE_GENERALISATION = {
-    "campaign drawn": "7a1c9f9473c25cdd8e237e2089a6a7cd11aee7c9939746a61bb50c22802612d5",
-    "campaign updated": "41e218c4710fc0549da3ec89bd5546c55011fd0c2511c05bfbe29a2827dbb583",
+    "campaign drawn": "8fc7f7f85d726b1dcf6c59f027c9c2b2c82bb873dcda59d6e48ed11b7ac45b77",
+    "campaign updated": "6057c93633848cceb4afcf6435f3d7dce20c5313dd1fbad989cbc0da3e45959b",
 }
 
 
@@ -176,20 +180,28 @@ def test_stage_cs_campaign_is_the_campaign_before_the_skeleton_bit_for_bit(setup
 #: one thread). "round real" written again by d5cc5d6a with each flight's own permitted record alone (S6, multi-aircraft
 #: control D193 (3), requests_from_d item 99): its sentences' records are no longer padded to the most rows of those
 #: asked; the other digests stay.
+#: Written again on 2026-10-13 (two-tier2-eval-landing): the executor of `ts-executor-spec-v11` (223f1e30) moved every
+#: flown part (the values before pass at 6c3cd8f6), and the closed-loop sentences of vocabulary D197–D199 (after
+#: 04378395, by 0ac795e5) moved the parts that train. The judge of D196 (04378395) and the merge of dev-two-tier moved
+#: none. A part that neither flies nor trains keeps c7a0b6b0's value. Since then the digests pin this code itself.
 BEFORE_GENERALISATION = {
     "module": "8ef2cf46f1b72b4b62813330bf8f53bb59819a99862dc087c036e978031b4122",
-    "window real": "62e8e4e86314c20be46d9a70988b9cefbfb9a7cc9939bc6a7994c73a2a3b4026",
-    "window A": "7c76b34704ab763318ce39232634b1315b276cc0c9cc94104f968c87bedd0444",
-    "window B": "afe5951db940afbdd830714c5485771f9046e14c5d22bf852e4efd37deaba271",
-    "round A": "1e7dadf27004b47b1582c4c4ea801a35cb775db75ce9224c1c8b25134ac77ed5",
+    "window real": "6b5503b888cfeb22c60e786c9328323c90888bf8ca653f53d112da81218237d7",
+    "window A": "141eb86f8ccf3e5b0b2c9b8802da649858ceecc6dbef2166bdec52cdc3491587",
+    "window B": "ebfca5d6da0829908182461afa6e795cc68c73f3ef374ffeffb7f6289d81256d",
+    "round A": "24b4de8282913be7cd4183a5069eb67bf3c257f4cdf485b672c3661af3b88b5d",
     "samples A": "96c0207aaba55f9089327068ca64239f1db9df538865040ed679c45e32b08ab9",
-    "round real": "02b295dc011920f8c54cd0e1b709e258267db93116822b15ccdd4855f13b86cc",
+    "round real": "9fb934fba0dd22796a2dd0714c5a08ba0118504d3ddbd24036d483229a715bfd",
 }
 
 
 #: `stage_c_batch_scenario`'s digest, written by the same code, and again as "round real" (S6: its two rows' records each
 #: their own).
-BATCH_BEFORE_GENERALISATION = "b35bfbebc8b58a0bb98ecc8ca7118f41f1bc124791926de4f046995a406195a7"
+#: Written again on 2026-10-13 (two-tier2-eval-landing): the executor of `ts-executor-spec-v11` (223f1e30) moved every
+#: flown part (the values before pass at 6c3cd8f6), and the closed-loop sentences of vocabulary D197–D199 (after
+#: 04378395, by 0ac795e5) moved the parts that train. The judge of D196 (04378395) and the merge of dev-two-tier moved
+#: none. A part that neither flies nor trains keeps c7a0b6b0's value. Since then the digests pin this code itself.
+BATCH_BEFORE_GENERALISATION = "48fc6fd98d8ef8a6c146d8bdafb77219a710844ce3e9e57698f66d056f3f5540"
 
 
 def test_a_stage_c_batch_whose_first_window_ended_is_the_code_before_its_generalisation_bit_for_bit(setup, monkeypatch):
