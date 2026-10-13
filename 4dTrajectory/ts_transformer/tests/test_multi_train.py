@@ -1094,6 +1094,7 @@ def test_the_runner_sizes_its_workers_from_the_profile_before_any_process_uses_t
     class FakeContext:
         device: torch.device
         base: SimpleNamespace
+        interval_s: float = INSTRUCTION_STEP_S
 
     base = SimpleNamespace(to=lambda device: base, eval=lambda: base)    # no CUDA touched
     calls = []

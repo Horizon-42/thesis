@@ -1080,7 +1080,8 @@ POST_INTERFACE = {
     "post.traffic_attention": {"TrafficConfig", "Traffic", "traffic_of", "TrafficTokens", "TrafficAttention",
                                "add_traffic_attention", "parameter_groups", "TokenPart", "add_token_part"},
     "post.branches": {"first_numbers", "continuation_numbers", "branch_points", "Group", "Sentence", "samples",
-                      "BRANCH_EVERY_S", "CONTINUATIONS", "EQUAL", "MINORITY_SIDE", "GROUP_WEIGHTS"},   # D195
+                      "BRANCH_EVERY_S", "CONTINUATIONS", "EQUAL", "MINORITY_SIDE", "GROUP_WEIGHTS",    # D195
+                      "branch_rows"},                                  # D200: stage D refuses --branch-every-s with it
     "post.loss": {"Samples", "surrogate", "pull_to_base", "data_term", "update_step", "update_loss", "one_pass",
                   "passes", "DATA_WEIGHT"},                                    # D194 (1): `update_step`'s default
     "post.window_lists": {"identity_of"},                     # §9 item 13 (frontend D178 (6)): a window's identity
