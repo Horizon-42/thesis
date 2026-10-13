@@ -114,6 +114,8 @@ export function readbackModel({ selection, reading, layers, cursorS, column, aut
   const endS = Math.max(lastOf(observed.tS), flown === null ? 0 : lastOf(flown.tS), live === null ? 0 : lastOf(live.track.tS));
   const xTime = (seconds: number) => GUTTER + (seconds / endS) * plotW;
   const timeAtX = (x: number) => Math.min(Math.max(((x - GUTTER) / plotW) * endS, 0), endS);
+  // the cursor's line, kept on the axis (stage D's scene cursor runs before a later aircraft's flight and after its end)
+  const cursorX = xTime(Math.min(Math.max(cursorS, 0), endS));
 
   // ── the plan view: the tracks and the threshold decide the frame, one scale on both axes ──
   const km = (metres: number) => metres / 1000;
@@ -183,7 +185,7 @@ export function readbackModel({ selection, reading, layers, cursorS, column, aut
     selection, flight, vocabulary, candidates, layers, reading, cursorS, cursorRow, column, designated, stepS,
     observed, flown, flownColour: flownSentenceColour(flight), judged: judgedTrack, envelopes, closed, decision,
     live, liveColour, focus, focusIndex, focused, recede, focusSpanS, focusPoints, corrections, unspecifiedRuns,
-    width, plotW, endS, xTime, timeAtX, envelopeTimeS, rowTimeS,
+    width, plotW, endS, xTime, timeAtX, cursorX, envelopeTimeS, rowTimeS,
     px, py, planPoints, rows, indexAt, runwayLine, reach, bandCentre, bands, tubes, spans,
     yHeading: yOf(hLow, hHigh), yAltitude: yOf(aLow, aHigh), ySpeed: yOf(sLow, sHigh),
     /** The word of ``name`` in force at the cursor, short. */

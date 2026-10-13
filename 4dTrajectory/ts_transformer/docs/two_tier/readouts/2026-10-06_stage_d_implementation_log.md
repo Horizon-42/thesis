@@ -895,3 +895,109 @@ S3s taken. Changed modules' tests: 174 passed and 3 failed (the wrong row, a par
 12 passed. Fast-forward into dev-two-tier; worktree and branch removed. The control arm (intent in
 `docs/experiments/intents.json`): the formal campaign's settings with `--group-weight minority-side`, 3 rounds, the
 same start and seed, launched only if the formal campaign's next two rounds stay flat (the user's condition).
+
+**Round 5's stop, the pause and the control arm** (2026-10-11 afternoon). The formal campaign's rounds 2 / 3 / 4 landed
+82.5 / 83.1 / 82.8 %, lost separation 690 / 648 / 663 of 4,492 flights (15.4 / 14.4 / 14.8 %; rounds 0 / 1: 720 /
+730). Round 5 stopped at 16:42: batch 186, a CPU batch, went past the CPU's last level (one at a time, 8.74 GB) with
+`HostMemoryError`; 216 of its 217 batch records were written. A resume was refused, because `done_batches` refused a done
+batch spoken on another kind of device than the launch's rule gives it. Memory before the stop: the swap (7.6 GB) was
+full, 5.9 GB of it the campaign's own cold pages from the fork, with about 40 kB/s of swap traffic (no thrash); the GPU
+workers held 4.7–5.6 GB each, as they did not give the heap's free pages back. The user's decisions: the formal campaign
+pauses after round 4 and the control arm runs first; find why batch 186 needed more; the number of workers must not
+stop a resume in the middle of a round; a CPU batch past the CPU's last level is spoken again on the GPU. Built, each
+merged into dev-two-tier: 1efca2f8 (every worker, GPU workers too, calls `malloc_trim(0)` after a task; small change),
+67e45506 (a resume keeps each done batch whatever device spoke it; a batch of another draw is still refused; small
+change), 9f50be58 (a CPU batch past the CPU's last level is spoken once more on the speak device at its last level;
+review: S2 a test that could not tell the last level from the first, fixed, second round clean). The control arm
+`outputs/POOLED/multi/multi_train_minority_side_20261011` was launched at 16:58 from `.claude/worktrees/run-gw` at
+1efca2f8 (unit `minority-side`), after window_behaviour on arm A's campaign against d3dc3b26's record gave the same
+behaviour (a first try was refused only because one record held the campaign's path relative and the other absolute).
+It does not have 67e45506 and 9f50be58; its rounds 0–2 draw the formal campaign's windows of rounds 0–2, which spoke
+without a stop. Why batch 186 needed more than 8.74 GB: spoken alone on the CPU after the control arm's round 2 (round 5's draw,
+round 4's model, one process, `/proc/self/status` VmHWM reset before the batch), it took 466 s and its peak was 12.0 GB,
+9.5 GB above the 2.5 GB the process held before. Its four windows hold 24 commanded aircraft, the usual count of a
+1200 s batch (median 24); one of them, at KSTL, has 13 commanded aircraft and 12 joined. Its 14 searches stepped 433,231
+rows: the most of all 1,309 batches of rounds 0–5 (median 38,868, p99 155,400; the most before, 325,059, a GPU batch of
+round 2 with a 14-aircraft window; the most on the CPU, 206,808). The peak follows the search's rows, not the batch's
+rows: the batching counts commanded aircraft, but a search steps every aircraft of its window for every continuation,
+so one window of many aircraft with many searches makes the batch. The answer depends only on the inputs and the
+device's kind, so on the CPU this batch goes past the last level every time. With 9f50be58 it goes to the GPU's last
+level (6.81 GB); whether it fits there is not measured.
+
+The control arm continues to 5 rounds (the user, 2026-10-11 evening: its rounds 0–2 rose each round, 81.9 / 82.1 /
+82.8 % landed, 716 / 694 / 676 lost separation, with smaller swings by span than the formal campaign's): from
+`.claude/worktrees/run-gw` moved to 7c1431bf, after window_behaviour against d3dc3b26's record, rounds 3 and 4 compared
+with the formal campaign's (83.1 / 82.8 %).
+
+**The batches by their aircraft squared, and the control arm's rates times 3** (2026-10-11 evening). The user ordered
+the batching and placement change proposed after batch 186: ae3839bd (`--batch-squares`, a bound a span on a batch's
+sum of commanded aircraft squared, a campaign setting in `PROFILED_SETTINGS`; `--gpu-squares`, a batch whose sum
+reaches it on the speak device, a setting a resume may change; both off by default; over rounds 0–5 the sum of squares
+follows a batch's search rows at r = 0.47, the sum of rows at 0.03; review: S2 the profile's settings and a default
+test, fixed, second round clean). Their values wait for single batches' peaks measured on the CPU (seven batches of
+round 5, sums 60 to the most, after the control arm). The control arm's round 3: 82.6 % landed, 674 lost separation (the
+formal campaign's round 3: 83.1 %, 648). The user then ordered its learning rates times 3 after round 4 for some rounds:
+16bacde0 (a resume may change `prior_lr` and `traffic_lr`; the next round's optimizer is the checkpoint's state with each
+group at its setting's rate; each resume entry holds the rates before and after and the round they act from; small
+change). The control arm goes on to 8 rounds at 3e-5 / 3e-4 after the behaviour check at 16bacde0; the calibration
+follows it.
+
+**The calibration, and the control arm's end** (2026-10-12, 01:20–01:29). The control arm's rounds 5–7 at 3 × the
+rates (select readout, landed / lost separation / reward): 83.1 % / 631 / 3707.8, 82.5 % / 644 / 3672.8, 83.0 % / 635 /
+3701.7 (round 4: 83.1 % / 644 / 3702.5); KL 0.061 → 0.074 → 0.092 → 0.100, clipped share 0.7 → 2.0 → 2.4 → 2.7 %, other
+failures 116 → 126 → 142 → 129. The larger rate did not lift the plateau; pass_gradients (R70) reads the prior's reward
+gradient between updates at a cosine near 0, the data term's at 0.95, and the credit spread (median 33 rows a group).
+The calibration spoke single batches of round 5 alone on the CPU (round 4's model; added memory / search rows): squares
+45 → 0.37 GB / 1,906; 100 → 0.32 GB / 0; 128 → 2.31 GB / 90,439; 161 → 0.85 GB / 16,106; 194 → 2.88 GB / 88,613; 210 →
+2.25 GB / 100,929; a 600 s batch, 179 → 2.07 GB / 91,017; batch 186, 218 → 9.5 GB / 433,231. The memory follows the
+search rows (about 23–25 KB a row), the squares only roughly (requests 115).
+
+**The formal campaign's end** (the user, 2026-10-12 01:30: test batch 186 on the GPU, then finish; then "先把正式组的都跑
+完 再选出最好的那一轮的模型 然后再导出"). Batch 186 alone on the GPU (cuda, the executor on the CPU as launched; round 4's
+model, round 5's draw): allocated peak 3.36 GB, reserved 6.95 GB, host peak 9.25 GB, 397 s; its groups as on the CPU (25
+groups, 433,147 search rows). The campaign resumed 01:50 from `.claude/worktrees/run-formal` at 96b5b87f, after
+window_behaviour against arm A's record gave the same behaviour, with `--gpu-squares 200` and every other setting as
+launched (216 done batches kept, batch 186 on the GPU). Rounds 5–7: 83.3 % / 625 / 3711.8, 83.5 % / 625 / 3718.8,
+83.7 % / 604 / 3727.2; ended 03:44, exit 0. Round 7 by span: 300 s 83.4 % / 118, 600 s 83.9 % / 189, 1200 s 83.7 % / 297;
+KL 0.044 (round 0) → 0.070; other failures 95 → 129 (unstable at minimums 24 → 36, timeout 30 → 42, ground contact 30
+→ 34). Both campaigns' run scripts and logs are in their `run_logs/`, each read-only with its SHA256SUMS (1,762 and 1,764
+files). A publication of the control arm's round 4, started before the user's order, was stopped in its first step and
+wrote nothing.
+
+**Round 7 read window by window and published** (requests 117–118, 120). The round chosen: the highest select reward of
+both arms' 16 rounds, the formal campaign's round 7. `multi_window_read` (cf7e21f0) read it again at 96b5b87f: 1,500
+windows, the sum the round's readout; `window_list --multi` with every outcome but `landed`: 453 windows (KMSY 55, KRDU
+118, KSJC 95, KSMF 95, KSTL 90). Exported (rounds start and 7, select split): `majority_formal_r7_drawn_20261012` (10
+windows an airport, 5.0–6.6 MB) and `majority_formal_r7_not_landed_20261012` (the list; KMSY 29.3, KRDU 84.6, KSJC 58.8,
+KSMF 60.4, KSTL 65.4 MB). The run worktree's first read stopped on a missing `aeroviz-4d/public/data/airports` link
+(request 120). The browser check found two faults of the Training view: three listed sets refused (a flight whose
+executor failed in its first word has a closed loop of one word, `flownFromRow + 1` state rows; the reader asked + 2),
+and a window with a silent aircraft read as all landed (the list, its tooltip, "this round" and the rounds summary
+counted the export's end; the statistics and the loop count a loss). Fixed in 70d87089 (`countedOutcome`, the reader's
+rows; review: S2 the single-aircraft tooltip and S3 a bound that could not bind, fixed, second round clean; vitest
+130 files / 1,140 tests); the second browser check passed on all five airports.
+
+**The extension** (the user, 2026-10-12: continue 4 rounds from round 7). A new campaign cannot start from a stage D
+round and would draw rounds 0–3's windows again (`[seed, round]`), so the formal campaign is extended in place to 12
+rounds at 70d87089, after window_behaviour gave the same behaviour (09:20, unit `formal-extend`). Stop rules: two rounds
+in a row not above 3727.2, KL above 0.10, or other failures above 150. Round 8: 83.6 % / 613 / 3726.9, KL 0.075, other
+failures 123 (58 min). Round 9: 83.4 % / 610 / 3714.9, KL 0.070, other failures 136 (unstable at minimums 43, timeout 44); by span 300 s 84.1 % / 120, 600 s 84.5 % / 174, 1200 s 82.4 % / 316. Rounds 8 and 9 did not beat 3727.2: the unit was stopped at 11:11 at the start of round 10 (its directory holds only its speaking model); the campaign read-only again with its SHA256SUMS (2,205 files) and run3's script and log in `run_logs/`. Round 7 stays the chosen round.
+
+**notes/stage_d.md of 2026-10-12** (requests 108–120 decided). Order 1: §0.3 (D195's milestone MC14, the state;
+76cf287c). Order 2 (41a65026): `multi_training_export`'s window identity is `partial(identity_of, "D")` (`post.window_lists`)
+instead of its own lambda; checked once on round 7's list: the 1,500 selection windows' identities the same, the list's
+453 windows the same places and windows before and after. The two settings namespaces of `tests/test_multi_training_export.py` lacked `batch_squares`
+(read since ae3839bd; 2 tests failed since then) and gained it in the same commit. Order 3: this log and the requests.
+
+**Rounds 10–11 and round 7's val read (the user, 2026-10-12).** The user ordered rounds 10–11 run so that the campaign
+had done every round before round 7's val read (b7fc0048, unit `formal-close` at 70d87089), then paused round 10 at 11:36
+before its first batch (no resume entry written) and made an exception: `multi_validation --unfinished` (9b1da192; the
+claim's options and `config.json` hold `rounds_done` and `of_rounds`; small change, no agent review, test_multi_validation 4
+passed) reads a campaign not done. Round 7's val read (`val_majority_formal_r7_20261012`, 10 of 12 rounds done, read-only
+with its SHA256SUMS): landed 3,803 of 4,534 = 83.9 %, lost separation 606, other failures 125 (unstable at minimums 43,
+ground contact 37, timeout 31); KMSY 87.8 %, KRDU 81.2 %, KSJC 90.3 %, KSMF 77.5 %, KSTL 83.9 %; spans 300 / 600 / 1200 s
+84.3 / 84.9 / 83.1 %. The user then said "继续跑 10-12 轮": rounds 10–11 ran from 13:03 to 15:11 (run5.sh, the settings of
+rounds 8–9). Round 10: 83.0 % / 638 / 3703.8, KL 0.073, other failures 127. Round 11: 83.7 % / 593 / 3734.5, KL 0.075, other
+failures 137; by span 300 s 84.5 % / 114, 600 s 83.7 % / 181, 1200 s 83.5 % / 298. Round 11's reward is 7.3 above round 7's,
+inside the rounds' spread; the val claim is spent, so round 11 has no val number. The user chose round 7 to stay the
+chosen round. The campaign is read-only again with its SHA256SUMS (2,650 files) and run5's script and log in `run_logs/`.

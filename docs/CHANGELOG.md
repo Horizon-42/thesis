@@ -52,6 +52,17 @@ later; the corrections now do the same.
   crossings than the old runway limit (106.7 m), so the other aircraft can be given other inputs and fly other tracks.
   `window_behaviour --against` (R68) on a stage D campaign measures it.
 
+### 2026-10-12 — Learning view: the slider plays, stage D's slider is the window scene's, label switches
+
+- The user's four requests for the Learning (Training) task, on branch `dev-learning-view`: (1) stages C and D: "Other
+  aircraft" and "Their tracks" are one switch, "Other aircraft and tracks"; (2) "Aircraft labels" and "Failure labels" in
+  every stage's Draw box hide the label text only (`data/trainingLabels.ts`, `scene/trainingEntities.showLabels`);
+  (3) stage D's cursor slider spans the window's scene on the window's clock, not one commanded aircraft's sentence
+  (`TrainingSliderAxis`, `sceneAxis`, `windowSceneEndS`; the cursor stays the aircraft's flight time, so no reader of it
+  changed; `WindowCursor` clamps to the axis); (4) Play / Pause and a speed at the slider (`hooks/useCursorPlayback.ts`)
+  play the exported tracks — no flight is computed. The cursor setter takes an updater; the charts' and the bar's cursor
+  line clamp at 0 too. Frontend design §6.1 rewritten to match; viewer reference AV50.
+
 ### 2026-10-06 — Multi-aircraft optimization merged into dev-two-tier
 
 - `dev-optimizer-multi-aircraft` merged (the user's order): dev-two-tier merged into the branch twice (de7f0daf, b9a8afec)

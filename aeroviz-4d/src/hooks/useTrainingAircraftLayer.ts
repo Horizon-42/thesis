@@ -3,7 +3,7 @@
  * ---------------------------
  * THE AIRCRAFT AT THE CURSOR (Training module design, doc 36 §4.12): the aircraft model on the observed track where it is
  * at the cursor, in the attitude exported there (`trainingAttitude.poseAt`: heading, path angle as the pitch, right bank),
- * its attitude written under it — and, when a closed-loop sentence is read, a second one in the flown path's colour on the
+ * its attitude written under it (Draw "Aircraft labels") — and, when a closed-loop sentence is read, a second one in the flown path's colour on the
  * path the executor flew, so the two are seen apart in 3D at the same moment. Each is hidden before its track starts and
  * held where its track ends. The live executor's aircraft is its own (`useTrainingLiveLayer`).
  *
@@ -15,7 +15,8 @@ import { useEffect, useMemo, useRef } from "react";
 import * as Cesium from "cesium";
 import { useApp, useTrainingCursor } from "../context/AppContext";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
-import { aircraftModel, colour, entityGroup, placeAircraft, TRAINING_ENTITY } from "../scene/trainingEntities";
+import { aircraftModel, colour, entityGroup, placeAircraft, showLabels, TRAINING_ENTITY } from "../scene/trainingEntities";
+import { useTrainingLabels } from "../data/trainingLabels";
 import { poseAt, poseText, type TrainingAttitudeTrack } from "../data/trainingAttitude";
 import { trainingReadingOf } from "../data/trainingSample";
 import { TRAINING_TRACE_COLOR } from "../utils/trainingWordColors";
@@ -37,6 +38,7 @@ export default function useTrainingAircraftLayer(): void {
   const { viewer, mode, trainingSelection, trainingIntervalS, trainingLayers } = useApp();
   const observedShown = trainingLayers.observed;
   const { trainingCursorS } = useTrainingCursor();
+  const labels = useTrainingLabels();
   const selection = mode === "training" ? trainingSelection : null;
   // the aircraft drawn for the reading on screen: the observed one (unless its switch is off), and the flown one of a
   // closed-loop reading
@@ -73,6 +75,11 @@ export default function useTrainingAircraftLayer(): void {
       group.remove();
     };
   }, [viewer, drawn]);
+
+  useEffect(() => {
+    if (!isCesiumViewerUsable(viewer)) return;
+    showLabels(viewer, drawn.map((item) => item.id), labels.aircraft);
+  }, [viewer, drawn, labels.aircraft]);
 
   // AT THE CURSOR: hidden before a track starts, held at its end after it
   useEffect(() => {

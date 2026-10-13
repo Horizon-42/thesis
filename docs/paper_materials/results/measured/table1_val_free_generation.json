@@ -1,0 +1,407 @@
+{
+  "split": "val",
+  "instructions": "4dTrajectory/outputs/POOLED/instruction_language/v12_20261005",
+  "truth": "observed track (signals), from the first predicted step to the end of the arrival slice",
+  "arc_points": 64,
+  "models": {
+    "base": {
+      "directory": "4dTrajectory/outputs/POOLED/prior/prior_base_20261006/base/free_generation",
+      "config_git": {
+        "head": "a933ca0687ff7634a867909937829a53a868e2f9",
+        "dirty": false
+      },
+      "all": {
+        "sentences": 2000,
+        "landed": 1887,
+        "landing_rate": 0.9435,
+        "arc_ade_mean_m": 1479.4446923309872,
+        "arc_ade_median_m": 331.1151227311717,
+        "arc_fde_mean_m": 775.793111389532,
+        "arc_fde_median_m": 193.13242728317687
+      },
+      "inside": {
+        "sentences": 1894,
+        "landed": 1792,
+        "landing_rate": 0.9461457233368532,
+        "arc_ade_mean_m": 1444.240003181587,
+        "arc_ade_median_m": 315.3353034316956,
+        "arc_fde_mean_m": 774.5911253954694,
+        "arc_fde_median_m": 192.30642669352542
+      },
+      "airports": {
+        "KMSY": {
+          "sentences": 370,
+          "landed": 344,
+          "landing_rate": 0.9297297297297298,
+          "arc_ade_mean_m": 1431.583818452383,
+          "arc_ade_median_m": 153.04211880390085,
+          "arc_fde_mean_m": 509.5039511006969,
+          "arc_fde_median_m": 150.00932726961292
+        },
+        "KRDU": {
+          "sentences": 380,
+          "landed": 367,
+          "landing_rate": 0.9657894736842105,
+          "arc_ade_mean_m": 2085.7649672564253,
+          "arc_ade_median_m": 890.2145214217027,
+          "arc_fde_mean_m": 1087.3458104029883,
+          "arc_fde_median_m": 603.1561938843311
+        },
+        "KSJC": {
+          "sentences": 382,
+          "landed": 366,
+          "landing_rate": 0.9581151832460733,
+          "arc_ade_mean_m": 628.5869486999906,
+          "arc_ade_median_m": 89.80277357131308,
+          "arc_fde_mean_m": 327.12945461984674,
+          "arc_fde_median_m": 150.95938129707758
+        },
+        "KSMF": {
+          "sentences": 382,
+          "landed": 361,
+          "landing_rate": 0.9450261780104712,
+          "arc_ade_mean_m": 1769.065955417474,
+          "arc_ade_median_m": 1036.4545137105251,
+          "arc_fde_mean_m": 949.7845604009336,
+          "arc_fde_median_m": 173.27592485599558
+        },
+        "KSTL": {
+          "sentences": 380,
+          "landed": 354,
+          "landing_rate": 0.9315789473684211,
+          "arc_ade_mean_m": 1308.4485691269228,
+          "arc_ade_median_m": 469.4802705321961,
+          "arc_fde_mean_m": 993.6488628965453,
+          "arc_fde_median_m": 219.96666649751245
+        }
+      },
+      "strata": {
+        "straight-in": {
+          "sentences": 1242,
+          "landed": 1212,
+          "landing_rate": 0.9758454106280193,
+          "arc_ade_mean_m": 416.58914086186854,
+          "arc_ade_median_m": 131.60092283321742,
+          "arc_fde_mean_m": 534.5608949680433,
+          "arc_fde_median_m": 184.69302989984567
+        },
+        "vectored": {
+          "sentences": 652,
+          "landed": 580,
+          "landing_rate": 0.8895705521472392,
+          "arc_ade_mean_m": 3401.8203268028906,
+          "arc_ade_median_m": 2385.9656239196356,
+          "arc_fde_mean_m": 1231.8266256882043,
+          "arc_fde_median_m": 218.160409519565
+        }
+      },
+      "inside_landed_only": {
+        "sentences": 1792,
+        "landed": 1792,
+        "landing_rate": 1.0,
+        "arc_ade_mean_m": 1191.194248029234,
+        "arc_ade_median_m": 280.7000816258782,
+        "arc_fde_mean_m": 527.0049469580973,
+        "arc_fde_median_m": 187.21678951143178
+      }
+    },
+    "c_r5": {
+      "directory": "4dTrajectory/outputs/POOLED/post/single_val_post_seg60_r5_20261010",
+      "config_git": {
+        "head": "a2f51add90686bd8dbc2a4e56e1103239f4296c2",
+        "dirty": false
+      },
+      "all": {
+        "sentences": 2000,
+        "landed": 1957,
+        "landing_rate": 0.9785,
+        "arc_ade_mean_m": 1284.6064091713563,
+        "arc_ade_median_m": 306.6827829653469,
+        "arc_fde_mean_m": 706.8237867049868,
+        "arc_fde_median_m": 191.09553055432605
+      },
+      "inside": {
+        "sentences": 1894,
+        "landed": 1855,
+        "landing_rate": 0.9794086589229145,
+        "arc_ade_mean_m": 1242.0451234295717,
+        "arc_ade_median_m": 298.25222245875096,
+        "arc_fde_mean_m": 708.4650668198392,
+        "arc_fde_median_m": 190.46569913617913
+      },
+      "airports": {
+        "KMSY": {
+          "sentences": 370,
+          "landed": 358,
+          "landing_rate": 0.9675675675675676,
+          "arc_ade_mean_m": 1122.754664918839,
+          "arc_ade_median_m": 176.89777180776673,
+          "arc_fde_mean_m": 536.1736730978317,
+          "arc_fde_median_m": 152.12417182483048
+        },
+        "KRDU": {
+          "sentences": 380,
+          "landed": 376,
+          "landing_rate": 0.9894736842105263,
+          "arc_ade_mean_m": 2040.904160132712,
+          "arc_ade_median_m": 833.1090640398243,
+          "arc_fde_mean_m": 907.4643668113416,
+          "arc_fde_median_m": 597.683568590048
+        },
+        "KSJC": {
+          "sentences": 382,
+          "landed": 380,
+          "landing_rate": 0.9947643979057592,
+          "arc_ade_mean_m": 306.926457598995,
+          "arc_ade_median_m": 88.33477925034714,
+          "arc_fde_mean_m": 178.99223038019983,
+          "arc_fde_median_m": 147.4214013323252
+        },
+        "KSMF": {
+          "sentences": 382,
+          "landed": 374,
+          "landing_rate": 0.9790575916230366,
+          "arc_ade_mean_m": 1609.0997973905744,
+          "arc_ade_median_m": 1042.5079259319339,
+          "arc_fde_mean_m": 924.9815071558675,
+          "arc_fde_median_m": 175.38659914509321
+        },
+        "KSTL": {
+          "sentences": 380,
+          "landed": 367,
+          "landing_rate": 0.9657894736842105,
+          "arc_ade_mean_m": 1130.3911249978742,
+          "arc_ade_median_m": 432.59127013235917,
+          "arc_fde_mean_m": 991.8267115355006,
+          "arc_fde_median_m": 225.3628835426996
+        }
+      },
+      "strata": {
+        "straight-in": {
+          "sentences": 1242,
+          "landed": 1225,
+          "landing_rate": 0.9863123993558777,
+          "arc_ade_mean_m": 369.52797929356655,
+          "arc_ade_median_m": 131.93055808455443,
+          "arc_fde_mean_m": 518.9960826632163,
+          "arc_fde_median_m": 186.49116822454602
+        },
+        "vectored": {
+          "sentences": 652,
+          "landed": 630,
+          "landing_rate": 0.9662576687116564,
+          "arc_ade_mean_m": 2904.109990019937,
+          "arc_ade_median_m": 1958.4729305406609,
+          "arc_fde_mean_m": 1069.386045842118,
+          "arc_fde_median_m": 206.64779810499363
+        }
+      },
+      "inside_landed_only": {
+        "sentences": 1855,
+        "landed": 1855,
+        "landing_rate": 1.0,
+        "arc_ade_mean_m": 1146.4902044475227,
+        "arc_ade_median_m": 284.40577980364657,
+        "arc_fde_mean_m": 531.8867171519522,
+        "arc_fde_median_m": 188.52390868641731
+      }
+    },
+    "d_r7": {
+      "directory": "4dTrajectory/outputs/POOLED/multi/single_val_majority_formal_r7_20261012",
+      "config_git": {
+        "head": "ac3468b01b62fc994e578a72f776cdd116ac40db",
+        "dirty": false
+      },
+      "all": {
+        "sentences": 2000,
+        "landed": 1934,
+        "landing_rate": 0.967,
+        "arc_ade_mean_m": 1293.8698335478905,
+        "arc_ade_median_m": 304.12581640767104,
+        "arc_fde_mean_m": 697.877136534855,
+        "arc_fde_median_m": 195.16962012543593
+      },
+      "inside": {
+        "sentences": 1894,
+        "landed": 1836,
+        "landing_rate": 0.9693769799366421,
+        "arc_ade_mean_m": 1247.8706300358583,
+        "arc_ade_median_m": 295.0888066465979,
+        "arc_fde_mean_m": 673.5166725070064,
+        "arc_fde_median_m": 194.98687983082795
+      },
+      "airports": {
+        "KMSY": {
+          "sentences": 370,
+          "landed": 353,
+          "landing_rate": 0.9540540540540541,
+          "arc_ade_mean_m": 1104.2667963932943,
+          "arc_ade_median_m": 177.1202917656259,
+          "arc_fde_mean_m": 319.7191801759988,
+          "arc_fde_median_m": 148.60438310569367
+        },
+        "KRDU": {
+          "sentences": 380,
+          "landed": 371,
+          "landing_rate": 0.9763157894736842,
+          "arc_ade_mean_m": 2063.4105647640345,
+          "arc_ade_median_m": 691.2947220495394,
+          "arc_fde_mean_m": 989.280233823199,
+          "arc_fde_median_m": 604.3665536251196
+        },
+        "KSJC": {
+          "sentences": 382,
+          "landed": 378,
+          "landing_rate": 0.9895287958115183,
+          "arc_ade_mean_m": 289.88515021698277,
+          "arc_ade_median_m": 88.99125152561604,
+          "arc_fde_mean_m": 251.35233042071854,
+          "arc_fde_median_m": 147.27929612354964
+        },
+        "KSMF": {
+          "sentences": 382,
+          "landed": 369,
+          "landing_rate": 0.9659685863874345,
+          "arc_ade_mean_m": 1622.4323498315607,
+          "arc_ade_median_m": 942.7539899792368,
+          "arc_fde_mean_m": 834.7526752863926,
+          "arc_fde_median_m": 181.91158824874043
+        },
+        "KSTL": {
+          "sentences": 380,
+          "landed": 365,
+          "landing_rate": 0.9605263157894737,
+          "arc_ade_mean_m": 1158.649892088211,
+          "arc_ade_median_m": 411.6340851698065,
+          "arc_fde_mean_m": 964.5417895532062,
+          "arc_fde_median_m": 219.85011497190317
+        }
+      },
+      "strata": {
+        "straight-in": {
+          "sentences": 1242,
+          "landed": 1226,
+          "landing_rate": 0.9871175523349437,
+          "arc_ade_mean_m": 362.56410282266575,
+          "arc_ade_median_m": 133.72475813244216,
+          "arc_fde_mean_m": 494.9371054706162,
+          "arc_fde_median_m": 184.23946776580095
+        },
+        "vectored": {
+          "sentences": 652,
+          "landed": 610,
+          "landing_rate": 0.9355828220858896,
+          "arc_ade_mean_m": 2934.2980944511723,
+          "arc_ade_median_m": 1891.7843607149334,
+          "arc_fde_mean_m": 1013.6943140088415,
+          "arc_fde_median_m": 218.72099335796997
+        }
+      },
+      "inside_landed_only": {
+        "sentences": 1836,
+        "landed": 1836,
+        "landing_rate": 1.0,
+        "arc_ade_mean_m": 1096.3147016047592,
+        "arc_ade_median_m": 278.8821924752449,
+        "arc_fde_mean_m": 529.3916581654566,
+        "arc_fde_median_m": 191.2952961686629
+      }
+    }
+  },
+  "labelled_reference": {
+    "all": {
+      "sentences": 1000,
+      "landed": 975,
+      "landing_rate": 0.975,
+      "arc_ade_mean_m": 86.86882475039737,
+      "arc_ade_median_m": 70.12205322560104,
+      "arc_fde_mean_m": 139.75539402536864,
+      "arc_fde_median_m": 104.67311270206407
+    },
+    "inside": {
+      "sentences": 947,
+      "landed": 947,
+      "landing_rate": 1.0,
+      "arc_ade_mean_m": 82.82635042650276,
+      "arc_ade_median_m": 68.8870543780307,
+      "arc_fde_mean_m": 132.35843803301606,
+      "arc_fde_median_m": 102.963907099853
+    },
+    "airports": {
+      "KMSY": {
+        "sentences": 185,
+        "landed": 185,
+        "landing_rate": 1.0,
+        "arc_ade_mean_m": 67.08512602345172,
+        "arc_ade_median_m": 60.296341621658875,
+        "arc_fde_mean_m": 102.85279922151712,
+        "arc_fde_median_m": 95.44738352590514
+      },
+      "KRDU": {
+        "sentences": 190,
+        "landed": 190,
+        "landing_rate": 1.0,
+        "arc_ade_mean_m": 139.42547550802635,
+        "arc_ade_median_m": 123.0161434739344,
+        "arc_fde_mean_m": 253.09772463521927,
+        "arc_fde_median_m": 225.5046854405205
+      },
+      "KSJC": {
+        "sentences": 191,
+        "landed": 191,
+        "landing_rate": 1.0,
+        "arc_ade_mean_m": 57.487699076931264,
+        "arc_ade_median_m": 52.474710410659824,
+        "arc_fde_mean_m": 98.861216103475,
+        "arc_fde_median_m": 87.87667354545239
+      },
+      "KSMF": {
+        "sentences": 191,
+        "landed": 191,
+        "landing_rate": 1.0,
+        "arc_ade_mean_m": 70.97327497415688,
+        "arc_ade_median_m": 63.00185150088988,
+        "arc_fde_mean_m": 90.74938144475948,
+        "arc_fde_median_m": 74.21641277571362
+      },
+      "KSTL": {
+        "sentences": 190,
+        "landed": 190,
+        "landing_rate": 1.0,
+        "arc_ade_mean_m": 78.94167973303523,
+        "arc_ade_median_m": 70.12205322560104,
+        "arc_fde_mean_m": 115.84990078358467,
+        "arc_fde_median_m": 98.57011420031571
+      }
+    },
+    "strata": {
+      "straight-in": {
+        "sentences": 621,
+        "landed": 621,
+        "landing_rate": 1.0,
+        "arc_ade_mean_m": 77.03466996307792,
+        "arc_ade_median_m": 61.957090499221316,
+        "arc_fde_mean_m": 138.20219447438518,
+        "arc_fde_median_m": 109.23730554496368
+      },
+      "vectored": {
+        "sentences": 326,
+        "landed": 326,
+        "landing_rate": 1.0,
+        "arc_ade_mean_m": 93.85896873259728,
+        "arc_ade_median_m": 83.04068624435894,
+        "arc_fde_mean_m": 121.22661978120551,
+        "arc_fde_median_m": 89.3269260957958
+      }
+    },
+    "inside_landed_only": {
+      "sentences": 947,
+      "landed": 947,
+      "landing_rate": 1.0,
+      "arc_ade_mean_m": 82.82635042650276,
+      "arc_ade_median_m": 68.8870543780307,
+      "arc_fde_mean_m": 132.35843803301606,
+      "arc_fde_median_m": 102.963907099853
+    }
+  }
+}

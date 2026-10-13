@@ -12,7 +12,7 @@
  *    when it was told the sentence at the chosen Δ, in its kind's colour beside the observed track (frontend §3 item 11:
  *    the closed loop teal, the base's sample magenta, a post-trained round yellow-green), its ground trace dashed, where
  *    it ended — named with the judge's outcome — and the DA POINT of the threshold crossing, green when the check
- *    passed, red when it did not (its values in the label).
+ *    passed, red when it did not (its values in the label). Those two labels are under Draw "Failure labels".
  *  • THE CORRECTION WORDS: an orange point on the flown path where each word the closed-loop reading added is said.
  *  • THE HEADING WORDS (`headingBands`): a heading word bounds no position — it says where the track is a lead after it
  *    is said, and is judged on the rows from then on — so what is exact in plan is the stretch of ground trace it is
@@ -73,6 +73,7 @@ import {
   type TrainingSelection,
 } from "../data/trainingSample";
 import { decisionText, TRAINING_OUTCOME_TAG } from "../data/trainingText";
+import { useTrainingLabels } from "../data/trainingLabels";
 import {
   airLine,
   colour,
@@ -82,6 +83,7 @@ import {
   lonLatHeights,
   marker,
   planDegrees,
+  showLabels,
   TRAINING_ENTITY,
   trainingBandFan,
   trainingBandGround,
@@ -363,6 +365,11 @@ export default function useTrainingTrackLayer(): void {
     if (!isCesiumViewerUsable(viewer)) return;
     applySwitches(viewer, layerIds.current, trainingLayers);
   }, [viewer, selection, reading, trainingLayers]);
+  const labels = useTrainingLabels();
+  useEffect(() => {
+    if (!isCesiumViewerUsable(viewer)) return;
+    showLabels(viewer, [TRAINING_ENTITY.flownEnd, TRAINING_ENTITY.decision], labels.failures);
+  }, [viewer, selection, reading, labels.failures]);
 
   // A new FLIGHT is framed ONCE — a flight can lie tens of kilometres from the airport view. Coming back to Training frames
   // it again (another task moved the camera).

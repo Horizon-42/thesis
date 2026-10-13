@@ -37,8 +37,10 @@ import {
   lonLatHeights,
   planDegrees,
   poseOrientation,
+  showLabels,
   TRAINING_ENTITY,
 } from "../scene/trainingEntities";
+import { useTrainingLabels } from "../data/trainingLabels";
 
 type Ready = Extract<TrainingAutopilotView, { status: "ready" }>;
 
@@ -119,4 +121,10 @@ export default function useTrainingLiveLayer(): void {
     if (!isCesiumViewerUsable(viewer) || ready === null) return;
     return flyOut(viewer, ready);
   }, [viewer, ready]);
+  // its clock under Draw "Aircraft labels"
+  const labels = useTrainingLabels();
+  useEffect(() => {
+    if (!isCesiumViewerUsable(viewer) || ready === null) return;
+    showLabels(viewer, [TRAINING_ENTITY.autopilotAircraft], labels.aircraft);
+  }, [viewer, ready, labels.aircraft]);
 }

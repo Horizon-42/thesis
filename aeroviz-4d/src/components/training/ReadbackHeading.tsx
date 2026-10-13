@@ -105,7 +105,7 @@ export default function ReadbackHeading({ m, onCursorChange, onColumnChange }: {
         label={(event) => `heading ${trainingBandLabel(event.says)}`} />
       <OutcomeLine m={m} top={PLOT_TOP} bottom={bottom} />
       {m.live ? <circle cx={m.xTime(m.live.track.tS[0])} cy={yHeading(m.live.track.trackPlotDeg[0])} r={3} fill={TRAINING_AUTOPILOT_COLOR} /> : null}
-      <VLine x={m.xTime(Math.min(m.cursorS, m.endS))} top={PLOT_TOP} bottom={bottom} className="training-readback-cursor-line" />
+      <VLine x={m.cursorX} top={PLOT_TOP} bottom={bottom} className="training-readback-cursor-line" />
       <Axis left={GUTTER} right={GUTTER + m.plotW} y={bottom} ticks={timeTicks(m)} caption="s from the track's first row" />
     </ChartFrame>
   );

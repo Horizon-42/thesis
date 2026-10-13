@@ -1793,7 +1793,7 @@ under the same select seed and windows an airport), refused by name otherwise; a
 `campaign.json` beside it. Writes, into a new directory, `list.json` (stage C; the select windows only, none moved out
 of the split; each window's place, airport and identity — flight, `row0_s`, kind — and, as information no reader acts
 on, each read's outcome and D175's fields; the reads by path and sha256) and `SHA256SUMS`; read-only. The Training
-export takes a list (`--windows`, D176 (3), frontend F5). Tests: `tests/test_window_lists.py`.
+export takes a list (`--windows`, D176 (3), frontend F5). Stage D's reads: `--multi DIR` (R73). Tests: `tests/test_window_lists.py`.
 
     python run_ts.py window_list --diagnose 4dTrajectory/outputs/POOLED/post/<diagnose id> on \
         --ceiling 4dTrajectory/outputs/POOLED/post/<ceiling id> start --outcomes lost_separation \
@@ -1879,3 +1879,46 @@ column's correction words per sentence and the landed share (the judge's, D74, a
 around each OBSERVED word of the column that changes its value, at the said rows −1…+4 from it (e_y for heading, e_h for
 angle, flown − observed ground speed at the matched point for speed): p10 / p50 / p90 and the share beyond Y, H or δv.
 No criterion is read (D7). Needs an `instruction-v7` artefact and an executor spec of this code (`ts-executor-spec-v11`).
+
+### R73 · `run_ts.py multi_window_read` — a stage D round read again on its select windows, a line a window (post-training D176 (2))
+
+2026-10-12 (the user: a Training set of the windows a stage D model did not land). Round `--round`'s model read on its
+campaign's select windows by its own selection readout (`multi_train.selection_readout` with `lines`: the windows and
+random numbers of every round's readout), here or by `--speak-workers` workers on `--device` (default `cuda`; the rule
+of the CPU's batches left off, D191). The summed readout must be the round's own (`round.json`'s `selection_readout`),
+or the run stops and writes nothing: the behaviour check on fixed inputs, on the device and code of this read. Writes,
+into a new directory, `config.json` (`ts-multi-window-read-v1`: the campaign, the round, its inputs, the commit, the
+checks, the device and workers, the selection as the Training export's `StageExport.selection_fields`, the count),
+`per_window.jsonl` (`multi_train.window_line`: place, airport, identity, span, kind, each commanded aircraft's key,
+outcome, reward and go-arounds, the steps of loss by pair) and `SHA256SUMS`, read-only. A clean tree unless `--smoke`,
+the checks first; a smoke campaign only with `--smoke`. `window_list --multi DIR` reads it (R67): a stage D window is
+chosen when an outcome of any of its commanded aircraft is one of `--outcomes`. Tests: `tests/test_multi_window_read.py`.
+
+    python run_ts.py multi_window_read --campaign 4dTrajectory/outputs/POOLED/multi/<campaign> --round <r> \
+        --out 4dTrajectory/outputs/POOLED/multi/<read id> [--speak-workers N] [--device cuda]
+    python run_ts.py window_list --multi 4dTrajectory/outputs/POOLED/multi/<read id> --outcomes lost_separation … \
+        --out 4dTrajectory/outputs/POOLED/multi/<list id>
+
+### R74 · `run_ts.py multi_val_evaluation` — a stage D round's val windows flown again and graded by the evaluation package
+
+2026-10-12 (the user: "用 evaluation 跑一下 r7 的 val 轨迹"). Round `--round`'s model flown again on the campaign's val
+windows as `multi_validation` flew them (`multi_train.selection_readout` with `window_ends`: the same windows and random
+numbers, one process on `--device`); the summed readout must be the val read's own (`--val-read`'s `readout.json`), or the
+run stops and writes nothing. The val claim is neither checked nor written: the run flies the windows of the read the claim
+spent, by the user's order, and chooses nothing. Each commanded aircraft of each window becomes an evaluation record
+(`aircraft_record`: subject `predicted`, no controls — the speed gate reads the declared 1 g; latitude and longitude from the
+airport frame, the MSL height, ψ from the compass track, V and γ from the ground speed and vertical rate, no wind; the runway
+its crossing landed on, else its observed one; the target the evaluation context's threshold, LTP + TCH; the observed
+record's source without its observed-only fields and `aircraft_type`; the type and mass the executor flew, the scenario's —
+never the observed record's mass, the harvest's nominal 60 t for a type it does not resolve, which put a Phenom 300's
+speed window at 168 m/s in the first run of 2026-10-12), one a window and aircraft;
+`python -m evaluation` grades each airport's records, and the same flights' observed records are graded by the same code
+(`executor_replay.observed_verdicts`, the two reports' schema and methodology required equal). Writes, into a new directory,
+`config.json` (`ts-multi-val-evaluation-v1`), `records/<ICAO>/`, `observed/<ICAO>/`, `aircraft.jsonl` (an aircraft a line:
+window, span, outcome, runway, the evaluation's verdict and gates, the observed verdict), `readout.json` (`readout_table`:
+pooled and by airport, each by span: outcomes, verdicts and pass share, gates of the landed, verdict by outcome, and of the
+aircraft whose observed track passes the share whose flown track passes) and `SHA256SUMS`, read-only. A clean tree; the
+checks first; no criterion is read (D7). Tests: `tests/test_multi_val_evaluation.py`.
+
+    python run_ts.py multi_val_evaluation --campaign 4dTrajectory/outputs/POOLED/multi/<campaign> --round <r> \
+        --val-read 4dTrajectory/outputs/POOLED/multi/<val read> --out 4dTrajectory/outputs/POOLED/multi/<id> [--device cuda]

@@ -86,7 +86,7 @@ def test_stage_ds_chosen_round_reads_the_val_days_once(campaign, tmp_path):
     assert airport["all"]["all"]["windows"] == 2 and airport["1"]["all"]["aircraft"] == 1 and "reward_mean" in airport
     assert airport["2"]["all"]["windows"] == 1
     held = json.loads(claim.read_text())
-    assert "spent_utc" in held and held["options"] == {"round": 0, "device": "cpu"}
+    assert "spent_utc" in held and held["options"] == {"round": 0, "device": "cpu", "rounds_done": 1, "of_rounds": 1}
     config = json.loads((readout_dir / "config.json").read_text())
     assert config["schema"] == validation.MULTI_VALIDATION_SCHEMA and config["checks"] == {"stub": True}
     assert config["base"]["selection"]["counts"] == {"train": 1}                  # val's counts not shown
@@ -114,6 +114,20 @@ def test_a_read_is_refused_by_name_before_anything_opens(campaign, tmp_path, cap
         validation.main(_argv(out, tmp_path / "v"))
     assert "has done 1 of its 2 rounds" in capsys.readouterr().err
     assert asked == []
+
+
+def test_the_users_exception_reads_a_campaign_not_done_and_records_its_rounds(campaign, tmp_path):
+    """``--unfinished`` (the user, 2026-10-12): a campaign of 2 rounds with 1 done is read; the claim and the config
+    hold the rounds done of the campaign's rounds."""
+    out, _, claim = campaign
+    record = json.loads((out / "campaign.json").read_text())
+    record["inputs"]["settings"]["rounds"] = 2
+    (out / "campaign.json").write_text(json.dumps(record))
+    readout_dir = tmp_path / "validation"
+    assert validation.main(_argv(out, readout_dir, "--unfinished")) == 0
+    assert json.loads(claim.read_text())["options"] == {"round": 0, "device": "cpu", "rounds_done": 1, "of_rounds": 2}
+    config = json.loads((readout_dir / "config.json").read_text())
+    assert (config["rounds_done"], config["of_rounds"]) == (1, 2)
 
 
 def test_a_smoke_read_reads_the_select_days_claims_nothing_and_is_the_rounds_readout(campaign, tmp_path):

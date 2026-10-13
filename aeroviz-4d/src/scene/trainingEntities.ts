@@ -287,6 +287,16 @@ export function placeAircraft(entity: Cesium.Entity, pose: TrainingAircraftPose)
   entity.orientation = new Cesium.ConstantProperty(poseOrientation(position, pose));
 }
 
+/** Shows or hides the labels of the entities ``ids`` that are drawn (a label switch, `data/trainingLabels.ts`: the
+ *  entities stay, nothing is rebuilt). */
+export function showLabels(viewer: Cesium.Viewer, ids: string[], shown: boolean): void {
+  for (const id of ids) {
+    const label = viewer.entities.getById(id)?.label;
+    if (label !== undefined) label.show = new Cesium.ConstantProperty(shown);
+  }
+  viewer.scene.requestRender();
+}
+
 /** A point that stays visible through terrain, with an optional label under it. */
 export function marker(
   id: string, name: string, position: Cesium.Cartesian3, css: string, size: number, label?: string,

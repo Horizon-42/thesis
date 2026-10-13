@@ -947,6 +947,9 @@ TRAINING_EXPORT_NAMES = {
 }
 #: The timers of stage B's `model_speed` (D136), which stage D's `multi_speed` (D181 (56)) times its parts with.
 MODEL_SPEED_NAMES = {"experiments.model_speed": {"host_info", "synchroniser"}}
+#: Stage A's grading by the evaluation package (`executor_replay`), which stage D's `multi_val_evaluation` grades its
+#: val windows' tracks and their observed tracks with (the user, 2026-10-12).
+EVALUATION_NAMES = {"experiments.executor_replay": {"evaluate_records", "observed_verdicts", "require_same_grading"}}
 
 
 def _experiments_imports_refused(source: str, own: tuple[str, ...] = ("post_",)) -> list[str]:
@@ -964,8 +967,8 @@ def _experiments_imports_refused(source: str, own: tuple[str, ...] = ("post_",))
                 continue
             if module == "experiments":
                 refused += [f"from experiments import {a.name}" for a in node.names if not a.name.startswith(own)]
-            elif module in TRAINING_EXPORT_NAMES or module in MODEL_SPEED_NAMES:
-                names = {**TRAINING_EXPORT_NAMES, **MODEL_SPEED_NAMES}[module]
+            elif module in TRAINING_EXPORT_NAMES or module in MODEL_SPEED_NAMES or module in EVALUATION_NAMES:
+                names = {**TRAINING_EXPORT_NAMES, **MODEL_SPEED_NAMES, **EVALUATION_NAMES}[module]
                 refused += [f"from {module} import {a.name}" for a in node.names if a.name not in names]
             elif module == SPEAKING_LOOP:
                 refused += [f"from {module} import {a.name}" for a in node.names if a.name not in SPEAKING_LOOP_NAMES]
@@ -1117,6 +1120,7 @@ POST_INTERFACE = {
                       "BRANCH_EVERY_S", "CONTINUATIONS", "EQUAL", "MINORITY_SIDE", "GROUP_WEIGHTS"},   # D195
     "post.loss": {"Samples", "surrogate", "pull_to_base", "data_term", "update_step", "update_loss", "one_pass",
                   "passes", "DATA_WEIGHT"},                                    # D194 (1): `update_step`'s default
+    "post.window_lists": {"identity_of"},                     # §9 item 13 (frontend D178 (6)): a window's identity
 }
 
 
@@ -1193,3 +1197,55 @@ def test_the_stage_d_runners_take_only_the_names_of_the_interfaces():
             assert not refused, f"{path.name}: {refused}"
     assert _experiments_imports_refused("from ts_transformer.experiments.multi_train import stage_d\n") == [
         "from experiments.multi_train import stage_d"]                   # stage C's runners do not reach stage D's
+
+
+# ---- the two-tier line reads the day split only (the user, 2026-10-12)
+#: The two-tier line's packages and runners: stages A–D and their Training exports.
+TWO_TIER_PACKAGES = ("instructions", "autopilot", "prior", "post", "multi")
+TWO_TIER_RUNNER_PREFIXES = ("prior_", "post_", "multi_", "executor_", "instruction_", "window_")
+TWO_TIER_RUNNERS = {"model_speed", "closed_loop_start_check", "start_rules", "training_flights", "training_attitude",
+                    "training_export", "pass_gradients"}
+#: Runners with a two-tier prefix that are not of the line: two-tier v3's gates and reads of its lockstep (its design
+#: archived, 2026-09-20).
+NOT_TWO_TIER_RUNNERS = {"executor_relative_gate", "executor_grid_gate", "executor_failure_modes"}
+#: The imports of the line that may reach the flight split, each deals no flight by it: the artefact's build counts the
+#: sealed days' flights that the flight split also holds out (`signals.json`'s ``test_days``), and takes its length
+#: filter (`usable_series`) from the old training loop.
+FLIGHT_SPLIT_EDGES = {("experiments.instruction_signals", "data.splits"),
+                      ("experiments.instruction_signals", "training.train")}
+
+
+def _module_name(path: Path) -> str:
+    return ".".join(path.relative_to(TS_DIR).with_suffix("").parts).removesuffix(".__init__")
+
+
+def _two_tier_roots() -> list[str]:
+    roots = []
+    for path in _module_files():
+        name = _module_name(path)
+        top, _, rest = name.partition(".")
+        if top in TWO_TIER_PACKAGES or (top == "experiments" and (
+                rest.startswith(TWO_TIER_RUNNER_PREFIXES) or rest in TWO_TIER_RUNNERS) and rest not in NOT_TWO_TIER_RUNNERS):
+            roots.append(name)
+    return sorted(roots)
+
+
+def test_the_two_tier_line_never_reaches_the_flight_split():
+    """No module the two-tier line runs imports `data.splits` (the old ts line's split by flight), directly or
+    through the modules it imports, except along `FLIGHT_SPLIT_EDGES`: the line deals flights by day only
+    (`data.day_split`)."""
+    files = {_module_name(path): path for path in _module_files()}
+    roots = _two_tier_roots()
+    assert "experiments.multi_train" in roots and "post.scene" in roots       # the roots are found
+    seen, stack, reached = set(roots), list(roots), []
+    while stack:
+        name = stack.pop()
+        for imported in _imported_names(files[name]):
+            if (name, imported) in FLIGHT_SPLIT_EDGES:
+                continue
+            if imported == "data.splits":
+                reached.append(name)
+            if imported in files and imported not in seen:
+                seen.add(imported)
+                stack.append(imported)
+    assert reached == [], f"the two-tier line reaches the flight split through {sorted(reached)}"

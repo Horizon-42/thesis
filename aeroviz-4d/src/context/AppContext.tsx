@@ -378,11 +378,12 @@ interface WorkbenchUiState {
  * THE TRAINING CURSOR: the time shared by the sentence bar, the read-back charts and the 3D scene. It moves on every
  * mousemove over a chart, so it is a context of its own that `useApp` does NOT read: only what draws the cursor
  * (`useTrainingCursor`) re-renders when it moves, never the ~50 other consumers of `useApp` or the app shell. It is flight
- * time (s from the observed track's row 0) and starts at 0 with each flight.
+ * time (s from the observed track's row 0) and starts at 0 with each flight. The setter takes a time, or an update of the
+ * time in force (the slider's playback: it moves on from whatever another writer set in the same frame).
  */
 interface TrainingCursorState {
   trainingCursorS: number;
-  setTrainingCursorS: (atS: number) => void;
+  setTrainingCursorS: (atS: number | ((currentS: number) => number)) => void;
 }
 
 interface AppState extends
@@ -425,8 +426,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   if (trainingCursor.scope !== trainingScope) setTrainingCursor({ scope: trainingScope, atS: 0 });
   const trainingCursorS = trainingCursor.scope === trainingScope ? trainingCursor.atS : 0;
   // a setter captured before the flight changed is of the last one: it writes nothing
-  const setTrainingCursorS = useCallback((atS: number) => {
-    setTrainingCursor((current) => (current.scope === trainingScope ? { scope: trainingScope, atS } : current));
+  const setTrainingCursorS = useCallback((atS: number | ((currentS: number) => number)) => {
+    setTrainingCursor((current) => (current.scope === trainingScope
+      ? { scope: trainingScope, atS: typeof atS === "function" ? atS(current.atS) : atS } : current));
   }, [trainingScope]);
   const pickScope = trainingScope === null ? null : `${trainingScope}@${trainingIntervalS}`;
   const [trainingPicked, setTrainingPicked] = useState<{ scope: string | null; pick: TrainingPick | null }>({

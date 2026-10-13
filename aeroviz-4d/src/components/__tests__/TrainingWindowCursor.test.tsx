@@ -20,14 +20,14 @@ import type { TrainingSelection } from "../../data/trainingSample";
 function harness() {
   let app!: ReturnType<typeof useApp>;
   let cursor!: ReturnType<typeof useTrainingCursor>;
-  function Harness({ leaf }: { leaf: { windowKey: string; flightKey: string; labelled?: boolean; clockS: number; endS: number } | null }) {
+  function Harness({ leaf }: { leaf: { windowKey: string; flightKey: string; labelled?: boolean; clockS: number; fromS: number; toS: number } | null }) {
     app = useApp();
     cursor = useTrainingCursor();
     return leaf === null ? null : <WindowCursor labelled={false} {...leaf} />;
   }
   const view = render(<AppProvider><Harness leaf={null} /></AppProvider>);
   return {
-    show: (leaf: { windowKey: string; flightKey: string; labelled?: boolean; clockS: number; endS: number } | null) =>
+    show: (leaf: { windowKey: string; flightKey: string; labelled?: boolean; clockS: number; fromS: number; toS: number } | null) =>
       view.rerender(<AppProvider><Harness leaf={leaf} /></AppProvider>),
     publish: (selection: TrainingSelection) => act(() => app.setTrainingSelection(selection)),
     cursor: () => cursor,
@@ -49,16 +49,16 @@ describe("the cursor of a window", () => {
     const { show, publish, cursor } = harness();
     publish(first);
     expect(cursor().trainingCursorS).toBe(0);                          // a flight on screen: its row 0
-    show({ windowKey: "set/0", flightKey: first.flight.flightKey, clockS: 6, endS: 500 });
+    show({ windowKey: "set/0", flightKey: first.flight.flightKey, clockS: 6, fromS: 0, toS: 500 });
     expect(cursor().trainingCursorS).toBe(6);
     act(() => cursor().setTrainingCursorS(99));
-    show({ windowKey: "set/0", flightKey: first.flight.flightKey, clockS: 6, endS: 500 });
+    show({ windowKey: "set/0", flightKey: first.flight.flightKey, clockS: 6, fromS: 0, toS: 500 });
     expect(cursor().trainingCursorS).toBe(99);                         // the user's, not set again
     // the next window's leaf before the session has put that window on screen: nothing written on the flight before
-    show({ windowKey: "set/2", flightKey: third.flight.flightKey, clockS: 10, endS: 500 });
+    show({ windowKey: "set/2", flightKey: third.flight.flightKey, clockS: 10, fromS: 0, toS: 500 });
     expect(cursor().trainingCursorS).toBe(99);
     publish(third);
-    show({ windowKey: "set/2", flightKey: third.flight.flightKey, clockS: 10, endS: 500 });
+    show({ windowKey: "set/2", flightKey: third.flight.flightKey, clockS: 10, fromS: 0, toS: 500 });
     expect(cursor().trainingCursorS).toBe(10);
   });
 
@@ -68,20 +68,20 @@ describe("the cursor of a window", () => {
     const r2 = otherRound(start, 2);
     const { show, publish, cursor } = harness();
     publish(start);
-    show({ windowKey: "set/0", flightKey: start.flight.flightKey, clockS: 6, endS: 500 });
+    show({ windowKey: "set/0", flightKey: start.flight.flightKey, clockS: 6, fromS: 0, toS: 500 });
     act(() => cursor().setTrainingCursorS(128));
-    show({ windowKey: "set/0", flightKey: start.flight.flightKey, clockS: 6, endS: 500 });
+    show({ windowKey: "set/0", flightKey: start.flight.flightKey, clockS: 6, fromS: 0, toS: 500 });
     // round 1: a new flight on screen (the provider puts its cursor at 0), then the leaf puts back the instant
-    show({ windowKey: "set/0", flightKey: r1.flight.flightKey, clockS: 6, endS: 500 });
+    show({ windowKey: "set/0", flightKey: r1.flight.flightKey, clockS: 6, fromS: 0, toS: 500 });
     publish(r1);
-    show({ windowKey: "set/0", flightKey: r1.flight.flightKey, clockS: 6, endS: 500 });
+    show({ windowKey: "set/0", flightKey: r1.flight.flightKey, clockS: 6, fromS: 0, toS: 500 });
     expect(cursor().trainingCursorS).toBe(128);
     act(() => cursor().setTrainingCursorS(300));
-    show({ windowKey: "set/0", flightKey: r1.flight.flightKey, clockS: 6, endS: 500 });
+    show({ windowKey: "set/0", flightKey: r1.flight.flightKey, clockS: 6, fromS: 0, toS: 500 });
     // round 2 ends before the instant: its sentence's end
-    show({ windowKey: "set/0", flightKey: r2.flight.flightKey, clockS: 6, endS: 240 });
+    show({ windowKey: "set/0", flightKey: r2.flight.flightKey, clockS: 6, fromS: 0, toS: 240 });
     publish(r2);
-    show({ windowKey: "set/0", flightKey: r2.flight.flightKey, clockS: 6, endS: 240 });
+    show({ windowKey: "set/0", flightKey: r2.flight.flightKey, clockS: 6, fromS: 0, toS: 240 });
     expect(cursor().trainingCursorS).toBe(240);
   });
 
@@ -91,41 +91,57 @@ describe("the cursor of a window", () => {
     const third = otherRound(anchor, 8);
     const { show, publish, cursor } = harness();
     publish(anchor);
-    show({ windowKey: "set/0", flightKey: anchor.flight.flightKey, clockS: 6, endS: 500 });
+    show({ windowKey: "set/0", flightKey: anchor.flight.flightKey, clockS: 6, fromS: 0, toS: 500 });
     act(() => cursor().setTrainingCursorS(128));                         // the window's 122 s
-    show({ windowKey: "set/0", flightKey: anchor.flight.flightKey, clockS: 6, endS: 500 });
+    show({ windowKey: "set/0", flightKey: anchor.flight.flightKey, clockS: 6, fromS: 0, toS: 500 });
     // an aircraft that joined 32 s later: its flight time at the window's row 0 is 32 s less
-    show({ windowKey: "set/0", flightKey: other.flight.flightKey, clockS: -26, endS: 500 });
+    show({ windowKey: "set/0", flightKey: other.flight.flightKey, clockS: -26, fromS: 0, toS: 500 });
     publish(other);
-    show({ windowKey: "set/0", flightKey: other.flight.flightKey, clockS: -26, endS: 500 });
+    show({ windowKey: "set/0", flightKey: other.flight.flightKey, clockS: -26, fromS: 0, toS: 500 });
     expect(cursor().trainingCursorS).toBe(96);                           // 122 − 26 on its clock
     // one whose sentence starts after that instant: the nearer end, its 0
     act(() => cursor().setTrainingCursorS(10));                          // the window's 36 s
-    show({ windowKey: "set/0", flightKey: other.flight.flightKey, clockS: -26, endS: 500 });
-    show({ windowKey: "set/0", flightKey: third.flight.flightKey, clockS: -60, endS: 500 });
+    show({ windowKey: "set/0", flightKey: other.flight.flightKey, clockS: -26, fromS: 0, toS: 500 });
+    show({ windowKey: "set/0", flightKey: third.flight.flightKey, clockS: -60, fromS: 0, toS: 500 });
     publish(third);
-    show({ windowKey: "set/0", flightKey: third.flight.flightKey, clockS: -60, endS: 500 });
+    show({ windowKey: "set/0", flightKey: third.flight.flightKey, clockS: -60, fromS: 0, toS: 500 });
     expect(cursor().trainingCursorS).toBe(0);
     // another window opened on an aircraft that joined late: its row 0 is before its flight's, so at the axis's 0
     const elsewhere = otherRound(anchor, 9);
-    show({ windowKey: "set/1", flightKey: elsewhere.flight.flightKey, clockS: -32, endS: 500 });
+    show({ windowKey: "set/1", flightKey: elsewhere.flight.flightKey, clockS: -32, fromS: 0, toS: 500 });
     publish(elsewhere);
-    show({ windowKey: "set/1", flightKey: elsewhere.flight.flightKey, clockS: -32, endS: 500 });
+    show({ windowKey: "set/1", flightKey: elsewhere.flight.flightKey, clockS: -32, fromS: 0, toS: 500 });
     expect(cursor().trainingCursorS).toBe(0);
+  });
+
+  it("on stage D's scene axis keeps the window's instant where the new aircraft has not joined yet or has ended", () => {
+    const anchor = stageCSelection(stageCSample(), 0);
+    const other = otherRound(anchor, 7);
+    const { show, publish, cursor } = harness();
+    publish(anchor);
+    // the scene runs 900 s from the window's row 0: on each aircraft's clock from its clockS
+    show({ windowKey: "set/0", flightKey: anchor.flight.flightKey, clockS: 6, fromS: 6, toS: 906 });
+    act(() => cursor().setTrainingCursorS(16));                          // the window's 10 s
+    show({ windowKey: "set/0", flightKey: anchor.flight.flightKey, clockS: 6, fromS: 6, toS: 906 });
+    // an aircraft that joins 120 s in: the instant is before its flight, kept on its clock
+    show({ windowKey: "set/0", flightKey: other.flight.flightKey, clockS: -120, fromS: -120, toS: 780 });
+    publish(other);
+    show({ windowKey: "set/0", flightKey: other.flight.flightKey, clockS: -120, fromS: -120, toS: 780 });
+    expect(cursor().trainingCursorS).toBe(-110);
   });
 
   it("clamps the cursor to the sentence's axis between Labelled and the round it is read on (one flight)", () => {
     const start = stageCSelection(stageCSample(), 0);
     const { show, publish, cursor } = harness();
     publish(start);
-    show({ windowKey: "set/0", flightKey: start.flight.flightKey, labelled: true, clockS: 6, endS: 700 });
+    show({ windowKey: "set/0", flightKey: start.flight.flightKey, labelled: true, clockS: 6, fromS: 0, toS: 700 });
     act(() => cursor().setTrainingCursorS(600));                         // late on the recorded track
-    show({ windowKey: "set/0", flightKey: start.flight.flightKey, labelled: true, clockS: 6, endS: 700 });
-    show({ windowKey: "set/0", flightKey: start.flight.flightKey, labelled: false, clockS: 6, endS: 400 });
+    show({ windowKey: "set/0", flightKey: start.flight.flightKey, labelled: true, clockS: 6, fromS: 0, toS: 700 });
+    show({ windowKey: "set/0", flightKey: start.flight.flightKey, labelled: false, clockS: 6, fromS: 0, toS: 400 });
     expect(cursor().trainingCursorS).toBe(400);                         // the round's sentence ends at 400 s
     act(() => cursor().setTrainingCursorS(100));
-    show({ windowKey: "set/0", flightKey: start.flight.flightKey, labelled: false, clockS: 6, endS: 400 });
-    show({ windowKey: "set/0", flightKey: start.flight.flightKey, labelled: true, clockS: 6, endS: 700 });
+    show({ windowKey: "set/0", flightKey: start.flight.flightKey, labelled: false, clockS: 6, fromS: 0, toS: 400 });
+    show({ windowKey: "set/0", flightKey: start.flight.flightKey, labelled: true, clockS: 6, fromS: 0, toS: 700 });
     expect(cursor().trainingCursorS).toBe(100);                         // within the labelled axis: kept
   });
 });

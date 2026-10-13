@@ -91,7 +91,7 @@ export default function ReadbackSpeed({ m, onCursorChange, onColumnChange }: {
       <CorrectionTicks m={m} columns={["speed"]} bottom={bottom} colour={TRAINING_CORRECTION_COLOR}
         label={(event) => `speed ${trainingBandLabel(event.says)}`} />
       <OutcomeLine m={m} top={PLOT_TOP} bottom={bottom} />
-      <VLine x={m.xTime(Math.min(m.cursorS, m.endS))} top={PLOT_TOP} bottom={bottom} className="training-readback-cursor-line" />
+      <VLine x={m.cursorX} top={PLOT_TOP} bottom={bottom} className="training-readback-cursor-line" />
       <Axis left={GUTTER} right={GUTTER + m.plotW} y={bottom} ticks={timeTicks(m)} caption="s from the track's first row" />
     </ChartFrame>
   );

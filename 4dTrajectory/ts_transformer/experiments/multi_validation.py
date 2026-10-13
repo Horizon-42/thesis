@@ -17,7 +17,8 @@ opened, their selection counts checked against the base's identity (`require_sel
 ``readout.json`` (`CLAIM_SPENT_BY`) is in the output; a second read is refused by name; a run that stopped before its
 readout may be run again to the same output, its directory moved aside first. From a clean checkout (a run worktree,
 outline D163), once the campaign has done every round; a smoke campaign has no formal read. ``--smoke`` reads the
-select days instead and claims nothing. THE CHECKS run first: the closed loop's (D69) and the edge features' (D104).
+select days instead and claims nothing. ``--unfinished`` is the user's exception (2026-10-12): the read of a campaign
+that has not done every round, the rounds done written in the claim and in ``config.json``. THE CHECKS run first: the closed loop's (D69) and the edge features' (D104).
 
     python run_ts.py multi_validation --campaign 4dTrajectory/outputs/POOLED/multi/<campaign id> --round <r> \\
         --out <a new directory>
@@ -59,6 +60,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, required=True, help="a new directory")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--smoke", action="store_true", help="SMOKE: a tree with changes; reads the select days")
+    parser.add_argument("--unfinished", action="store_true",
+                        help="the user's exception: read before the campaign has done every round (the rounds done "
+                             "are recorded)")
     args = parser.parse_args(argv)
     split = "select" if args.smoke else "val"
     campaign, out = (p if p.is_absolute() else REPO_ROOT / p for p in (args.campaign, args.out))
@@ -72,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
     done = done_rounds(campaign)
     if not 0 <= args.round < done:
         parser.error(f"{campaign} holds the checkpoints of rounds 0–{done - 1}, not round {args.round}")
-    if done < settings.rounds and not args.smoke:
+    if done < settings.rounds and not (args.smoke or args.unfinished):
         parser.error(f"{campaign} has done {done} of its {settings.rounds} rounds: the val days are read once the round "
                      f"is chosen on every round's selection readout (D7, D85)")
     # the val read's lock, before the output is looked at, kept to the end (D128)
@@ -97,7 +101,8 @@ def main(argv: list[str] | None = None) -> int:
                            Path(inputs["procedure_root"]), formal=not args.smoke, data=False, splits=())   # D132
     model = round_model(context, settings, campaign, args.round)                   # the read's own options, checked
     if split == "val":
-        claim_validation_read(campaign, MULTI_CLAIM_READER, out, {"round": args.round, "device": str(device)})
+        claim_validation_read(campaign, MULTI_CLAIM_READER, out, {"round": args.round, "device": str(device),
+                                                                   "rounds_done": done, "of_rounds": settings.rounds})
         require_selection_of(instructions, context.interval_s, context.base_identity, split)
     context = replace(context, splits={split: split_data(instructions, split, context.words, context.interval_s,
                                                          context.geometries, executor)})
@@ -114,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
         "checkpoint_sha256": file_sha256(checkpoint), "base": readable_identity(context.base_identity),
         "settings": inputs["settings"], "instructions": str(instructions), "executor": str(executor),
         "checks": opened["checks"], "edges_reference": str(edges_reference), "git": git, "smoke": args.smoke,
-        "device": str(device)})
+        "device": str(device), "rounds_done": done, "of_rounds": settings.rounds})
     write_json_atomic(out / CLAIM_SPENT_BY, {
         "schema": MULTI_VALIDATION_SCHEMA, "split": split, "round": args.round, "coverage": coverage,
         "windows": [window_record(w) for w in windows], "readout": readout})
