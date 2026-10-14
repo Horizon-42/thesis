@@ -17,7 +17,7 @@ from ts_transformer.prior.inputs import (
     PATH_OFFSET_SCALE_M, SPEED_SCALE_MPS, VERTICAL_RATE_SCALE_MPS, sentence_rows, since_input,
 )
 from ts_transformer.prior.landings import Landing, LandingIndex, read_roster_landings, roster_landings, utc_s
-from ts_transformer.prior.source import ArtefactSource, artefact_identity
+from ts_transformer.prior.source import ArtefactSource, artefact_identity, opened_entries, opening_identity
 from ts_transformer.tests.support import (
     INSTRUCTION_AIRPORT_ELEVATION_M, TEST_GLIDEPATH_DEG, TEST_TCH_M, fixture_days, fly_legs, instruction_flight,
     instruction_spec, parallel_airport, prior_artefact, prior_closed_loop_sentence,
@@ -355,9 +355,11 @@ def test_the_flight_key_mirror_reads_the_dataset_id_as_the_data_plane_writes_it(
         own_flight_key({"dataset_id": dataset_flight_key(source, 0), "airport": "KSJC"})
 
 
-def test_a_stored_landings_entry_is_not_read_and_every_other_entry_is_compared(tmp_path):
-    """D63 (the user, 2026-10-14): the identity holds no landings; a checkpoint written before, whose identity holds the
-    roster landings' digest, opens for the identity of today without it. Every other entry is still compared."""
+def test_a_checkpoint_opens_on_the_meaning_and_the_day_split_and_never_on_a_description(tmp_path):
+    """D63 (the user, 2026-10-14): a checkpoint opens on the spec, the candidate table, Δ, the day split and the
+    selection's rule (`opened_entries`), each refused by name when it differs. The sha256 of the sentence and signal
+    files, the selection's counts and a landings entry written before describe the data: kept as written, not compared.
+    `opening_identity` is the opened entries of the artefact's identity, read without a sentence."""
     from ts_transformer.prior.checkpoint import load_checkpoint, save_checkpoint
     from ts_transformer.prior.model import Prior, PriorConfig
 
@@ -365,12 +367,19 @@ def test_a_stored_landings_entry_is_not_read_and_every_other_entry_is_compared(t
     words, _ = prior_artefact(directory, interval_s=2.0)
     model = Prior(PriorConfig.from_words(words, "full", d_model=32, layers=1, heads=4, feedforward=64))
     today = artefact_identity(directory, 2.0, "landed")
+    assert opening_identity(directory, 2.0, "landed") == opened_entries(today)
+    described = {**today, "sentence_files": {"train": "1" * 64}, "signals_files": {"val": "2" * 64},
+                 "selection": {"rule": "landed", "counts": {}}, "landings": {"KXXX": "0" * 64}}
     path = tmp_path / "checkpoint.pt"
-    save_checkpoint(path, model, model.state_dict(), identity={**today, "landings": {"KXXX": "0" * 64}},
+    save_checkpoint(path, model, model.state_dict(), identity=described,
                     run={"airports": ["KXXX"], "held_out": None}, train_config={})
-    assert load_checkpoint(path, today).identity["landings"] == {"KXXX": "0" * 64}       # kept as written, unread
-    with pytest.raises(ValueError, match=r"\['row_interval_s'\] differ"):
-        load_checkpoint(path, {**today, "row_interval_s": 4.0})
+    assert load_checkpoint(path, today).identity == described                            # kept as written
+    assert load_checkpoint(path, opening_identity(directory, 2.0, "landed")).identity == described
+    for key, value in (("spec_sha256", "c" * 64), ("day_split", {}), ("candidates", {}), ("row_interval_s", 4.0)):
+        with pytest.raises(ValueError, match=rf"\['{key}'\] differ"):
+            load_checkpoint(path, {**today, key: value})
+    with pytest.raises(ValueError, match=r"\['selection'\] differ"):
+        load_checkpoint(path, opening_identity(directory, 2.0, "all"))
 
 
 # ---- the selection of the base's sentences (B8, D75)
@@ -554,11 +563,11 @@ def test_the_source_leaves_out_a_marked_flight_under_landed_and_its_mark_changes
     assert sum(c["left_out_outcome"] for stratum in cells.values() for c in stratum.values()) == 1
 
 
-def test_the_val_readers_recount_the_selection_and_the_identity_binds_the_signals(tmp_path, monkeypatch):
+def test_the_val_readers_recount_the_selection_from_todays_outcomes_and_marks(tmp_path, monkeypatch):
     """D85, D111: after the claim, a val reader recounts the split's selection from today's outcomes and marks
     (`source.require_selection_of`): the same counts pass, a changed mark is refused, a split with no sentence is refused
-    by name; the identity holds each split's stored signals (`signals_files`), from which the marks are read, so a
-    changed val signals file refuses a prior before any claim (`checkpoint.open_prior` compares the identity)."""
+    by name. The identity holds the sha256 of each split's stored signals (`signals_files`), from which the marks are
+    read, as a description of the data, not compared (D209): the recount is what refuses."""
     from ts_transformer.instructions.artefact import SPLITS
     from ts_transformer.prior import source as source_module
     from ts_transformer.prior.source import require_selection_of
@@ -575,10 +584,6 @@ def test_the_val_readers_recount_the_selection_and_the_identity_binds_the_signal
     monkeypatch.setattr(source_module, "faulty_flights", lambda d, split: {0: ("a fault",)} if split == "val" else {})
     with pytest.raises(ValueError, match="faulty-track marks changed"):
         require_selection_of(directory, 4.0, identity, "val")
-    signals = directory / "signals_val.npz"
-    signals.write_bytes(signals.read_bytes() + b"\0")
-    assert artefact_identity(directory, 4.0, "landed", counted=("train", "select"))["signals_files"]["val"] != \
-        identity["signals_files"]["val"]
 
 
 def test_loop_rows_take_one_first_predicted_step_for_the_batch():

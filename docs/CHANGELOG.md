@@ -1,5 +1,20 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-14 — a prior's checkpoint opens on the meaning and the day split (prior D209)
+
+- Why: after D63 the user asked for a proposal on the identity's other entries, then chose: the spec sha, the
+  candidate table, Δ and the day split must match; the sha256 of the sentence and signal files become description;
+  the selection's counts become description, and the val readers still count val after their claim.
+- `source.OPENED`, `opened_entries`, `opening_identity`: `load_checkpoint` compares the opened entries of the stored
+  and the given identity (OPENED and the selection's rule) and nothing else; `open_prior` builds them without reading
+  a sentence or a file's sha256 (about 19 s less per open on `v19_20261014`). `artefact_identity` loses `counted`;
+  `load_checkpoint` loses `counted`; `checkpoint.NOT_COMPARED` (D63) is gone: the landings are not an opened entry.
+- The training run writes the identity as before (same entries, same format, v10); every checkpoint written before
+  opens as before. `require_selection_of` is unchanged: only the val readers call it, after their claim; a reader
+  of train or select reads today's selection, not checked against the stored counts.
+- Docs: prior D209 (new), D63, D118 (2) (5), §8 item 1, code index; outline index, next free number D210;
+  `superseded_decisions.md` entries 152–154 and the user's decision 20.
+
 ### 2026-10-14 — the identity of a prior's data holds no landings (prior D63)
 
 - Why: no input (prior D206) and no loop (post-training D208) reads the landings, but the identity still held their

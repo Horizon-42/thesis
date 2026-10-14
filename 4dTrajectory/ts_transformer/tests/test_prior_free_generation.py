@@ -242,10 +242,10 @@ def test_flights_done_at_different_rows_end_apart_and_never_feed_a_state_that_is
 
 
 def test_the_runner_writes_its_sentences_and_readout(tmp_path, monkeypatch, capsys):
-    """`main` on A26's synthetic artefact: every live root replaced (the CIFP finals and digests, the closed-loop check,
-    the identity of a one-split artefact), a prior written as `prior_train` writes one; two samples of
-    the one flight, the files read back. The flight's stored outcome is set to a landing and its generated ones are
-    not: the readout puts it inside the prior's selection by the stored outcome (D75)."""
+    """`main` on A26's synthetic artefact: every live root replaced (the CIFP finals and digests, the closed-loop
+    check), a prior written as `prior_train` writes one; two samples of the one flight, the files read back. The
+    flight's stored outcome is set to a landing and its generated ones are not: the readout puts it inside the prior's
+    selection by the stored outcome (D75)."""
     import dataclasses
     import json
 
@@ -254,15 +254,16 @@ def test_the_runner_writes_its_sentences_and_readout(tmp_path, monkeypatch, caps
     from ts_transformer.prior import checkpoint as opening
     from ts_transformer.prior.checkpoint import CHECKPOINT_SCHEMA, save_checkpoint
     from ts_transformer.prior.procedure import PROCEDURE_MASKS
+    from ts_transformer.prior.source import opening_identity
 
     directory, words, _, stored, _ = test_start._artefact(tmp_path, monkeypatch, 4.0)
     flight = signals_flights(directory, "train")[0]
     geometry = load_candidates(directory)[flight["airport"]]
-    identity = {"row_interval_s": 4.0, "artefact": "synthetic", "selection": {"rule": "landed", "counts": {}}}
+    # a one-split artefact: the identity a checkpoint opens on, and no sentence file's sha256 or count (D63)
+    identity = {**opening_identity(directory, 4.0, "landed"), "selection": {"rule": "landed", "counts": {}}}
     digests = {geometry.code: {c.ident: "0" * 64 for c in geometry.candidates}}
     checked = []
     # the prior opens through `checkpoint.open_prior`: its live roots replaced there
-    monkeypatch.setattr(opening, "artefact_identity", lambda d, interval, rule, counted: identity)
     monkeypatch.setattr(runner, "require_conforming_closed_loop", lambda *given: checked.append(given) or (None, {"checks": {"stub": True}}, None))
     monkeypatch.setattr(opening, "procedure_digests", lambda geometries, root: digests)
     read = runner.closed_loop_sentences

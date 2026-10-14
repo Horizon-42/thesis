@@ -8,8 +8,9 @@ the frontend and backend rule (outline §5 rules 1, 8, 10, 11; the branch `two-t
 for the final's vertical corrections (D203, the branch `two-tier2-glidepath`), the prior's lateral input
 scale (D204, the same branch), the prior's stop (D205, the same branch), the prior's landings input (D206, the
 same branch) the reward's landing direction (post-training D207, the branch `two-tier2-reward`), the loops' landings
-(post-training D208, the branch `two-tier2-no-loop-landings`) and the landings in a prior's identity (prior D63, the
-branch `two-tier2-no-landings-digest`). This file
+(post-training D208, the branch `two-tier2-no-loop-landings`), the landings in a prior's identity (prior D63, the
+branch `two-tier2-no-landings-digest`) and the entries a prior's checkpoint opens on (prior D209, the same branch). This
+file
 keeps each text that the rewrite replaced, word for word, beside the text that replaced it, so that the user can compare
 them. It is not part of the design: no code and no design document cites it. An entry leaves this file when the user
 has reviewed it.
@@ -66,8 +67,12 @@ has reviewed it.
    (post-training O26, D175; prior D63; 2026-10-14): for D175, the choice "Keep (Recommended)"; for D63, after "你给我
    解释清楚 … 把模型的checkpoint和数据硬绑定的目的是什么 是一般做法吗？单纯的作为配置描述不行吗？", the choice "Drop it: not
    written, not compared (Recommended)" (B21's stored digest is kept as written and not compared).
+20. A prior's checkpoint opens on the meaning and the day split (prior D209; 2026-10-14): after "Write me a proposal
+   first" for the other entries of the identity, the choices "都保持必须一致（推荐）" for the spec, the candidate table, Δ and
+   the day split, "改为描述" for the sha256 of the sentence and signal files, and "数目改描述，val 前仍重数（推荐）" for the
+   selection's counts.
 
-The new decision rows (vocabulary D196, D197, D201, D203; prior D204–D206; post-training D207, D208; outline D198) are new text, not replacements, so they are not entries
+The new decision rows (vocabulary D196, D197, D201, D203; prior D204–D206, D209; post-training D207, D208; outline D198) are new text, not replacements, so they are not entries
 below; the rewritten rows that cite them are.
 
 ## Index
@@ -225,6 +230,9 @@ below; the rewritten rows that cite them are.
 | 149 | `post_training.md` | O26 | the identity of a prior's data holds no landings (prior D63); D175 keeps the window's landings (O26 closed) |
 | 150 | `post_training.md` | §3, Landings | the identity of a prior's data holds no landings (prior D63); D175 keeps the window's landings (O26 closed) |
 | 151 | `outline.md` | index, post-training | the identity of a prior's data holds no landings (prior D63); D175 keeps the window's landings (O26 closed) |
+| 152 | `prior.md` | D63 | a checkpoint opens on the meaning and the day split; the files' sha256 and the selection's counts describe the data (prior D209) |
+| 153 | `prior.md` | D118 | a checkpoint opens on the meaning and the day split; the files' sha256 and the selection's counts describe the data (prior D209) |
+| 154 | `prior.md` | §8 item 1 | a checkpoint opens on the meaning and the day split; the files' sha256 and the selection's counts describe the data (prior D209) |
 
 ## Text kept unchanged on purpose
 
@@ -3016,4 +3024,52 @@ the losses that an aircraft answers for (item 3),
 
 ```text
 | Post-training | D29–D31, D36, D37, D76, D91–D94, D98–D101, D103–D105, D107, D110, D113–D117, D123–D125, D129, D130, D132, D137, D157, D161, D162, D165, D167–D171, D173–D176, D185, D207, D208 | O15 |
+```
+
+### 152. `prior.md`: D63
+
+**What changed:** a checkpoint opens on the meaning and the day split; the files' sha256 and the selection's counts describe the data (prior D209)
+
+**Old text:**
+
+```text
+| D63 | The identity of a prior's data (§8, item 1) holds no landings: no input (D206) and no loop (post-training D208) reads them. A checkpoint written before 2026-10-14 (B21's) holds their digest; the entry is kept as written and not compared (`checkpoint.NOT_COMPARED`). Opening a prior reads no tracks roster; only the diagnostic readout of stage C reads an airport's landings (post-training D175) | Decided | User, 2026-10-04, on the reading of the stage B agent; the digest removed: user, 2026-10-14 ("Drop it: not written, not compared") |
+```
+
+**New text:**
+
+```text
+| D63 | The identity of a prior's data (§8, item 1) holds no landings: no input (D206) and no loop (post-training D208) reads them. A checkpoint written before 2026-10-14 (B21's) holds their digest; the entry is kept as written and not compared (D209: not an opened entry). Opening a prior reads no tracks roster; only the diagnostic readout of stage C reads an airport's landings (post-training D175) | Decided | User, 2026-10-04, on the reading of the stage B agent; the digest removed: user, 2026-10-14 ("Drop it: not written, not compared") |
+```
+
+### 153. `prior.md`: D118
+
+**What changed:** a checkpoint opens on the meaning and the day split; the files' sha256 and the selection's counts describe the data (prior D209)
+
+**Old text:**
+
+```text
+| D118 | Stage B's readings of B9–B11, accepted by the user: (1) a faulty flight that also did not land is left out for its fault (the mark is asked first); (2) the identity of a prior's data also holds the sha256 of each split's stored signals (§8 item 1): the faulty-track marks are read from the signals, so a reader before the claim of the val read (`open_prior`) checks the val marks by the files' sha256 without reading them (D85) — the training run itself reads val's outcomes and marks to count its identity, held and never shown (D120); it binds data, not code — it changes only when the artefact is built again, when the sentence files' sha256 changes too, so no change of code refuses a prior unless it changes which flights the selection keeps; (3) the claim of the val read names its readout relative to the repository; the base's one validation readout is two readers, each with its own claim (`prior_validation`: the teacher-forced loss and the masks on the labelled words; `prior_free_generation`: the free generation, whose set the Training view opens, D109); (4) the claimed validation set flies on a second service of stage A's live segment that permits val alone (frontend D109), so stage A's code is not changed; (5) after the claim, the val readers count val's selection again and refuse a difference before they read (with (2), only a change of stage A's fault rule that moves no train or select mark can cause it; nothing is written, so the claim may be run again, D119); (6) a flight that the caller ends (post-training D93) gets the caller's outcome: the closed loop's step gives its words and states and refuses to give it an outcome of the judge; (7) D108's behaviour check takes the artefact's vocabulary spec and its first airport's finals as its fixed inputs, and covers two steps of training, the speaker, the input functions, the variant `constants`, the first-step runway and the closed loop's step on a straight-flying stand-in; the campaign also compares its own settings (the seeds, the selection, the configurations, free generation, the temperature, D68's bound); (8) a flight's random numbers in free generation come from numpy `default_rng([seed, sample, index])`; the log-probability under records is 0 at a row not asked, and an asked row reads the record said at its time, its own-state inputs checked against the record's. Free generation and the validation readout write the identity without the val counts (D85) | Decided | User, 2026-10-05 |
+```
+
+**New text:**
+
+```text
+| D118 | Stage B's readings of B9–B11, accepted by the user: (1) a faulty flight that also did not land is left out for its fault (the mark is asked first); (2) the identity of a prior's data also holds the sha256 of each split's stored signals (§8 item 1), from which the faulty-track marks are read: a description of the data, not compared when a prior opens (D209) — the training run itself reads val's outcomes and marks to count its identity, held and never shown (D120); (3) the claim of the val read names its readout relative to the repository; the base's one validation readout is two readers, each with its own claim (`prior_validation`: the teacher-forced loss and the masks on the labelled words; `prior_free_generation`: the free generation, whose set the Training view opens, D109); (4) the claimed validation set flies on a second service of stage A's live segment that permits val alone (frontend D109), so stage A's code is not changed; (5) after the claim, the val readers count val's selection again and refuse a difference before they read (nothing is written, so the claim may be run again, D119); (6) a flight that the caller ends (post-training D93) gets the caller's outcome: the closed loop's step gives its words and states and refuses to give it an outcome of the judge; (7) D108's behaviour check takes the artefact's vocabulary spec and its first airport's finals as its fixed inputs, and covers two steps of training, the speaker, the input functions, the variant `constants`, the first-step runway and the closed loop's step on a straight-flying stand-in; the campaign also compares its own settings (the seeds, the selection, the configurations, free generation, the temperature, D68's bound); (8) a flight's random numbers in free generation come from numpy `default_rng([seed, sample, index])`; the log-probability under records is 0 at a row not asked, and an asked row reads the record said at its time, its own-state inputs checked against the record's. Free generation and the validation readout write the identity without the val counts (D85) | Decided | User, 2026-10-05 |
+```
+
+### 154. `prior.md`: §8 item 1
+
+**What changed:** a checkpoint opens on the meaning and the day split; the files' sha256 and the selection's counts describe the data (prior D209)
+
+**Old text:**
+
+```text
+| 1 | The artefact of a prior | The spec sha, the day split, the candidate table (`candidates.json`), the row interval Δ, the sha256 of each split's closed-loop sentence file at Δ and of its stored signals (D118: they bind the faulty-track marks, D111), the selection of its sentences (D75: the rule and, for each split, airport, stratum and outcome, the sentences kept and left out for each reason, D111; val's counts held and never shown, D120). No landings (D63). A checkpoint opens only for an equal identity, compared whole (a stored `landings` entry, written before 2026-10-14, is not compared: `checkpoint.NOT_COMPARED`); a reader before the val read compares val's counts by the files' sha256, and the val readers count them again after their claim (D118). |
+```
+
+**New text:**
+
+```text
+| 1 | The artefact of a prior | The spec sha, the day split, the candidate table (`candidates.json`), the row interval Δ, the sha256 of each split's closed-loop sentence file at Δ and of its stored signals (the faulty-track marks are read from the signals, D111), the selection of its sentences (D75: the rule and, for each split, airport, stratum and outcome, the sentences kept and left out for each reason, D111; val's counts held and never shown, D120). No landings (D63). A checkpoint opens only on an equal spec sha, candidate table, Δ, day split and selection rule (D209); the files' sha256 and the selection's counts describe the data and are not compared; only the val readers count a selection again, val's, after their claim (D118 (5)). |
 ```

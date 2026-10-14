@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping
 
 from ts_transformer.data.day_split import DaySplit
 from ts_transformer.instructions.airport import AirportGeometry
@@ -42,31 +42,49 @@ def stored_sentences(directory: Path, interval_s: float, split: str) -> list[Sto
             for index, sentence in closed_loop_sentences(directory, split, interval_s, load_spec(directory)).items()]
 
 
-def artefact_identity(directory: Path, interval_s: float, selection: str, *,
-                      counted: Sequence[str] = SPLITS) -> dict[str, Any]:
-    """§8 item 1 (D21, D75): the spec sha, the day split, the candidate table (`candidates.json`, the vertical paths
-    in it), the sha256 of the closed-loop sentence files of Δ = ``interval_s`` and of the stored signals (whose
-    faulty-track marks the selection reads, D111), every development split; and the selection — its rule and, for each
-    split, airport, stratum and outcome, the sentences kept and left out (`prior.selection.selection_record` of the rule
-    ``selection``). The selection's counts read the stored outcomes of the splits ``counted`` only: a run's own record
-    counts every split, a reader that must not read the val days' outcomes (D85: before the base's one validation
-    readout) counts train and select, and `checkpoint.load_checkpoint` compares the rest by the sentence files'
-    sha256."""
+#: The entries of an identity that a checkpoint opens on, with the selection's rule (§8 item 1; D63, the user,
+#: 2026-10-14): what the words and the inputs mean (the spec, the candidate table, Δ) and the day split. The others
+#: describe the data and are not compared: the sha256 of the sentence and signal files, the selection's counts (only
+#: the val readers count again: val's, after their claim, `require_selection_of`), the landings of a checkpoint written
+#: before.
+OPENED = ("spec_sha256", "day_split", "candidates", "row_interval_s")
+
+
+def opened_entries(identity: Mapping[str, Any]) -> dict[str, Any]:
+    """The entries of ``identity`` (an `artefact_identity`, stored or of today, or an `opening_identity`) that a
+    checkpoint opens on: `OPENED` and the selection's rule."""
+    return {**{key: identity[key] for key in OPENED}, "selection": {"rule": identity["selection"]["rule"]}}
+
+
+def opening_identity(directory: Path, interval_s: float, selection: str) -> dict[str, Any]:
+    """`opened_entries` of the artefact's identity at Δ = ``interval_s`` under the rule ``selection``, read without a
+    sentence, an outcome or a file's sha256 (`checkpoint.open_prior`)."""
     return {"spec_sha256": load_spec(directory).sha256, "day_split": load_day_split(directory).to_dict(),
             "candidates": json.loads((directory / "candidates.json").read_text(encoding="utf-8")),
-            "row_interval_s": interval_s,
+            "row_interval_s": interval_s, "selection": {"rule": require_rule(selection)}}
+
+
+def artefact_identity(directory: Path, interval_s: float, selection: str) -> dict[str, Any]:
+    """§8 item 1 (D21, D75): `opening_identity` (the spec sha, the day split, the candidate table — `candidates.json`,
+    the vertical paths in it — and Δ = ``interval_s``); the sha256 of the closed-loop sentence files of Δ and of the
+    stored signals (whose faulty-track marks the selection reads, D111), every development split; and the selection —
+    its rule and, for each split, airport, stratum and outcome, the sentences kept and left out
+    (`prior.selection.selection_record` of the rule ``selection``). A run writes it with its checkpoint; a checkpoint
+    opens on its `opened_entries` alone (D63)."""
+    opened = opening_identity(directory, interval_s, selection)
+    return {**{key: opened[key] for key in OPENED},
             "sentence_files": {split: file_sha256(closed_loop_path(directory, split, interval_s)) for split in SPLITS},
             # the stored signals of each split (MIRROR of `instructions.artefact`'s ``signals_<split>.npz``): the
-            # faulty-track marks are read from them (D111), so the val marks are bound before the claim of the val read
+            # faulty-track marks are read from them (D111)
             "signals_files": {split: file_sha256(directory / f"signals_{split}.npz") for split in SPLITS},
-            "selection": selection_record(selection, (s for split in SPLITS if split in counted
+            "selection": selection_record(selection, (s for split in SPLITS
                                                      for s in stored_sentences(directory, interval_s, split)))}
 
 
 def require_selection_of(directory: Path, interval_s: float, identity: Mapping[str, Any], split: str) -> None:
     """Refuse a prior whose identity's selection counts of ``split`` are not those of the artefact's sentences today
-    (their outcomes and their marks, D75, D111): the val readers' check after the claim of the val read (D85), as
-    `checkpoint.open_prior` compares the read splits."""
+    (their outcomes and their marks, D75, D111): the val readers' check of val after the claim of the val read (D85).
+    Opening a prior counts no selection, and a reader of train or select does not call it (D209)."""
     record = identity["selection"]
     today = selection_record(record["rule"], stored_sentences(directory, interval_s, split))["counts"]
     if split not in today or split not in record["counts"]:

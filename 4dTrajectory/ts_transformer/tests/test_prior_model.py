@@ -368,7 +368,8 @@ def test_an_added_module_with_a_zero_output_changes_nothing_until_it_learns(word
 def test_the_checkpoint_opens_only_for_its_artefact(words, tmp_path):
     model = small_prior(words, variant="constants")
     identity = {"spec_sha256": "a" * 64, "day_split": {"train": ["2026-05-01"]}, "candidates": {"KXXX": []},
-                "sentences": {"train": "b" * 64}}
+                "row_interval_s": 4.0, "sentence_files": {"train": "b" * 64},
+                "selection": {"rule": "landed", "counts": {}}}
     path = tmp_path / "checkpoint.pt"
     save_checkpoint(path, model, model.state_dict(), identity=identity, run={"airports": ["KXXX"], "held_out": None},
                     train_config={"seed": 1})

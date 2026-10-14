@@ -226,9 +226,9 @@ def test_a_smoke_reads_the_select_days_never_the_val_days(tmp_path, monkeypatch)
 
 
 def test_a_smoke_reads_no_outcome_of_a_val_sentence(tmp_path, monkeypatch):
-    """D85: before the base's one validation readout, nothing reads the val days' sentences — not their stored outcomes
-    for the identity either (`checkpoint.open_prior` compares the val counts by the val file's sha256): every read of
-    val's closed-loop sentences fails here, and the smoke runs."""
+    """D85: before the base's one validation readout, nothing reads the val days' sentences, and opening the prior reads
+    no sentence at all (`checkpoint.open_prior`, D209): every read of val's closed-loop sentences fails here, the smoke
+    runs, and the only split read is the one the readout reads."""
     from ts_transformer.instructions import artefact as artefact_module
     from ts_transformer.prior import source as source_module
 
@@ -247,7 +247,7 @@ def test_a_smoke_reads_no_outcome_of_a_val_sentence(tmp_path, monkeypatch):
     argv = ["--prior", str(prior), "--instructions", str(artefact), "--executor", str(tmp_path / "executor"),
             "--device", "cpu", "--split", "select", "--smoke", "--out", str(tmp_path / "c")]
     assert runner.main(argv) == 0
-    assert set(opened) == {"train", "select"}
+    assert set(opened) == {"select"}
 
 
 def test_the_readout_is_the_base_s_alone(tmp_path, monkeypatch):
