@@ -1,5 +1,17 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-14 — B19: the prior's campaign on the labels of D203 with D204; the base lands 93.0 % of the val days
+
+- Why: the user, 2026-10-14: "再跑一遍CV，如果确认效果更好了，那么就在新的标注数据上跑base模型的正式训练".
+- `outputs/POOLED/prior/prior_b19_20261014` (read-only): B15's campaign on `v19_20261014` / `v24_20261014`, from
+  `run-b19` at `1bac2c38`. Held-out airports landed: configuration A seed 1337 84.6 % (the trial on v18 80.2 %, B16
+  47.0 %), C 83.8 % (B15 62.8 %), A seed 2024 80.3 % (B15 54.5 %); configuration A chosen.
+- The campaign's base stopped at epoch 13 by patience 3 (best 10) and read val: 87.2 %. A run of A on every airport for
+  30 epochs (`prior_b19_base30_20261014`, best epoch 30) landed 92.3 % of the select days against 87.6 %; the user chose
+  it, and it read val (B19's second val read): **93.0 %** landed (straight-in 95.9 %, vectored 88.0 %; B15's base
+  90.3 / 93.7 / 84.2 %), the evaluation's lateral gate failures 89 → 10. Readout
+  `4dTrajectory/ts_transformer/docs/two_tier/readouts/2026-10-14_b19_prior.zh.md`.
+
 ### 2026-10-14 — the prior's offset right of a final goes in on the glidepath's 100 m scale (prior D204); v19 / v24 built
 
 - Why: on asinh(d / 1 km), 20 m off the centreline was the input 0.02, and B16's configuration A folds (on v18) crossed
