@@ -290,8 +290,6 @@ class Context:
     base: Prior
     base_identity: dict[str, Any]
     geometries: Mapping[str, Any]
-    #: each airport's roster landings (prior D63); only the diagnostic readout reads them (D175)
-    rosters: Mapping[str, Any]
     finals: Mapping[str, Any]
     splits: Mapping[str, Mapping[str, Any]]
     data: Sequence[Any]
@@ -367,7 +365,7 @@ def open_context(prior_dir: Path, instructions: Path, executor: Path, edges_refe
     if data and not sentences:
         raise ValueError(f"no train sentence in the base's selection {prior.selection!r}: no data term (D36, D76)")
     return Context(instructions, executor, edges_reference, device, words, prior.interval_s,
-                   prior.checkpoint.model.to(device).eval(), prior.checkpoint.identity, prior.geometries, prior.landings,
+                   prior.checkpoint.model.to(device).eval(), prior.checkpoint.identity, prior.geometries,
                    {code: airport_finals(g, root=procedure_root) for code, g in prior.geometries.items()},
                    {split: split_data(instructions, split, words, prior.interval_s, prior.geometries, executor)
                     for split in splits},

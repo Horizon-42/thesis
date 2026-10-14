@@ -16,7 +16,7 @@ from ts_transformer.instructions.artefact import load_signals
 from ts_transformer.instructions.words import ALTITUDE, ANGLE, Words
 from ts_transformer.prior.procedure import Final
 from ts_transformer.tests.support import (
-    fixture_days, instruction_spec, parallel_airport, prior_artefact, prior_closed_loop_sentence,
+    instruction_spec, parallel_airport, prior_artefact, prior_closed_loop_sentence,
 )
 
 CPU = torch.device("cpu")
@@ -65,23 +65,20 @@ def base_prior(tmp_path, monkeypatch, *, held_out=None):
     `prior_train` writes one, every live root of the runner replaced. Returns ``(artefact, prior directory)``."""
     from ts_transformer.prior import checkpoint as opening
     from ts_transformer.prior.checkpoint import CHECKPOINT_SCHEMA, save_checkpoint
-    from ts_transformer.prior.landings import roster_landings
     from ts_transformer.prior.model import Prior, PriorConfig
     from ts_transformer.prior.procedure import PROCEDURE_MASKS
     from ts_transformer.prior.source import artefact_identity
     from ts_transformer.io_utils import file_sha256
 
     artefact = tmp_path / "artefact"
-    words, records = prior_artefact(artefact, interval_s=2.0, outcomes=("landed", "landing_failed"))
-    landings = {"KXXX": roster_landings(records["KXXX"], ("09", "09L"), fixture_days())}
+    words, _ = prior_artefact(artefact, interval_s=2.0, outcomes=("landed", "landing_failed"))
     digests = {"KXXX": {"09": "0" * 64, "09L": "0" * 64}}
     monkeypatch.setattr(runner, "require_conforming_closed_loop", lambda *given: (None, {"checks": {"stub": True}}, None))
     # the prior opens through `checkpoint.open_prior`: its live roots replaced there
-    monkeypatch.setattr(opening, "airport_landings", lambda geometries, days: landings)
     monkeypatch.setattr(opening, "procedure_digests", lambda geometries, root: digests)
     monkeypatch.setattr(runner, "airport_finals", lambda geometry, root: finals_of(geometry))
     monkeypatch.setattr(runner, "git_state", lambda: {"head": "fixture", "dirty": False})
-    identity = artefact_identity(artefact, 2.0, landings, "landed")
+    identity = artefact_identity(artefact, 2.0, "landed")
     torch.manual_seed(0)
     model = Prior(PriorConfig.from_words(words, "full", d_model=32, layers=1, heads=4, feedforward=64))
     prior = tmp_path / "prior"

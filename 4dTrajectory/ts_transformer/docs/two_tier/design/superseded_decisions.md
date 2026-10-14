@@ -7,8 +7,9 @@ B15), for the final's lateral corrections (D201, the branch `two-tier2-centrelin
 the frontend and backend rule (outline §5 rules 1, 8, 10, 11; the branch `two-tier2-backend-orphans`); on 2026-10-14
 for the final's vertical corrections (D203, the branch `two-tier2-glidepath`), the prior's lateral input
 scale (D204, the same branch), the prior's stop (D205, the same branch), the prior's landings input (D206, the
-same branch) the reward's landing direction (post-training D207, the branch `two-tier2-reward`) and the loops' landings
-(post-training D208, the branch `two-tier2-no-loop-landings`). This file
+same branch) the reward's landing direction (post-training D207, the branch `two-tier2-reward`), the loops' landings
+(post-training D208, the branch `two-tier2-no-loop-landings`) and the landings in a prior's identity (prior D63, the
+branch `two-tier2-no-landings-digest`). This file
 keeps each text that the rewrite replaced, word for word, beside the text that replaced it, so that the user can compare
 them. It is not part of the design: no code and no design document cites it. An entry leaves this file when the user
 has reviewed it.
@@ -61,6 +62,10 @@ has reviewed it.
 18. The landings that nothing reads go (post-training O26, D208; 2026-10-14): the choice "现在就删". What D208 keeps
    (the landings' digest in a prior's identity, the window's landings that the diagnostic readout reads) is Claude's,
    for the user to confirm.
+19. The diagnostic readout keeps the window's landings, and the identity of a prior's data holds no landings
+   (post-training O26, D175; prior D63; 2026-10-14): for D175, the choice "Keep (Recommended)"; for D63, after "你给我
+   解释清楚 … 把模型的checkpoint和数据硬绑定的目的是什么 是一般做法吗？单纯的作为配置描述不行吗？", the choice "Drop it: not
+   written, not compared (Recommended)" (B21's stored digest is kept as written and not compared).
 
 The new decision rows (vocabulary D196, D197, D201, D203; prior D204–D206; post-training D207, D208; outline D198) are new text, not replacements, so they are not entries
 below; the rewritten rows that cite them are.
@@ -209,6 +214,17 @@ below; the rewritten rows that cite them are.
 | 138 | `outline.md` | §3.2 Index | the loops keep no landings (post-training D208) |
 | 139 | `outline.md` | §3.2 Index | the loops keep no landings (post-training D208) |
 | 140 | `multi_control.md` | D150 | the loops keep no landings (post-training D208) |
+| 141 | `prior.md` | D63 | the identity of a prior's data holds no landings (prior D63); D175 keeps the window's landings (O26 closed) |
+| 142 | `prior.md` | §2, No landings | the identity of a prior's data holds no landings (prior D63); D175 keeps the window's landings (O26 closed) |
+| 143 | `prior.md` | §8 item 1 | the identity of a prior's data holds no landings (prior D63); D175 keeps the window's landings (O26 closed) |
+| 144 | `prior.md` | code index, the landings | the identity of a prior's data holds no landings (prior D63); D175 keeps the window's landings (O26 closed) |
+| 145 | `prior.md` | code index, the identity | the identity of a prior's data holds no landings (prior D63); D175 keeps the window's landings (O26 closed) |
+| 146 | `prior.md` | code index, the artefact | the identity of a prior's data holds no landings (prior D63); D175 keeps the window's landings (O26 closed) |
+| 147 | `prior.md` | code index, the checkpoint | the identity of a prior's data holds no landings (prior D63); D175 keeps the window's landings (O26 closed) |
+| 148 | `post_training.md` | D208 | the identity of a prior's data holds no landings (prior D63); D175 keeps the window's landings (O26 closed) |
+| 149 | `post_training.md` | O26 | the identity of a prior's data holds no landings (prior D63); D175 keeps the window's landings (O26 closed) |
+| 150 | `post_training.md` | §3, Landings | the identity of a prior's data holds no landings (prior D63); D175 keeps the window's landings (O26 closed) |
+| 151 | `outline.md` | index, post-training | the identity of a prior's data holds no landings (prior D63); D175 keeps the window's landings (O26 closed) |
 
 ## Text kept unchanged on purpose
 
@@ -2823,4 +2839,181 @@ the losses that an aircraft answers for (item 3),
 
 ```text
 | D150 | **The aircraft of one closed loop join it at their own Δ rows, in one batch** (§6.3). A loop has a row clock (its ticks, one Δ each); each aircraft has a join tick j: before it the aircraft is absent (its rows not present, not spoken, not flown, its executor waiting), from it the aircraft's own row 0, then its observed rows to its own first predicted step, then its said rows. Built in stages A's and B's code (the start and `Loop`; `LoopRows`, the speaker, `SpeakingLoop`), each written first in its stage's public interface (vocabulary §6 item 5, prior §7 items 2, 3, 7). The prior's network does not change: its time attention already reads only present rows (`Past.present`) and time differences (RoPE on each aircraft's own seconds). With every join tick 0 the loop is today's loop, bit for bit (a test); free generation and stage C call it so. Why: the commanded aircraft of a window enter at different times; one loop for each entry row would speak a row in up to L / Δ small batches (150 at L = 10 min), each with its fixed cost in Python, and the speaking is bound by the CPU (outline D138) | Decided | User, 2026-10-06 (one batch with each aircraft's own first row, Claude's option 1); the design of §6.3: Claude |
+```
+
+### 141. `prior.md`: D63
+
+**What changed:** the identity of a prior's data holds no landings (prior D63); D175 keeps the window's landings (O26 closed)
+
+**Old text:**
+
+```text
+| D63 | The identity of a prior's data (§8, item 1) also holds the airport's landings (no input reads them since D206, and no loop since post-training D208; post-training O26): for each airport, the sha256 of each landing's flight, runway and time, in time order, and of the number of landings left out on the sealed test days. The landings come from the airport's tracks roster, outside the artefact: without them, a changed roster would have changed the inputs (before D206) and left the identity the same. By their flights, never by the bytes of the roster (D21). A run that reads the landings again computes the digest again and refuses a difference (§2, §8) | Decided | User, 2026-10-04, on the reading of the stage B agent |
+```
+
+**New text:**
+
+```text
+| D63 | The identity of a prior's data (§8, item 1) holds no landings: no input (D206) and no loop (post-training D208) reads them. A checkpoint written before 2026-10-14 (B21's) holds their digest; the entry is kept as written and not compared (`checkpoint.NOT_COMPARED`). Opening a prior reads no tracks roster; only the diagnostic readout of stage C reads an airport's landings (post-training D175) | Decided | User, 2026-10-04, on the reading of the stage B agent; the digest removed: user, 2026-10-14 ("Drop it: not written, not compared") |
+```
+
+### 142. `prior.md`: §2, No landings
+
+**What changed:** the identity of a prior's data holds no landings (prior D63); D175 keeps the window's landings (O26 closed)
+
+**Old text:**
+
+```text
+  index of landings refuses a landing on a test day or on a day outside the day split by itself. The identity of
+  a prior's data holds a digest of them (§8, item 1; D63; post-training O26).
+```
+
+**New text:**
+
+```text
+  index of landings refuses a landing on a test day or on a day outside the day split by itself. The identity of
+  a prior's data does not hold them (§8, item 1; D63); only the diagnostic readout of stage C reads them
+  (post-training D175).
+```
+
+### 143. `prior.md`: §8 item 1
+
+**What changed:** the identity of a prior's data holds no landings (prior D63); D175 keeps the window's landings (O26 closed)
+
+**Old text:**
+
+```text
+| 1 | The artefact of a prior | The spec sha, the day split, the candidate table (`candidates.json`), the row interval Δ, the sha256 of each split's closed-loop sentence file at Δ and of its stored signals (D118: they bind the faulty-track marks, D111), the selection of its sentences (D75: the rule and, for each split, airport, stratum and outcome, the sentences kept and left out for each reason, D111; val's counts held and never shown, D120), and the landings that the candidate vectors count (D63): for each airport, the sha256 of each landing's flight, runway and time, in time order, and of the number left out on the sealed test days. A checkpoint opens only for an equal identity, compared whole; a reader before the val read compares val's counts by the files' sha256, and the val readers count them again after their claim (D118). A run that reads the landings again computes the digest again and refuses a difference |
+```
+
+**New text:**
+
+```text
+| 1 | The artefact of a prior | The spec sha, the day split, the candidate table (`candidates.json`), the row interval Δ, the sha256 of each split's closed-loop sentence file at Δ and of its stored signals (D118: they bind the faulty-track marks, D111), the selection of its sentences (D75: the rule and, for each split, airport, stratum and outcome, the sentences kept and left out for each reason, D111; val's counts held and never shown, D120). No landings (D63). A checkpoint opens only for an equal identity, compared whole (a stored `landings` entry, written before 2026-10-14, is not compared: `checkpoint.NOT_COMPARED`); a reader before the val read compares val's counts by the files' sha256, and the val readers count them again after their claim (D118). |
+```
+
+### 144. `prior.md`: code index, the landings
+
+**What changed:** the identity of a prior's data holds no landings (prior D63); D175 keeps the window's landings (O26 closed)
+
+**Old text:**
+
+```text
+| The landings of an airport (D63; post-training D105): the index, its digest, the roster | `prior/landings.py:30` `LandingIndex`, `:53` `digest`, `:65` `roster_landings` |
+```
+
+**New text:**
+
+```text
+| The landings of an airport (post-training D105, D175): the index, the roster, every airport's | `prior/landings.py:29` `LandingIndex`, `:57` `roster_landings`; `prior/source.py:79` `airport_landings` |
+```
+
+### 145. `prior.md`: code index, the identity
+
+**What changed:** the identity of a prior's data holds no landings (prior D63); D175 keeps the window's landings (O26 closed)
+
+**Old text:**
+
+```text
+| The identity of the data (§8 item 1); the val recount after the claim | `prior/source.py:45` `artefact_identity`, `:68` `require_selection_of` |
+```
+
+**New text:**
+
+```text
+| The identity of the data (§8 item 1); the val recount after the claim | `prior/source.py:45` `artefact_identity`, `:66` `require_selection_of` |
+```
+
+### 146. `prior.md`: code index, the artefact
+
+**What changed:** the identity of a prior's data holds no landings (prior D63); D175 keeps the window's landings (O26 closed)
+
+**Old text:**
+
+```text
+| The artefact as sentences of a selection | `prior/source.py:87` `ArtefactSource` |
+```
+
+**New text:**
+
+```text
+| The artefact as sentences of a selection | `prior/source.py:85` `ArtefactSource` |
+```
+
+### 147. `prior.md`: code index, the checkpoint
+
+**What changed:** the identity of a prior's data holds no landings (prior D63); D175 keeps the window's landings (O26 closed)
+
+**Old text:**
+
+```text
+| The checkpoint; the val read: its lock, its claim with the reader's options, a written readout under an unspent claim, the spent mark, a written claim (D119, D128); the identity a readout shows; opening a prior run | `prior/checkpoint.py:67` `load_checkpoint`, `:89` `CLAIM_SPENT_BY`, `:99` `lock_val_read`, `:113` `claim_validation_read`, `:152` `settle_written_claim`, `:164` `spend_validation_claim`, `:174` `holds_written_claim`, `:180` `written_claim`, `:190` `readable_identity`, `:208` `open_prior` |
+```
+
+**New text:**
+
+```text
+| The checkpoint; the val read: its lock, its claim with the reader's options, a written readout under an unspent claim, the spent mark, a written claim (D119, D128); the identity a readout shows; opening a prior run | `prior/checkpoint.py:46` `NOT_COMPARED`, `:72` `load_checkpoint`, `:94` `CLAIM_SPENT_BY`, `:104` `lock_val_read`, `:118` `claim_validation_read`, `:157` `settle_written_claim`, `:169` `spend_validation_claim`, `:179` `holds_written_claim`, `:185` `written_claim`, `:195` `readable_identity`, `:212` `open_prior` |
+```
+
+### 148. `post_training.md`: D208
+
+**What changed:** the identity of a prior's data holds no landings (prior D63); D175 keeps the window's landings (O26 closed)
+
+**Old text:**
+
+```text
+| D208 | **The loops keep no landings** (O26): no input of the prior (prior D206) and no reward (D207) reads them. Deleted, with their tests: the landings that a speaker's loop keeps for each aircraft (prior §7 item 7: `SpeakingLoop`'s argument `landings`, `landings(flight)`, `add_landing`); a commanded aircraft's landing added to the others' in the loop (multi-aircraft control D147, D186 (1), D189 (0): `post.landings.commanded_landings`, `LandingIndex.with_landing`); the count of the 30 min before a step (`LandingIndex.counts_before`, `LANDINGS_WINDOW_S`); the rosters that the loops took (`WindowLoop`, `speak_and_fly`, `branch_round`, `backward_round`). Kept: the landings of a window (D105, `window_landings`), which the diagnostic readout's field 1 reads (D175, `other_class`), and the landings' digest in the identity of a prior's data (prior D63): without it the identity changes, and every prior checkpoint written before, B21's base too, is refused. Both stay in O26. No word, state, outcome, reward or record of free generation or of a window loop changes (their tests on fixed inputs) | Decided | User, 2026-10-14 (O26: "现在就删"); what is kept: Claude, for the user to confirm |
+```
+
+**New text:**
+
+```text
+| D208 | **The loops keep no landings** (O26): no input of the prior (prior D206) and no reward (D207) reads them. Deleted, with their tests: the landings that a speaker's loop keeps for each aircraft (prior §7 item 7: `SpeakingLoop`'s argument `landings`, `landings(flight)`, `add_landing`); a commanded aircraft's landing added to the others' in the loop (multi-aircraft control D147, D186 (1), D189 (0): `post.landings.commanded_landings`, `LandingIndex.with_landing`); the count of the 30 min before a step (`LandingIndex.counts_before`, `LANDINGS_WINDOW_S`); the rosters that the loops took (`WindowLoop`, `speak_and_fly`, `branch_round`, `backward_round`). Kept: the landings of a window (D105, `window_landings`), which the diagnostic readout's field 1 reads (D175, `other_class`); the readout reads each airport's roster itself (`prior.source.airport_landings`), and no context holds them (`Context.rosters` deleted). The identity of a prior's data holds no landings (prior D63). No word, state, outcome, reward or record of free generation or of a window loop changes (their tests on fixed inputs) | Decided | User, 2026-10-14 (O26: "现在就删"; the window's landings for D175: "Keep"; the digest: prior D63) |
+```
+
+### 149. `post_training.md`: O26
+
+**What changed:** the identity of a prior's data holds no landings (prior D63); D175 keeps the window's landings (O26 closed)
+
+**Old text:**
+
+```text
+| O26 | What D208 kept of the landings that no input, no reward and no loop reads: the landings of a window (D105, `post/landings.py` `window_landings`), read only by the diagnostic readout's field 1 (D175, `other_class`), and their digest in the identity of a prior's data (prior D63, `prior/source.py` `artefact_identity`) | The digest goes with the next prior campaign (the identity then changes its format, and the checkpoints before it are refused); D175's field 1 without the window's landings, or the landings kept for it alone. The user decides | §3 |
+```
+
+**New text:**
+
+(deleted)
+
+### 150. `post_training.md`: §3, Landings
+
+**What changed:** the identity of a prior's data holds no landings (prior D63); D175 keeps the window's landings (O26 closed)
+
+**Old text:**
+
+```text
+  readout reads them (D175; O26).
+```
+
+**New text:**
+
+```text
+  readout reads them (D175).
+```
+
+### 151. `outline.md`: index, post-training
+
+**What changed:** the identity of a prior's data holds no landings (prior D63); D175 keeps the window's landings (O26 closed)
+
+**Old text:**
+
+```text
+| Post-training | D29–D31, D36, D37, D76, D91–D94, D98–D101, D103–D105, D107, D110, D113–D117, D123–D125, D129, D130, D132, D137, D157, D161, D162, D165, D167–D171, D173–D176, D185, D207, D208 | O15, O26 |
+```
+
+**New text:**
+
+```text
+| Post-training | D29–D31, D36, D37, D76, D91–D94, D98–D101, D103–D105, D107, D110, D113–D117, D123–D125, D129, D130, D132, D137, D157, D161, D162, D165, D167–D171, D173–D176, D185, D207, D208 | O15 |
 ```

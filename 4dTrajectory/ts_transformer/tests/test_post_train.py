@@ -49,7 +49,7 @@ def test_a_batch_is_spoken_with_its_campaigns_front_attention(monkeypatch, atten
 
     monkeypatch.setattr(post_train, "branch_round", spoken)
     context = SimpleNamespace(splits={"train": {"sentences": {}, "flights": {}, "faults": {}}},
-                              start_loop=lambda split, batch: None, geometries={}, rosters={}, finals={}, words=None,
+                              start_loop=lambda split, batch: None, geometries={}, finals={}, words=None,
                               interval_s=DELTA, variant="full", edges_reference=None, device=CPU)
     with pytest.raises(_Spoken):
         post_train.speak_batch(None, context, [], [], _settings(front_attention=attention), 0, None, 0)
@@ -85,7 +85,7 @@ def _context(s):
     train["start"] = Start(s["directory"], "train", DELTA, s["directory"].parent / "executor")
     data = ArtefactSource(s["directory"], DELTA, "full", "all").sentences("train", code)
     return Context(s["directory"], s["directory"].parent / "executor", s["reference"], CPU, s["words"], DELTA, s["base"],
-                   {"base": "the fixture's"}, s["geometries"], {code: s["roster"]}, s["finals"],
+                   {"base": "the fixture's"}, s["geometries"], s["finals"],
                    {"train": train, "select": train}, data)
 
 
@@ -96,7 +96,7 @@ def test_the_context_holds_the_base_on_its_device(monkeypatch, tmp_path):
     base = torch.nn.Linear(2, 2).train()
     base.config = SimpleNamespace(variant="full")
     prior = SimpleNamespace(checkpoint=SimpleNamespace(model=base, identity={}), interval_s=4.0, geometries={},
-                            landings={}, selection="landed")
+                            selection="landed")
     monkeypatch.setattr(post_train, "open_prior", lambda *a, **k: prior)
     monkeypatch.setattr(post_train, "load_spec", lambda instructions: None)
     monkeypatch.setattr(post_train, "Words", lambda spec: None)
@@ -115,8 +115,8 @@ def test_a_context_starts_its_loops_executor_on_its_executor_device(monkeypatch)
     window = SimpleNamespace(signal_index=0, signal_indices=[0], join_steps=lambda: [0], joined=[])
     monkeypatch.setattr(post_train, "start_move_of", lambda window: None)
     context = post_train.Context(instructions=None, executor=None, edges_reference=None, device=torch.device("meta"),
-                                 words=None, interval_s=4.0, base=None, base_identity={}, geometries={}, rosters={},
-                                 finals={}, splits={"train": {"sentences": {0: None}, "start": start}}, data=[])
+                                 words=None, interval_s=4.0, base=None, base_identity={}, geometries={}, finals={},
+                                 splits={"train": {"sentences": {0: None}, "start": start}}, data=[])
     context.start_loop("train", [window])([0])
     replace(context, executor_device=torch.device("cpu")).start_loop("train", [window])([0])
     assert [d.type for d in seen] == ["meta", "cpu"]
@@ -1544,7 +1544,7 @@ def test_stage_c_speaks_at_its_branch_interval(monkeypatch):
 
     monkeypatch.setattr(post_train, "branch_round", branch_round)
     context = SimpleNamespace(splits={"train": {"sentences": None, "flights": None, "faults": None}},
-                              start_loop=lambda split, batch: None, geometries=None, rosters=None, finals=None,
+                              start_loop=lambda split, batch: None, geometries=None, finals=None,
                               words=None, interval_s=4.0, variant="full", edges_reference=None, device=CPU)
     loop = SimpleNamespace(speaking=SimpleNamespace(start=8), end_step=lambda b: 40)
     for every, points in ((60.0, [8, 23, 38]), (120.0, [8, 38])):          # 120 s: D37's, the default
@@ -1646,7 +1646,7 @@ def test_a_formal_context_refuses_a_fold_or_a_smoke_prior(monkeypatch, tmp_path)
         base.config = SimpleNamespace(variant="full")
         return SimpleNamespace(directory=tmp_path / "run", config={"run": {"held_out": held_out}},
                                checkpoint=SimpleNamespace(model=base, identity={}, run={"sample": sample}),
-                               interval_s=4.0, geometries={}, landings={}, selection="landed")
+                               interval_s=4.0, geometries={}, selection="landed")
 
     monkeypatch.setattr(post_train, "load_spec", lambda instructions: None)
     monkeypatch.setattr(post_train, "Words", lambda spec: None)

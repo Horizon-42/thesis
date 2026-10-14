@@ -11,10 +11,10 @@ from flight_scenarios.fas_geometry import fas_course_geometry
 from ts_transformer.autopilot.start import NO_MOVE, start_moved
 from ts_transformer.experiments.prior_free_generation import speak_and_fly
 from ts_transformer.experiments.prior_speaking_loop import flight_numbers
-from ts_transformer.instructions.artefact import load_candidates, load_day_split, signals_flights
+from ts_transformer.instructions.artefact import load_candidates, signals_flights
 from ts_transformer.instructions.grammar import apply
 from ts_transformer.instructions.words import COLUMNS, UNCHANGED
-from ts_transformer.prior.landings import Landing, LandingIndex, utc_s
+from ts_transformer.prior.landings import utc_s
 from ts_transformer.prior.model import Prior, PriorConfig
 from ts_transformer.prior.procedure import Final
 from ts_transformer.prior.speaker import MOST_GO_AROUNDS
@@ -242,8 +242,8 @@ def test_flights_done_at_different_rows_end_apart_and_never_feed_a_state_that_is
 
 
 def test_the_runner_writes_its_sentences_and_readout(tmp_path, monkeypatch, capsys):
-    """`main` on A26's synthetic artefact: every live root replaced (the landings, the CIFP finals and digests, the
-    closed-loop check, the identity of a one-split artefact), a prior written as `prior_train` writes one; two samples of
+    """`main` on A26's synthetic artefact: every live root replaced (the CIFP finals and digests, the closed-loop check,
+    the identity of a one-split artefact), a prior written as `prior_train` writes one; two samples of
     the one flight, the files read back. The flight's stored outcome is set to a landing and its generated ones are
     not: the readout puts it inside the prior's selection by the stored outcome (D75)."""
     import dataclasses
@@ -258,16 +258,11 @@ def test_the_runner_writes_its_sentences_and_readout(tmp_path, monkeypatch, caps
     directory, words, _, stored, _ = test_start._artefact(tmp_path, monkeypatch, 4.0)
     flight = signals_flights(directory, "train")[0]
     geometry = load_candidates(directory)[flight["airport"]]
-    landings = {geometry.code: LandingIndex(tuple(c.ident for c in geometry.candidates),
-                                            (Landing(utc_s(flight["landing_time_utc"]), geometry.candidates[0].ident,
-                                                     flight["dataset_id"].split(":", 1)[1]),), 0,
-                                            load_day_split(directory))}
     identity = {"row_interval_s": 4.0, "artefact": "synthetic", "selection": {"rule": "landed", "counts": {}}}
     digests = {geometry.code: {c.ident: "0" * 64 for c in geometry.candidates}}
     checked = []
     # the prior opens through `checkpoint.open_prior`: its live roots replaced there
-    monkeypatch.setattr(opening, "airport_landings", lambda geometries, days: landings)
-    monkeypatch.setattr(opening, "artefact_identity", lambda d, interval, given, rule, counted: identity)
+    monkeypatch.setattr(opening, "artefact_identity", lambda d, interval, rule, counted: identity)
     monkeypatch.setattr(runner, "require_conforming_closed_loop", lambda *given: checked.append(given) or (None, {"checks": {"stub": True}}, None))
     monkeypatch.setattr(opening, "procedure_digests", lambda geometries, root: digests)
     read = runner.closed_loop_sentences

@@ -2,9 +2,9 @@
 it was trained on.
 
 The identity (§8 item 1, D21) is the spec sha, the day split, the candidate table, the sha256 of the sentence
-files, the roster landings (D63; no input and no loop reads them, D206, post-training D208) and the selection of the
-sentences (D75); `prior.source.artefact_identity` builds it. A checkpoint opens only for the same identity, compared
-whole: a prior of another artefact is refused by what differs, never read with a guess (principle 8). The run (its
+files and the selection of the sentences (D75); `prior.source.artefact_identity` builds it. A checkpoint opens only for
+the same identity, compared whole: a prior of another artefact is refused by what differs, never read with a guess
+(principle 8). A stored entry in `NOT_COMPARED` is not read (D63). The run (its
 airports and its held-out airport, `runs.Run`) and the training configuration are recorded beside it.
 
 `open_prior` opens a prior run as every runner of the prior does (§7 item 1, D106 item 2): its record, its checkpoint
@@ -27,12 +27,11 @@ import torch
 
 from flight_scenarios.procedure_final import DEFAULT_PROCEDURE_ROOT
 from ts_transformer.instructions.airport import AirportGeometry
-from ts_transformer.instructions.artefact import READ_SPLITS, SPLITS, load_candidates, load_day_split
+from ts_transformer.instructions.artefact import READ_SPLITS, SPLITS, load_candidates
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
-from ts_transformer.prior.landings import LandingIndex
 from ts_transformer.prior.model import Prior, PriorConfig
 from ts_transformer.prior.procedure import PROCEDURE_MASKS, procedure_digests
-from ts_transformer.prior.source import airport_landings, artefact_identity
+from ts_transformer.prior.source import artefact_identity
 from ts_transformer.repo_layout import REPO_ROOT, repo_relative
 
 #: The prior of two-tier v4 (prior design, 2026-10-04): five columns, no airport or row-position embedding, RoPE on
@@ -42,6 +41,9 @@ from ts_transformer.repo_layout import REPO_ROOT, repo_relative
 #: offset right of a final's centreline goes in on the glidepath's scale (`inputs.PATH_OFFSET_SCALE_M`), not 1 km.
 #: v10 (D206): a candidate vector has no landings in the 30 min before the step.
 CHECKPOINT_SCHEMA = "ts-prior-checkpoint-v10"
+#: The entries of a stored identity that are not compared (D63, the user, 2026-10-14): the airports' roster landings,
+#: which no input (D206) and no loop (post-training D208) reads. A checkpoint written before then holds them, unread.
+NOT_COMPARED = ("landings",)
 
 
 class Checkpoint(NamedTuple):
@@ -74,7 +76,7 @@ def load_checkpoint(path: Path, identity: Mapping[str, Any], *, counted: Sequenc
     payload = torch.load(path, map_location="cpu", weights_only=True)
     if payload["schema"] != CHECKPOINT_SCHEMA:
         raise ValueError(f"{path} is a {payload['schema']!r} checkpoint, not {CHECKPOINT_SCHEMA!r}")
-    stored = payload["identity"]
+    stored = {key: value for key, value in payload["identity"].items() if key not in NOT_COMPARED}
     if set(counted) != set(SPLITS):
         counts = {split: cells for split, cells in stored["selection"]["counts"].items() if split in counted}
         stored = {**stored, "selection": {**stored["selection"], "counts": counts}}
@@ -203,7 +205,6 @@ class OpenedPrior(NamedTuple):
     config: dict[str, Any]                    # the run's ``config.json``
     checkpoint: Checkpoint
     geometries: dict[str, AirportGeometry]    # the artefact's candidates, by airport
-    landings: dict[str, LandingIndex]         # each airport's roster landings (D63); stage C's diagnostic reads them
     interval_s: float
     selection: str                            # the run's selection rule (D75)
 
@@ -218,13 +219,12 @@ def open_prior(prior_dir: Path, instructions: Path, *, procedure_root: Path = DE
     interval_s = float(config["identity"]["row_interval_s"])
     selection = config["identity"]["selection"]["rule"]
     geometries = load_candidates(instructions)
-    landings = airport_landings(geometries, load_day_split(instructions))
     checkpoint = load_checkpoint(prior_dir / "checkpoint.pt",
-                                 artefact_identity(instructions, interval_s, landings, selection, counted=READ_SPLITS),
+                                 artefact_identity(instructions, interval_s, selection, counted=READ_SPLITS),
                                  counted=READ_SPLITS)
     masks = json.loads((prior_dir / "procedure_masks.json").read_text(encoding="utf-8"))
     if masks != {"set": PROCEDURE_MASKS, "checkpoint_sha256": file_sha256(prior_dir / "checkpoint.pt"),
                  "procedure_data": procedure_digests(geometries, root=procedure_root)}:
         raise ValueError(f"{prior_dir}: the prior's procedure masks are not {PROCEDURE_MASKS} on today's procedure data "
                          f"(§8 item 2)")
-    return OpenedPrior(prior_dir, config, checkpoint, geometries, landings, interval_s, selection)
+    return OpenedPrior(prior_dir, config, checkpoint, geometries, interval_s, selection)

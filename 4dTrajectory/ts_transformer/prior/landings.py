@@ -1,6 +1,6 @@
-"""The airport's landings on its candidate runways. No input of the prior (D206) and no loop (post-training D207, D208)
-reads them. The prior's data identity binds their digest (D63), and the diagnostic readout of stage C reads a window's
-(post-training D175, `post.landings.window_landings`).
+"""The airport's landings on its candidate runways. No input of the prior (D206), no loop (post-training D207, D208)
+and not the prior's data identity (D63) reads them; the diagnostic readout of stage C reads a window's (post-training
+D175, `post.landings.window_landings`).
 
 The landings are the harvest's tracks roster of the airport (`repo_layout.tracks_manifest_path`): every record the
 harvest assigned to a runway, whether or not its flight has a sentence — less every landing on a sealed test day
@@ -9,7 +9,6 @@ harvest assigned to a runway, whether or not its flight has a sentence — less 
 
 from __future__ import annotations
 
-import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -49,13 +48,6 @@ class LandingIndex:
         keys = [landing.flight_key for landing in self.landings]
         if len(set(keys)) != len(keys):
             raise ValueError("a flight lands twice in the index")
-
-    def digest(self) -> str:
-        """The identity of these landings (D63; D21: data by their flights, never by the roster's bytes): the sha256 of
-        each landing's flight, runway and time, in time order, and of the number left out on the sealed test days."""
-        rows = [[landing.flight_key, landing.runway, landing.time_s] for landing in self.landings]
-        payload = json.dumps({"landings": rows, "sealed": self.sealed}, separators=(",", ":"))
-        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def utc_s(value: str) -> float:

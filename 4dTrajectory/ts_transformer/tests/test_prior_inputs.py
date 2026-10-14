@@ -43,7 +43,7 @@ def test_the_landings_index_holds_the_rosters_assigned_landings_without_the_test
     path.write_text(json.dumps({"records": records}))
     index = read_roster_landings(path, ("05L", "23R"), days)
     assert [landing.flight_key for landing in index.landings] == ["A", "B", "C"] and index.sealed == 1
-    assert index.digest() != roster_landings(records[:2], ("05L", "23R"), days).digest()
+    assert roster_landings(records[:2], ("05L", "23R"), days).sealed == 0
 
 
 def test_the_landings_index_refuses_a_day_outside_the_split():
@@ -280,8 +280,7 @@ def test_the_constants_variant_adds_the_length_and_the_threshold_elevation():
 
 def test_the_artefact_source_reads_every_sentence_and_its_identity(tmp_path):
     directory = tmp_path / "artefact"
-    words, records = prior_artefact(directory, interval_s=4.0)
-    days = fixture_days()
+    words, _ = prior_artefact(directory, interval_s=4.0)
     source = ArtefactSource(directory, 4.0, "full", "all")
     for split in ("train", "select", "val"):
         sentences = source.sentences(split, "KXXX")
@@ -289,8 +288,8 @@ def test_the_artefact_source_reads_every_sentence_and_its_identity(tmp_path):
         assert {s.split for s in sentences} == {split} and sentences[1].go_around.any()
     with pytest.raises(ValueError, match="development splits"):
         source.sentences("test", "KXXX")
-    identity = artefact_identity(directory, 4.0, {"KXXX": roster_landings(records["KXXX"], ("09", "09L"), days)},
-                                 "all")
+    identity = artefact_identity(directory, 4.0, "all")
+    assert "landings" not in identity                                                   # D63 (the user, 2026-10-14)
     assert identity["spec_sha256"] == words.spec.sha256 and set(identity["sentence_files"]) == {"train", "select", "val"}
     assert identity["candidates"]["airports"]["KXXX"]["candidates"][0]["vertical_path"]["crossing_height_m"] == TEST_TCH_M
 
@@ -356,44 +355,22 @@ def test_the_flight_key_mirror_reads_the_dataset_id_as_the_data_plane_writes_it(
         own_flight_key({"dataset_id": dataset_flight_key(source, 0), "airport": "KSJC"})
 
 
-def test_the_landings_digest_holds_each_landings_flight_runway_and_time_only():
-    """D63: a change of a landing's time or runway in the roster changes the digest; a change of another field of the
-    roster does not; the landings left out on the sealed test days count."""
-    days = fixture_days()
-    train_day, test_day = days.days["train"][0], days.days["test"][0]
-    records = [{**record("A", "05L", f"{train_day}T12:00:00Z"), "icao24": "abc123", "file": "a.json"},
-               {**record("B", "23R", f"{train_day}T12:20:00Z"), "icao24": "def456", "file": "b.json"},
-               record("C", "05L", f"{test_day}T12:00:00Z")]
-
-    def digest(rows):
-        return roster_landings(rows, ("05L", "23R"), days).digest()
-
-    base = digest(records)
-    assert digest([{**records[0], "icao24": "zzz999", "file": "elsewhere.json"}, *records[1:]]) == base
-    assert digest([{**records[0], "landing_time_utc": f"{train_day}T12:00:02Z"}, *records[1:]]) != base
-    assert digest([{**records[0], "runway": "23R"}, *records[1:]]) != base
-    assert digest(records[:2]) != base                                    # one sealed landing fewer
-
-
-def test_a_run_refuses_landings_whose_digest_differs_from_the_identity(tmp_path):
-    """D63: the identity is computed again from the landings read again; a checkpoint of other landings is refused."""
+def test_a_stored_landings_entry_is_not_read_and_every_other_entry_is_compared(tmp_path):
+    """D63 (the user, 2026-10-14): the identity holds no landings; a checkpoint written before, whose identity holds the
+    roster landings' digest, opens for the identity of today without it. Every other entry is still compared."""
     from ts_transformer.prior.checkpoint import load_checkpoint, save_checkpoint
     from ts_transformer.prior.model import Prior, PriorConfig
 
     directory = tmp_path / "artefact"
-    words, by_airport = prior_artefact(directory, interval_s=2.0)
-    records = by_airport["KXXX"]
-    days = fixture_days()
-    landings = {"KXXX": roster_landings(records, ("09", "09L"), days)}
+    words, _ = prior_artefact(directory, interval_s=2.0)
     model = Prior(PriorConfig.from_words(words, "full", d_model=32, layers=1, heads=4, feedforward=64))
+    today = artefact_identity(directory, 2.0, "landed")
     path = tmp_path / "checkpoint.pt"
-    save_checkpoint(path, model, model.state_dict(), identity=artefact_identity(directory, 2.0, landings, "landed"),
+    save_checkpoint(path, model, model.state_dict(), identity={**today, "landings": {"KXXX": "0" * 64}},
                     run={"airports": ["KXXX"], "held_out": None}, train_config={})
-    load_checkpoint(path, artefact_identity(directory, 2.0, landings, "landed"))
-    moved = [{**records[0], "landing_time_utc": records[0]["landing_time_utc"].replace(":00Z", ":04Z")}, *records[1:]]
-    with pytest.raises(ValueError, match=r"\['landings'\] differ"):
-        load_checkpoint(path, artefact_identity(directory, 2.0, {"KXXX": roster_landings(moved, ("09", "09L"), days)},
-                                                "landed"))
+    assert load_checkpoint(path, today).identity["landings"] == {"KXXX": "0" * 64}       # kept as written, unread
+    with pytest.raises(ValueError, match=r"\['row_interval_s'\] differ"):
+        load_checkpoint(path, {**today, "row_interval_s": 4.0})
 
 
 # ---- the selection of the base's sentences (B8, D75)
@@ -454,7 +431,7 @@ def test_the_source_reads_only_the_selected_sentences_and_the_identity_counts_ev
     from ts_transformer.prior.selection import selection_totals
 
     directory = tmp_path / "artefact"
-    _, records = prior_artefact(directory, interval_s=4.0, outcomes=("landed", "landing_failed"))
+    prior_artefact(directory, interval_s=4.0, outcomes=("landed", "landing_failed"))
     spec = load_spec(directory)
     with np.load(directory / "sentences_train.npz") as arrays:
         labelled = {name: arrays[name] for name in arrays.files}
@@ -466,14 +443,13 @@ def test_the_source_reads_only_the_selected_sentences_and_the_identity_counts_ev
     path.unlink()
     write_closed_loop(path, spec, executor_params_sha256=str(data["executor_params_sha256"]), row_interval_s=4.0,
                       start_row=int(data["start_row"]), sentences={1: stored[1], 0: stored[0]})
-    landings = {"KXXX": roster_landings(records["KXXX"], ("09", "09L"), fixture_days())}
     landed = ArtefactSource(directory, 4.0, "full", "landed")
     every = ArtefactSource(directory, 4.0, "full", "all")
     for split in SPLITS:
         flights = signals_flights(directory, split)
         assert [s.flight_key for s in landed.sentences(split, "KXXX")] == [flights[0]["dataset_id"]]
         assert sorted(s.flight_key for s in every.sentences(split, "KXXX")) == [f["dataset_id"] for f in flights]
-    identity = artefact_identity(directory, 4.0, landings, "landed")
+    identity = artefact_identity(directory, 4.0, "landed")
     record = identity["selection"]
     assert record["rule"] == "landed"
     assert record["counts"]["train"]["KXXX"] == {
@@ -486,7 +462,7 @@ def test_the_source_reads_only_the_selected_sentences_and_the_identity_counts_ev
         assert {o: sum(c["kept"] for name, c in cells if name == o) for o in ("landed", "landing_failed")} == {
             "landed": 1, "landing_failed": 0}
     assert selection_totals(record) == {split: {"kept": 1, "left_out_fault": 0, "left_out_outcome": 1} for split in SPLITS}
-    other = artefact_identity(directory, 4.0, landings, "all")
+    other = artefact_identity(directory, 4.0, "all")
     assert selection_totals(other["selection"]) == {split: {"kept": 2, "left_out_fault": 0, "left_out_outcome": 0}
                                                     for split in SPLITS}
     assert {k for k in identity if identity[k] != other[k]} == {"selection"}
@@ -562,8 +538,7 @@ def test_the_source_leaves_out_a_marked_flight_under_landed_and_its_mark_changes
     from ts_transformer.prior import source as source_module
 
     directory = tmp_path / "artefact"
-    _, records = prior_artefact(directory, interval_s=4.0, outcomes=("landed", "landing_failed"))
-    landings = {"KXXX": roster_landings(records["KXXX"], ("09", "09L"), fixture_days())}
+    prior_artefact(directory, interval_s=4.0, outcomes=("landed", "landing_failed"))
     plain = ArtefactSource(directory, 4.0, "full", "all").sentences("train", "KXXX")
     monkeypatch.setattr(source_module, "faulty_flights",
                         lambda d, split: {0: ("a fault",)} if split == "train" else {})
@@ -574,7 +549,7 @@ def test_the_source_leaves_out_a_marked_flight_under_landed_and_its_mark_changes
         for name in ("time_s", "own", "candidates", "runway_in_force", "go_around", "heading_in_force",
                      "words_in_force", "since", "targets"):
             assert np.array_equal(getattr(a, name), getattr(b, name)), name
-    cells = artefact_identity(directory, 4.0, landings, "landed")["selection"]["counts"]["train"]["KXXX"]
+    cells = artefact_identity(directory, 4.0, "landed")["selection"]["counts"]["train"]["KXXX"]
     assert sum(c["left_out_fault"] for stratum in cells.values() for c in stratum.values()) == 1
     assert sum(c["left_out_outcome"] for stratum in cells.values() for c in stratum.values()) == 1
 
@@ -589,9 +564,8 @@ def test_the_val_readers_recount_the_selection_and_the_identity_binds_the_signal
     from ts_transformer.prior.source import require_selection_of
 
     directory = tmp_path / "artefact"
-    _, records = prior_artefact(directory, interval_s=4.0, outcomes=("landed", "landing_failed"))
-    landings = {"KXXX": roster_landings(records["KXXX"], ("09", "09L"), fixture_days())}
-    identity = artefact_identity(directory, 4.0, landings, "landed")
+    prior_artefact(directory, interval_s=4.0, outcomes=("landed", "landing_failed"))
+    identity = artefact_identity(directory, 4.0, "landed")
     assert set(identity["signals_files"]) == set(SPLITS)
     require_selection_of(directory, 4.0, identity, "val")
     with monkeypatch.context() as patch:                      # an artefact with no val sentence
@@ -603,7 +577,7 @@ def test_the_val_readers_recount_the_selection_and_the_identity_binds_the_signal
         require_selection_of(directory, 4.0, identity, "val")
     signals = directory / "signals_val.npz"
     signals.write_bytes(signals.read_bytes() + b"\0")
-    assert artefact_identity(directory, 4.0, landings, "landed", counted=("train", "select"))["signals_files"]["val"] != \
+    assert artefact_identity(directory, 4.0, "landed", counted=("train", "select"))["signals_files"]["val"] != \
         identity["signals_files"]["val"]
 
 

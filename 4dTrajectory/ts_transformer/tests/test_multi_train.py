@@ -55,7 +55,7 @@ def test_a_batch_is_spoken_with_its_campaigns_front_attention(monkeypatch, branc
     monkeypatch.setattr(multi_train, "backward_round", spoken)
     monkeypatch.setattr(multi_train, "loop_options", lambda context: {"answering": "the stage's"})
     context = SimpleNamespace(splits={"train": {"sentences": {}, "flights": {}, "faults": {}}},
-                              start_loop=lambda split, batch: None, geometries={}, rosters={}, finals={}, words=None,
+                              start_loop=lambda split, batch: None, geometries={}, finals={}, words=None,
                               interval_s=INSTRUCTION_STEP_S, variant="full", edges_reference=None,
                               device=torch.device("cpu"))
     settings = _multi_settings(front_attention=attention, branching=branching)
@@ -183,7 +183,7 @@ def test_the_grids_interval_and_segment_credit_default_to_the_code_before_them_a
 def _speak_context():
     """What `multi_train.speak_batch` reads of a context before its loops."""
     return SimpleNamespace(splits={"train": {"sentences": {}, "flights": {}, "faults": {}}},
-                           start_loop=lambda split, batch: None, geometries={}, rosters={}, finals={}, words=None,
+                           start_loop=lambda split, batch: None, geometries={}, finals={}, words=None,
                            interval_s=INSTRUCTION_STEP_S, variant="full", edges_reference=None,
                            device=torch.device("cpu"))
 

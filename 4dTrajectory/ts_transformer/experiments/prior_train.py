@@ -3,9 +3,7 @@ cross-validation (D39) with ``--held-out``, stopped on the select days of its tr
 
 Reads the sentence artefact through the vocabulary's public interface at one row interval (``--row-interval-s``), only
 after the closed-loop check with the artefact's executor spec (``--executor``) passes in this process
-(`autopilot.closed_loop.require_conforming_closed_loop`, D69, D73), and each
-airport's landings from its tracks roster for the identity (D63; no input, D206; no loop, post-training D208).
-Never reads the validation days.
+(`autopilot.closed_loop.require_conforming_closed_loop`, D69, D73). Never reads the validation days.
 Before training it checks the memory
 at the formal size: the largest batches, one forward and backward pass each on the device, and refuses
 a run that would not fit (``memory.json``).
@@ -40,7 +38,7 @@ import torch
 
 from flight_scenarios.procedure_final import DEFAULT_PROCEDURE_ROOT
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
-from ts_transformer.instructions.artefact import load_candidates, load_day_split
+from ts_transformer.instructions.artefact import load_candidates
 from ts_transformer.io_utils import file_sha256, utc_now, wait_for_turn, write_json_atomic
 from ts_transformer.prior.batch import VARIANTS
 from ts_transformer.prior.checkpoint import CHECKPOINT_SCHEMA, save_checkpoint
@@ -48,7 +46,7 @@ from ts_transformer.prior.model import Prior, PriorConfig
 from ts_transformer.prior.procedure import PROCEDURE_MASKS, procedure_digests
 from ts_transformer.prior.runs import SAMPLE_SEED, Run, held_out_sentences, run_data, sampled_run_data
 from ts_transformer.prior.selection import RULES, selection_totals
-from ts_transformer.prior.source import ArtefactSource, airport_landings, artefact_identity
+from ts_transformer.prior.source import ArtefactSource, artefact_identity
 from ts_transformer.prior.train import TrainConfig, evaluate, first_step_runway, largest_batch_memory, train
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
@@ -107,11 +105,10 @@ def main(argv: list[str] | None = None) -> int:
     device = torch.device(args.device)
 
     geometries = load_candidates(instructions)
-    landings = airport_landings(geometries, load_day_split(instructions))
     source = ArtefactSource(instructions, args.row_interval_s, args.variant, args.selection)
     run = Run(tuple(sorted(geometries)), args.held_out)
     data = run_data(source, run) if args.sample is None else sampled_run_data(source, run, args.sample)
-    identity = artefact_identity(instructions, args.row_interval_s, landings, args.selection)
+    identity = artefact_identity(instructions, args.row_interval_s, args.selection)
     # the artefact's sentences that the rule keeps and leaves out in train and select, every airport (the run's own:
     # "sentences"); the identity keeps every split, but nothing shows a reading of the val days before the base's one
     # validation readout (D85)

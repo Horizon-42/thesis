@@ -167,7 +167,7 @@ def test_stage_c_flies_the_drawn_windows_at_their_places_with_their_readout_numb
 
     context = SimpleNamespace(start_loop=lambda split, chosen: lambda indices: (None, indices, {}),
                               splits={model_speed.SPLIT: {"sentences": None, "flights": None, "faults": None}},
-                              geometries=None, rosters=None, finals=None, words=None, interval_s=4.0, variant="full",
+                              geometries=None, finals=None, words=None, interval_s=4.0, variant="full",
                               edges_reference=None)
     monkeypatch.setattr(post_window_loop, "WindowLoop", Loop)
     monkeypatch.setattr(post_train, "readout_numbers", lambda seed, place: numbered.append((seed, place)))

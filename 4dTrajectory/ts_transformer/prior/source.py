@@ -42,13 +42,11 @@ def stored_sentences(directory: Path, interval_s: float, split: str) -> list[Sto
             for index, sentence in closed_loop_sentences(directory, split, interval_s, load_spec(directory)).items()]
 
 
-def artefact_identity(directory: Path, interval_s: float, landings: Mapping[str, LandingIndex], selection: str, *,
+def artefact_identity(directory: Path, interval_s: float, selection: str, *,
                       counted: Sequence[str] = SPLITS) -> dict[str, Any]:
-    """§8 item 1 (D21, D63, D75): the spec sha, the day split, the candidate table (`candidates.json`, the vertical paths
+    """§8 item 1 (D21, D75): the spec sha, the day split, the candidate table (`candidates.json`, the vertical paths
     in it), the sha256 of the closed-loop sentence files of Δ = ``interval_s`` and of the stored signals (whose
-    faulty-track marks the selection reads, D111), every development split; the airports' roster landings
-    (`LandingIndex.digest`, by their flights; D63): no input of the prior (D206) and no loop (post-training D207, D208)
-    reads them; and the selection — its rule and, for each
+    faulty-track marks the selection reads, D111), every development split; and the selection — its rule and, for each
     split, airport, stratum and outcome, the sentences kept and left out (`prior.selection.selection_record` of the rule
     ``selection``). The selection's counts read the stored outcomes of the splits ``counted`` only: a run's own record
     counts every split, a reader that must not read the val days' outcomes (D85: before the base's one validation
@@ -61,7 +59,6 @@ def artefact_identity(directory: Path, interval_s: float, landings: Mapping[str,
             # the stored signals of each split (MIRROR of `instructions.artefact`'s ``signals_<split>.npz``): the
             # faulty-track marks are read from them (D111), so the val marks are bound before the claim of the val read
             "signals_files": {split: file_sha256(directory / f"signals_{split}.npz") for split in SPLITS},
-            "landings": {code: index.digest() for code, index in sorted(landings.items())},
             "selection": selection_record(selection, (s for split in SPLITS if split in counted
                                                      for s in stored_sentences(directory, interval_s, split)))}
 

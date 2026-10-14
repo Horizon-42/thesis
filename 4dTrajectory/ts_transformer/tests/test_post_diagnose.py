@@ -41,7 +41,7 @@ INTENT = {"G2": "off below on by < 2 points with the interval holding 0: the tra
 @pytest.fixture
 def campaign(setup, tmp_path, monkeypatch):  # noqa: F811
     """A campaign of one round (as `test_post_ceiling`'s) and the runner's world: the checks stubbed, the context the
-    fixture's, the intent written."""
+    fixture's, the roster landings the fixture's (the runner reads them itself, D175), the intent written."""
     s = setup
     context = _context(s)
     settings = _settings(rounds=1, per_kind={**dict.fromkeys(KINDS, 0), REAL: 1})
@@ -64,9 +64,11 @@ def campaign(setup, tmp_path, monkeypatch):  # noqa: F811
     monkeypatch.setattr(diagnose, "checked_edges", lambda path: None)
     monkeypatch.setattr(diagnose, "open_context",
                         lambda *a, **k: (opened.append((k["splits"], k["formal"], k["data"])), context)[1])
+    rosters = {s["geometry"].code: s["roster"]}
+    monkeypatch.setattr(diagnose, "airport_landings", lambda geometries, days: rosters)
     intent = tmp_path / "intent.json"
     intent.write_text(json.dumps(INTENT))
-    return SimpleNamespace(out=out, opened=opened, context=context, settings=settings, intent=intent)
+    return SimpleNamespace(out=out, opened=opened, context=context, rosters=rosters, settings=settings, intent=intent)
 
 
 def _argv(c, out, *more):
@@ -248,7 +250,7 @@ def test_the_fields_of_a_loss_read_in_the_loop(campaign):
     code = window.scene.geometry.code
     separation = c.context.separations[code]
     fields = diagnose.loss_fields(window, result, separation, c.context.finals[code],
-                                  window_landings(window, c.context.rosters[code]), STEP, True)
+                                  window_landings(window, c.rosters[code]), STEP, True)
     runway = diagnose.runway_at_loss(result)
     candidates = window.scene.geometry.candidates
     assert np.diff(window.commanded.e_m[:3]).max() < 0.0 and candidates[runway].course_deg == 90.0

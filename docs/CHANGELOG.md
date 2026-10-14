@@ -1,5 +1,21 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-14 — the identity of a prior's data holds no landings (prior D63)
+
+- Why: no input (prior D206) and no loop (post-training D208) reads the landings, but the identity still held their
+  digest, read from the live tracks rosters outside the artefact: every prior open read about 150 MB of rosters
+  (0.6 s, +200 MB), and a new download, merge or reclassification would have refused every prior. The user chose
+  "Drop it: not written, not compared" (2026-10-14).
+- `artefact_identity` takes no landings and writes none; `LandingIndex.digest` is deleted; `open_prior` and
+  `prior_train` read no tracks roster; `OpenedPrior.landings` and `Context.rosters` are deleted.
+- A checkpoint written before (B21's base and folds) holds the entry; `load_checkpoint` keeps it as written and does
+  not compare it (`checkpoint.NOT_COMPARED`, the one rule for it). Every other entry is compared as before. The
+  checkpoint format keeps its name (v10): the stored files do not change.
+- The diagnostic readout (`post_diagnose`, post-training D175) keeps the window's landings (the user: "Keep") and reads
+  each airport's roster itself (`prior.source.airport_landings`).
+- Docs: prior D63, §2, §8 item 1, code index; post-training D208, O26 (closed), §3; outline index and plan;
+  `superseded_decisions.md` entries 141–151 and the user's decision 19.
+
 ### 2026-10-14 — the loops keep no landings (post-training D208)
 
 - Why: since prior D206 no input reads the landings, and since post-training D207 no reward does; the user chose to

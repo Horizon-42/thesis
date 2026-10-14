@@ -59,6 +59,7 @@ from ts_transformer.experiments.post_train import (
 )
 from ts_transformer.experiments.post_window_loop import LOST_SEPARATION, WindowResult, checked_edges
 from ts_transformer.inference.runway_schedule import Separation
+from ts_transformer.instructions.artefact import load_day_split
 from ts_transformer.instructions.words import RUNWAY
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.post.branches import BRANCH_EVERY_S, branch_rows
@@ -71,6 +72,7 @@ from ts_transformer.post.traffic_attention import traffic_modules
 from ts_transformer.prior.landings import LandingIndex
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.procedure import Final
+from ts_transformer.prior.source import airport_landings
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 #: The format of the readout's files.
@@ -345,6 +347,8 @@ def main(argv: list[str] | None = None) -> int:
                                          gpu_squares=0), args.speak_workers, device)
                 if args.speak_workers > 1 else None)
     context = replace(context, device=device, base=context.base.to(device).eval())
+    # each airport's roster landings, for field 1's window landings (D105, D175): this readout alone reads them
+    rosters = airport_landings(context.geometries, load_day_split(instructions))
     windows = selection_windows(context, settings, SPLIT)
     places = batches(windows, settings.batch_windows)
     start = round_draws = None
@@ -400,7 +404,7 @@ def main(argv: list[str] | None = None) -> int:
                     code = window.scene.geometry.code
                     line["fields"] = loss_fields(
                         window, result, separations[code], context.finals[code],
-                        window_landings(window, context.rosters[code]), step_s,
+                        window_landings(window, rosters[code]), step_s,
                         None if round_draws is None else round_draws[2][place])
                 lines[read].append(line)
             with open(out / "per_window.jsonl", "a", encoding="utf-8") as f:
