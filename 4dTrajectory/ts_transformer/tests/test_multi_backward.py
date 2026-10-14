@@ -657,9 +657,9 @@ def test_a_row_no_longer_flown_leaves_a_joint_loop_and_keeps_its_end(setup):
     from ts_transformer.tests.test_post_window_multi import _multi, _numbers
 
     s = setup
-    # its second row loses separation, flies on silent and ends first, while the others fly (ts-executor-spec-v11:
-    # with joins (0, 10, 20) its third row ended first and the window with it)
-    _, loop_of = _multi(s, joins=(0, 10, 60))
+    # its second row ends first, while the others fly (prior D206: with joins (0, 10, 60) the three rows ended at one
+    # tick)
+    _, loop_of = _multi(s, joins=(0, 20, 60))
     loop = loop_of(_with_module(s["base"]))
     numbers = _numbers(3)
     while loop.speaking.alive.all():                     # flown until a row ends while the others fly
@@ -697,9 +697,9 @@ def test_a_join_of_loops_with_rows_that_left_keeps_their_records(setup):
     from ts_transformer.tests.test_post_window_multi import _multi, _numbers
 
     s = setup
-    # its second row loses separation, flies on silent and ends first, while the others fly (ts-executor-spec-v11:
-    # with joins (0, 10, 20) its third row ended first and the window with it)
-    _, loop_of = _multi(s, joins=(0, 10, 60))
+    # its second row ends first, while the others fly (prior D206: with joins (0, 10, 60) the three rows ended at one
+    # tick)
+    _, loop_of = _multi(s, joins=(0, 20, 60))
     loop = loop_of(_with_module(s["base"]))
     numbers = _numbers(3)
     while loop.speaking.alive.all():

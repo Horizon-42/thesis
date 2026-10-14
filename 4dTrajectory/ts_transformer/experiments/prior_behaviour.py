@@ -2,8 +2,8 @@
 synthetic set, and the words and probabilities the speaker says with fixed numbers — on the CPU, with one thread, as
 JSON. With them: the configuration values a run reads from the code (`TrainConfig`'s and `PriorConfig`'s defaults:
 `prior_train`'s), the first-step runway readout of the trained model, the teacher-forced loss of the variant
-`constants`, the inputs of fixed rows (`inputs.state_inputs` of both variants with the landings counted by a
-`LandingIndex`, `inputs.Heard.inputs` after the words said), the inputs of a fixed sentence (`inputs.sentence_rows`, its
+`constants`, the inputs of fixed rows (`inputs.state_inputs` of both variants, `inputs.Heard.inputs` after the words
+said), the inputs of a fixed sentence (`inputs.sentence_rows`, its
 flight key of the real format), the step of a speaker's closed loop (`prior_speaking_loop.SpeakingLoop`) on an executor
 that flies straight (`Straight`): its words, states and records; the selection (`selection.left_out`) over every rule,
 stored outcome and mark; `prior_select`'s rule on fixed tables of scores (`select_rules`: a score at exactly twice the
@@ -102,22 +102,15 @@ def hexed(values: Any) -> list:
     return np.vectorize(lambda v: float(v).hex(), otypes=[object])(np.asarray(values, dtype=np.float64)).tolist()
 
 
-def fixed_inputs(geometry: AirportGeometry, days: DaySplit) -> dict[str, Any]:
+def fixed_inputs(geometry: AirportGeometry) -> dict[str, Any]:
     """The inputs of fixed rows of ``geometry``'s airport (module docstring): the states of a descent along its first
-    candidate's extended course, the landings of fixed flights on a train day of ``days`` counted before each row."""
-    day = days.days["train"][0]
-    noon = float(np.datetime64(f"{day}T12:00:00", "s").astype(np.int64))
-    times = noon + 2.0 * np.arange(ROWS)
-    runways = tuple(c.ident for c in geometry.candidates)
-    index = LandingIndex(runways, tuple(Landing(noon - 600.0 + 30.0 * k, runways[k % len(runways)], f"L{k}")
-                                        for k in range(20)), 0, days)
-    counts = index.counts_before(times, without="L0")
+    candidate's extended course."""
     at = np.stack([-12_000.0 + 140.0 * np.arange(ROWS), 30.0 * np.sin(np.arange(ROWS)),
                    geometry.elevation_m + 900.0 - 7.0 * np.arange(ROWS)], axis=1)
     before = np.concatenate((at[:1], at[:-1]))
-    out = {"landings": counts.tolist()}
+    out = {}
     for variant in ("full", "constants"):
-        own, candidates = state_inputs(at, before, np.arange(ROWS) > 0, counts, geometry, variant, 2.0)
+        own, candidates = state_inputs(at, before, np.arange(ROWS) > 0, geometry, variant, 2.0)
         out[variant] = {"own": hexed(own), "candidates": hexed(candidates)}
     return out
 
@@ -163,12 +156,8 @@ def speaking(model: Prior, words: Words, finals: Sequence[Final], days: DaySplit
     flights = {b: {"airport": geometry.code, "entry_time_utc": f"{days.days['train'][0]}T11:50:00Z",
                    "dataset_id": f"{geometry.code}:L{b}"} for b in range(count)}
     runways = tuple(c.ident for c in geometry.candidates)
-    # each aircraft its own landings (D105): the three flights' own landings after their rows (a scene's), and others
-    # in the 30 min before its rows, on each candidate, one more than the aircraft before it
-    landings = [LandingIndex(runways, tuple(sorted(
-        (*(Landing(noon - 1_500.0 + 60.0 * k, runways[k % len(runways)], f"O{b}{k}") for k in range(3 + b)),
-         *(Landing(noon + 10.0 * a, runways[0], f"L{a}") for a in range(count))), key=lambda landing: landing.time_s)),
-        0, days) for b in range(count)]
+    # each aircraft's landings, which the loop keeps for a caller and no input reads (D206): one before its rows
+    landings = [LandingIndex(runways, (Landing(noon - 1_500.0, runways[0], f"O{b}"),), 0, days) for b in range(count)]
     observed = {b: states[b, : start * every] for b in range(count)}
     loop = SpeakingLoop(model, Straight(states[:, -1], every, 2), list(range(count)), rows, observed, flights,
                         {geometry.code: geometry}, landings, {geometry.code: finals}, words, interval_s=4.0,
@@ -187,10 +176,8 @@ def fixed_sentence(said: Sequence[Sequence[int]], geometry: AirportGeometry, wor
                    ) -> dict[str, Any]:
     """The inputs and targets of a fixed closed-loop sentence (`inputs.sentence_rows`, both variants) at Δ = 4 s: the
     words ``said`` from its first predicted step (`FIRST`) where the speaker said them (`behaviour`'s first aircraft:
-    the same heights, so the grammar takes them), a flight key of the real format
-    (``<airport>:<id>_<runway>_<icao24>_<landing time>``) whose own landing the landings hold between two of its rows on
-    the last candidate, with another landing at the same second on the first, others in the 30 min before its rows on
-    each candidate, one at a row's time and one exactly 30 min before a row (the window's two edges)."""
+    the same heights, so the grammar takes them) and a flight key of the real format
+    (``<airport>:<id>_<runway>_<icao24>_<landing time>``)."""
     every, rows = 2, (FIRST + len(said) - 1) * 2 + 1
     states = np.zeros((rows, len(STATE_COLUMNS)))
     states[:, STATE_COLUMNS.index("e_m")] = -15_000.0 + 200.0 * np.arange(rows)
@@ -199,20 +186,12 @@ def fixed_sentence(said: Sequence[Sequence[int]], geometry: AirportGeometry, wor
     runway = geometry.candidates[-1].ident
     flight = {"airport": geometry.code, "entry_time_utc": f"{day}T11:50:00Z",
               "dataset_id": f"{geometry.code}:BEH123_{runway}_abc123_{day.replace('-', '')}T115031Z"}
-    entry = float(np.datetime64(f"{day}T11:50:00", "s").astype(np.int64))
-    runways = tuple(c.ident for c in geometry.candidates)
-    own = entry + 31.0                # between two of its Δ rows (2 s row 3 at 11:50:06, a Δ row every 4 s from it)
-    landings = LandingIndex(runways, tuple(sorted(
-        (*(Landing(entry - 1_700.0 + 97.0 * k, runways[k % len(runways)], f"L{k}") for k in range(17)),
-         Landing(own, runway, flight["dataset_id"].partition(":")[2]), Landing(own, runways[0], "SAME_SECOND"),
-         Landing(entry + 14.0, runways[0], "AT_A_ROW"), Landing(entry + 18.0 - 1_800.0, runways[-1], "WINDOW_EDGE")),
-        key=lambda landing: landing.time_s)), 0, days)
     sentence = ClosedLoopRows(first_row=3, start=FIRST, grid=np.array(said, dtype=np.int16),
                               correction=np.zeros((len(said), len(COLUMNS)), dtype=bool), states=states,
                               on_interval=on_interval_rows(rows, every))
     out = {}
     for variant in ("full", "constants"):
-        got = sentence_rows(sentence, flight, geometry, landings, words, interval_s=4.0, split="train", variant=variant)
+        got = sentence_rows(sentence, flight, geometry, words, interval_s=4.0, split="train", variant=variant)
         out[variant] = {name: (hexed(value) if np.asarray(value).dtype.kind == "f" else np.asarray(value).tolist())
                         for name, value in vars(got).items() if name not in ("flight_key", "airport", "split")}
     return out
@@ -309,7 +288,7 @@ def behaviour(words: Words, finals: Sequence[Final], days: DaySplit) -> dict[str
         with torch.no_grad():
             nll, asked = batch_nll(constants, collate(fixed_sentences(words, len(finals), constants.config.word_values,
                                                                       variant="constants"), cpu))
-        inputs = fixed_inputs(finals[0].geometry, days)
+        inputs = fixed_inputs(finals[0].geometry)
         sentence = fixed_sentence([row[0] for row in said], finals[0].geometry, words, days)
         loop = speaking(model, words, finals, days)
     finally:

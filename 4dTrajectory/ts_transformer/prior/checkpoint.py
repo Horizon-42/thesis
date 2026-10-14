@@ -2,9 +2,10 @@
 it was trained on.
 
 The identity (§8 item 1, D21) is the spec sha, the day split, the candidate table, the sha256 of the sentence
-files, the landings (D63) and the selection of the sentences (D75); `prior.source.artefact_identity` builds it. A checkpoint opens only for the same identity, compared whole: a
-prior of another artefact is refused by what differs, never read with a guess (principle 8). The run (its airports and
-its held-out airport, `runs.Run`) and the training configuration are recorded beside it.
+files, the roster landings (D63; the loops' reward reads them, the prior does not, D206) and the selection of the
+sentences (D75); `prior.source.artefact_identity` builds it. A checkpoint opens only for the same identity, compared
+whole: a prior of another artefact is refused by what differs, never read with a guess (principle 8). The run (its
+airports and its held-out airport, `runs.Run`) and the training configuration are recorded beside it.
 
 `open_prior` opens a prior run as every runner of the prior does (§7 item 1, D106 item 2): its record, its checkpoint
 for the artefact's identity and its procedure masks on today's procedure data (§8 item 2). It reads no stored outcome or
@@ -39,7 +40,8 @@ from ts_transformer.repo_layout import REPO_ROOT, repo_relative
 #: v7 (B8, D75): the identity holds the selection of the sentences (`prior.selection.selection_record`). v8 (B10, B11,
 #: D111): the selection leaves out the flights with a faulty observed track and counts them apart. v9 (D204): the
 #: offset right of a final's centreline goes in on the glidepath's scale (`inputs.PATH_OFFSET_SCALE_M`), not 1 km.
-CHECKPOINT_SCHEMA = "ts-prior-checkpoint-v9"
+#: v10 (D206): a candidate vector has no landings in the 30 min before the step.
+CHECKPOINT_SCHEMA = "ts-prior-checkpoint-v10"
 
 
 class Checkpoint(NamedTuple):
@@ -201,7 +203,7 @@ class OpenedPrior(NamedTuple):
     config: dict[str, Any]                    # the run's ``config.json``
     checkpoint: Checkpoint
     geometries: dict[str, AirportGeometry]    # the artefact's candidates, by airport
-    landings: dict[str, LandingIndex]         # each airport's roster landings (D63)
+    landings: dict[str, LandingIndex]         # each airport's roster landings (D63): the loops', no input (D206)
     interval_s: float
     selection: str                            # the run's selection rule (D75)
 

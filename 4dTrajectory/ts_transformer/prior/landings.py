@@ -1,13 +1,14 @@
-"""The airport's landings before a step (prior design §2 "Candidates", §6): an input of each candidate vector is the
-number of landings on that candidate in the 30 min before the step.
+"""The airport's landings before a step (prior design §6): the number of landings on each candidate runway in the 30 min
+before the step. The prior reads no landings (D206); the post-training reward reads them for the airport's present
+landing direction, and the prior's data identity binds them (D63).
 
 Offline, the landings are the harvest's tracks roster of the airport (`repo_layout.tracks_manifest_path`): every
 record the harvest assigned to a runway, whether or not its flight has a sentence — less every landing on a sealed test
 day (contract C32: a test day is never counted as context). In a loop the caller gives each aircraft the landings the
 loop knows (D105: a window's scene, built from the roster's `Landing`s); the index refuses a landing on a sealed test
 day by itself, whoever builds it.
-A flight never counts its own landing (`LandingIndex.counts_before`): a closed-loop sentence flies on to the threshold and its
-last rows can fall after the time the observed aircraft landed, and the runway it landed on is the answer.
+A flight never counts its own landing (`LandingIndex.counts_before`): the runway it landed on is the answer, and a
+closed-loop sentence's last rows can fall after the time the observed aircraft landed.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ import numpy as np
 
 from ts_transformer.data.day_split import DaySplit, landing_day, operational_day, parse_utc
 
-#: The window of the landings input, s (§2).
+#: The window of the landings count, s.
 LANDINGS_WINDOW_S = 30.0 * 60.0
 
 

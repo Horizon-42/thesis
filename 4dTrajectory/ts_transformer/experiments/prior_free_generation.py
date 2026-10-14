@@ -102,7 +102,7 @@ def speak_and_fly(model: Prior, loop: Loop, order: Sequence[int], sentences: Map
     """The closed loop of the flights ``order`` of ``loop`` (`autopilot.start.start_moved`; module docstring):
     ``sentences``, ``observed`` (the start's observed rows) and ``flights`` (their records in the split's signals) by
     their place in the signals; ``landings`` each airport's
-    roster landings (each flight is given its airport's, D105); ``numbers`` each flight's source of random numbers, in
+    roster landings (the loop keeps each flight its airport's, D105; no input of the prior, D206); ``numbers`` each flight's source of random numbers, in
     ``order`` (`flight_numbers`: five a row said, D96)."""
     if len(numbers) != len(order):
         raise ValueError(f"{len(numbers)} sources of random numbers for {len(order)} flights")

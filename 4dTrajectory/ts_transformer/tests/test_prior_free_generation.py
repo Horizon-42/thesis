@@ -136,7 +136,7 @@ def test_the_readout_by_airport_and_stratum():
 def test_the_loop_gives_the_speaker_the_rows_the_sentence_gives(tmp_path, monkeypatch, interval_s):
     """§7 item 2: every row the loop gives the speaker — observed and flown — is, bit for bit, the row `sentence_rows`
     gives the sentence it said, read back from the flight's words and states: the time, the motion from the 2 s row
-    before, the landings at the row's UTC, the words in force, the first predicted step."""
+    before, the words in force, the first predicted step."""
     from dataclasses import replace
 
     from ts_transformer.instructions.labeller.interval import on_interval_rows
@@ -163,10 +163,9 @@ def test_the_loop_gives_the_speaker_the_rows_the_sentence_gives(tmp_path, monkey
     count = (stored.rows.start + len(generated.words) - 1) * every + 1
     sentence = replace(stored.rows, grid=generated.words.astype(np.int16), states=generated.states[:count],
                        on_interval=on_interval_rows(count, every))
-    expected = collate([sentence_rows(sentence, spy["flights"][0], geometry, spy["landings"][geometry.code], words,
-                                      interval_s=interval_s, split="train", variant="full")], CPU)
+    expected = collate([sentence_rows(sentence, spy["flights"][0], geometry, words, interval_s=interval_s,
+                                      split="train", variant="full")], CPU)
     assert len(rows) == stored.rows.start + len(generated.words)
-    assert expected.candidates[..., 6].abs().sum() > 0                  # a landing counted: the UTC times are read
     for r, row in enumerate(rows):
         for name in row._fields:
             if name != "targets":
@@ -444,7 +443,7 @@ def test_the_rows_a_loop_said_and_its_records_give_the_probabilities_the_speaker
     from ts_transformer.prior.speaker import Permitted
     from ts_transformer.prior.train import masked_log_probability
 
-    loops = [generate(tmp_path / str(seed), monkeypatch, seed=seed, speaking=True) for seed in (0, 5)]
+    loops = [generate(tmp_path / str(seed), monkeypatch, seed=seed, speaking=True) for seed in (0, 9)]
     model = loops[0][1]
     lengths = [len(loop.speaker.drawn_probability) for loop, _ in loops]
     assert lengths[0] != lengths[1]                       # the join pads a shorter record

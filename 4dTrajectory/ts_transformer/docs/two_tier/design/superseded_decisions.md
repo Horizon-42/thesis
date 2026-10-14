@@ -6,7 +6,8 @@ place to match the code of the branch `two-tier2-eval-landing` (commits `0437839
 B15), for the final's lateral corrections (D201, the branch `two-tier2-centreline`), and for the branch rule and
 the frontend and backend rule (outline §5 rules 1, 8, 10, 11; the branch `two-tier2-backend-orphans`); on 2026-10-14
 for the final's vertical corrections (D203, the branch `two-tier2-glidepath`), the prior's lateral input
-scale (D204, the same branch) and the prior's stop (D205, the same branch). This file
+scale (D204, the same branch), the prior's stop (D205, the same branch) and the prior's landings input (D206, the
+same branch). This file
 keeps each text that the rewrite replaced, word for word, beside the text that replaced it, so that the user can compare
 them. It is not part of the design: no code and no design document cites it. An entry leaves this file when the user
 has reviewed it.
@@ -52,8 +53,10 @@ has reviewed it.
 15. The prior's training stops after 15 epochs without a better select loss, at most 150 epochs (prior D205;
    2026-10-14): "改成连续8轮不变小；或者你建议一个更合理的数字；另外评估一下，当前base训练是不是停早了", then the choices
    "15 轮，上限 150（推荐）" and "新规则重跑整个活动（推荐）".
+16. The prior reads no landings; the loops keep them for the post-training's reward (prior D206; 2026-10-14): "这样 你先做个
+   试验，直接把这个输入去掉 … 理论上为了增加泛化能力，最好能去掉它", then, after the trial, "直接采用，重跑整个活动".
 
-The new decision rows (vocabulary D196, D197, D201, D203; prior D204, D205; outline D198) are new text, not replacements, so they are not entries
+The new decision rows (vocabulary D196, D197, D201, D203; prior D204–D206; outline D198) are new text, not replacements, so they are not entries
 below; the rewritten rows that cite them are.
 
 ## Index
@@ -146,6 +149,18 @@ below; the rewritten rows that cite them are.
 | 84 | `prior.md` | §5 Training, the loop | the stop: 15 epochs without a better select loss, at most 150 epochs (D205) |
 | 85 | `prior.md` | §5 Training, hyperparameters | the stop: 15 epochs without a better select loss, at most 150 epochs (D205) |
 | 86 | `prior.md` | §9 Values, configuration A | the stop: 15 epochs without a better select loss, at most 150 epochs (D205) |
+| 87 | `prior.md` | §2 Inputs, D23's test | the prior reads no landings; the loops keep them for the reward (D206) |
+| 88 | `prior.md` | §2 Inputs, Candidates | the prior reads no landings; the loops keep them for the reward (D206) |
+| 89 | `prior.md` | §2 Inputs, Landings | the prior reads no landings; the loops keep them for the reward (D206) |
+| 90 | `prior.md` | §2 Inputs, Scales | the prior reads no landings; the loops keep them for the reward (D206) |
+| 91 | `prior.md` | §6 A new airport, what it needs | the prior reads no landings; the loops keep them for the reward (D206) |
+| 92 | `prior.md` | §7 Public interface, item 2 | the prior reads no landings; the loops keep them for the reward (D206) |
+| 93 | `prior.md` | §7 Public interface, item 7 | the prior reads no landings; the loops keep them for the reward (D206) |
+| 94 | `prior.md` | §9 Values, landings | the prior reads no landings; the loops keep them for the reward (D206) |
+| 95 | `prior.md` | §9 Values, input scales | the prior reads no landings; the loops keep them for the reward (D206) |
+| 96 | `post_training.md` | §3 Inputs, landing context | the prior reads no landings; the loops keep them for the reward (prior D206) |
+| 97 | `multi_control.md` | §6.2 Compressed windows | the prior reads no landings; the loops keep them for the reward (prior D206) |
+| 98 | `multi_control.md` | §9 Changes of other stages, item 3 | the prior reads no landings; the loops keep them for the reward (prior D206) |
 
 ## Text kept unchanged on purpose
 
@@ -1833,4 +1848,224 @@ batch, at most 150 epochs, a stop after 15 epochs without a better select loss (
 
 ```text
 | Configuration A | d_model 192, 4 layers, 6 heads, feed-forward 768, dropout 0.1, weight decay 0.01, learning rate 3·10⁻⁴ (linear warm-up over 500 steps, then constant), clip 1.0, 16,384 padded rows a batch, at most 150 epochs, stop after 15 (D205) | D40 |
+```
+
+### 87. `prior.md`: §2 Inputs, D23's test
+
+**What changed:** the prior reads no landings; the loops keep them for the reward (D206)
+
+**Old text:**
+
+```text
+  loop the same input does not exist. A test: a change of the runway word of a sentence, of its flight's record (its
+  runway and landing time) and of its own landing in the index leaves the inputs of rows 0 to the first predicted step
+  the same, bit for bit.
+```
+
+**New text:**
+
+```text
+  loop the same input does not exist. A test: a change of the runway word of a sentence and of its flight's record (its
+  runway and landing time) leaves the inputs of rows 0 to the first predicted step the same, bit for bit.
+```
+
+### 88. `prior.md`: §2 Inputs, Candidates
+
+**What changed:** the prior reads no landings; the loops keep them for the reward (D206)
+
+**Old text:**
+
+```text
+  the glidepath height below, and the landings on the candidate in the 30 min before the step. It has no constant of
+  its runway.
+```
+
+**New text:**
+
+```text
+  and the glidepath height below. It has no count of landings (D206) and no constant of its runway.
+```
+
+### 89. `prior.md`: §2 Inputs, Landings
+
+**What changed:** the prior reads no landings; the loops keep them for the reward (D206)
+
+**Old text:**
+
+```text
+- **Landings (D63, D105).** The number of landings on each candidate in the 30 min before the step: in [t − 30 min, t),
+  t the row's UTC time. Offline, the landings come from the airport's tracks roster: every record that the harvest
+  assigned to a candidate, with a sentence or without one, less the landings on the sealed test days (C32). The index of
+  landings refuses a landing on a test day or on a day outside the day split by itself. A flight never counts its own
+  landing: a closed-loop sentence can fly past the time at which the observed aircraft landed, and the runway of that
+  landing is the answer of the runway word; the own landing must be in the index. In a loop, the caller gives each
+  aircraft the landings that the loop knows (D105). The roster is outside the artefact, so the identity of a prior's
+  data holds a digest of the landings (§8, item 1).
+```
+
+**New text:**
+
+```text
+- **No landings (D206).** The prior does not read the landings before the step. The loops keep each aircraft's
+  landings for their caller (D105): the post-training's reward reads the airport's present landing direction from
+  them. Offline, the landings come from the airport's tracks roster: every record that the harvest assigned to a
+  candidate, with a sentence or without one, less the landings on the sealed test days (C32). The index of landings
+  refuses a landing on a test day or on a day outside the day split by itself, and counts the landings in
+  [t − 30 min, t) without a given flight's own landing. The roster is outside the artefact, so the identity of a
+  prior's data holds a digest of the landings (§8, item 1; D63).
+```
+
+### 90. `prior.md`: §2 Inputs, Scales
+
+**What changed:** the prior reads no landings; the loops keep them for the reward (D206)
+
+**Old text:**
+
+```text
+  ground speed v / 100 m/s; the vertical rate v / 10 m/s; the landings in 30 min n / 10; in the variant `constants` the
+  length l / 1 km and the threshold elevation MSL h / 1 km.
+```
+
+**New text:**
+
+```text
+  ground speed v / 100 m/s; the vertical rate v / 10 m/s; in the variant `constants` the length l / 1 km and the
+  threshold elevation MSL h / 1 km.
+```
+
+### 91. `prior.md`: §6 A new airport, what it needs
+
+**What changed:** the prior reads no landings; the loops keep them for the reward (D206)
+
+**Old text:**
+
+```text
+| The landings in the 30 min before the step | The airport's tracks (offline) or a live surveillance feed |
+```
+
+**New text:**
+
+(deleted)
+
+### 92. `prior.md`: §7 Public interface, item 2
+
+**What changed:** the prior reads no landings; the loops keep them for the reward (D206)
+
+**Old text:**
+
+```text
+| 2 | The inputs of a row | One function from the states on the data's 2 s rows (observed before the first predicted step, flown from it), the words said, the candidates and the landings before the step to the inputs of a row (§2). Training, free generation and a loop of several aircraft use the same function: for the sentences of the artefact; and in a loop, from each aircraft's states, its own landings (D105) and the speaker's words in force, the inputs of the next Δ row and the position that the masks read (D96). The landings: from the tracks roster, less the sealed test days (the index refuses them, D105), counted before a time without a given flight's own landing (D63). The motion of rows: the 2 s displacement, with the velocities east and north (D106) Built (multi-aircraft control D150, MC0): `LoopRows` takes each aircraft's join tick in place of one first predicted step for the batch (aircraft b's inputs at tick t are those of its own row t − j_b; an absent aircraft's row is not present), and a landing added to chosen aircraft's landings while the loop runs (each one's `LandingIndex` replaced by one that holds it, with the index's checks); with every join tick 0 and no landing added, today's inputs, bit for bit | `prior/inputs.py` `state_inputs`, `sentence_rows`, `own_flight_key`, `motion` (the motion of rows); `prior/loop.py` `LoopRows` (`select`; one `LandingIndex` for each aircraft; one first predicted step for the batch, an int); `prior/landings.py` `Landing`, `LandingIndex`; `prior/source.py` `airport_landings`; stage D's: `LoopRows(…, join_ticks=…)`, `LoopRows.join_ticks`, `LoopRows.add_landing`, `LandingIndex.with_landing`, `batch.row_tensors(…, present=…)`; `LandingIndex` refuses landings out of time-then-flight-key order (multi-aircraft control D186 (1): a landing added is checked and inserted alone); `LoopRows.select(indices, device=)` (multi-aircraft control D182: a copy on another device) |
+```
+
+**New text:**
+
+```text
+| 2 | The inputs of a row | One function from the states on the data's 2 s rows (observed before the first predicted step, flown from it), the words said and the candidates to the inputs of a row (§2; no landings, D206). Training, free generation and a loop of several aircraft use the same function: for the sentences of the artefact; and in a loop, from each aircraft's states and the speaker's words in force, the inputs of the next Δ row and the position that the masks read (D96). The landings, which the loops keep for their caller (D105, D206): from the tracks roster, less the sealed test days (the index refuses them), counted before a time without a given flight's own landing (D63). The motion of rows: the 2 s displacement, with the velocities east and north (D106) Built (multi-aircraft control D150, MC0): `LoopRows` takes each aircraft's join tick in place of one first predicted step for the batch (aircraft b's inputs at tick t are those of its own row t − j_b; an absent aircraft's row is not present); with every join tick 0, today's inputs, bit for bit | `prior/inputs.py` `state_inputs`, `sentence_rows`, `own_flight_key`, `motion` (the motion of rows); `prior/loop.py` `LoopRows` (`select`; one first predicted step for the batch, an int); `prior/landings.py` `Landing`, `LandingIndex`; `prior/source.py` `airport_landings`; stage D's: `LoopRows(…, join_ticks=…)`, `LoopRows.join_ticks`, `LandingIndex.with_landing`, `batch.row_tensors(…, present=…)`; `LandingIndex` refuses landings out of time-then-flight-key order (multi-aircraft control D186 (1): a landing added is checked and inserted alone); `LoopRows.select(indices, device=)` (multi-aircraft control D182: a copy on another device) |
+```
+
+### 93. `prior.md`: §7 Public interface, item 7
+
+**What changed:** the prior reads no landings; the loops keep them for the reward (D206)
+
+**Old text:**
+
+```text
+| 7 | The step of a speaker's closed loop | The closed loop of a speaker and the executor, one Δ row at a time (D106): the observed rows that the start of the closed loop gives back (vocabulary §6 item 5: `start_moved`'s, a moved start's moved rows; never read from the stored sentence), then the inputs of each row, the speaker with the caller's numbers, masks and input of the added modules, the executor's step through the start of a closed loop, the flights done halted, a flight ended by the caller; a copy of its state for chosen flights; free generation's random numbers of a flight. Free generation and the post-training's window loop use it. Built (multi-aircraft control D150, MC0): each aircraft joins at its own tick — `step` advances one tick for every aircraft, absent, observed or said by its own clock; each aircraft's records, words, states and sentence are of its own rows from its row 0, as today; a landing added to chosen aircraft (item 2); the copy keeps the join ticks. With every join tick 0, today's loop, bit for bit | `experiments/prior_speaking_loop.py` `SpeakingLoop` (`SpeakingLoop(model, loop, order, sentences, observed, flights, geometries, landings, finals, words, *, interval_s, variant, device, temperature)`: `observed` the start's rows; the executor flies a row inside the speaker's `accept`, so a refused row leaves the loop as it was; `copy(flights)` on the loop's own `Loop.copy`; `said(b)`, `states(b)`; `generated(flights)`, which refuses a flight the caller ended, D118), `Generated`; free generation's numbers `flight_numbers`; stage D's: `SpeakingLoop.join_ticks`, `roles`, `own_row`, `joined`, `said_now`, `add_landing`; `held`, `left` (each left flight's frozen record), `inside`, `outcome(flight)`, `landings(flight)`, `in_force(flight)`, `permitted(flights)` (one record a flight; multi-aircraft control D193 (3)); `SpeakingLoop.copy(flights, device=)` (multi-aircraft control D182); `SpeakingLoop(…, executor_device=)`, the executor's device, kept by a copy (multi-aircraft control D193 (1)) |
+```
+
+**New text:**
+
+```text
+| 7 | The step of a speaker's closed loop | The closed loop of a speaker and the executor, one Δ row at a time (D106): the observed rows that the start of the closed loop gives back (vocabulary §6 item 5: `start_moved`'s, a moved start's moved rows; never read from the stored sentence), then the inputs of each row, the speaker with the caller's numbers, masks and input of the added modules, the executor's step through the start of a closed loop, the flights done halted, a flight ended by the caller; a copy of its state for chosen flights; free generation's random numbers of a flight. Free generation and the post-training's window loop use it. Built (multi-aircraft control D150, MC0): each aircraft joins at its own tick — `step` advances one tick for every aircraft, absent, observed or said by its own clock; each aircraft's records, words, states and sentence are of its own rows from its row 0, as today; a landing added to chosen aircraft's landings, which the loop keeps for its caller (D105, D206); the copy keeps the join ticks. With every join tick 0, today's loop, bit for bit | `experiments/prior_speaking_loop.py` `SpeakingLoop` (`SpeakingLoop(model, loop, order, sentences, observed, flights, geometries, landings, finals, words, *, interval_s, variant, device, temperature)`: `observed` the start's rows; the executor flies a row inside the speaker's `accept`, so a refused row leaves the loop as it was; `copy(flights)` on the loop's own `Loop.copy`; `said(b)`, `states(b)`; `generated(flights)`, which refuses a flight the caller ended, D118), `Generated`; free generation's numbers `flight_numbers`; stage D's: `SpeakingLoop.join_ticks`, `roles`, `own_row`, `joined`, `said_now`, `add_landing`; `held`, `left` (each left flight's frozen record), `inside`, `outcome(flight)`, `landings(flight)`, `in_force(flight)`, `permitted(flights)` (one record a flight; multi-aircraft control D193 (3)); `SpeakingLoop.copy(flights, device=)` (multi-aircraft control D182); `SpeakingLoop(…, executor_device=)`, the executor's device, kept by a copy (multi-aircraft control D193 (1)) |
+```
+
+### 94. `prior.md`: §9 Values, landings
+
+**What changed:** the prior reads no landings; the loops keep them for the reward (D206)
+
+**Old text:**
+
+```text
+| Landings of a candidate | In [t − 30 min, t), the flight's own landing not counted | §2, D63 |
+```
+
+**New text:**
+
+```text
+| The landings that the loops keep (no input, D206) | Counted in [t − 30 min, t), the flight's own landing not counted | §2, D63 |
+```
+
+### 95. `prior.md`: §9 Values, input scales
+
+**What changed:** the prior reads no landings; the loops keep them for the reward (D206)
+
+**Old text:**
+
+```text
+| Input scales | Distance before a threshold asinh(d / 1 km); offset right of a final and height above a glidepath asinh(d / 100 m); heights / 1 km; ground speed / 100 m/s; vertical rate / 10 m/s; landings in 30 min / 10; length / 1 km and threshold elevation MSL / 1 km (`constants`) | D41, D65, D204 |
+```
+
+**New text:**
+
+```text
+| Input scales | Distance before a threshold asinh(d / 1 km); offset right of a final and height above a glidepath asinh(d / 100 m); heights / 1 km; ground speed / 100 m/s; vertical rate / 10 m/s; length / 1 km and threshold elevation MSL / 1 km (`constants`) | D41, D65, D204 |
+```
+
+### 96. `post_training.md`: §3 Inputs, landing context
+
+**What changed:** the prior reads no landings; the loops keep them for the reward (prior D206)
+
+**Old text:**
+
+```text
+- **Landing context (D31, D98, D105).** Only the commanded aircraft has inputs. Its landing context counts the landings
+  of the window's scene before the step: the recorded landings of the recorded aircraft and of the aircraft before the
+  window, with the changes of an augmented window (D105), never its own recorded landing (that landing is the future of
+  the commanded aircraft) and never a landing on a sealed test day. The commanded aircraft's own landing in the loop
+  ends its window, so it never counts it either.
+```
+
+**New text:**
+
+```text
+- **Landing context (D31, D98, D105; prior D206).** The prior reads no landings; the loop keeps the commanded
+  aircraft's landings for the reward's present landing direction (§2 item 2). They are the landings of the window's
+  scene before the step: the recorded landings of the recorded aircraft and of the aircraft before the window, with
+  the changes of an augmented window (D105), never its own recorded landing (that landing is the future of the
+  commanded aircraft) and never a landing on a sealed test day. The commanded aircraft's own landing in the loop
+  ends its window, so it never counts it either.
+```
+
+### 97. `multi_control.md`: §6.2 Compressed windows
+
+**What changed:** the prior reads no landings; the loops keep them for the reward (prior D206)
+
+**Old text:**
+
+```text
+  and words do not change (the executor and the inputs read no absolute time, except the landings it counts, which are
+  read at its new time: its moved entry time in `LoopRows`, §6.3 item 2).
+```
+
+**New text:**
+
+```text
+  and words do not change (the executor and the inputs read no absolute time; the reward's landings are counted at its
+  new time).
+```
+
+### 98. `multi_control.md`: §9 Changes of other stages, item 3
+
+**What changed:** the prior reads no landings; the loops keep them for the reward (prior D206)
+
+**Old text:**
+
+```text
+| 3 | Prior §7 item 2, the landings of a loop | A landing added to chosen aircraft's landings while the loop runs; copied with the loop (§6.3 item 5) | No landing added: today's inputs, bit for bit; a landing added at a time changes only the counts of the rows after it |
+```
+
+**New text:**
+
+```text
+| 3 | Prior §7 item 7, the landings of a loop | A landing added to chosen aircraft's landings while the loop runs; copied with the loop (§6.3 item 5) | A landing goes to the chosen aircraft still held, and changes no input (prior D206) |
 ```

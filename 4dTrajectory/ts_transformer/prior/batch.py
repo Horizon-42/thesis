@@ -42,10 +42,10 @@ from ts_transformer.instructions.words import COLUMNS, RUNWAY, RUNWAY_GO_AROUND,
 OWN_FEATURES = ("height_above_elevation", "ground_speed", "vertical_rate", "no_motion")
 #: The inputs that come from the motion in the 2 s before a row (D25): 0 at row 0, which has no state before it (D60).
 OWN_MOTION_FEATURES = ("ground_speed", "vertical_rate")
-#: A candidate vector (D23, D24): the aircraft in the frame of the candidate, the height above its glidepath, the
-#: landings on it in the 30 min before the step.
+#: A candidate vector (D23, D24): the aircraft in the frame of the candidate and the height above its glidepath; no
+#: landings on it (D206).
 CANDIDATE_FEATURES = ("before_threshold", "right_of_final", "height_above_threshold", "motion_minus_course_sin",
-                      "motion_minus_course_cos", "height_above_glidepath", "landings_30min")
+                      "motion_minus_course_cos", "height_above_glidepath")
 CANDIDATE_MOTION_FEATURES = ("motion_minus_course_sin", "motion_minus_course_cos")
 #: The runway constants of the variant ``constants`` (D39).
 RUNWAY_CONSTANT_FEATURES = ("length", "threshold_elevation")

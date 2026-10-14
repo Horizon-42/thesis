@@ -361,8 +361,7 @@ def open_context(prior_dir: Path, instructions: Path, executor: Path, edges_refe
     if formal:
         require_formal_base(prior)
     words = Words(load_spec(instructions))
-    source = ArtefactSource(instructions, prior.interval_s, prior.checkpoint.model.config.variant, prior.landings,
-                            prior.selection)
+    source = ArtefactSource(instructions, prior.interval_s, prior.checkpoint.model.config.variant, prior.selection)
     sentences = [s for code in sorted(prior.geometries) for s in source.sentences("train", code)] if data else []
     if data and not sentences:
         raise ValueError(f"no train sentence in the base's selection {prior.selection!r}: no data term (D36, D76)")

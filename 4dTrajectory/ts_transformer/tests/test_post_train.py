@@ -83,7 +83,7 @@ def _context(s):
 
     train["signals"] = {x.dataset_id: x for x in load_signals(s["directory"], "train")}
     train["start"] = Start(s["directory"], "train", DELTA, s["directory"].parent / "executor")
-    data = ArtefactSource(s["directory"], DELTA, "full", {code: s["roster"]}, "all").sentences("train", code)
+    data = ArtefactSource(s["directory"], DELTA, "full", "all").sentences("train", code)
     return Context(s["directory"], s["directory"].parent / "executor", s["reference"], CPU, s["words"], DELTA, s["base"],
                    {"base": "the fixture's"}, s["geometries"], {code: s["roster"]}, s["finals"],
                    {"train": train, "select": train}, data)

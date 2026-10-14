@@ -349,15 +349,13 @@ def _start_wrong(s, multi):
 
 def test_a_compressed_windows_moved_aircraft_reads_its_inputs_at_its_moved_time(setup):
     """Multi-aircraft control D146, §6.3 item 2: in a compressed window a commanded aircraft moved earlier by its shift
-    joins at its moved row 0 and reads its landings at its moved time (its entry time moved), its own landing at its
-    moved time too; its states and words are those of the window without the move, joined at the same tick."""
+    joins at its moved row 0, its own landing kept at its moved time; its states and words are those of the window
+    without the move, joined at the same tick."""
     s = setup
     shift = -4                                                      # recorded 4 steps later, moved 4 steps earlier
     _, plain_of = _multi(s)
     _, moved_of = _multi(s, shifts=(0, shift, 0))
     plain, moved = plain_of(_with_module(s["base"])), moved_of(_with_module(s["base"]))
-    entry = moved.speaking.rows_of.entry_utc_s
-    assert entry[1] == plain.speaking.rows_of.entry_utc_s[1]        # its moved entry: where the plain copy enters
     own = [x for x in moved.speaking.landings(1).landings if x.flight_key == moved.keys[1]]
     plain_own = [x for x in plain.speaking.landings(1).landings if x.flight_key == plain.keys[1]]
     assert len(own) == 1 and own[0].time_s == plain_own[0].time_s   # its own landing at its moved time
@@ -694,8 +692,8 @@ def test_each_rows_view_is_its_window_reordered_and_reads_as_the_scene_functions
 
 
 def test_every_count_a_loop_reads_lies_where_its_landings_were_cut(setup, monkeypatch):
-    """D189 (0): flown to its end, every time at which a loop counts an aircraft's landings (its rows' inputs, the
-    reward's present direction) lies in the span its landings were cut to (`post.landings.commanded_landings`: from one
+    """D189 (0): flown to its end, every time at which a loop counts an aircraft's landings (the reward's present
+    direction; the prior reads none, D206) lies in the span its landings were cut to (`post.landings.commanded_landings`: from one
     Δ before its window's row 0 to the loop's last row, ``reach``; the 30 min before the first kept too), so every
     count is the roster's."""
     from ts_transformer.prior.landings import LandingIndex

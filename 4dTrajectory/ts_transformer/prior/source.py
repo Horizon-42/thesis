@@ -46,8 +46,10 @@ def artefact_identity(directory: Path, interval_s: float, landings: Mapping[str,
                       counted: Sequence[str] = SPLITS) -> dict[str, Any]:
     """§8 item 1 (D21, D63, D75): the spec sha, the day split, the candidate table (`candidates.json`, the vertical paths
     in it), the sha256 of the closed-loop sentence files of Δ = ``interval_s`` and of the stored signals (whose
-    faulty-track marks the selection reads, D111), every development split; the landings
-    the candidate vectors count (`LandingIndex.digest`, by their flights); and the selection — its rule and, for each
+    faulty-track marks the selection reads, D111), every development split; the airports' roster landings
+    (`LandingIndex.digest`, by their flights; D63): no input of the prior (D206), but the loops that start from it
+    read them (the reward's present landing direction, post-training D112) and their identities hold the prior's;
+    and the selection — its rule and, for each
     split, airport, stratum and outcome, the sentences kept and left out (`prior.selection.selection_record` of the rule
     ``selection``). The selection's counts read the stored outcomes of the splits ``counted`` only: a run's own record
     counts every split, a reader that must not read the val days' outcomes (D85: before the base's one validation
@@ -88,15 +90,11 @@ class ArtefactSource:
     """The closed-loop sentences of an artefact at one Δ that the rule ``selection`` keeps (D75), as `SentenceRows` of a
     variant (module docstring); each split's file is read once, on first use. The artefact is not changed."""
 
-    def __init__(self, directory: Path, interval_s: float, variant: str, landings: Mapping[str, LandingIndex],
-                 selection: str) -> None:
+    def __init__(self, directory: Path, interval_s: float, variant: str, selection: str) -> None:
         self.directory, self.interval_s, self.variant = directory, interval_s, variant
         self.selection = require_rule(selection)
         self.words = Words(load_spec(directory))
         self.geometries = load_candidates(directory)
-        if set(landings) != set(self.geometries):
-            raise ValueError(f"landings of {sorted(landings)}, the artefact's airports are {sorted(self.geometries)}")
-        self.landings = dict(landings)
         self._split: dict[str, dict[str, list[SentenceRows]]] = {}
 
     def sentences(self, split: str, airport: str) -> list[SentenceRows]:
@@ -120,6 +118,6 @@ class ArtefactSource:
             flight = flights[index]
             code = flight["airport"]
             out[code].append(sentence_rows(           # the rows alone are an input (D82)
-                sentence.rows, flight, self.geometries[code], self.landings[code], self.words, interval_s=self.interval_s,
-                split=split, variant=self.variant))
+                sentence.rows, flight, self.geometries[code], self.words, interval_s=self.interval_s, split=split,
+                variant=self.variant))
         return out

@@ -367,10 +367,11 @@ The status (outline §5 rule 10); the commits, the tests and the readings are in
   approach on the present motions (its time, horizontal distance and height difference); the distance that the rules
   require between the two; a flag for an unknown motion. The scales are constants in SI units (D117). No feature uses a
   value of a row after the step. Their identity: §4 item 1.
-- **Landing context (D31, D98, D105).** Only the commanded aircraft has inputs. Its landing context counts the landings
-  of the window's scene before the step: the recorded landings of the recorded aircraft and of the aircraft before the
-  window, with the changes of an augmented window (D105), never its own recorded landing (that landing is the future of
-  the commanded aircraft) and never a landing on a sealed test day. The commanded aircraft's own landing in the loop
+- **Landing context (D31, D98, D105; prior D206).** The prior reads no landings; the loop keeps the commanded
+  aircraft's landings for the reward's present landing direction (§2 item 2). They are the landings of the window's
+  scene before the step: the recorded landings of the recorded aircraft and of the aircraft before the window, with
+  the changes of an augmented window (D105), never its own recorded landing (that landing is the future of the
+  commanded aircraft) and never a landing on a sealed test day. The commanded aircraft's own landing in the loop
   ends its window, so it never counts it either.
 - **States in a scene (D32, D36).** A scene occurs only in the closed loop. The commanded aircraft flies with the
   executor; the other aircraft fly their records. There is no teacher-forced scene sample: the flown states keep the

@@ -336,8 +336,8 @@ def test_the_behaviour_check_covers_the_procedure_masks(monkeypatch):
 
 
 def test_the_behaviour_check_covers_the_sentence_rows_the_selection_the_choices_and_the_settings(monkeypatch):
-    """B12 (D108): the answer changes when the training sentences' inputs (`inputs.sentence_rows`: the landings counted
-    at another UTC), the selection (`selection.left_out`) or a rule of `prior_select` (the seed scale) changes; its
+    """B12 (D108): the answer changes when the training sentences' inputs (`inputs.sentence_rows`: the distance before
+    a threshold on another scale), the selection (`selection.left_out`) or a rule of `prior_select` (the seed scale) changes; its
     settings are the campaign's as a second process loads them."""
     import os
     import subprocess
@@ -360,9 +360,8 @@ def test_the_behaviour_check_covers_the_sentence_rows_the_selection_the_choices_
     assert answer["select_rules"]["edge"]["within"] == ["A", "C"] and answer["select_rules"]["edge"]["chosen"] == "A"
     assert answer["select_rules"]["zero"]["within"] == ["C"]
     assert answer["settings"]["variant"] == "full"
-    for patch_it, key in ((lambda patch: patch.setattr(inputs_module, "utc_s",
-                                                       lambda text, real=inputs_module.utc_s: real(text) + 600.0),
-                           "sentence_rows"),
+    for patch_it, key in ((lambda patch: patch.setattr(inputs_module, "DISTANCE_SCALE_M",
+                                                       2.0 * inputs_module.DISTANCE_SCALE_M), "sentence_rows"),
                           (lambda patch: patch.setattr(selection_module, "LANDING", "landing_failed"), "selection"),
                           (lambda patch: patch.setattr(select_module, "seed_scale", lambda scores, seeds: 0.0),
                            "select_rules")):
@@ -372,22 +371,14 @@ def test_the_behaviour_check_covers_the_sentence_rows_the_selection_the_choices_
         assert changed[key] != answer[key] and changed["train_loss"] == answer["train_loss"], key
     from ts_transformer.experiments import prior_behaviour as behaviour_module
     from ts_transformer.experiments import prior_free_generation as generation_module
-    from ts_transformer.prior.landings import LandingIndex
     from ts_transformer.prior.loop import LoopRows
 
     # B13: each new part of the answer moves when what it holds changes
-    counts = LandingIndex.counts_before
-    rows_init = LoopRows.__init__
-    assert any(any(v != 0 for v in row) for row in answer["inputs"]["landings"])
+    rows_call = LoopRows.__call__
     for patch_it, keys in (
-            # the landings counted 30 s off the rows' UTC (the fixed sentence's own and same-second landings lie
-            # between two of its rows)
-            (lambda patch: patch.setattr(LandingIndex, "counts_before", lambda self, times, *, without:
-                                         counts(self, np.asarray(times) - 30.0, without=without)),
-             ("sentence_rows",)),
-            # every aircraft of the loop given the first one's landings (D105)
-            (lambda patch: patch.setattr(LoopRows, "__init__", lambda self, geometries, landings, *given, **named:
-                                         rows_init(self, geometries, [landings[0]] * len(landings), *given, **named)),
+            # the loop's rows read every aircraft 50 m higher
+            (lambda patch: patch.setattr(LoopRows, "__call__", lambda self, t, at, before, known, heard: rows_call(
+                self, t, at + np.array([0.0, 0.0, 50.0, 0.0, 0.0, 0.0]), before, known, heard)),
              ("speaking_loop",)),
             (lambda patch: patch.setattr(behaviour_module, "kept", lambda rule, outcome, faulty: True), ("selection",)),
             (lambda patch: patch.setattr(behaviour_module, "side", lambda rule, outcome, faulty: "inside"),

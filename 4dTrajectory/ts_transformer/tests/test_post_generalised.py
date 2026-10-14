@@ -162,9 +162,11 @@ def stage_c_campaign_scenario(s, tmp_path, monkeypatch) -> dict[str, str]:
 #: trains (the fixture's angle corrections now aim at the published glidepath); the drawn part did not move.
 #: Written again on 2026-10-14 (two-tier2-glidepath, prior D204): the offset right of the centreline goes into the
 #: prior on the glidepath's 100 m scale, so the synthetic prior says other words; both parts moved.
+#: Written again on 2026-10-14 (two-tier2-glidepath, prior D206): the prior reads no landings, so its candidate input is
+#: one feature narrower and the synthetic prior says other words; both parts moved.
 CAMPAIGN_BEFORE_GENERALISATION = {
-    "campaign drawn": "52d88a8a08e049fcb3e06eb08a2f1a82b113e5ddaa0dd95708f100d1211c4408",
-    "campaign updated": "30cf0c83b8f9d11985195494a055b1dc85b220fb6c0e471b3efa7d65221b7343",
+    "campaign drawn": "c5915d9687b5637f1f78ed2c1e16956d4bcdad9d4cadbe7ddd04a5cf58fd8f23",
+    "campaign updated": "a23fe105b9709d288038681df563558d746706b2fbba54a055947245c28039a7",
 }
 
 
@@ -190,14 +192,17 @@ def test_stage_cs_campaign_is_the_campaign_before_the_skeleton_bit_for_bit(setup
 #: none. A part that neither flies nor trains keeps c7a0b6b0's value. Since then the digests pin this code itself.
 #: Written again on 2026-10-14 (two-tier2-glidepath, prior D204): the offset right of the centreline goes into the
 #: prior on the glidepath's 100 m scale, so the synthetic prior says other words; every part it says moved; the module did not.
+#: Written again on 2026-10-14 (two-tier2-glidepath, prior D206): the prior reads no landings, so its candidate input is
+#: one feature narrower and the synthetic prior says other words; every part it says moved, and the module too (the smaller prior draws fewer random numbers
+#: before the module's first weights).
 BEFORE_GENERALISATION = {
-    "module": "8ef2cf46f1b72b4b62813330bf8f53bb59819a99862dc087c036e978031b4122",
-    "window real": "51a76e943fc78b37ed8494e555a4ccbe3eb6824acd10171bc4263c4328031871",
-    "window A": "db8c881aec3303f5b42282df00157e64af9db8968782f97fb32e8c980654e15f",
-    "window B": "e011f2ebb5fba68810008cb554f04bd0e765a8f89950dc88f2cead2d050e8a74",
-    "round A": "4220191b3a03d85378742084a2a9eb4cbe10f7078650fb8dee7438b21f0298ef",
-    "samples A": "10686a47c3d94fcedf19b8fab84471f9cddb869c362fdf79c4126b24e89488d6",
-    "round real": "02f49b07a745d969acf83caae4f4b8f50b95cd2b5b14508e13e615a2eac5b1fa",
+    "module": "e044dd8b8db5b1f1cbd00a795628831ac36e028e601369449bbbbc17c9599baf",
+    "window real": "b27686c03d39830c8338ad4f4a905fe55e6d0f56a153f6d2a994234a01896acc",
+    "window A": "80dd7f1cdf188ae1f29fe770173b7cd91ec6b75074af12515e190529854f1c8a",
+    "window B": "108dd02238e432e1a9a8d7c57c2e12d1e1907cf45465f2db3e1b676fb4ab64db",
+    "round A": "c70fb4845cf373118848bd3b24ff67468c51efbb1eb073c0ecb0a94946be7b12",
+    "samples A": "6c46fbe50c1aa2c7eacb2139b6353a5188bd92a2ddb726f6672a230c887a3fca",
+    "round real": "d2d3e66bc7cd1208515725dc6a7b78ee4192d43202cc300297ea065b837bcf65",
 }
 
 
@@ -209,7 +214,9 @@ BEFORE_GENERALISATION = {
 #: none. A part that neither flies nor trains keeps c7a0b6b0's value. Since then the digests pin this code itself.
 #: Written again on 2026-10-14 (two-tier2-glidepath, prior D204): the offset right of the centreline goes into the
 #: prior on the glidepath's 100 m scale, so the synthetic prior says other words; every part it says moved.
-BATCH_BEFORE_GENERALISATION = "3727c7d07861c6c72a368b7e734d0db70169e12ffeb5bf61756590c02650199e"
+#: Written again on 2026-10-14 (two-tier2-glidepath, prior D206): the prior reads no landings, so its candidate input is
+#: one feature narrower and the synthetic prior says other words; every part it says moved.
+BATCH_BEFORE_GENERALISATION = "01f893c2457be58b7af13bc8a45b448f53ad9bf3682a4332f68cede0885e6234"
 
 
 def test_a_stage_c_batch_whose_first_window_ended_is_the_code_before_its_generalisation_bit_for_bit(setup, monkeypatch):

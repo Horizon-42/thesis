@@ -30,8 +30,7 @@ from ts_transformer.tests import test_start
 
 CPU = torch.device("cpu")
 INTERVAL_S = 4.0
-#: The keys of the copies of the flight; every loop's landings hold all of them, so a copy's inputs do not depend on
-#: the other copies of its loop.
+#: The keys of the copies of the flight; every loop's landings hold all of them.
 KEYS = tuple(f"F{i}" for i in range(5))
 #: The join ticks of the loops below: one joins at the first tick, one inside the first's observed rows, one after the
 #: first's first predicted step, one later still.
@@ -149,8 +148,10 @@ def _zero_join_scenario(speaking, join_ticks) -> str:
 #: The loop with no join ticks and the loop with every join tick 0 give this same digest from 223f1e30 to 288b779b.
 #: Written again on 2026-10-14 (two-tier2-glidepath, prior D204): the offset right of the centreline goes into the
 #: prior on the glidepath's 100 m scale, so the synthetic prior says other words; every part it says moved.
-BEFORE_JOIN_TICKS = ("b90cdcad1ac2037c8f79b38674343a449eba085e88dd9d3c9fda57b94398ada9"
-                     "03353c1dacd63e981f28469d61a4dbe681b7d41e20f42b8b4729f483fd02298c")
+#: Written again on 2026-10-14 (prior D206): the prior reads no landings, so its candidate input is one feature
+#: narrower and the synthetic prior says other words.
+BEFORE_JOIN_TICKS = ("a4eec3e7f766d11df3c3702808b6687ff4ac59b29f35ba07e782d78e1d545eb0"
+                     "30e387d8583e5e49a831ff7b8d916d52a904aaa6e8676e64a9ba738abba6b47d")
 
 
 def test_every_join_tick_zero_says_and_flies_what_the_loop_said_before_join_ticks(tmp_path, monkeypatch):
@@ -240,12 +241,11 @@ def test_a_copy_of_a_loop_with_join_ticks_says_what_its_original_says(tmp_path, 
         assert np.allclose(copy.states(j), loop.states(b), rtol=0.0, atol=STATE_BOUND_M)
 
 
-def test_a_landing_added_changes_only_the_counts_of_the_chosen_flights_rows_after_it(tmp_path, monkeypatch):
-    """D150, §6.3 item 5 (multi-aircraft control D147): a landing added to chosen flights' landings while the loop runs
-    changes only their rows whose time is after it (within the 30 min of the input), and nothing else of any row; a
-    copy keeps it; the index keeps its checks — a second landing of a flight and a landing on a day outside the split
-    are refused; one on a sealed test day is left out and counted with the sealed landings (requests item 6, the user,
-    2026-10-07)."""
+def test_a_landing_added_goes_to_the_chosen_flights_landings_and_changes_no_input(tmp_path, monkeypatch):
+    """D150, §6.3 item 5 (multi-aircraft control D147), D206: a landing added to chosen flights' landings while the loop
+    runs goes to their indexes only, and no row of any flight changes (the prior reads no landings); a copy keeps it;
+    the index keeps its checks — a second landing of a flight and a landing on a day outside the split are refused; one
+    on a sealed test day is left out and counted with the sealed landings (requests item 6, the user, 2026-10-07)."""
     speaking, _, _ = _setup(tmp_path, monkeypatch)
     loop = speaking(JOIN_TICKS)
     rows_of = loop.rows_of
@@ -253,31 +253,62 @@ def test_a_landing_added_changes_only_the_counts_of_the_chosen_flights_rows_afte
     before = loop.observed[:, 3]
     tick = 20
     first = rows_of(tick, at, before, True, loop.speaker.heard)[0]
-    utc = rows_of.entry_utc_s + (rows_of.first_rows + (tick - rows_of.join_ticks) * rows_of.every) * rows_of.step_s
-    idents = rows_of.landings[0].runways
-    rows_of.add_landing([1, 3], Landing(float(utc[1]) - 1.0, idents[0], "NEW"))      # before flight 1's row, after 3's
+    kept = [loop.landings(b) for b in range(4)]
+    idents = kept[0].runways
+    when = max(landing.time_s for landing in kept[0].landings) + 1.0
+    loop.add_landing([1, 3], Landing(when, idents[0], "NEW"))
+    assert [loop.landings(b).digest() == kept[b].digest() for b in range(4)] == [True, False, True, False]
+    assert all("NEW" in {x.flight_key for x in loop.landings(b).landings} for b in (1, 3))
     second = rows_of(tick, at, before, True, loop.speaker.heard)[0]
-    for name, a, b in zip(first._fields, first, second):
-        if name != "candidates":
-            assert torch.equal(a, b), name
-    changed = (first.candidates != second.candidates).any(dim=-1).any(dim=-1)[:, 0]
-    assert utc[3] < utc[1] - 1.0 and changed.tolist() == [False, True, False, False]   # 3's row is earlier
+    for name, x, y in zip(first._fields, first, second):
+        assert torch.equal(x, y), name
     copy = loop.copy([1, 0])
-    assert [index.digest() for index in copy.rows_of.landings] == [rows_of.landings[1].digest(),
-                                                                   rows_of.landings[0].digest()]
+    assert [copy.landings(j).digest() for j in range(2)] == [loop.landings(1).digest(), loop.landings(0).digest()]
     with pytest.raises(ValueError, match="a flight lands twice"):
-        rows_of.landings[1].with_landing(Landing(float(utc[1]), idents[0], "NEW"))
-    days = rows_of.landings[0].days
+        loop.landings(1).with_landing(Landing(when, idents[0], "NEW"))
+    days = kept[0].days
     test_day = datetime.strptime(sorted(days.days["test"])[0], "%Y-%m-%d").replace(hour=21, tzinfo=timezone.utc)
-    sealed = rows_of.landings[0].with_landing(Landing(test_day.timestamp(), idents[0], "SEALED"))
-    assert sealed.landings == rows_of.landings[0].landings and sealed.sealed == rows_of.landings[0].sealed + 1
+    sealed = kept[0].with_landing(Landing(test_day.timestamp(), idents[0], "SEALED"))
+    assert sealed.landings == kept[0].landings and sealed.sealed == kept[0].sealed + 1
     early = test_day.replace(hour=5) + timedelta(days=1)                   # UTC − 9 h: still the test day's
-    assert rows_of.landings[0].with_landing(Landing(early.timestamp(), idents[0], "EARLY")).sealed == sealed.sealed
+    assert kept[0].with_landing(Landing(early.timestamp(), idents[0], "EARLY")).sealed == sealed.sealed
     with pytest.raises(ValueError, match="lands twice"):                    # the other checks first
-        rows_of.landings[1].with_landing(Landing(test_day.timestamp(), idents[0], "NEW"))
+        loop.landings(1).with_landing(Landing(test_day.timestamp(), idents[0], "NEW"))
     outside = datetime(1990, 1, 1, 21, tzinfo=timezone.utc)                # a day outside the split: refused
     with pytest.raises(KeyError, match="not in this day split"):
-        rows_of.landings[0].with_landing(Landing(outside.timestamp(), idents[0], "OUTSIDE"))
+        kept[0].with_landing(Landing(outside.timestamp(), idents[0], "OUTSIDE"))
+
+
+def test_the_loop_keeps_each_flights_landings_for_its_caller(tmp_path, monkeypatch):
+    """D105, D147, D206: the loop keeps each flight's landings for its caller (the post-training reward reads them; the
+    prior reads none). A landing added goes to the chosen flights still held — an ended flight is held until the loop
+    is joined again — and never to a flight that left; `together` and `copy` (repeats permitted) give each flight its
+    own landings."""
+    from ts_transformer.experiments.prior_speaking_loop import SpeakingLoop as Loops
+
+    speaking, _, _ = _setup(tmp_path, monkeypatch)
+    keys = KEYS[:3]
+    sources = _sources(keys)
+    loop = speaking(None, keys)
+    runway = loop.landings(0).runways[0]
+    late = max(x.time_s for x in loop.landings(0).landings)
+
+    def added(of, flight):
+        return {"A", "B", "C", "D"} & {x.flight_key for x in of.landings(flight).landings}
+
+    loop.add_landing([0], Landing(late + 10.0, runway, "A"))
+    loop.add_landing([1, 2], Landing(late + 20.0, runway, "B"))
+    _fly(loop, sources, steps=2)
+    loop.end(np.array([False, True, False]))
+    loop.add_landing([1, 2], Landing(late + 30.0, runway, "C"))     # flight 1 ended, still held: it gets it
+    assert [added(loop, b) for b in range(3)] == [{"A"}, {"B", "C"}, {"B", "C"}]
+    joint = Loops.together([(loop, [0, 1, 1, 2])], CPU, None)
+    assert joint.held.tolist() == [True, False, False, True]           # flight 1 left the speaker and the executor
+    assert [joint.landings(k).digest() for k in range(4)] == [loop.landings(b).digest() for b in (0, 1, 1, 2)]
+    joint.add_landing([0, 1, 2, 3], Landing(late + 40.0, runway, "D"))
+    assert ["D" in added(joint, k) for k in range(4)] == [True, False, False, True]
+    copy = joint.copy([3, 3, 1])
+    assert [copy.landings(j).digest() for j in range(3)] == [joint.landings(k).digest() for k in (3, 3, 1)]
 
 
 def test_a_row_of_several_roles_is_refused_out_of_order_or_unlike_its_rows(tmp_path, monkeypatch):

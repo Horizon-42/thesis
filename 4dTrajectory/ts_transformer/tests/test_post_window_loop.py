@@ -26,7 +26,6 @@ from ts_transformer.post.reward import GO_AROUND_FACTOR, LANDED, present_runways
 from ts_transformer.post.scene import INSERTED, INSERTED_SUFFIX, MovedScene, airport_scenes, real_windows
 from ts_transformer.post.traffic_attention import TrafficConfig, add_traffic_attention, traffic_modules
 from ts_transformer.prior.batch import variant_features
-from ts_transformer.prior.inputs import LANDINGS_SCALE
 from ts_transformer.prior.landings import LANDINGS_WINDOW_S, Landing, LandingIndex, utc_s
 from ts_transformer.prior.model import Prior, PriorConfig
 from ts_transformer.prior.procedure import Final
@@ -148,9 +147,10 @@ def test_a_loss_of_separation_that_the_commanded_aircraft_answers_for_ends_its_w
     assert result.states.shape[0] == (start_row + 1) * loop.every + 1
 
 
-def test_the_landing_context_counts_the_windows_landings_never_the_commanded_aircrafts_own(setup):
-    """D31, D105: at every row said, the commanded aircraft's landings input is its window's landings (an inserted
-    aircraft's at its shifted time) without its own landing."""
+def test_the_landings_a_loop_keeps_are_the_windows_never_the_commanded_aircrafts_own(setup):
+    """D31, D105, D206: the landings a window loop keeps for the commanded aircraft (the reward's present direction reads
+    them; the prior reads none) are its window's (an inserted aircraft's at its shifted time); counted at its rows, its
+    own landing is never counted."""
     s = setup
     (window,) = s["windows"]
     own = window.scene.flights[0]
@@ -162,9 +162,8 @@ def test_the_landing_context_counts_the_windows_landings_never_the_commanded_air
     loop.run([flight_numbers(7, 0, 0)])
     (rows,) = loop.speaking.sentences("train")
     times = window.row0_s + np.arange(len(rows.time_s)) * DELTA
-    counts = window_landings(inserted, s["roster"]).counts_before(times, without=s["key"])[:, 0]
-    feature = variant_features("full").index("landings_30min")
-    assert np.allclose(rows.candidates[:, 0, feature], counts / LANDINGS_SCALE)
+    counts = loop.speaking.landings(0).counts_before(times, without=s["key"])[:, 0]
+    assert (counts == window_landings(inserted, s["roster"]).counts_before(times, without=s["key"])[:, 0]).all()
     without_insert = s["roster"].counts_before(times, without=s["key"])[:, 0]
     inserted_at = own.landing_s + shift
     in_window = (times > inserted_at) & (times <= inserted_at + LANDINGS_WINDOW_S)

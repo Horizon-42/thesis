@@ -7,9 +7,8 @@
 | every other outcome; every loss of separation that the commanded aircraft answers for | 0 |
 
 **The present landing direction**: a runway within 90° of a runway with a landing in the 30 min before the first
-predicted step — the landings of the window's scene (D105), without the commanded aircraft's own (D31), counted by the
-prior's index (`LandingIndex.counts_before`, whose window is the same 30 min, prior §7 item 2). With no landing in the 30
-min, every runway is of it: there is no direction to break (the user, 2026-10-05; on A34's artefact 2.8 % of the train
+predicted step — the landings of the window's scene (D105), without the commanded aircraft's own (D31), counted by
+`LandingIndex.counts_before` (its window is the same 30 min). With no landing in the 30 min, every runway is of it: there is no direction to break (the user, 2026-10-05; on A34's artefact 2.8 % of the train
 windows).
 """
 

@@ -339,7 +339,9 @@ def _weights(model) -> str:
 #: fixture's observed final runs up to 31 m above the published glidepath; its angle corrections now aim at the glidepath).
 #: Written again on 2026-10-14 (two-tier2-glidepath, prior D204): the offset right of the centreline goes into the
 #: prior on the glidepath's 100 m scale, so the synthetic prior says other words; it moved.
-VALUE_BEFORE_D173 = "d44b3db161c66932f2590ec8ee0ea0f64fdc84aeabb7bc8a636621afe41bbc38"
+#: Written again on 2026-10-14 (two-tier2-glidepath, prior D206): the prior reads no landings, so its candidate input is
+#: one feature narrower and the synthetic prior says other words; it moved.
+VALUE_BEFORE_D173 = "d4700b23d0a8aed604a4a345ef047f79b0b6e5ee322671cc00f2278151f3680b"
 
 
 def test_with_d173_s_defaults_a_value_campaign_is_the_code_s_before_bit_for_bit(setup, tmp_path, monkeypatch):

@@ -1,5 +1,22 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-14 — the prior reads no landings (prior D206)
+
+- Why: the user, 2026-10-14: "这样 你先做个试验，直接把这个输入去掉 … 理论上为了增加泛化能力，最好能去掉它", then, after the
+  trial, "直接采用，重跑整个活动". The input (the landings on each candidate in the 30 min before the step) counted every
+  landing of the roster, light aircraft too: B20's fold without KRDU said KRDU's light-aircraft runway 32 first in 60 of
+  400 sentences (B19's: 17), and few of them landed.
+- The trial (`outputs/POOLED/prior/trial_no_landings_20261014`, read-only; branch `trial-no-landings` at `54dc46aa`),
+  configuration A seed 1337 against B20: KRDU landed 84.8 → 90.8 % of its held-out sentences, 32 first in 19; KMSY
+  92.0 → 91.5 %.
+- The code: `prior/batch.py` `CANDIDATE_FEATURES` without `landings_30min`; `state_inputs`, `sentence_rows`, `LoopRows`
+  and `ArtefactSource` lose their landings arguments; `SpeakingLoop` keeps each flight's `LandingIndex` for its caller
+  (`landings(flight)`, `add_landing`), which the post-training's reward reads. The data identity still binds the
+  landings' digest (D63). `ts-prior-checkpoint-v10`: every earlier prior is refused by name, so every stage C/D model
+  trained from one is too.
+- Stale: B20 (`prior_b20_20261014`, paused after three folds) is superseded by B21, B20's campaign without the input.
+  The D200 chain (`multi/compare_20261014.run`) waits for B21's base.
+
 ### 2026-10-14 — the prior's training stops after 15 epochs without a better select loss, at most 150 (prior D205)
 
 - Why: the user, 2026-10-14: "改成连续8轮不变小；或者你建议一个更合理的数字；另外评估一下，当前base训练是不是停早了", then the

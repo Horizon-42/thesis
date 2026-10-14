@@ -120,7 +120,7 @@ control arm ended its 8 rounds (log §22).
 | Post-training (D185: a resume's rates) | Merged: 16bacde0 (log §22) |
 | §5 item 5 (`multi_window_read`, `window_list --multi`) | Merged (cf7e21f0): af98c354, d0b9c202, 5139728a; read on the formal campaign's round 7 (log §22) |
 | Frontend §5.1 (the counted outcome) | Merged: 70d87089 (log §22) |
-| D200 (one method of branch training) | Code `0f6c4468` (reviewed, two S2 fixed), its two broken tests `a39ef6bc`; the backend's stage D route answers a start from the base (`be3cdd49`, the user's permission). The chain `compare_20261013.run` (B15's base, v17) never ran: the user held it (2026-10-13, "先查原因，对照暂缓"). The user, 2026-10-14: from the new base. The chain `4dTrajectory/outputs/POOLED/multi/compare_20261014.run` (unit `multi-compare-d200`, run worktree `run-b20` at `2c3e7f3d`) waits for B20's last step, then runs the three arms from B20's base on `v19_20261014` / `v24_20261014`; a CPU smoke from B19's base passed |
+| D200 (one method of branch training) | Code `0f6c4468` (reviewed, two S2 fixed), its two broken tests `a39ef6bc`; the backend's stage D route answers a start from the base (`be3cdd49`, the user's permission). The chain `compare_20261013.run` (B15's base, v17) never ran: the user held it (2026-10-13, "先查原因，对照暂缓"). The user, 2026-10-14: from the new base. The chain `4dTrajectory/outputs/POOLED/multi/compare_20261014.run` (unit `multi-compare-d200`) waited for B20, which the user paused (prior D206); it now runs from the run worktree `run-b21`, waits for B21's last step, then runs the three arms from B21's base on `v19_20261014` / `v24_20261014`; a CPU smoke from B19's base passed |
 | MC8–MC10 | Not started |
 
 ### 0.4 Plan
@@ -132,8 +132,8 @@ control arm ended its 8 rounds (log §22).
    formal campaign and its control arm `multi_train_minority_side_20261011`); its one validation readout landed
    83.9 %; its two sets are published (drawn windows and the windows not landed, D176). O18 from its readouts; O21 for
    the user; O19 not taken up (the user, 2026-10-10).
-3. D200: the comparison of the three methods of branch training, from B20's base on v19 (the user, 2026-10-14); its
-   chain waits for B20 (§0.3). The user then chooses one method for stages C and D.
+3. D200: the comparison of the three methods of branch training, from B21's base on v19 (the user, 2026-10-14: from
+   the new base; prior D206); its chain waits for B21 (§0.3). The user then chooses one method for stages C and D.
 4. Version 2 (D153): MC8 (its code), MC9 (its memory measure, its campaign from version 1's chosen round, its
    validation readout); MC10 closes stage D.
 
@@ -338,8 +338,8 @@ D93 says.
 - **Compressed windows**: each commanded aircraft other than the anchor is moved earlier, its offset from the anchor's
   row 0 multiplied by c (c uniform in [c_min, 1], the moved offset rounded to a whole Δ); the recorded aircraft do not
   move. A moved aircraft's record moves with it: its observed rows, its row 0, its first predicted step; its states
-  and words do not change (the executor and the inputs read no absolute time, except the landings it counts, which are
-  read at its new time: its moved entry time in `LoopRows`, §6.3 item 2).
+  and words do not change (the executor and the inputs read no absolute time; the reward's landings are counted at its
+  new time).
 - **Left out** (post-training D113, for each commanded aircraft): a window in which a commanded aircraft, on its
   record at its first predicted step with no runway in force, loses separation that it answers for against the
   records of every other aircraft of the window. A stated limit: in the loop the earlier commanded aircraft fly the
@@ -467,7 +467,7 @@ D184), its names written into the interface after.
 |---|---|---|---|
 | 1 | Vocabulary §6 item 5, the start of a closed loop and `Loop` | Each flight's join tick (§6.3 item 1) | Every join tick 0: today's loop, bit for bit; a flight that joins at tick j flies, with the same words, the states that it flies alone, within `STATE_BOUND_M` |
 | 2 | Prior §7 items 2, 3 and 7: `LoopRows`, the speaker, `SpeakingLoop` | Each aircraft's join tick; one row of the batch holds absent, observed and said aircraft (§6.3 items 2–4) | Every join tick 0: today's words, records and states, bit for bit; an aircraft that joins at tick j says, with the same numbers, what it says alone, to the tolerance of post-training §6.4 |
-| 3 | Prior §7 item 2, the landings of a loop | A landing added to chosen aircraft's landings while the loop runs; copied with the loop (§6.3 item 5) | No landing added: today's inputs, bit for bit; a landing added at a time changes only the counts of the rows after it |
+| 3 | Prior §7 item 7, the landings of a loop | A landing added to chosen aircraft's landings while the loop runs; copied with the loop (§6.3 item 5) | A landing goes to the chosen aircraft still held, and changes no input (prior D206) |
 | 4 | Prior §7 item 3, the masks of a caller | A caller's mask in every column (D144's silent aircraft): to check that the speaker takes one in each column and that the grammar permits "unchanged" in every column after the first predicted step | A silent aircraft flies its words in force; its rows' log-probability under records is 0 |
 
 ### 6.3 The design of D150: aircraft that join a loop
