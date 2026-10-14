@@ -1,12 +1,12 @@
-"""The window loop of the post-training (post-training §2 items 1–3, §8 C4; D29–D31, D91, D93, D105, D110): a module
+"""The window loop of the post-training (post-training §2 items 1–3, §8 C4; D29–D31, D91, D93, D110): a module
 shared by the runners of stage C, not a runner.
 
 Each window's commanded aircraft is flown from the observed rows that the start gives back (`autopilot.start.start_moved`:
 window B's moved, every other window's its stored rows, vocabulary D97 (4); C9), which the speaking loop takes as they
 are (prior §7 item 7, B12), through the prior's step of a speaker's
 closed loop (prior §7 item 7,
-`prior_speaking_loop.SpeakingLoop`: the start of a closed loop, the prior's one function of a loop's row with each
-window's own landings, D105, the speaker, the executor; the most go-arounds of a flight 2, D91). The loop adds the
+`prior_speaking_loop.SpeakingLoop`: the start of a closed loop, the prior's one function of a loop's row, the speaker,
+the executor; the most go-arounds of a flight 2, D91). The loop adds the
 scene, row by row:
 
 - **the traffic module's input** at every row, observed and said: the tokens of the other aircraft of the window's step
@@ -28,22 +28,20 @@ permits every word.
 
 **Windows of several commanded aircraft** (multi-aircraft control D144–D148, D150, D152; post-training §9 item 8). A
 window may hold commanded aircraft after its anchor (`post.scene.Window.joined`): the rows of the batch are then each
-window's commanded aircraft, each joining the loop at its own tick (its join step, the start's join ticks; prior §7
-item 7), each with its own landings (`post.landings.commanded_landings`) and, in a compressed window, its moved entry
-time. At each tick, for each commanded aircraft that has joined: its other aircraft are the window's recorded aircraft
-and its other commanded aircraft that have joined (their states in the loop, their R and G from their words in force),
-in that order, with a caller's token part beside the edge features (``token_part``, D152); the speed-word mask reads a
+window's commanded aircraft, each joining the loop at its own tick (its join step, the start's join ticks; prior §7 item
+7). At each tick, for each commanded aircraft that has joined: its other aircraft are the window's recorded aircraft and
+its other commanded aircraft that have joined (their states in the loop, their R and G from their words in force), in
+that order, with a caller's token part beside the edge features (``token_part``, D152); the speed-word mask reads a
 commanded leader as it reads a recorded one (D148). After each row flown, each window is judged once on all its
 commanded aircraft still flown (first, in their order) and its recorded aircraft: of each loss, the commanded aircraft
 said in the row that the caller's rule makes answer (``answering``; stage C's: the commanded aircraft that the rules
 make responsible) become silent (D144): reward 0, flown on by a caller's mask that permits only "unchanged" in every
 column, never answering again; an aircraft in its observed rows answers for nothing. A commanded aircraft that the
-executor ends `landed` adds its landing (its landed runway, its crossing time) to the other commanded aircraft of its
-window (D147 item 2; a loop landing on a sealed test day is left out and counted, `LandingIndex.with_landing`), and is
-judged once more at the row flown to, over its threshold at its last state flown, so that the wake minimum at the
-threshold behind a commanded leader is judged as behind a recorded one (`_judged`; the user, 2026-10-07). A window ends when every commanded aircraft is done or silent (D144): its silent ones are halted
-then. Each commanded aircraft gives its own result (`results`). A stage C window (one commanded aircraft, joining at
-tick 0) is flown as before, bit for bit: silent is its window's end.
+executor ends `landed` is judged once more at the row flown to, over its threshold at its last state flown, so that the
+wake minimum at the threshold behind a commanded leader is judged as behind a recorded one (`_judged`; the user,
+2026-10-07). A window ends when every commanded aircraft is done or silent (D144): its silent ones are halted then. Each
+commanded aircraft gives its own result (`results`). A stage C window (one commanded aircraft, joining at tick 0) is
+flown as before, bit for bit: silent is its window's end.
 """
 
 from __future__ import annotations
@@ -67,7 +65,7 @@ from ts_transformer.instructions.words import COLUMNS, RUNWAY, RUNWAY_GO_AROUND,
 from ts_transformer.post.conformance import Checked, require_conforming_edges
 from ts_transformer.post.edges import TOKEN_FEATURES, Pairs, each_tokens, window_tokens
 from ts_transformer.post.fault_census import STEPS_BEFORE_EVENT, reads_fault
-from ts_transformer.post.landings import commanded_landings, roster_key
+from ts_transformer.post.landings import roster_key
 from ts_transformer.post.reward import LANDED, reward
 from ts_transformer.post.runways import airport_separation
 from ts_transformer.post.scene import INSERTED_SUFFIX, AircraftAt, Recorded, Window, recorded, utc_s
@@ -76,7 +74,6 @@ from ts_transformer.post.traffic import answered_loss, scene_aircraft, step_loss
 from ts_transformer.post.traffic import traffic as separation_traffic
 from ts_transformer.post.traffic_attention import traffic_of
 from ts_transformer.prior.inputs import motion
-from ts_transformer.prior.landings import Landing, LandingIndex
 from ts_transformer.prior.model import COPIED, Prior
 from ts_transformer.prior.procedure import Final
 from ts_transformer.prior.speaker import MOST_GO_AROUNDS
@@ -174,15 +171,14 @@ class _View(NamedTuple):
 class WindowLoop:
     """The windows ``windows`` flown in one batch (module docstring): ``loop`` started for their commanded flights
     (`autopilot.start.start`; each flight once, with its window's join step as its join tick), ``order`` its order,
-    ``sentences`` and ``flights`` (their records in the split's signals) by their place in the signals, ``rosters`` each
-    airport's roster landings (each commanded aircraft's own landings from them, D105), ``finals`` each airport's,
-    ``edges_reference`` the edge features' reference (D104); ``answering`` the rule of who answers for a loss
+    ``sentences`` and ``flights`` (their records in the split's signals) by their place in the signals, ``finals`` each
+    airport's, ``edges_reference`` the edge features' reference (D104); ``answering`` the rule of who answers for a loss
     (`responsible`: stage C's), ``token_part`` a caller's token part and its ``part_width`` (none: stage C's)."""
 
     def __init__(self, model: Prior, loop: Loop, order: Sequence[int], windows: Sequence[Window],
                  sentences: Mapping[int, ClosedLoopSentence], flights: Mapping[int, Mapping[str, Any]],
-                 geometries: Mapping[str, AirportGeometry], rosters: Mapping[str, LandingIndex],
-                 finals: Mapping[str, Sequence[Final]], words: Words, *, interval_s: float, variant: str,
+                 geometries: Mapping[str, AirportGeometry], finals: Mapping[str, Sequence[Final]], words: Words, *,
+                 interval_s: float, variant: str,
                  edges_reference: Path, faults: Mapping[str, Mapping[str, frozenset[int]]],
                  observed: Mapping[int, np.ndarray], device: torch.device, answering: Answering = responsible,
                  token_part: TokenPartOf | None = None, part_width: int = 0,
@@ -222,25 +218,9 @@ class WindowLoop:
         self.records: list[Recorded] = [self.windows[w].commanded_all[m] for w, m in zip(self.window_of, self.member_of)]
         shifts = [0.0 if m == 0 else self.windows[w].joined[m - 1].shift_s
                   for w, m in zip(self.window_of, self.member_of)]
-        # the latest a row of the loop is said, from its window's row 0 (a batch is said together: a window's rows go on
-        # while another's are flown): an aircraft's first predicted step and its time limit with every go-around's
-        # (the executor's), the latest of any, and one Δ more (a row's time is its flight's, the window's to rounding);
-        # each commanded aircraft's landings those its rows can count (D189 (0))
-        most = loop.executor.most_s.cpu().numpy()
-        reach = max(self.records[b].first_step_s - self.windows[w].row0_s + float(most[b])
-                    for b, w in enumerate(self.window_of)) + interval_s
-        landings = [commanded_landings(window, rosters[window.scene.geometry.code], window.row0_s + reach)
-                    for window in self.windows]
-        row_landings = [landings[w][m] for w, m in zip(self.window_of, self.member_of)]
-        # a moved aircraft (a compressed window) reads its landings at its moved time (multi-aircraft control §6.3 item 2)
-        moved_flights = dict(flights)
-        for b, shift in enumerate(shifts):
-            if shift:
-                i = self.order[b]
-                moved_flights[i] = {**flights[i], "entry_time_utc": _utc_text(utc_s(flights[i]["entry_time_utc"]) + shift)}
-        self.speaking = SpeakingLoop(model, loop, order, sentences, observed, moved_flights, geometries, row_landings,
-                                     finals, words, interval_s=interval_s, variant=variant, device=device,
-                                     attention=attention, executor_device=executor_device)
+        self.speaking = SpeakingLoop(model, loop, order, sentences, observed, flights, geometries, finals, words,
+                                     interval_s=interval_s, variant=variant, device=device, attention=attention,
+                                     executor_device=executor_device)
         self.step_s = words.spec.step_s
         self.every = self.speaking.every
         self.geometries = [self.windows[w].scene.geometry for w in self.window_of]
@@ -501,10 +481,8 @@ class WindowLoop:
         return said
 
     def _landed(self, done: np.ndarray) -> list[int]:
-        """The rows the executor ended in the row just flown (``done``): one judged `landed` adds its landing on its
-        landed runway at its crossing time to the other commanded aircraft of its window (D147 item 2; not a silent
-        one's). The rows judged `landed` in a window of other commanded aircraft (silent ones too), for the judge
-        (`_judged`)."""
+        """The rows the executor ended in the row just flown (``done``) judged `landed` in a window of other commanded
+        aircraft (silent ones too), for the judge (`_judged`)."""
         out = []
         for b in np.flatnonzero(done):
             others = [c for c in self.members[self.window_of[b]] if c != b]
@@ -514,12 +492,6 @@ class WindowLoop:
             if outcome.outcome != LANDED:
                 continue
             out.append(int(b))
-            if self.silent[b]:
-                continue
-            g = self.geometries[b]
-            time_s = self.records[b].first_step_s + outcome.crossing["at_row"] * self.speaking.loop.params.cycle_s
-            landing = Landing(time_s, g.candidates[int(outcome.crossing["runway_index"])].ident, self.keys[b])
-            self.speaking.add_landing(others, landing)
         return out
 
     def _judged(self, tick: _Tick, landed: Sequence[int]) -> tuple[AircraftAt, Any, int]:
@@ -548,7 +520,7 @@ class WindowLoop:
     def copy(self, windows: Sequence[int], device: torch.device | None = None) -> WindowLoop:
         """A loop of copies of the windows ``windows`` (places in ``windows``, repeats permitted; post-training D94): the
         closed loop's own copy of every row of each (`SpeakingLoop.copy`: the executor's loop, the speaker, the inputs
-        and their records) and the window's own state — its scene, landings, separation judge, silent rows, speed-mask
+        and their records) and the window's own state — its scene, separation judge, silent rows, speed-mask
         counts, recorded tokens and value readings (D171). Flown on with the same numbers, a copy says what its original says (D94); the loop
         copied is unchanged. ``device``: the copy's (this loop's when not given; multi-aircraft control D182: the second
         pass's copies held in the host's memory until their point is tried)."""
@@ -736,13 +708,6 @@ def _concat(items: Sequence[AircraftAt]) -> AircraftAt:
     for item in items[1:]:
         out = scene_aircraft(out, item)
     return out
-
-
-def _utc_text(time_s: float) -> str:
-    """A UTC epoch as the signals write an entry time."""
-    from datetime import datetime, timezone
-
-    return datetime.fromtimestamp(time_s, tz=timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _window_faults(window: Window, faults: Mapping[str, frozenset[int]]) -> dict[str, frozenset[int]]:

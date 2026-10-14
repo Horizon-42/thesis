@@ -21,11 +21,11 @@ from ts_transformer.experiments.prior_speaking_loop import SpeakingLoop, flight_
 from ts_transformer.instructions.artefact import load_candidates, load_day_split, load_spec, signals_flights
 from ts_transformer.instructions.words import COLUMNS
 from ts_transformer.post.conformance import reference_steps, write_edge_reference
-from ts_transformer.post.landings import roster_key, window_landings
+from ts_transformer.post.landings import roster_key
 from ts_transformer.post.reward import GO_AROUND_FACTOR, LANDED, reward
 from ts_transformer.post.scene import INSERTED, INSERTED_SUFFIX, MovedScene, airport_scenes, real_windows
 from ts_transformer.post.traffic_attention import TrafficConfig, add_traffic_attention, traffic_modules
-from ts_transformer.prior.landings import LANDINGS_WINDOW_S, Landing, LandingIndex, utc_s
+from ts_transformer.prior.landings import Landing, LandingIndex, utc_s
 from ts_transformer.prior.model import Prior, PriorConfig
 from ts_transformer.prior.procedure import Final
 from ts_transformer.prior.speaker import MOST_GO_AROUNDS
@@ -94,8 +94,8 @@ def _with_module(base, weights=True):
 
 def _window_loop(s, model, windows, faults=None):
     loop, order, observed = s["moved_loop"](start_move_of(windows[0]))
-    return WindowLoop(model, loop, order, windows, {0: s["stored"]}, s["flights"], s["geometries"],
-                      {s["geometry"].code: s["roster"]}, s["finals"], s["words"], interval_s=DELTA, variant="full",
+    return WindowLoop(model, loop, order, windows, {0: s["stored"]}, s["flights"], s["geometries"], s["finals"],
+                      s["words"], interval_s=DELTA, variant="full",
                       edges_reference=s["reference"], faults={s["geometry"].code: faults or {}}, observed=observed,
                       device=CPU)
 
@@ -107,7 +107,7 @@ def test_a_window_without_other_aircraft_is_free_generation_bit_for_bit(setup):
     assert len(s["windows"]) == 1 and not len(s["windows"][0].others_at(10))
     loop, order, observed = s["moved_loop"](NO_MOVE)
     (free,) = speak_and_fly(s["base"], loop, order, {0: s["stored"]}, observed, s["flights"], s["geometries"],
-                            {s["geometry"].code: s["roster"]}, s["finals"], s["words"], interval_s=DELTA,
+                            s["finals"], s["words"], interval_s=DELTA,
                             variant="full", numbers=[flight_numbers(7, 0, 0)], device=CPU)
     windows = _window_loop(s, _with_module(s["base"]), s["windows"])
     (window,) = windows.run([flight_numbers(7, 0, 0)])
@@ -117,7 +117,7 @@ def test_a_window_without_other_aircraft_is_free_generation_bit_for_bit(setup):
     # the speaker's probabilities too, bit for bit: free generation's loop as `speak_and_fly` runs it
     loop, order, observed = s["moved_loop"](NO_MOVE)
     speaking = SpeakingLoop(s["base"], loop, order, {0: s["stored"]}, observed, s["flights"], s["geometries"],
-                            [s["roster"]], s["finals"], s["words"], interval_s=DELTA, variant="full", device=CPU)
+                            s["finals"], s["words"], interval_s=DELTA, variant="full", device=CPU)
     numbers = flight_numbers(7, 0, 0)
     while speaking.observing:
         speaking.observe()
@@ -143,30 +143,6 @@ def test_a_loss_of_separation_that_the_commanded_aircraft_answers_for_ends_its_w
     assert result.loss_step == start_row + 1 and 0 in result.loss.responsible
     assert len(result.words) == 1                                   # the one row said before the loss
     assert result.states.shape[0] == (start_row + 1) * loop.every + 1
-
-
-def test_the_landings_a_loop_keeps_are_the_windows_never_the_commanded_aircrafts_own(setup):
-    """D31, D105, D206, D207: the landings a window loop keeps for the commanded aircraft (no input and no reward reads
-    them: post-training O26) are its window's (an inserted aircraft's at its shifted time); counted at its rows, its
-    own landing is never counted."""
-    s = setup
-    (window,) = s["windows"]
-    own = window.scene.flights[0]
-    key = own.key + INSERTED_SUFFIX
-    shift = round((window.row0_s + 30.0 - own.landing_s) / DELTA) * DELTA          # it lands 30 s into the window
-    inserted = replace(window, kind=INSERTED, moved=((key, shift),),
-                       scene=MovedScene(window.scene, added=(own.shifted(shift, DELTA, key=key),)))
-    loop = _window_loop(s, _with_module(s["base"], weights=False), [inserted])
-    loop.run([flight_numbers(7, 0, 0)])
-    (rows,) = loop.speaking.sentences("train")
-    times = window.row0_s + np.arange(len(rows.time_s)) * DELTA
-    counts = loop.speaking.landings(0).counts_before(times, without=s["key"])[:, 0]
-    assert (counts == window_landings(inserted, s["roster"]).counts_before(times, without=s["key"])[:, 0]).all()
-    without_insert = s["roster"].counts_before(times, without=s["key"])[:, 0]
-    inserted_at = own.landing_s + shift
-    in_window = (times > inserted_at) & (times <= inserted_at + LANDINGS_WINDOW_S)
-    assert (counts == without_insert + in_window).all()     # the inserted landing, from its time, for 30 min
-    assert (counts > without_insert).any()
 
 
 def test_the_reward_table():

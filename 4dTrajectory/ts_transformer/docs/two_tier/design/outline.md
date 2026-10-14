@@ -112,12 +112,12 @@ they came from. Each document lists the identities of its parts.
 |---|---|---|
 | Outline | D7, D20, D21, D55, D85, D95, D131, D138, D139, D158, D163, D184, D187, D198 | — |
 | Training view (`frontend.md`) | D109, D133–D136, D154–D156, D159, D160, D177, D178 | — |
-| Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62, D66, D67, D69–D71, D73, D74, D77–D84, D86–D90, D97, D102, D111, D126, D196, D197, D199, D201, D203 | O8, O22, O23 |
+| Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62, D66, D67, D69–D71, D73, D74, D77–D84, D86–D90, D97, D102, D111, D126, D196, D197, D199, D201, D203 | O8, O22 |
 | Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60, D63–D65, D68, D72, D75, D96, D105–D108, D111, D118–D122, D126–D128, D202, D204–D206 | O25 |
-| Post-training | D29–D31, D36, D37, D76, D91–D94, D98–D101, D103–D105, D107, D110, D113–D117, D123–D125, D129, D130, D132, D137, D157, D161, D162, D165, D167–D171, D173–D176, D185, D207 | O15, O26 |
-| Multi-aircraft control | D140–D153, D164, D166, D172, D179–D183, D186, D188–D195, D200 | O18–O21 |
+| Post-training | D29–D31, D36, D37, D76, D91–D94, D98–D101, D103–D105, D107, D110, D113–D117, D123–D125, D129, D130, D132, D137, D157, D161, D162, D165, D167–D171, D173–D176, D185, D207, D208 | O15, O26 |
+| Multi-aircraft control | D140–D146, D148–D153, D164, D166, D172, D179–D183, D186, D188–D195, D200 | O18–O21 |
 
-The next free numbers: D208, O27.
+The next free numbers: D209, O27.
 
 ---
 
@@ -130,8 +130,9 @@ Stages A–D are built: each stage's §0.3 gives its state, its implementation l
    O25 (wind) follows it.
 2. One method of branch training for stages C and D (multi-aircraft control D200). Its comparison is held (the user,
    2026-10-13: "先查原因，对照暂缓"); it starts from the new base, B21's (the user, 2026-10-14), with the reward
-   of post-training D207 (the runway of a landing does not change it). Post-training O26 (the landings that
-   nothing reads now) waits for the user.
+   of post-training D207 (the runway of a landing does not change it) and D208 (the loops keep no landings).
+   Post-training O26 (the window's landings that only D175 reads, the landings' digest in a prior's identity)
+   waits for the user.
 3. Version 2 of the multi-aircraft control (multi-aircraft control D153, MC8–MC10).
 4. The test days at the end: the check of the labelling (D198), KAUS in its three parts (D158).
 5. The frontend and the backend change last, each change with the user's permission (§5 rule 11).

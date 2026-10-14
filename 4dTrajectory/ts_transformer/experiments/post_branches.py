@@ -47,7 +47,6 @@ from ts_transformer.post.branches import (
 )
 from ts_transformer.post.reward import LANDED
 from ts_transformer.post.scene import Window
-from ts_transformer.prior.landings import LandingIndex
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.procedure import Final
 
@@ -117,8 +116,8 @@ def _draws(loop: WindowLoop, numbers: Sequence[np.random.Generator]) -> np.ndarr
 def branch_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop, list[int], dict[int, np.ndarray]]],
                  windows: Sequence[Window],
                  places: Sequence[int], sentences: Mapping[int, ClosedLoopSentence], flights: Mapping[int, Mapping[str, Any]],
-                 geometries: Mapping[str, AirportGeometry], rosters: Mapping[str, LandingIndex],
-                 finals: Mapping[str, Sequence[Final]], words: Words, *, interval_s: float, variant: str,
+                 geometries: Mapping[str, AirportGeometry], finals: Mapping[str, Sequence[Final]], words: Words, *,
+                 interval_s: float, variant: str,
                  edges_reference: Path, faults: Mapping[str, Mapping[str, frozenset[int]]], device: torch.device,
                  seed: int, round_: int, split: str,
                  continuations: int = CONTINUATIONS, rules: Rules | None = None,
@@ -129,8 +128,8 @@ def branch_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop,
     its order and the observed rows it gave back; ``rules`` the caller's (`stage_c_rules` when not given);
     ``loop_options`` the window loop's options (its rule of who answers, its token part)."""
     rules = stage_c_rules(seed, round_, interval_s) if rules is None else rules
-    window_loop, sources = _batch_loops(model, start_loop, windows, places, sentences, flights, geometries, rosters,
-                                        finals, words, interval_s=interval_s, variant=variant,
+    window_loop, sources = _batch_loops(model, start_loop, windows, places, sentences, flights, geometries, finals,
+                                        words, interval_s=interval_s, variant=variant,
                                         edges_reference=edges_reference, faults=faults, device=device, rules=rules,
                                         loop_options=loop_options)
     everything = list(range(len(windows)))
@@ -201,8 +200,8 @@ def branch_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop,
 def _batch_loops(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop, list[int], dict[int, np.ndarray]]],
                  windows: Sequence[Window], places: Sequence[int], sentences: Mapping[int, ClosedLoopSentence],
                  flights: Mapping[int, Mapping[str, Any]], geometries: Mapping[str, AirportGeometry],
-                 rosters: Mapping[str, LandingIndex], finals: Mapping[str, Sequence[Final]], words: Words, *,
-                 interval_s: float, variant: str, edges_reference: Path,
+                 finals: Mapping[str, Sequence[Final]], words: Words, *, interval_s: float, variant: str,
+                 edges_reference: Path,
                  faults: Mapping[str, Mapping[str, frozenset[int]]], device: torch.device, rules: Rules,
                  loop_options: Mapping[str, Any] | None
                  ) -> tuple[Callable[[Sequence[int]], WindowLoop],
@@ -220,8 +219,8 @@ def _batch_loops(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop,
 
     def window_loop(batch: Sequence[int]) -> WindowLoop:
         loop, started, observed = start_loop(sorted(i for b in batch for i in windows[b].signal_indices))
-        return WindowLoop(model, loop, started, [windows[b] for b in batch], sentences, flights, geometries, rosters,
-                          finals, words, interval_s=interval_s, variant=variant, edges_reference=edges_reference,
+        return WindowLoop(model, loop, started, [windows[b] for b in batch], sentences, flights, geometries, finals,
+                          words, interval_s=interval_s, variant=variant, edges_reference=edges_reference,
                           faults=faults, observed=observed, device=device, **options)
 
     def sources(loop: WindowLoop, batch: Sequence[int]) -> list[np.random.Generator]:
@@ -329,8 +328,8 @@ class _Part:
 def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop, list[int], dict[int, np.ndarray]]],
                    windows: Sequence[Window], places: Sequence[int], sentences: Mapping[int, ClosedLoopSentence],
                    flights: Mapping[int, Mapping[str, Any]], geometries: Mapping[str, AirportGeometry],
-                   rosters: Mapping[str, LandingIndex], finals: Mapping[str, Sequence[Final]], words: Words, *,
-                   interval_s: float, variant: str, edges_reference: Path,
+                   finals: Mapping[str, Sequence[Final]], words: Words, *, interval_s: float, variant: str,
+                   edges_reference: Path,
                    faults: Mapping[str, Mapping[str, frozenset[int]]], device: torch.device, split: str,
                    continuations: int, rules: Rules, loop_options: Mapping[str, Any] | None = None,
                    host: torch.device = torch.device("cpu"), majority: int | None = None) -> BackwardRound:
@@ -358,8 +357,8 @@ def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loo
 
     The groups are in the order of the searches (the windows', then their varied aircraft's) and, within a search, of
     their points chosen; a window's held copies are freed once its searches are done."""
-    window_loop, sources = _batch_loops(model, start_loop, windows, places, sentences, flights, geometries, rosters,
-                                        finals, words, interval_s=interval_s, variant=variant,
+    window_loop, sources = _batch_loops(model, start_loop, windows, places, sentences, flights, geometries, finals,
+                                        words, interval_s=interval_s, variant=variant,
                                         edges_reference=edges_reference, faults=faults, device=device, rules=rules,
                                         loop_options=loop_options)
     everything = list(range(len(windows)))

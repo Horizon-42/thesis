@@ -2,7 +2,7 @@
 training (post-training §9 item 6, `experiments.post_branches.Rules`, which `rules` gives as its fields).
 
 - **The window's reward** W (`window_reward`, D141): the sum of its commanded aircraft's rewards (post-training D30,
-  each with its own landings, D140); not divided by their count. With one commanded aircraft, that aircraft's reward.
+  D207); not divided by their count. With one commanded aircraft, that aircraft's reward.
 - **Spoken again** (D143): a window whose W is less than its count of commanded aircraft.
 - **The varied aircraft** (`varied`, D143): each commanded aircraft with r < 1, and each commanded aircraft of a loss
   of separation that one of them answers for (the other aircraft of that loss, even with r = 1).

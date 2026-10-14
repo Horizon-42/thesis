@@ -3,8 +3,8 @@
 `speak_and_fly` flies a batch of flights started at their first predicted step through the start of a closed loop
 (vocabulary §6 item 5, D67: `autopilot.start`) in the step of a speaker's closed loop (`prior_speaking_loop`, §7 item 7,
 D106: the observed rows, then at each Δ row the inputs from the flown states, the speaker under its masks and the bound
-of D68, the executor's step), with each flight's own random numbers (`flight_numbers`, D96) and its airport's roster
-landings (D105), to the end of every flight; its outcome is the judge's (`Loop.outcome`, item 6). The runner imports
+of D68, the executor's step), with each flight's own random numbers (`flight_numbers`, D96), to the end of every
+flight; its outcome is the judge's (`Loop.outcome`, item 6). The runner imports
 nothing else of `autopilot/` (`tests/test_architecture.py`, D69).
 """
 
@@ -32,7 +32,6 @@ from ts_transformer.prior.checkpoint import (CLAIM_SPENT_BY, claim_validation_re
                                              readable_identity, settle_written_claim, spend_validation_claim)
 from ts_transformer.prior.source import require_selection_of
 from ts_transformer.prior.training_files import CLAIM_READER
-from ts_transformer.prior.landings import LandingIndex
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.procedure import PROCEDURE_MASKS, Final, ProcedureMasks, airport_finals
 from ts_transformer.prior.selection import SIDES, side
@@ -96,21 +95,19 @@ def read_sentences(out: Path) -> tuple[dict[str, Any], list[Stored]]:
 
 def speak_and_fly(model: Prior, loop: Loop, order: Sequence[int], sentences: Mapping[int, ClosedLoopSentence],
                   observed: Mapping[int, np.ndarray], flights: Mapping[int, Mapping[str, Any]], geometries: Mapping[str, AirportGeometry],
-                  landings: Mapping[str, LandingIndex], finals: Mapping[str, Sequence[Final]], words: Words, *,
+                  finals: Mapping[str, Sequence[Final]], words: Words, *,
                   interval_s: float, variant: str, numbers: Sequence[np.random.Generator],
                   device: torch.device, temperature: float = 1.0) -> list[Generated]:
     """The closed loop of the flights ``order`` of ``loop`` (`autopilot.start.start_moved`; module docstring):
     ``sentences``, ``observed`` (the start's observed rows) and ``flights`` (their records in the split's signals) by
-    their place in the signals; ``landings`` each airport's
-    roster landings (the loop keeps each flight its airport's, D105; no input of the prior, D206); ``numbers`` each flight's source of random numbers, in
-    ``order`` (`flight_numbers`: five a row said, D96)."""
+    their place in the signals; ``numbers`` each flight's source of random numbers, in ``order`` (`flight_numbers`: five
+    a row said, D96)."""
     if len(numbers) != len(order):
         raise ValueError(f"{len(numbers)} sources of random numbers for {len(order)} flights")
     if loop.most_go_arounds != MOST_GO_AROUNDS:
         raise ValueError(f"the loop was started for {loop.most_go_arounds} go-arounds a flight, the bound is "
                          f"{MOST_GO_AROUNDS} (D68)")
-    speaking = SpeakingLoop(model, loop, order, sentences, observed, flights, geometries,
-                            [landings[flights[i]["airport"]] for i in order], finals, words,
+    speaking = SpeakingLoop(model, loop, order, sentences, observed, flights, geometries, finals, words,
                             interval_s=interval_s, variant=variant, device=device, temperature=temperature)
     while speaking.observing:
         speaking.observe()
@@ -218,7 +215,7 @@ def main(argv: list[str] | None = None) -> int:
     device = torch.device(args.device)
 
     prior = open_prior(prior_dir, instructions)        # its record, checkpoint and procedure masks (§7 item 1, D106)
-    geometries, landings, interval_s = prior.geometries, prior.landings, prior.interval_s
+    geometries, interval_s = prior.geometries, prior.interval_s
     selection, checkpoint = prior.selection, prior.checkpoint           # the prior's own rule (D75)
     model = checkpoint.model.to(device)
     finals = {code: airport_finals(geometry) for code, geometry in geometries.items()}
@@ -252,7 +249,7 @@ def main(argv: list[str] | None = None) -> int:
                                                 executor_dir, {i: NO_MOVE for i in chunk},
                                                 most_go_arounds=MOST_GO_AROUNDS, device=device)
             generated += [(sample, g) for g in speak_and_fly(
-                model, loop, order, sentences, observed, dict(enumerate(flights)), geometries, landings, finals, loop.words,
+                model, loop, order, sentences, observed, dict(enumerate(flights)), geometries, finals, loop.words,
                 interval_s=interval_s, variant=model.config.variant,
                 numbers=[flight_numbers(args.seed, sample, i) for i in order], device=device,
                 temperature=TEMPERATURE)]

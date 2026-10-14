@@ -157,7 +157,7 @@ def test_no_majority_point_within_the_bound_leaves_the_decision_points_groups():
 def _backward(s, model, rules, continuations=2, majority=None):
     (window,) = s["windows"]
     return backward_round(model, lambda flights: s["moved_loop"](start_move_of(window)), [window], [0],
-                          {0: s["stored"]}, s["flights"], s["geometries"], {s["geometry"].code: s["roster"]}, s["finals"],
+                          {0: s["stored"]}, s["flights"], s["geometries"], s["finals"],
                           s["words"], interval_s=DELTA, variant="full", edges_reference=s["reference"],
                           faults={s["geometry"].code: {}}, device=CPU, split="train", continuations=continuations,
                           rules=rules, majority=majority)
@@ -364,7 +364,7 @@ def _round_trip_on_the_gpu(directory: str) -> None:
     (window,) = s["windows"]
     window_loop, sources = _batch_loops(model, lambda flights: s["moved_loop"](start_move_of(window)), [window], [0],
                                         {0: s["stored"]}, s["flights"], s["geometries"],
-                                        {s["geometry"].code: s["roster"]}, s["finals"], s["words"], interval_s=DELTA,
+                                        s["finals"], s["words"], interval_s=DELTA,
                                         variant="full", edges_reference=s["reference"],
                                         faults={s["geometry"].code: {}}, device=CPU,
                                         rules=Rules(**credit.rules(1337, 0, DELTA)), loop_options=None)
@@ -423,7 +423,7 @@ def _executor_kept_on_the_cpu(directory: str) -> None:
     def flown(executor: torch.device):
         window_loop, sources = _batch_loops(model, lambda flights: s["moved_loop"](start_move_of(window), executor),
                                             [window], [0], {0: s["stored"]}, s["flights"], s["geometries"],
-                                            {s["geometry"].code: s["roster"]}, s["finals"], s["words"],
+                                            s["finals"], s["words"],
                                             interval_s=DELTA, variant="full", edges_reference=s["reference"],
                                             faults={s["geometry"].code: {}}, device=gpu,
                                             rules=Rules(**credit.rules(1337, 0, DELTA)),
@@ -575,7 +575,7 @@ def test_the_searches_of_a_batch_step_together_and_find_what_each_finds_alone(se
 
     def round_of(varied):
         return backward_round(model, parts["start"], [multi], [5], parts["sentences"], parts["flights"],
-                              s["geometries"], parts["rosters"], s["finals"], s["words"], interval_s=DELTA,
+                              s["geometries"], s["finals"], s["words"], interval_s=DELTA,
                               variant="full", edges_reference=s["reference"], faults={s["geometry"].code: {}},
                               device=CPU, split="train", continuations=2, rules=replace(rules, varied=varied))
 
@@ -634,7 +634,7 @@ def test_a_joint_loops_cache_has_room_for_the_steps_to_its_next_rebuild(setup, m
     monkeypatch.setattr(WindowLoop, "step", step)
     monkeypatch.setattr(Past, "grown", grown)
     backward_round(_with_module(s["base"]), parts["start"], [multi], [5], parts["sentences"], parts["flights"],
-                   s["geometries"], parts["rosters"], s["finals"], s["words"], interval_s=DELTA, variant="full",
+                   s["geometries"], s["finals"], s["words"], interval_s=DELTA, variant="full",
                    edges_reference=s["reference"], faults={s["geometry"].code: {}}, device=CPU, split="train",
                    continuations=2, rules=rules)
     assert len(built) > 1

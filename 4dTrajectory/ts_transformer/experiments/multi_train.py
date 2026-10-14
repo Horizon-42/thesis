@@ -357,7 +357,7 @@ def speak_batch(model: Prior, context: Context, windows: Sequence[Window], place
                   rules=Rules(**credit.rules(settings.seed, round_, context.interval_s, settings.branch_every_s)),
                   loop_options={**loop_options(context), "attention": settings.front_attention})
     data = (model, context.start_loop("train", batch), batch, places, train["sentences"], train["flights"],
-            context.geometries, context.rosters, context.finals, context.words)
+            context.geometries, context.finals, context.words)
     majority = settings.continuations // 2 + 1 if settings.branching == MAJORITY else None
     found = (branch_round(*data, seed=settings.seed, round_=round_, **common) if settings.branching == GRID else
              backward_round(*data, **common, majority=majority))
@@ -421,7 +421,7 @@ def read_batch(model: Prior, context: Context, windows: Sequence[Window], places
     batch = [windows[p] for p in places]
     loop, order, observed = context.start_loop(split, batch)(sorted(i for w in batch for i in w.signal_indices))
     window_loop = WindowLoop(model, loop, order, batch, data["sentences"], data["flights"], context.geometries,
-                             context.rosters, context.finals, context.words, interval_s=context.interval_s,
+                             context.finals, context.words, interval_s=context.interval_s,
                              variant=context.variant, edges_reference=context.edges_reference, faults=data["faults"],
                              observed=observed, device=context.device, **loop_options(context))
     numbers = [readout_numbers(settings.seed, places[int(window_loop.window_of[b])], int(window_loop.member_of[b]),

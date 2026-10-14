@@ -54,7 +54,7 @@ def two_window(tmp_path, monkeypatch, joins=(0, 8)):
             return parts["start"]
 
     two = TwoContext(**{**{f.name: getattr(context, f.name) for f in fields(context)},
-                        "splits": {"train": data, "select": data}, "rosters": parts["rosters"]})
+                        "splits": {"train": data, "select": data}})
     model = _with_module(s["base"])
     add_token_part(model, TokenPart.width, TOKENS_SCHEMA)
     model.eval()                                     # the part added in training mode: the speaker reads eval (D107)

@@ -213,7 +213,7 @@ def profile(context: Context, settings: Settings, out: Path, counts: Sequence[in
     profiler = cProfile.Profile()
     found, wall = timed(device, lambda: profiler.runcall(
         branch_round, model, context.start_loop("train", batch), batch, places, train["sentences"], train["flights"],
-        context.geometries, context.rosters, context.finals, context.words, interval_s=context.interval_s,
+        context.geometries, context.finals, context.words, interval_s=context.interval_s,
         variant=context.variant, edges_reference=context.edges_reference, faults=train["faults"], device=device,
         seed=settings.seed, round_=0, split="train", continuations=settings.continuations))
     stats = pstats.Stats(profiler)

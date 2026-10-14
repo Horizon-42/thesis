@@ -107,7 +107,6 @@ The decision numbers are shared by all documents (outline §3).
 | # | Item | Proposal | §  |
 |---|---|---|---|
 | O8 | Speed words in ground speed: wind can make speed words at turns | A check on data, later | 3.6 |
-| O23 | Stage D's landing context: a commanded aircraft adds its landing to the others' context only when the judge says `landed`; D196 passes fewer crossings than the judge before it. No input (prior D206) and no reward (post-training D207) reads that context now (post-training O26) | Closes with post-training O26 | 5.8 |
 
 ### 0.3 Implementation
 

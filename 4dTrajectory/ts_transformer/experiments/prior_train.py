@@ -4,7 +4,8 @@ cross-validation (D39) with ``--held-out``, stopped on the select days of its tr
 Reads the sentence artefact through the vocabulary's public interface at one row interval (``--row-interval-s``), only
 after the closed-loop check with the artefact's executor spec (``--executor``) passes in this process
 (`autopilot.closed_loop.require_conforming_closed_loop`, D69, D73), and each
-airport's landings from its tracks roster for the identity (D63; no input, D206). Never reads the validation days.
+airport's landings from its tracks roster for the identity (D63; no input, D206; no loop, post-training D208).
+Never reads the validation days.
 Before training it checks the memory
 at the formal size: the largest batches, one forward and backward pass each on the device, and refuses
 a run that would not fit (``memory.json``).

@@ -2,7 +2,7 @@
 it was trained on.
 
 The identity (§8 item 1, D21) is the spec sha, the day split, the candidate table, the sha256 of the sentence
-files, the roster landings (D63; the loops' reward reads them, the prior does not, D206) and the selection of the
+files, the roster landings (D63; no input and no loop reads them, D206, post-training D208) and the selection of the
 sentences (D75); `prior.source.artefact_identity` builds it. A checkpoint opens only for the same identity, compared
 whole: a prior of another artefact is refused by what differs, never read with a guess (principle 8). The run (its
 airports and its held-out airport, `runs.Run`) and the training configuration are recorded beside it.
@@ -203,7 +203,7 @@ class OpenedPrior(NamedTuple):
     config: dict[str, Any]                    # the run's ``config.json``
     checkpoint: Checkpoint
     geometries: dict[str, AirportGeometry]    # the artefact's candidates, by airport
-    landings: dict[str, LandingIndex]         # each airport's roster landings (D63): the loops', no input (D206)
+    landings: dict[str, LandingIndex]         # each airport's roster landings (D63); stage C's diagnostic reads them
     interval_s: float
     selection: str                            # the run's selection rule (D75)
 

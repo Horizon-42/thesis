@@ -16,9 +16,7 @@ from ts_transformer.prior.batch import CANDIDATE_FEATURES, OWN_FEATURES
 from ts_transformer.prior.inputs import (
     PATH_OFFSET_SCALE_M, SPEED_SCALE_MPS, VERTICAL_RATE_SCALE_MPS, sentence_rows, since_input,
 )
-from ts_transformer.prior.landings import (
-    LANDINGS_WINDOW_S, Landing, LandingIndex, read_roster_landings, roster_landings, utc_s,
-)
+from ts_transformer.prior.landings import Landing, LandingIndex, read_roster_landings, roster_landings, utc_s
 from ts_transformer.prior.source import ArtefactSource, artefact_identity
 from ts_transformer.tests.support import (
     INSTRUCTION_AIRPORT_ELEVATION_M, TEST_GLIDEPATH_DEG, TEST_TCH_M, fixture_days, fly_legs, instruction_flight,
@@ -30,7 +28,7 @@ def record(key, runway, time_utc, outcome="assigned"):
     return {"flight_key": key, "outcome": outcome, "runway": runway, "landing_time_utc": time_utc}
 
 
-def test_the_landings_index_counts_the_30_min_before_a_step_without_the_test_days(tmp_path):
+def test_the_landings_index_holds_the_rosters_assigned_landings_without_the_test_days(tmp_path):
     days = fixture_days()
     train_day, test_day = days.days["train"][0], days.days["test"][0]
     records = [
@@ -45,13 +43,6 @@ def test_the_landings_index_counts_the_30_min_before_a_step_without_the_test_day
     path.write_text(json.dumps({"records": records}))
     index = read_roster_landings(path, ("05L", "23R"), days)
     assert [landing.flight_key for landing in index.landings] == ["A", "B", "C"] and index.sealed == 1
-    noon = utc_s(f"{train_day}T12:00:00Z")
-    times = np.array([noon, noon + 1.0, noon + 25 * 60.0, noon + LANDINGS_WINDOW_S, noon + LANDINGS_WINDOW_S + 1.0])
-    # [t − 30 min, t): a landing at t is not before it; one exactly 30 min before is
-    assert index.counts_before(times, without="C").tolist() == [[0, 0], [1, 0], [2, 0], [2, 0], [1, 0]]
-    assert index.counts_before(times, without="B").tolist() == [[0, 0], [1, 0], [1, 0], [1, 1], [0, 1]]
-    with pytest.raises(ValueError, match="does not land in the index"):
-        index.counts_before(times, without="D")
     assert index.digest() != roster_landings(records[:2], ("05L", "23R"), days).digest()
 
 
@@ -61,8 +52,8 @@ def test_the_landings_index_refuses_a_day_outside_the_split():
 
 
 def test_an_index_built_from_given_landings_refuses_a_sealed_test_day_by_itself():
-    """D105, C32: a loop's caller builds each aircraft's landings from `Landing`s (a window's scene); the index refuses
-    a landing on a sealed test day, or on a day outside the split, whoever built it."""
+    """D105, C32: a window's landings are built from `Landing`s (post-training D105); the index refuses a landing on a
+    sealed test day, or on a day outside the split, whoever built it, and landings out of time-then-flight order."""
     from ts_transformer.data.day_split import SealedDay
 
     days = fixture_days()
@@ -73,40 +64,9 @@ def test_an_index_built_from_given_landings_refuses_a_sealed_test_day_by_itself(
         LandingIndex(("05L",), (Landing(on["train"], "05L", "A"), Landing(on["test"], "05L", "T")), 0, days)
     with pytest.raises(KeyError, match="not in this day split"):
         LandingIndex(("05L",), (Landing(utc_s("2031-01-01T12:00:00Z"), "05L", "A"),), 0, days)
-
-
-def test_a_landing_added_gives_the_index_built_whole_and_checks_only_itself(monkeypatch):
-    """Multi-aircraft control D186 (1): `with_landing` puts the new landing in its place and checks only it — the same
-    index as one built whole from every landing (landings, sealed, counts, digest), ties in time ordered by flight; the
-    index refuses landings out of time-then-flight order."""
-    from ts_transformer.prior import landings as module
-
-    days = fixture_days()
-    runways = ("05L", "23R")
-    noon = utc_s(f"{days.days['train'][0]}T12:00:00Z")
-    rng = np.random.default_rng(3)
-    added = [Landing(noon + float(rng.integers(0, 40)) * 30.0, runways[int(rng.integers(0, 2))], f"F{k:02d}")
-             for k in rng.permutation(24)]
-    index = LandingIndex(runways, (), 0, days)
-    calls = []
-    real = module.operational_day
-    monkeypatch.setattr(module, "operational_day", lambda moment: calls.append(1) or real(moment))
-    for k, landing in enumerate(added):
-        index = index.with_landing(landing)
-        assert len(calls) == k + 1                                   # the new landing's day only
-    monkeypatch.undo()
-    test_day = utc_s(f"{days.days['test'][0]}T12:00:00Z")
-    index = index.with_landing(Landing(test_day, "05L", "SEALED"))
-    whole = LandingIndex(runways, tuple(sorted(added, key=lambda item: (item.time_s, item.flight_key))), 1, days)
-    assert index.landings == whole.landings and index.sealed == whole.sealed and index.digest() == whole.digest()
-    assert len({landing.time_s for landing in added}) < len(added), "ties in time"
-    probe = noon + np.arange(-1800.0, 1500.0, 7.0)
-    for landing in added:
-        assert np.array_equal(index.counts_before(probe, without=landing.flight_key),
-                              whole.counts_before(probe, without=landing.flight_key))
-    tied = (Landing(noon, "05L", "B"), Landing(noon, "05L", "A"))
+    tied = (Landing(on["train"], "05L", "B"), Landing(on["train"], "05L", "A"))
     with pytest.raises(ValueError, match="time order, then flight order"):
-        LandingIndex(runways, tied, 0, days)
+        LandingIndex(("05L",), tied, 0, days)
 
 
 # ---- the inputs of a sentence's rows (B1)

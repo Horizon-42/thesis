@@ -29,7 +29,7 @@ def spoken(tmp_path, monkeypatch, *, timed: bool, limit=None):
     finals = {spy["geometry"].code: tuple(free.Final(spy["geometry"], k, 9_000.0, free.fas_course_geometry(c.length_m))
                                           for k, c in enumerate(spy["geometry"].candidates))}
     speaking = SpeakingLoop(model, wrapped, order, {0: spy["stored"]}, observed, spy["flights"],
-                            {spy["geometry"].code: spy["geometry"]}, [spy["landings"][spy["geometry"].code]], finals,
+                            {spy["geometry"].code: spy["geometry"]}, finals,
                             spy["words"], interval_s=4.0, variant="full", device=CPU)
     numbers = flight_numbers(5, 0, 0)
     try:
@@ -93,7 +93,7 @@ def test_the_runner_s_loop_says_what_free_generation_says_copy_k_its_sample_k(tm
     geometry = spy["geometry"]
     finals = {geometry.code: tuple(free.Final(geometry, k, 9_000.0, free.fas_course_geometry(c.length_m))
                                    for k, c in enumerate(geometry.candidates))}
-    prior = SimpleNamespace(interval_s=4.0, geometries={geometry.code: geometry}, landings=spy["landings"],
+    prior = SimpleNamespace(interval_s=4.0, geometries={geometry.code: geometry},
                             checkpoint=SimpleNamespace(model=model))
     run = SimpleNamespace(prior=prior, instructions=spy["directory"], executor=tmp_path / "executor",
                           sentences={0: spy["stored"]}, flights=spy["flights"], finals=finals, drawn=[0])
@@ -123,7 +123,7 @@ def _plain(spy, tmp_path, model, finals, numbers):
                                         {0: NO_MOVE}, most_go_arounds=free.MOST_GO_AROUNDS, device=CPU)
     geometry = spy["geometry"]
     speaking = SpeakingLoop(model, loop, order, {0: spy["stored"]}, observed, spy["flights"],
-                            {geometry.code: geometry}, [spy["landings"][geometry.code]], finals, spy["words"],
+                            {geometry.code: geometry}, finals, spy["words"],
                             interval_s=4.0, variant="full", device=CPU)
     while speaking.observing:
         speaking.observe()

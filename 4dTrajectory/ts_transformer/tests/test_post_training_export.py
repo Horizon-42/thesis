@@ -418,7 +418,7 @@ def stage_c_two_fixture(tmp_path, monkeypatch):
             return parts["start"]
 
     two = TwoContext(**{**{f.name: getattr(context, f.name) for f in fields(context)},
-                        "splits": {"train": data, "select": data}, "rosters": parts["rosters"]})
+                        "splits": {"train": data, "select": data}})
     head = head_of(s)
     campaign, root = tmp_path / "campaign", tmp_path / "airports_two"
     inputs = {"prior": "p", "instructions": str(s["directory"]), "executor": str(tmp_path / "executor"),

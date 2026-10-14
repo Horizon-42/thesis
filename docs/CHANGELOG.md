@@ -1,5 +1,24 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-14 — the loops keep no landings (post-training D208)
+
+- Why: since prior D206 no input reads the landings, and since post-training D207 no reward does; the user chose to
+  delete them now (post-training O26: "现在就删").
+- Deleted, with their tests: `SpeakingLoop`'s `landings` argument, `landings(flight)` and `add_landing`;
+  `speak_and_fly`'s and `WindowLoop`'s landings / rosters arguments and the rosters that `branch_round`,
+  `backward_round` and the runners passed; a landed commanded aircraft's landing added to the others' (multi-aircraft
+  control D147, deleted; D186 (1), D189 (0)); `post.landings.commanded_landings`; `LandingIndex.counts_before`,
+  `with_landing`, `LANDINGS_WINDOW_S`.
+- Kept, for the user to confirm (open item O26): the landings' digest in the identity of a prior's data (prior D63) —
+  without it every prior checkpoint written before is refused, B21's base too; and the window's landings
+  (`window_landings`, post-training D105), which the diagnostic readout's field 1 reads (D175).
+- No word, state, outcome, reward or record changes: free generation, stage C ≡ free generation and the compressed
+  window tests stay as they were; the behaviour records of `prior_behaviour` and `window_behaviour` hold no landings.
+- Docs: post-training D208, O26 (rewritten), D31, D105, §3, §9 items 2 and 8; multi-aircraft control D147 (deleted),
+  D150, D166 (6), D186 (1), D189 (0), §1, §2.6, §3, §6.1–§6.3, §9.3; prior D63, D105, D206, §2, §7 items 2 and 7, §9,
+  §11; vocabulary O23 (closed); outline index and plan; `superseded_decisions.md` entries 111–140; the tutorial (also
+  the inputs of D204 and D206, which it had not followed).
+
 ### 2026-10-14 — the runway of a landing does not change the reward (post-training D207)
 
 - Why: the user, 2026-10-14, asked what the condition "landed on a runway of the airport's present landing direction"

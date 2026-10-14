@@ -234,8 +234,8 @@ def speak_prior(run: PriorRun, model: Any, group: Sequence[tuple[int, int]], see
     loop = loop.copy([place[f] for f, _ in group]) if [f for f, _ in group] != list(order) else loop
     timed = TimedLoop(loop, synchroniser(device), limit)
     speaking = SpeakingLoop(model, timed, [f for f, _ in group], run.sentences, observed, run.flights,
-                            run.prior.geometries, [run.prior.landings[run.flights[f]["airport"]] for f, _ in group],
-                            run.finals, loop.words, interval_s=run.prior.interval_s, variant=model.config.variant,
+                            run.prior.geometries, run.finals, loop.words, interval_s=run.prior.interval_s,
+                            variant=model.config.variant,
                             device=device, temperature=1.0)
     numbers = [flight_numbers(seed, sample, f) for f, sample in group]
     try:
@@ -296,7 +296,7 @@ def window_setting(context: Any, model: Any, windows: Sequence[Any], places: Seq
         loop, order, observed = context.start_loop(SPLIT, chosen)([w.signal_index for w in chosen])
         timed = TimedLoop(loop, synchroniser(device), limit)
         flown = WindowLoop(model, timed, order, chosen, select["sentences"], select["flights"], context.geometries,
-                           context.rosters, context.finals, context.words, interval_s=context.interval_s,
+                           context.finals, context.words, interval_s=context.interval_s,
                            variant=context.variant, edges_reference=context.edges_reference, faults=select["faults"],
                            observed=observed, device=device)
         try:

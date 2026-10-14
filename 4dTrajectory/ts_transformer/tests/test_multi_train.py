@@ -814,25 +814,6 @@ def test_the_time_the_aircraft_take(built):
         "record_spacing_s"] == []
 
 
-def test_the_loops_crossing_time_is_the_timing_readouts(setup, monkeypatch):
-    """The review of MC4's timing (S3): the time of a loop landing that `multi.timing.landed` reads is the one the window
-    loop adds to the other aircraft's landings (`WindowLoop._landed`, D147)."""
-    from ts_transformer.experiments.post_window_loop import LANDED
-    from ts_transformer.multi import timing
-    from ts_transformer.tests.test_post_window_loop import _with_module
-    from ts_transformer.tests.test_post_window_multi import _multi
-
-    s = setup
-    _, loop_of = _multi(s)
-    loop = loop_of(_with_module(s["base"]))
-    crossing = {"at_row": 37.5, "runway_index": 0, "cross_m": 0.0, "height_m": 15.0}
-    monkeypatch.setattr(loop.speaking.loop, "outcome", lambda b: SimpleNamespace(outcome=LANDED, crossing=crossing))
-    loop._landed(np.array([True, False, False]))
-    (added,) = [x for x in loop.speaking.landings(1).landings if x.flight_key == loop.keys[0]]
-    (item,) = timing.landed(loop.records[:1], [crossing], loop.speaking.loop.params.cycle_s)
-    assert item.loop_s == added.time_s
-
-
 def test_a_round_of_stage_d_is_refused_unless_its_identity_is_the_campaigns(setup, tmp_path, monkeypatch):
     """§7 row 3 (the review of MC4's timing, S2-3): `round_model` refuses a round whose identity is not the campaign's
     — another seed, spans, c_min, base — and a round not of that count; the campaign's own round opens."""

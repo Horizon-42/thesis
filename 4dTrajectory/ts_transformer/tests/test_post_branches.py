@@ -28,7 +28,7 @@ from ts_transformer.tests.test_post_window_loop import CPU, DELTA, _window_loop,
 def _round(s, model, windows, continuations=2, round_=0, places=(0,)):
     return branch_round(model, lambda flights: s["moved_loop"](start_move_of(windows[0])), windows, list(places),
                         {0: s["stored"]}, s["flights"],
-                        s["geometries"], {s["geometry"].code: s["roster"]}, s["finals"], s["words"], interval_s=DELTA,
+                        s["geometries"], s["finals"], s["words"], interval_s=DELTA,
                         variant="full",
                         edges_reference=s["reference"], faults={s["geometry"].code: {}}, device=CPU, seed=1337,
                         round_=round_, split="train",
@@ -279,7 +279,7 @@ def test_a_groups_next_branch_point_is_its_aircrafts_next_point(setup):
     rules = replace(every_row, varied=lambda *args: [(v, p[:3]) for v, p in every_row.varied(*args)])
     (window,) = s["windows"]
     found = branch_round(model, lambda flights: s["moved_loop"](start_move_of(window)), [window], [0], {0: s["stored"]},
-                         s["flights"], s["geometries"], {s["geometry"].code: s["roster"]}, s["finals"], s["words"],
+                         s["flights"], s["geometries"], s["finals"], s["words"],
                          interval_s=DELTA, variant="full", edges_reference=s["reference"],
                          faults={s["geometry"].code: {}}, device=CPU, seed=1337, round_=0, split="train",
                          continuations=2, rules=rules)

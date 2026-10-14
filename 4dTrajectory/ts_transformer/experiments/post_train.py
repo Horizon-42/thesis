@@ -290,6 +290,7 @@ class Context:
     base: Prior
     base_identity: dict[str, Any]
     geometries: Mapping[str, Any]
+    #: each airport's roster landings (prior D63); only the diagnostic readout reads them (D175)
     rosters: Mapping[str, Any]
     finals: Mapping[str, Any]
     splits: Mapping[str, Mapping[str, Any]]
@@ -566,7 +567,7 @@ def speak_batch(model: Prior, context: Context, windows: Sequence[Window], place
     train = context.splits["train"]
     batch = [windows[p] for p in places]
     found = branch_round(model, context.start_loop("train", batch), batch, places, train["sentences"], train["flights"],
-                         context.geometries, context.rosters, context.finals, context.words,
+                         context.geometries, context.finals, context.words,
                          interval_s=context.interval_s, variant=context.variant,
                          edges_reference=context.edges_reference, faults=train["faults"], device=context.device,
                          seed=settings.seed, round_=round_, split="train", continuations=settings.continuations,
@@ -608,7 +609,7 @@ def speak_landed_batch(model: Prior, context: Context, windows: Sequence[Window]
     for draw in range(settings.continuations):
         loop, order, observed = context.start_loop("train", batch)([w.signal_index for w in batch])
         flown = WindowLoop(model, loop, order, batch, train["sentences"], train["flights"], context.geometries,
-                           context.rosters, context.finals, context.words, interval_s=context.interval_s,
+                           context.finals, context.words, interval_s=context.interval_s,
                            variant=context.variant, edges_reference=context.edges_reference, faults=train["faults"],
                            observed=observed, device=context.device)
         ends = flown.run([landed_numbers(settings.seed, round_, p, draw) for p in places])
@@ -1631,7 +1632,7 @@ def speak_value_batch(model: Prior, context: Context, windows: Sequence[Window],
     batch = [windows[p] for p in places]
     loop, order, observed = context.start_loop("train", batch)([w.signal_index for w in batch])
     flown = WindowLoop(model, loop, order, batch, train["sentences"], train["flights"], context.geometries,
-                       context.rosters, context.finals, context.words, interval_s=context.interval_s,
+                       context.finals, context.words, interval_s=context.interval_s,
                        variant=context.variant, edges_reference=context.edges_reference, faults=train["faults"],
                        observed=observed, device=context.device, value_reader=read_value)
     ends = flown.run([first_numbers(settings.seed, round_, p) for p in places])
@@ -1929,7 +1930,7 @@ def read_batch(model: Prior, context: Context, windows: Sequence[Window], places
     batch = [windows[p] for p in places]
     loop, order, observed = context.start_loop(split, batch)([w.signal_index for w in batch])
     return WindowLoop(model, loop, order, batch, data["sentences"], data["flights"], context.geometries,
-                      context.rosters, context.finals, context.words, interval_s=context.interval_s,
+                      context.finals, context.words, interval_s=context.interval_s,
                       variant=context.variant, edges_reference=context.edges_reference, faults=data["faults"],
                       observed=observed, device=context.device).run([readout_numbers(settings.select_seed, p, draw) for p in places])
 

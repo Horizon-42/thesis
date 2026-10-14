@@ -299,7 +299,7 @@ def test_stage_ds_numbers_are_each_aircrafts_own():
 def _round_c(s, model, windows, rules=None, loop_options=None):
     """`branch_round` of stage C's windows of one commanded aircraft (`test_post_branches._round`), under ``rules``."""
     return branch_round(model, lambda flights: s["moved_loop"](start_move_of(windows[0])), windows, [0],
-                        {0: s["stored"]}, s["flights"], s["geometries"], {s["geometry"].code: s["roster"]}, s["finals"],
+                        {0: s["stored"]}, s["flights"], s["geometries"], s["finals"],
                         s["words"], interval_s=DELTA, variant="full", edges_reference=s["reference"],
                         faults={s["geometry"].code: {}}, device=CPU, seed=1337, round_=0, split="train",
                         continuations=2, rules=rules, loop_options=loop_options)
@@ -353,7 +353,7 @@ def test_stage_ds_rules_vary_the_aircraft_of_d143_at_their_points(setup):
 
     model = _with_module(s["base"])
     round_ = branch_round(model, parts["start"], [multi], [5], parts["sentences"], parts["flights"], s["geometries"],
-                          parts["rosters"], s["finals"], s["words"], interval_s=DELTA, variant="full",
+                          s["finals"], s["words"], interval_s=DELTA, variant="full",
                           edges_reference=s["reference"], faults={s["geometry"].code: {}}, device=CPU, seed=1337,
                           round_=0, split="train", continuations=2, rules=Rules(**{**fields,
                                                                                    "continuation": continuation}))

@@ -1068,7 +1068,7 @@ POST_INTERFACE = {
     "post.scene": {"Recorded", "AircraftAt", "Scene", "MovedScene", "Window", "StartMove", "real_windows",
                    "inserted_window", "leader_moved_window", "moved_start_window", "census", "Joined", "REAL",
                    "airport_scenes"},
-    "post.landings": {"window_landings", "commanded_landings"},
+    "post.landings": {"window_landings"},
     "post.traffic": {"traffic", "commanded_loss", "loss_at_first_step", "opens_inside_loss", "joined", "scene_aircraft",
                      "step_losses", "answered_loss"},
     "post.established": {"established"},

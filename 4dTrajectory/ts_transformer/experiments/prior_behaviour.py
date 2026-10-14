@@ -46,7 +46,6 @@ from ts_transformer.prior.batch import (
     variant_features,
 )
 from ts_transformer.prior.inputs import Heard, sentence_rows, state_inputs
-from ts_transformer.prior.landings import Landing, LandingIndex
 from ts_transformer.prior.model import Prior, PriorConfig
 from ts_transformer.prior.procedure import Final, airport_finals
 from ts_transformer.prior.runs import Run, RunData
@@ -147,7 +146,6 @@ def speaking(model: Prior, words: Words, finals: Sequence[Final], days: DaySplit
     """Three flights of ``finals``' airport in `SpeakingLoop` on `Straight` at Δ = 4 s (module docstring)."""
     geometry = finals[0].geometry
     count, every, start = 3, 2, 4
-    noon = float(np.datetime64(f"{days.days['train'][0]}T12:00:00", "s").astype(np.int64))
     states = np.zeros((count, start * every + 1, 6))
     states[:, :, 0] = -14_000.0 + 120.0 * np.arange(start * every + 1)[None] + 2_000.0 * np.arange(count)[:, None]
     states[:, :, 2] = geometry.elevation_m + 900.0 - 6.0 * np.arange(start * every + 1)[None]
@@ -155,12 +153,9 @@ def speaking(model: Prior, words: Words, finals: Sequence[Final], days: DaySplit
             for b in range(count)}
     flights = {b: {"airport": geometry.code, "entry_time_utc": f"{days.days['train'][0]}T11:50:00Z",
                    "dataset_id": f"{geometry.code}:L{b}"} for b in range(count)}
-    runways = tuple(c.ident for c in geometry.candidates)
-    # each aircraft's landings, which the loop keeps for a caller and no input reads (D206): one before its rows
-    landings = [LandingIndex(runways, (Landing(noon - 1_500.0, runways[0], f"O{b}"),), 0, days) for b in range(count)]
     observed = {b: states[b, : start * every] for b in range(count)}
     loop = SpeakingLoop(model, Straight(states[:, -1], every, 2), list(range(count)), rows, observed, flights,
-                        {geometry.code: geometry}, landings, {geometry.code: finals}, words, interval_s=4.0,
+                        {geometry.code: geometry}, {geometry.code: finals}, words, interval_s=4.0,
                         variant="full", device=torch.device("cpu"))
     while loop.observing:
         loop.observe()
