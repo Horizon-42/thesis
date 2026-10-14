@@ -691,40 +691,21 @@ def test_each_rows_view_is_its_window_reordered_and_reads_as_the_scene_functions
     assert checked >= 6
 
 
-def test_every_count_a_loop_reads_lies_where_its_landings_were_cut(setup, monkeypatch):
-    """D189 (0): flown to its end, every time at which a loop counts an aircraft's landings (the reward's present
-    direction; the prior reads none, D206) lies in the span its landings were cut to (`post.landings.commanded_landings`: from one
-    Δ before its window's row 0 to the loop's last row, ``reach``; the 30 min before the first kept too), so every
-    count is the roster's."""
+def test_a_loop_counts_no_landings(setup, monkeypatch):
+    """Prior D206, post-training D207: flown to its end, a stage D loop counts no landings. No input of the prior and
+    not the reward reads them (post-training O26)."""
     from ts_transformer.prior.landings import LandingIndex
 
-    spans, reads = {}, []
-    real_commanded, real_with, real_counts = (post_window_loop.commanded_landings, LandingIndex.with_landing,
-                                              LandingIndex.counts_before)
-
-    def commanded(window, roster, until_s):
-        out = real_commanded(window, roster, until_s)
-        for index in out:                                            # the index kept: its id is not taken again
-            spans[id(index)] = (window.row0_s - window.scene.interval_s, until_s, index)
-        return out
-
-    def with_landing(self, landing):
-        out = real_with(self, landing)
-        spans[id(out)] = (*spans[id(self)][:2], out)
-        return out
+    reads = []
+    real_counts = LandingIndex.counts_before
 
     def counts_before(self, time_s, *, without):
-        reads.append((id(self), np.array(time_s, dtype=np.float64)))
+        reads.append(np.array(time_s, dtype=np.float64))
         return real_counts(self, time_s, without=without)
 
-    monkeypatch.setattr(post_window_loop, "commanded_landings", commanded)
-    monkeypatch.setattr(LandingIndex, "with_landing", with_landing)
     monkeypatch.setattr(LandingIndex, "counts_before", counts_before)
     s = setup
     _, loop_of = _multi(s, joins=(0, 30, 60))
     loop = loop_of(_with_module(s["base"]))
     loop.run(_numbers(3))
-    assert reads and {key for key, _ in reads} <= set(spans)
-    for key, times in reads:
-        first, end, _ = spans[key]
-        assert ((times >= first) & (times < end)).all(), (first, end, times.min(), times.max())
+    assert reads == []

@@ -26,10 +26,10 @@ roles, `Speaker.say`; the executor's step once the loop's clock reaches tick s, 
 own rows from its row 0 (`sentences`, `said`, `states`, `generated`). With every join tick 0 the loop is the loop
 without join ticks, bit for bit.
 
-**Landings** (D105, D206). The loop keeps each flight's landings for its caller: no input of the prior reads them (D206);
-the post-training's reward reads those before a flight's first predicted step (its present landing direction,
-post-training D112). A landing may be added to chosen flights still held while the loop runs (`add_landing`; multi-
-aircraft control D147); a flight that left keeps the landings it had. A copy and a join keep each flight's.
+**Landings** (D105, D206, D207). The loop keeps each flight's landings for its caller: no input of the prior (D206)
+and not the post-training's reward (D207) reads them; the user decides whether they go (outline O26). A landing may be
+added to chosen flights still held while the loop runs (`add_landing`; multi-aircraft control D147); a flight that left
+keeps the landings it had. A copy and a join keep each flight's.
 
 **Rows that leave** (multi-aircraft control D193 (3), S6). A join (`together`) keeps in the speaker and the executor only
 the flights still flown. A flight no longer flown leaves them: nothing says or flies it after. The loop keeps what is

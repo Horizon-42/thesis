@@ -15,7 +15,7 @@ THE COMPARISON (``--out FILE``): each done round's ``round.json`` and, with ``--
 campaign (refused for other inputs or settings than the campaign's, the rule of the CPU's batches apart, or read on
 another kind of device than a round's readout, ``round.json``'s ``speak_device``), each row:
 - landed: ``outcomes.landed`` of ``aircraft`` of the readout;
-- reward: ``reward_sum`` over ``aircraft`` (post-training D30: 1 a landing on a runway of the present direction, 0.9ⁿ
+- reward: ``reward_sum`` over ``aircraft`` (post-training D30, D207: 1 a landing on any runway, 0.9ⁿ
   after n go-arounds, 0 every other outcome and every loss of separation the aircraft answers for — at most the landed
   share; the campaign's log prints it as each airport's ``reward_mean``);
 - lost separation: ``outcomes.lost_separation`` of ``aircraft``;

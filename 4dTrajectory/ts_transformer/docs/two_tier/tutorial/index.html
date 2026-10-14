@@ -679,7 +679,7 @@ Why attention, and not a sum or a list. A sum of the tokens would grow with the 
 <figure class="paper" data-fig="fig16_window_kinds"></figure>
 
 <h3 id="t-reward" class="toc">10.2 The reward</h3>
-<p>The reward comes <b>only from the outcome</b> (<span class="pill d">D30</span>). It is 1 for a landing without a go-around on a runway of the airport’s present landing direction. It is 0.9<sup>n</sup> for a landing after n go-arounds. It is 0 for every other outcome, and for every loss of separation. There is no payment for a go-around without a landing.</p>
+<p>The reward comes <b>only from the outcome</b> (<span class="pill d">D30</span>). It is 1 for a landing without a go-around, on any runway (<span class="pill d">D207</span>). It is 0.9<sup>n</sup> for a landing after n go-arounds. It is 0 for every other outcome, and for every loss of separation. There is no payment for a go-around without a landing.</p>
 <div data-demo="reward" data-title="The reward, and why a go-around is not paid"></div>
 <p>A go-around then pays when it turns a probable failure into a probable landing. With the same chance of landing before and after, it gives 0.9·p, which is less than p. A go-around that prevents a loss of separation keeps the chance of 0.9. So the same reward also teaches the go-around for traffic. “Go-around” is permitted at any row after the first predicted step (<span class="pill d">D10</span>), and the chance p is low on many flights at the start. A payment would teach a go-around where the model is not sure, not where the approach is unstable. Before the training, the design measures whether the base model says “go-around” by itself on the final. If it does, the training needs no probes.</p>
 
@@ -787,7 +787,7 @@ Why attention, and not a sum or a list. A sum of the tokens would grow with the 
 <p>The window ends when every commanded aircraft is done or silent.</p>
 
 <h4>The reward</h4>
-<p>Each commanded aircraft earns the reward of stage C: 1 for a landing without a go-around on a runway of the present landing direction, 0.9<sup>n</sup> after <i>n</i> go-arounds, and 0 for every other outcome and for a loss of separation that it answers for. The reward of a <b>window</b> is the <b>sum</b>: W = r<sub>1</sub> + r<sub>2</sub> + … The recorded aircraft add nothing.</p>
+<p>Each commanded aircraft earns the reward of stage C: 1 for a landing without a go-around, on any runway, 0.9<sup>n</sup> after <i>n</i> go-arounds, and 0 for every other outcome and for a loss of separation that it answers for. The reward of a <b>window</b> is the <b>sum</b>: W = r<sub>1</sub> + r<sub>2</sub> + … The recorded aircraft add nothing.</p>
 <ul>
 <li><b>Why a sum.</b> The model is one controller, and its task is that every aircraft lands safely. An aircraft that lands because another one made room for it is the controller’s success. With a reward for each aircraft alone, a leader that keeps its speed up for its follower would gain nothing.</li>
 <li><b>Why not a mean.</b> A landing is worth the same in a window of one aircraft and in a window of six. A mean would make each aircraft of a busy window worth less, and the busy windows are where this stage learns.</li>
@@ -842,7 +842,7 @@ Why attention, and not a sum or a list. A sum of the tokens would grow with the 
 <tr><td>Prior: speaker and masks</td><td><code>prior/speaker.py</code>, <code>procedure.py</code></td><td><code>Speaker.speak</code>, <code>draw</code>, <code>ProcedureMasks</code></td></tr>
 <tr><td>Prior: training</td><td><code>prior/train.py</code>, <code>selection.py</code>, <code>source.py</code></td><td><code>batch_nll</code>, <code>TrainConfig</code>, the rule <code>landed</code></td></tr>
 <tr><td>Prior: loop step</td><td><code>experiments/prior_speaking_loop.py</code></td><td><code>SpeakingLoop</code></td></tr>
-<tr><td>Post: window, reward</td><td><code>post/scene.py</code>, <code>reward.py</code>, <code>established.py</code></td><td><code>reward</code>, <code>present_runways</code></td></tr>
+<tr><td>Post: window, reward</td><td><code>post/scene.py</code>, <code>reward.py</code>, <code>established.py</code></td><td><code>reward</code></td></tr>
 <tr><td>Post: branches, loss</td><td><code>post/branches.py</code>, <code>loss.py</code></td><td><code>branch_points</code>, <code>Group.advantages</code>, <code>surrogate</code>, <code>pull_to_base</code></td></tr>
 <tr><td>Post: traffic</td><td><code>post/edges.py</code>, <code>traffic_attention.py</code>, <code>speed_mask.py</code></td><td><code>TOKEN_FEATURES</code>, <code>TrafficAttention</code>, <code>ramp_distance_m</code></td></tr>
 <tr><td>Separation judge</td><td><code>inference/separation.py</code>, <code>runway_schedule.py</code></td><td><code>IFR</code> and <code>VISUAL</code> readings</td></tr>
@@ -2381,16 +2381,15 @@ Why attention, and not a sum or a list. A sum of the tokens would grow with the 
 (function () {
   const TT = window.TT, E = TT.el, S = TT.svg;
 
-  // ============================================================ the reward (D30, D91, D112)
+  // ============================================================ the reward (D30, D91, D207)
   TT.demos.reward = (root, body) => {
-    const st = { outcome: 'landed', n: 0, present: true, lost: false, p: 0.6, q: 0.6, f: 0.28 };
+    const st = { outcome: 'landed', n: 0, lost: false, p: 0.6, q: 0.6, f: 0.28 };
     const outcomes = ['landed', 'unstable_at_minimums', 'crossed_too_high', 'crossed_off_runway', 'crossed_other_runway', 'ground_contact', 'timeout', 'dynamics_failure'];
     const g = E('div', { class: 'grid2' }); body.append(g); const A = E('div', { class: 'card' }), B = E('div', { class: 'card' }); g.append(A, B);
     A.append(E('h4', { text: 'The reward of one sentence' }));
     const row = TT.ui.row(A);
     TT.ui.select(row, 'Outcome (the judge)', outcomes, st.outcome, (v) => { st.outcome = v; draw(); });
     TT.ui.slider(A, { label: 'Go-arounds n', min: 0, max: 2, step: 1, value: 0, onInput: (v) => { st.n = v; draw(); } });
-    TT.ui.check(A, 'It landed on a runway of the airport’s present landing direction', true, (v) => { st.present = v; draw(); });
     TT.ui.check(A, 'It lost separation (and the commanded aircraft answers for it)', false, (v) => { st.lost = v; draw(); });
     const rOut = TT.ui.out(A);
     B.append(E('h4', { text: 'Why no payment for a go-around' }));
@@ -2404,8 +2403,8 @@ Why attention, and not a sum or a list. A sum of the tokens would grow with the 
     function draw() {
       c.clear();
       const landed = st.outcome === 'landed'; let r = 0;
-      if (landed && !st.lost) r = st.present ? Math.pow(0.9, st.n) : 0;
-      rOut(`reward = <b class="${r > 0 ? 'ok-t' : 'bad-t'}">${r.toFixed(3)}</b>\n${st.lost ? 'a loss of separation: 0' : !landed ? 'an outcome other than landed: 0' : !st.present ? 'a landing against the present landing direction: 0' : `landed after ${st.n} go-around${st.n === 1 ? '' : 's'}: 0.9^${st.n}`}`);
+      if (landed && !st.lost) r = Math.pow(0.9, st.n);
+      rOut(`reward = <b class="${r > 0 ? 'ok-t' : 'bad-t'}">${r.toFixed(3)}</b>\n${st.lost ? 'a loss of separation: 0' : !landed ? 'an outcome other than landed: 0' : `landed after ${st.n} go-around${st.n === 1 ? '' : 's'}: 0.9^${st.n}`}`);
       c.line([[0, 0], [1, 0.9 * st.q]], 'corr', c.dyn); c.line([[0, st.f], [1, 0.9 * st.q + (1 - st.q) * st.f]], 'word thin', c.dyn);
       c.dot(st.p, st.p, 4, 'f-obs', c.dyn);
       const better = 0.9 * st.q > st.p;

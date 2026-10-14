@@ -47,9 +47,8 @@ def artefact_identity(directory: Path, interval_s: float, landings: Mapping[str,
     """§8 item 1 (D21, D63, D75): the spec sha, the day split, the candidate table (`candidates.json`, the vertical paths
     in it), the sha256 of the closed-loop sentence files of Δ = ``interval_s`` and of the stored signals (whose
     faulty-track marks the selection reads, D111), every development split; the airports' roster landings
-    (`LandingIndex.digest`, by their flights; D63): no input of the prior (D206), but the loops that start from it
-    read them (the reward's present landing direction, post-training D112) and their identities hold the prior's;
-    and the selection — its rule and, for each
+    (`LandingIndex.digest`, by their flights; D63): no input of the prior (D206) and no reward (post-training D207)
+    reads them (post-training O26); and the selection — its rule and, for each
     split, airport, stratum and outcome, the sentences kept and left out (`prior.selection.selection_record` of the rule
     ``selection``). The selection's counts read the stored outcomes of the splits ``counted`` only: a run's own record
     counts every split, a reader that must not read the val days' outcomes (D85: before the base's one validation

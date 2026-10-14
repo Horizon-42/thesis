@@ -1,5 +1,20 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-14 — the runway of a landing does not change the reward (post-training D207)
+
+- Why: the user, 2026-10-14, asked what the condition "landed on a runway of the airport's present landing direction"
+  rests on ("降落方向 不对没用奖励的根据是什么？"), then chose "直接去掉". D30 names no direction; the condition came with
+  the earlier design's reward (`archive/two_tier_v3_2026_10/docs/post_training_design.zh.md` §2, "在用，未逐项确认"),
+  and how often it changed a reward was never measured. At KRDU it could not stop runway 32: 32 is within 90° of
+  both 23 and 05.
+- The code: `post/reward.py` `reward(outcome, go_arounds, lost_separation)`; `present_runways` and
+  `PRESENT_DIRECTION_DEG` deleted; the window loop no longer reads the landings for the reward.
+- The window's landings (post-training D105; multi-aircraft control D147, D189 (0)) are now read by nothing: open item
+  post-training O26, the user's decision. The rewards of stage C's and stage D's campaigns before D207 were made with
+  the condition; their records are not changed.
+- Docs: post-training D207 (D112 deleted), §2 item 2, §3, §5, §9; multi-aircraft control D140, D147, §2.1; prior §2 and
+  D206; vocabulary O23; outline index and plan; `superseded_decisions.md` entries 99–110.
+
 ### 2026-10-14 — the prior reads no landings (prior D206)
 
 - Why: the user, 2026-10-14: "这样 你先做个试验，直接把这个输入去掉 … 理论上为了增加泛化能力，最好能去掉它", then, after the

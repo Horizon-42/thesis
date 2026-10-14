@@ -1076,7 +1076,7 @@ POST_INTERFACE = {
     "post.edges": {"tokens", "TOKEN_FEATURES"},
     "post.conformance": {"require_conforming_edges"},
     "post.speed_mask": {"speed_check", "along_course_speeds"},
-    "post.reward": {"reward", "present_runways"},
+    "post.reward": {"reward"},
     "post.traffic_attention": {"TrafficConfig", "Traffic", "traffic_of", "TrafficTokens", "TrafficAttention",
                                "add_traffic_attention", "parameter_groups", "TokenPart", "add_token_part"},
     "post.branches": {"first_numbers", "continuation_numbers", "branch_points", "Group", "Sentence", "samples",

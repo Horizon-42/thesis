@@ -1,5 +1,5 @@
-"""The landings of a window's scene (post-training §3 "Landing context", D105): what the commanded aircraft's inputs and
-the reward's present landing direction count.
+"""The landings of a window's scene (post-training §3 "Landing context", D105). No input of the prior (D206) and not the
+reward (D207) reads them: the user decides whether they go (outline O26).
 
 A window's landings are its airport's roster landings (`prior.landings.LandingIndex`, prior §7 item 2: the tracks
 roster less the sealed test days) with the window's changes:

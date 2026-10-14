@@ -6,8 +6,8 @@ place to match the code of the branch `two-tier2-eval-landing` (commits `0437839
 B15), for the final's lateral corrections (D201, the branch `two-tier2-centreline`), and for the branch rule and
 the frontend and backend rule (outline §5 rules 1, 8, 10, 11; the branch `two-tier2-backend-orphans`); on 2026-10-14
 for the final's vertical corrections (D203, the branch `two-tier2-glidepath`), the prior's lateral input
-scale (D204, the same branch), the prior's stop (D205, the same branch) and the prior's landings input (D206, the
-same branch). This file
+scale (D204, the same branch), the prior's stop (D205, the same branch), the prior's landings input (D206, the
+same branch) and the reward's landing direction (post-training D207, the branch `two-tier2-reward`). This file
 keeps each text that the rewrite replaced, word for word, beside the text that replaced it, so that the user can compare
 them. It is not part of the design: no code and no design document cites it. An entry leaves this file when the user
 has reviewed it.
@@ -55,8 +55,10 @@ has reviewed it.
    "15 轮，上限 150（推荐）" and "新规则重跑整个活动（推荐）".
 16. The prior reads no landings; the loops keep them for the post-training's reward (prior D206; 2026-10-14): "这样 你先做个
    试验，直接把这个输入去掉 … 理论上为了增加泛化能力，最好能去掉它", then, after the trial, "直接采用，重跑整个活动".
+17. The runway of a landing does not change the reward (post-training D207; 2026-10-14): "降落方向 不对没用奖励的根据是
+   什么？", then the choice "直接去掉".
 
-The new decision rows (vocabulary D196, D197, D201, D203; prior D204–D206; outline D198) are new text, not replacements, so they are not entries
+The new decision rows (vocabulary D196, D197, D201, D203; prior D204–D206; post-training D207; outline D198) are new text, not replacements, so they are not entries
 below; the rewritten rows that cite them are.
 
 ## Index
@@ -161,6 +163,18 @@ below; the rewritten rows that cite them are.
 | 96 | `post_training.md` | §3 Inputs, landing context | the prior reads no landings; the loops keep them for the reward (prior D206) |
 | 97 | `multi_control.md` | §6.2 Compressed windows | the prior reads no landings; the loops keep them for the reward (prior D206) |
 | 98 | `multi_control.md` | §9 Changes of other stages, item 3 | the prior reads no landings; the loops keep them for the reward (prior D206) |
+| 99 | `post_training.md` | D105 | the runway of a landing does not change the reward (post-training D207) |
+| 100 | `post_training.md` | D112 | the runway of a landing does not change the reward (post-training D207) |
+| 101 | `post_training.md` | §2 item 2, Reward | the runway of a landing does not change the reward (post-training D207) |
+| 102 | `post_training.md` | §3 Multi-aircraft, Landing context | the runway of a landing does not change the reward (post-training D207) |
+| 103 | `post_training.md` | §5 Values, Present landing direction | the runway of a landing does not change the reward (post-training D207) |
+| 104 | `post_training.md` | §9 Public interface, item 6 | the runway of a landing does not change the reward (post-training D207) |
+| 105 | `multi_control.md` | D140 | the runway of a landing does not change the reward (post-training D207) |
+| 106 | `multi_control.md` | D147 | the runway of a landing does not change the reward (post-training D207) |
+| 107 | `multi_control.md` | §2.1 One aircraft | the runway of a landing does not change the reward (post-training D207) |
+| 108 | `prior.md` | §2 Inputs, No landings | the runway of a landing does not change the reward (post-training D207) |
+| 109 | `prior.md` | D206 | the runway of a landing does not change the reward (post-training D207) |
+| 110 | `vocabulary.md` | O23 | the runway of a landing does not change the reward (post-training D207) |
 
 ## Text kept unchanged on purpose
 
@@ -2068,4 +2082,217 @@ batch, at most 150 epochs, a stop after 15 epochs without a better select loss (
 
 ```text
 | 3 | Prior §7 item 7, the landings of a loop | A landing added to chosen aircraft's landings while the loop runs; copied with the loop (§6.3 item 5) | A landing goes to the chosen aircraft still held, and changes no input (prior D206) |
+```
+
+### 99. `post_training.md`: D105
+
+**What changed:** the runway of a landing does not change the reward (post-training D207)
+
+**Old text:**
+
+```text
+| D105 | The landings that the commanded aircraft's inputs count follow the window's scene (§3): the tracks roster's landings with the window's changes — an inserted aircraft's landing (A) added at its shifted time, a moved aircraft's landing (D) moved by its shift — less the commanded aircraft's own landing (D31) and never a landing on a sealed test day (C32). A real window counts the roster's landings, so a window without other aircraft reads what free generation reads (§2 item 1). The present landing direction of the reward (§2 item 2) reads the same landings. The window loop gives them to the prior's function of a loop's row for each aircraft (prior D105). Why: with one index for each airport, the commanded aircraft read a value of the record that the augmentation changed — one landing on one candidate, up to 120 s in D and to the end of the window in A (`readouts/2026-10-05_stage_b_check.zh.md`) | Decided | User, 2026-10-05, on Claude's check of stage B |
+```
+
+**New text:**
+
+```text
+| D105 | The landings that the commanded aircraft's inputs count follow the window's scene (§3): the tracks roster's landings with the window's changes — an inserted aircraft's landing (A) added at its shifted time, a moved aircraft's landing (D) moved by its shift — less the commanded aircraft's own landing (D31) and never a landing on a sealed test day (C32). A real window counts the roster's landings, so a window without other aircraft reads what free generation reads (§2 item 1). Since prior D206 and D207 no input and no reward reads them (O26). The window loop gives them to the prior's function of a loop's row for each aircraft (prior D105). Why: with one index for each airport, the commanded aircraft read a value of the record that the augmentation changed — one landing on one candidate, up to 120 s in D and to the end of the window in A (`readouts/2026-10-05_stage_b_check.zh.md`) | Decided | User, 2026-10-05, on Claude's check of stage B |
+```
+
+### 100. `post_training.md`: D112
+
+**What changed:** the runway of a landing does not change the reward (post-training D207)
+
+**Old text:**
+
+```text
+| D112 | With no landing in the 30 min before the first predicted step, every runway is of the airport's present landing direction (§2 item 2): there is no direction to break. Why: read literally, no runway would be of it and every landing would earn 0; 1,119 of 40,530 train windows (2.8 %; select 3.0 %) of A34's artefact have no landing in those 30 min | Decided | User, 2026-10-05, on the implementer's proposal P19 |
+```
+
+**New text:**
+
+(deleted)
+
+### 101. `post_training.md`: §2 item 2, Reward
+
+**What changed:** the runway of a landing does not change the reward (post-training D207)
+
+**Old text:**
+
+```text
+   | `landed`, no go-around, on a runway of the airport's present landing direction | 1 |
+   | `landed` after n go-arounds, on such a runway | 0.9ⁿ |
+   | Every other outcome; every loss of separation (the separation judge, §3) | 0 |
+
+   "The airport's present landing direction": a runway within 90° of a runway with a landing in the 30 min before the
+   first predicted step, among the window's landings (D105); with no landing in those 30 min, every runway (D112).
+```
+
+**New text:**
+
+```text
+   | `landed`, no go-around | 1 |
+   | `landed` after n go-arounds | 0.9ⁿ |
+   | Every other outcome; every loss of separation (the separation judge, §3) | 0 |
+
+   The runway of the landing does not change the reward: a landing on any candidate runway counts (D207).
+```
+
+### 102. `post_training.md`: §3 Multi-aircraft, Landing context
+
+**What changed:** the runway of a landing does not change the reward (post-training D207)
+
+**Old text:**
+
+```text
+- **Landing context (D31, D98, D105; prior D206).** The prior reads no landings; the loop keeps the commanded
+  aircraft's landings for the reward's present landing direction (§2 item 2). They are the landings of the window's
+```
+
+**New text:**
+
+```text
+- **Landing context (D31, D98, D105; prior D206; D207).** The prior reads no landings, and the reward reads none
+  (D207); the loop still keeps the commanded aircraft's landings (O26). They are the landings of the window's
+```
+
+### 103. `post_training.md`: §5 Values, Present landing direction
+
+**What changed:** the runway of a landing does not change the reward (post-training D207)
+
+**Old text:**
+
+```text
+| Present landing direction | A runway within 90° of a runway with a landing in the 30 min before the first predicted step; every runway with no such landing | §2 item 2, D112 |
+```
+
+**New text:**
+
+(deleted)
+
+### 104. `post_training.md`: §9 Public interface, item 6
+
+**What changed:** the runway of a landing does not change the reward (post-training D207)
+
+**Old text:**
+
+```text
+| 6 | The reward | D30's reward of an aircraft; the present landing direction (D112) | `post/reward.py` `reward`, `present_runways` |
+```
+
+**New text:**
+
+```text
+| 6 | The reward | D30's reward of an aircraft; the runway of a landing does not change it (D207) | `post/reward.py` `reward` |
+```
+
+### 105. `multi_control.md`: D140
+
+**What changed:** the runway of a landing does not change the reward (post-training D207)
+
+**Old text:**
+
+```text
+| D140 | **The reward of an aircraft** r_i is post-training D30, unchanged, for each commanded aircraft: 1 for `landed` with no go-around, 0.9ⁿ after n go-arounds, on a runway of the airport's present landing direction (D147); 0 for every other outcome and when the aircraft answers for a loss of separation (the judge's responsibility, §2.4). Why: D30's reasons hold for each aircraft (§2.1) | Decided | User, 2026-10-06, on Claude's proposal |
+```
+
+**New text:**
+
+```text
+| D140 | **The reward of an aircraft** r_i is post-training D30, unchanged, for each commanded aircraft: 1 for `landed` with no go-around, 0.9ⁿ after n go-arounds, on any runway (post-training D207); 0 for every other outcome and when the aircraft answers for a loss of separation (the judge's responsibility, §2.4). Why: D30's reasons hold for each aircraft (§2.1) | Decided | User, 2026-10-06, on Claude's proposal |
+```
+
+### 106. `multi_control.md`: D147
+
+**What changed:** the runway of a landing does not change the reward (post-training D207)
+
+**Old text:**
+
+```text
+| D147 | **The landings that a window counts.** Two quantities count landings: the input of the landings on each candidate in the 30 min before a row (prior §7 item 2) and the present landing direction of the reward (post-training D112). In a window: (1) a commanded aircraft's landing in the data is not counted (it is that aircraft's future); (2) a commanded aircraft whose outcome in the loop is `landed` is counted for every other aircraft of its window, on its landed runway, from its crossing time; (3) a commanded aircraft with any other outcome is not counted; (4) a recorded aircraft is counted at its landing time in the data, as in stage C (post-training D105). Why: the inputs give only what a controller knows before the step (principle 7); with one commanded aircraft this is post-training D31 and D105 | Decided | User, 2026-10-06, on Claude's proposal |
+```
+
+**New text:**
+
+```text
+| D147 | **The landings that a window counts.** Nothing reads them since prior D206 (the prior's input) and post-training D207 (the reward's landing direction): post-training O26. In a window: (1) a commanded aircraft's landing in the data is not counted (it is that aircraft's future); (2) a commanded aircraft whose outcome in the loop is `landed` is counted for every other aircraft of its window, on its landed runway, from its crossing time; (3) a commanded aircraft with any other outcome is not counted; (4) a recorded aircraft is counted at its landing time in the data, as in stage C (post-training D105). Why: the inputs give only what a controller knows before the step (principle 7); with one commanded aircraft this is post-training D31 and D105 | Decided | User, 2026-10-06, on Claude's proposal |
+```
+
+### 107. `multi_control.md`: §2.1 One aircraft
+
+**What changed:** the runway of a landing does not change the reward (post-training D207)
+
+**Old text:**
+
+```text
+| `landed`, no go-around, on a runway of the present landing direction | 1 |
+| `landed` after n go-arounds, on such a runway | 0.9ⁿ |
+| every other outcome of the judge; a loss of separation that the aircraft answers for | 0 |
+
+The present landing direction (post-training D112, §9 item 6) is read for each aircraft at its own first predicted
+step, from the landings of its window (D147). The bound of two go-arounds (post-training D91) holds for each aircraft.
+```
+
+**New text:**
+
+```text
+| `landed`, no go-around | 1 |
+| `landed` after n go-arounds | 0.9ⁿ |
+| every other outcome of the judge; a loss of separation that the aircraft answers for | 0 |
+
+The runway of the landing does not change r_i (post-training D207). The bound of two go-arounds (post-training D91)
+holds for each aircraft.
+```
+
+### 108. `prior.md`: §2 Inputs, No landings
+
+**What changed:** the runway of a landing does not change the reward (post-training D207)
+
+**Old text:**
+
+```text
+- **No landings (D206).** The prior does not read the landings before the step. The loops keep each aircraft's
+  landings for their caller (D105): the post-training's reward reads the airport's present landing direction from
+  them. Offline,
+```
+
+**New text:**
+
+```text
+- **No landings (D206).** The prior does not read the landings before the step. The loops keep each aircraft's
+  landings for their caller (D105); since post-training D207 the reward does not read them either (post-training
+  O26). Offline,
+```
+
+### 109. `prior.md`: D206
+
+**What changed:** the runway of a landing does not change the reward (post-training D207)
+
+**Old text:**
+
+```text
+| D206 | The prior reads no landings: the candidate vector loses the number of landings on the candidate in the 30 min before the step (`prior/batch.py` `CANDIDATE_FEATURES`: 6 in `full`, 8 in `constants`). The loops keep each aircraft's landings for their caller (`SpeakingLoop.landings`, `add_landing`; D105): the post-training's reward reads the airport's present landing direction from them (post-training §2 item 2). The identity of a prior's data still holds their digest (D63): the identities of stages C and D hold the prior's, and their reward reads the same landings. The checkpoint format is `ts-prior-checkpoint-v10`; a v9 checkpoint read the landings and is refused by name. Why: the user's reason, a better generalisation ("理论上为了增加泛化能力，最好能去掉它"). The input counted every landing of the roster, light aircraft too. At KRDU, runway 32 is a runway of light aircraft: on the train days 1,540 landings, 918 of them P28A, 72 with a closed-loop sentence (all C172). B20's fold without KRDU (configuration A, seed 1337) said 32 as its first runway in 60 of 400 sentences (B19's: 17), and of the 59 sentences with 32 last in force 21 landed. A trial without the input (the variant `no_landings`, branch `trial-no-landings` at `54dc46aa`; `outputs/POOLED/prior/trial_no_landings_20261014`, read-only), the folds KRDU and KMSY of A seed 1337 against B20's: KRDU landed 84.8 → 90.8 % of its held-out sentences (B19 85.2 %), 32 first in 19 sentences; KMSY 92.0 → 91.5 %; the first-step runway right KRDU 69.1 → 70.1 %, KMSY 92.6 → 86.5 % | Decided | User, 2026-10-14 ("直接把这个输入去掉", then after the trial "直接采用，重跑整个活动") |
+```
+
+**New text:**
+
+```text
+| D206 | The prior reads no landings: the candidate vector loses the number of landings on the candidate in the 30 min before the step (`prior/batch.py` `CANDIDATE_FEATURES`: 6 in `full`, 8 in `constants`). The loops keep each aircraft's landings for their caller (`SpeakingLoop.landings`, `add_landing`; D105); since post-training D207 the reward does not read them either (post-training O26). The identity of a prior's data still holds their digest (D63). The checkpoint format is `ts-prior-checkpoint-v10`; a v9 checkpoint read the landings and is refused by name. Why: the user's reason, a better generalisation ("理论上为了增加泛化能力，最好能去掉它"). The input counted every landing of the roster, light aircraft too. At KRDU, runway 32 is a runway of light aircraft: on the train days 1,540 landings, 918 of them P28A, 72 with a closed-loop sentence (all C172). B20's fold without KRDU (configuration A, seed 1337) said 32 as its first runway in 60 of 400 sentences (B19's: 17), and of the 59 sentences with 32 last in force 21 landed. A trial without the input (the variant `no_landings`, branch `trial-no-landings` at `54dc46aa`; `outputs/POOLED/prior/trial_no_landings_20261014`, read-only), the folds KRDU and KMSY of A seed 1337 against B20's: KRDU landed 84.8 → 90.8 % of its held-out sentences (B19 85.2 %), 32 first in 19 sentences; KMSY 92.0 → 91.5 %; the first-step runway right KRDU 69.1 → 70.1 %, KMSY 92.6 → 86.5 % | Decided | User, 2026-10-14 ("直接把这个输入去掉", then after the trial "直接采用，重跑整个活动") |
+```
+
+### 110. `vocabulary.md`: O23
+
+**What changed:** the runway of a landing does not change the reward (post-training D207)
+
+**Old text:**
+
+```text
+| O23 | Stage D's landing context: a commanded aircraft adds its landing to the others' context only when the judge says `landed`; D196 passes fewer crossings than the judge before it, so the other aircraft's reward can read another present landing direction (the prior reads no landings since prior D206) | Measure with `window_behaviour --against` (R68) on a stage D campaign | 5.8 |
+```
+
+**New text:**
+
+```text
+| O23 | Stage D's landing context: a commanded aircraft adds its landing to the others' context only when the judge says `landed`; D196 passes fewer crossings than the judge before it. No input (prior D206) and no reward (post-training D207) reads that context now (post-training O26) | Closes with post-training O26 | 5.8 |
 ```

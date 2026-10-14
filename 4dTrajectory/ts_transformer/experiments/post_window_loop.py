@@ -15,7 +15,7 @@ scene, row by row:
   (D110), with the aircraft's runway and G in force before the row's words;
 - **the separation judge** after each row the executor flew (`post.traffic.step_losses`, VISUAL): a loss of
   separation that the commanded aircraft answers for ends its window there (D93);
-- **the reward** of D30 (`post.reward`), its present landing direction from the window's landings (D105);
+- **the reward** of D30 (`post.reward`; the runway of a landing does not change it, D207);
 - **the faulty points** of the recorded aircraft (D114; vocabulary D111, C1's census): the steps at which a recorded
   aircraft reads one (`post.fault_census.reads_fault`: its row or the row before it is a fault row), and whether the
   other aircraft of a loss reads one at the event's step or in the 2 Δ before it (the commanded aircraft flies on the
@@ -68,7 +68,7 @@ from ts_transformer.post.conformance import Checked, require_conforming_edges
 from ts_transformer.post.edges import TOKEN_FEATURES, Pairs, each_tokens, window_tokens
 from ts_transformer.post.fault_census import STEPS_BEFORE_EVENT, reads_fault
 from ts_transformer.post.landings import commanded_landings, roster_key
-from ts_transformer.post.reward import LANDED, present_runways, reward
+from ts_transformer.post.reward import LANDED, reward
 from ts_transformer.post.runways import airport_separation
 from ts_transformer.post.scene import INSERTED_SUFFIX, AircraftAt, Recorded, Window, recorded, utc_s
 from ts_transformer.post.speed_mask import along_course_speeds, speed_check
@@ -707,22 +707,19 @@ class WindowLoop:
             window = self.windows[w]
             crossing = None
             if self.loss[b] is not None:
-                outcome, landed, go_arounds = LOST_SEPARATION, None, None
+                outcome, go_arounds = LOST_SEPARATION, None
                 if not self.speaking.ended[b]:                 # a silent aircraft the executor ended
                     judged = self.speaking.outcome(b)
                     crossing = judged.crossing if judged.outcome == LANDED else None
             else:
                 g = generated[b]
                 outcome, go_arounds = g.outcome, g.go_arounds
-                landed = None if g.crossing is None else int(g.crossing["runway_index"])
                 crossing = g.crossing if outcome == LANDED else None
             said = self.speaking.said(b)
             go_arounds = int((said[:, RUNWAY] == RUNWAY_GO_AROUND).sum()) if go_arounds is None else go_arounds
-            present = present_runways(self.speaking.landings(b), self.geometries[b], self.records[b].first_step_s,
-                                      self.keys[b])
             out.append(WindowResult(
                 index=index, kind=window.kind, outcome=outcome, loss=self.loss[b], loss_step=self.loss_step[b],
-                other=self.other[b], reward=reward(outcome, landed, go_arounds, present, self.loss[b] is not None),
+                other=self.other[b], reward=reward(outcome, go_arounds, self.loss[b] is not None),
                 go_arounds=go_arounds, words=said, states=self.speaking.states(b),
                 speed_mask_rows=int(self.speed_mask_rows[b]),
                 faulty_steps=sum(bool(keys) for keys in self._reading[w].values()),
