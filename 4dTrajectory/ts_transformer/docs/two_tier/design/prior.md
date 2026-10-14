@@ -66,7 +66,10 @@ The decision numbers are shared by all documents (outline §3).
 
 ### 0.2 Open items
 
-None.
+| # | Item | Proposal | § |
+|---|---|---|---|
+| O24 | The landings input (§2 "Landings") counts every landing of the roster, light aircraft too. At KRDU, runway 32 is a runway of light aircraft: on the train days 1,540 landings, 918 of them P28A, 72 with a closed-loop sentence (all C172). B20's fold without KRDU (A, seed 1337) said 32 as its first runway in 60 of 400 sentences (B19's: 17), and the flights with 32 in force did not join its final: 21 of the 59 sentences with 32 last in force landed. On the 339 sentences where neither fold said 32 first, B20 landed 93.5 % and B19 89.4 % | A trial without the input (the user, 2026-10-14: "直接把这个输入去掉"): the variant `no_landings` (branch `trial-no-landings`), configuration A, seed 1337, the folds KRDU and KMSY against B20's (`outputs/POOLED/prior/trial_no_landings_20261014`); B20 is paused until the user decides | 2 |
+| O25 | Wind (the user, 2026-10-14: a later plan, after O24). The prior has no wind. Aircraft land into the wind, so a strong wind tells the landing direction; a light wind does not, and then the airport's preferred runway decides | (1) Download the airports' METAR (surface wind each hour) and measure how often the landing direction agrees with the headwind, by wind speed. (2) If the wind explains enough: give each candidate two more features, the headwind and the crosswind on its runway (no absolute direction, D24); add them to the candidate network of a trained prior with their weights 0 at the start (the outputs stay the same, bit for bit) and train the candidate network only, against a control trained for the same epochs without wind; the folds measure the held-out airports. The wind's source joins the identity of the prior's data (§8) | 2 |
 
 ### 0.3 Implementation
 
@@ -94,7 +97,8 @@ Proposals (where the design says nothing): none open.
 
 1. B20: B19's campaign with the stop of D205 (15 epochs, at most 150), from a run worktree at a
    `two-tier2-glidepath` commit: the folds, the choice, the base and its one val read. Its report compares the
-   folds and the base with B19's.
+   folds and the base with B19's. Paused 2026-10-14 after the folds KMSY, KRDU and KSJC of A seed 1337 for O24's
+   trial (the user); a resume runs its launch script again.
 2. B5's base and the stage C and D models trained from it read `v12_20261005`, which the code of `two-tier2` does not
    open. Multi-aircraft control D200's comparison names B15's base; the user, 2026-10-14: from the new base (B20's).
 
