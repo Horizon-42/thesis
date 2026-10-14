@@ -9,7 +9,7 @@ of sentences is the sum over its asked rows and the five columns, divided by its
 in batches of sentences of similar length of at most ``tokens_per_batch`` padded rows, shuffled each epoch. After each
 epoch it reads the per-step loss on the run's select sentences, keeps the state of the epoch with the smallest one
 (D31) and stops after ``patience`` epochs without a smaller one, or at ``max_epochs``. It reads nothing else.
-`TrainConfig`'s defaults are configuration A (D40).
+`TrainConfig`'s defaults are configuration A (D40); the stop is D205: 15 epochs, at most 150.
 """
 
 from __future__ import annotations
@@ -37,8 +37,8 @@ class TrainConfig:
     weight_decay: float = 0.01
     warmup_steps: int = 500
     clip_norm: float = 1.0
-    max_epochs: int = 30
-    patience: int = 3
+    max_epochs: int = 150                # D205: a limit of time; the stop is the patience
+    patience: int = 15                   # D205
     seed: int = 1337
 
     def __post_init__(self) -> None:

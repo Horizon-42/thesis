@@ -5,8 +5,8 @@ place to match the code of the branch `two-tier2-eval-landing` (commits `0437839
 2026-10-13 again for commits `e00c8d08` and `d8f21c77`, for the prior's campaign on the new labels (`7e72a059`,
 B15), for the final's lateral corrections (D201, the branch `two-tier2-centreline`), and for the branch rule and
 the frontend and backend rule (outline §5 rules 1, 8, 10, 11; the branch `two-tier2-backend-orphans`); on 2026-10-14
-for the final's vertical corrections (D203, the branch `two-tier2-glidepath`) and the prior's lateral input
-scale (D204, the same branch). This file
+for the final's vertical corrections (D203, the branch `two-tier2-glidepath`), the prior's lateral input
+scale (D204, the same branch) and the prior's stop (D205, the same branch). This file
 keeps each text that the rewrite replaced, word for word, beside the text that replaced it, so that the user can compare
 them. It is not part of the design: no code and no design document cites it. An entry leaves this file when the user
 has reviewed it.
@@ -49,8 +49,11 @@ has reviewed it.
 14. The prior's offset right of a final goes in on the scale of its height above the glidepath, 100 m (prior D204;
    2026-10-13 and 10-14): "should algin lateral and vertical input, since they have similar accuracy requirement",
    then, for the cross-validation on the labels of D203, "/100 是定了的，一起上".
+15. The prior's training stops after 15 epochs without a better select loss, at most 150 epochs (prior D205;
+   2026-10-14): "改成连续8轮不变小；或者你建议一个更合理的数字；另外评估一下，当前base训练是不是停早了", then the choices
+   "15 轮，上限 150（推荐）" and "新规则重跑整个活动（推荐）".
 
-The new decision rows (vocabulary D196, D197, D201, D203; prior D204; outline D198) are new text, not replacements, so they are not entries
+The new decision rows (vocabulary D196, D197, D201, D203; prior D204, D205; outline D198) are new text, not replacements, so they are not entries
 below; the rewritten rows that cite them are.
 
 ## Index
@@ -140,6 +143,9 @@ below; the rewritten rows that cite them are.
 | 81 | `vocabulary.md` | §8 Values, past the end of the observed path | on the final the angle corrections aim at the glidepath, and the corrections go on to the threshold (D203) |
 | 82 | `prior.md` | §2 Inputs, Scales | the offset right of a final's centreline goes in on the glidepath's scale, asinh(d / 100 m) (D204) |
 | 83 | `prior.md` | §9 Values, input scales | the offset right of a final's centreline goes in on the glidepath's scale, asinh(d / 100 m) (D204) |
+| 84 | `prior.md` | §5 Training, the loop | the stop: 15 epochs without a better select loss, at most 150 epochs (D205) |
+| 85 | `prior.md` | §5 Training, hyperparameters | the stop: 15 epochs without a better select loss, at most 150 epochs (D205) |
+| 86 | `prior.md` | §9 Values, configuration A | the stop: 15 epochs without a better select loss, at most 150 epochs (D205) |
 
 ## Text kept unchanged on purpose
 
@@ -1776,4 +1782,55 @@ path; on the final, the centreline and the glidepath, D201, D203). At ė = 0 the
 
 ```text
 | Input scales | Distance before a threshold asinh(d / 1 km); offset right of a final and height above a glidepath asinh(d / 100 m); heights / 1 km; ground speed / 100 m/s; vertical rate / 10 m/s; landings in 30 min / 10; length / 1 km and threshold elevation MSL / 1 km (`constants`) | D41, D65, D204 |
+```
+
+### 84. `prior.md`: §5 Training, the loop
+
+**What changed:** the stop: 15 epochs without a better select loss, at most 150 epochs (D205)
+
+**Old text:**
+
+```text
+run keeps the weights of the epoch with the smallest one and stops after 3 epochs without a smaller one, or at 30
+epochs. The seed sets the first weights, the batches and the dropout.
+```
+
+**New text:**
+
+```text
+run keeps the weights of the epoch with the smallest one and stops after 15 epochs without a smaller one, or at 150
+epochs (D205). The seed sets the first weights, the batches and the dropout.
+```
+
+### 85. `prior.md`: §5 Training, hyperparameters
+
+**What changed:** the stop: 15 epochs without a better select loss, at most 150 epochs (D205)
+
+**Old text:**
+
+```text
+batch, at most 30 epochs, a stop after 3 epochs without a better select loss. The RoPE base is 10,000 (D65); a test
+```
+
+**New text:**
+
+```text
+batch, at most 150 epochs, a stop after 15 epochs without a better select loss (D205). The RoPE base is 10,000
+(D65); a test
+```
+
+### 86. `prior.md`: §9 Values, configuration A
+
+**What changed:** the stop: 15 epochs without a better select loss, at most 150 epochs (D205)
+
+**Old text:**
+
+```text
+| Configuration A | d_model 192, 4 layers, 6 heads, feed-forward 768, dropout 0.1, weight decay 0.01, learning rate 3·10⁻⁴ (linear warm-up over 500 steps, then constant), clip 1.0, 16,384 padded rows a batch, at most 30 epochs, stop after 3 | D40 |
+```
+
+**New text:**
+
+```text
+| Configuration A | d_model 192, 4 layers, 6 heads, feed-forward 768, dropout 0.1, weight decay 0.01, learning rate 3·10⁻⁴ (linear warm-up over 500 steps, then constant), clip 1.0, 16,384 padded rows a batch, at most 150 epochs, stop after 15 (D205) | D40 |
 ```

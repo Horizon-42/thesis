@@ -23,7 +23,7 @@ repository root; `readouts/` is `docs/two_tier/readouts/`. The documents of the 
 | Document | Part | Stage | State |
 |---|---|---|---|
 | `vocabulary.md` | The words, the labeller (open-loop and closed-loop reading), the executor, the judge | A | A0–A44 done; no milestone open. The formal artefact `v19_20261014` / `v24_20261014` (D196–D199, D201, D203), read by B19; before it `v18_20261013` / `v23_20261013` (read by B16), `v17_20261013` / `v22_20261013` (read by B15) and `v12_20261005` / `v17_20261005` (read by B5's base and the stage C and D models; its Training view `closed_loop_v12_20261005`). The test days check the labelling at the end (D198) |
-| `prior.md` | The prior: inputs, outputs, decoding and its masks, training, a new airport | B | B0–B15 done. B5's base `prior_base_20261006` (on v12; configuration C) is the start of the stage C and D models. B15 `prior_b15_20261013` (on v17): configuration C chosen, the base lands 90.3 % of the val days, the folds 50–63 % at their held-out airports (cause: the labels' soft lateral centring, vocabulary D201). B16 (B15's campaign on v18) paused after configuration A's folds (47.0 % at their held-out airports, 9–30 m off the centreline); D204 (the lateral offset on the glidepath's 100 m scale) took them to 80.2 %. B19 (B15's campaign on v19 with D204): folds 80–85 % at their held-out airports, configuration A, the base 87.2 % of the val days after 13 epochs; the user chose the 30-epoch base `prior_b19_base30_20261014`: 93.0 % of the val days (B15's base 90.3 %) |
+| `prior.md` | The prior: inputs, outputs, decoding and its masks, training, a new airport | B | B0–B15 done. B5's base `prior_base_20261006` (on v12; configuration C) is the start of the stage C and D models. B15 `prior_b15_20261013` (on v17): configuration C chosen, the base lands 90.3 % of the val days, the folds 50–63 % at their held-out airports (cause: the labels' soft lateral centring, vocabulary D201). B16 (B15's campaign on v18) paused after configuration A's folds (47.0 % at their held-out airports, 9–30 m off the centreline); D204 (the lateral offset on the glidepath's 100 m scale) took them to 80.2 %. B19 (B15's campaign on v19 with D204): folds 80–85 % at their held-out airports, configuration A, the base 87.2 % of the val days after 13 epochs; the user chose the 30-epoch base `prior_b19_base30_20261014`: 93.0 % of the val days (B15's base 90.3 %). Every run of B19 stopped early (100 epochs: the select days 96.2 %); D205 (15 epochs, at most 150) and B20, B19's campaign again under it, running |
 | `post_training.md` | The post-training in windows of traffic with one commanded aircraft | C | C0–C11 and C13–C27 done; C12 (the close) left. The user's chosen round: `post_seg60_20261007` round 5 (D7), its one validation readout 88.9 % landed; its sets published |
 | `multi_control.md` | The multi-aircraft control: every arrival of a window's span commanded; the window's reward and its credit by one varied aircraft; the model in two versions (the other aircraft's words in force, then their intent); what it needs of the other stages' public interfaces | D | Version 1 done (MC0–MC7, MC11–MC14): the formal campaign `multi_train_majority_formal_20261011`, 12 rounds; the user's chosen round 7, its one validation readout 83.9 % landed, 63.8 % of its aircraft passed by the evaluation package; its sets published; the report `readouts/2026-10-12_stage_d_report.md`. D200 (one method of branch training for C and D) built, its comparison held by the user. Version 2 (MC8–MC10) not started |
 | `frontend.md` | The Training view of every stage: its rules, the one layout, each stage's view (stage D's: stage C's window view with several commanded aircraft), the shared controls (the cursor slider), the backend's Training routes, the content and formats of the Training sets | — | F0–F5 done; the evaluation's landing verdict (`288b779b`) and the results route of B15's and D200's campaigns (`be3cdd49`) done. A change waits for the user's permission (§5 rule 11) |
@@ -113,11 +113,11 @@ they came from. Each document lists the identities of its parts.
 | Outline | D7, D20, D21, D55, D85, D95, D131, D138, D139, D158, D163, D184, D187, D198 | — |
 | Training view (`frontend.md`) | D109, D133–D136, D154–D156, D159, D160, D177, D178 | — |
 | Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62, D66, D67, D69–D71, D73, D74, D77–D84, D86–D90, D97, D102, D111, D126, D196, D197, D199, D201, D203 | O8, O22, O23 |
-| Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60, D63–D65, D68, D72, D75, D96, D105–D108, D111, D118–D122, D126–D128, D202, D204 | — |
+| Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60, D63–D65, D68, D72, D75, D96, D105–D108, D111, D118–D122, D126–D128, D202, D204, D205 | — |
 | Post-training | D29–D31, D36, D37, D76, D91–D94, D98–D101, D103–D105, D107, D110, D112–D117, D123–D125, D129, D130, D132, D137, D157, D161, D162, D165, D167–D171, D173–D176, D185 | O15 |
 | Multi-aircraft control | D140–D153, D164, D166, D172, D179–D183, D186, D188–D195, D200 | O18–O21 |
 
-The next free numbers: D205, O24.
+The next free numbers: D206, O24.
 
 ---
 
@@ -125,11 +125,10 @@ The next free numbers: D205, O24.
 
 Stages A–D are built: each stage's §0.3 gives its state, its implementation log the steps. What is left, in this order:
 
-1. B19 (prior §0.4): B15's campaign on the labels of D203 (`v19_20261014` / `v24_20261014`, vocabulary §0.3) with
-   the prior's inputs of D204; the folds first, then, if they land more at their held-out airports than B16's and the
-   trial of D204, the choice, the base and its one val read. Done: the base `prior_b19_base30_20261014` (prior §0.3, B19).
+1. B20 (prior §0.4): B19's campaign on `v19_20261014` / `v24_20261014` with D204, under the stop of prior D205
+   (15 epochs, at most 150): the folds, the choice, the base and its one val read.
 2. One method of branch training for stages C and D (multi-aircraft control D200). Its comparison is held (the user,
-   2026-10-13: "先查原因，对照暂缓"); Claude's proposal: run it from B19's base on v19.
+   2026-10-13: "先查原因，对照暂缓"); it starts from B20's base (the user, 2026-10-14).
 3. Version 2 of the multi-aircraft control (multi-aircraft control D153, MC8–MC10).
 4. The test days at the end: the check of the labelling (D198), KAUS in its three parts (D158).
 5. The frontend and the backend change last, each change with the user's permission (§5 rule 11).

@@ -1,5 +1,18 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-14 — the prior's training stops after 15 epochs without a better select loss, at most 150 (prior D205)
+
+- Why: the user, 2026-10-14: "改成连续8轮不变小；或者你建议一个更合理的数字；另外评估一下，当前base训练是不是停早了", then the
+  choices "15 轮，上限 150" and "新规则重跑整个活动".
+- The measurement: configuration A on every airport for 100 epochs without a stop
+  (`outputs/POOLED/prior/prior_b19_base100_20261014`, read-only): the best select loss at epoch 91 (1.152; epoch 30
+  1.259), flat over epochs 80–100, the longest gap between two new bests 12 epochs; the select days landed 96.2 % (the
+  30-epoch base 92.3 %, the 13-epoch base 87.6 %). With a constant learning rate the select loss moves 0.012–0.018 from
+  epoch to epoch; a stop after 3 epochs ends on noise (B19: the base at epoch 13, 8 of configuration A's 10 folds at
+  18–27, configuration C's 5 folds at 30).
+- `prior/train.py` `TrainConfig`: `patience` 3 → 15, `max_epochs` 30 → 150 (150 is a limit of time). Every finished run
+  keeps its own recorded values. B20, B19's campaign under the new stop, runs next; D200 starts from its base.
+
 ### 2026-10-14 — B19: the prior's campaign on the labels of D203 with D204; the base lands 93.0 % of the val days
 
 - Why: the user, 2026-10-14: "再跑一遍CV，如果确认效果更好了，那么就在新的标注数据上跑base模型的正式训练".
