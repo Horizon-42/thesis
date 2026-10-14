@@ -120,7 +120,7 @@ control arm ended its 8 rounds (log §22).
 | Post-training (D185: a resume's rates) | Merged: 16bacde0 (log §22) |
 | §5 item 5 (`multi_window_read`, `window_list --multi`) | Merged (cf7e21f0): af98c354, d0b9c202, 5139728a; read on the formal campaign's round 7 (log §22) |
 | Frontend §5.1 (the counted outcome) | Merged: 70d87089 (log §22) |
-| D200 (one method of branch training) | Code `0f6c4468` (reviewed, two S2 fixed), its two broken tests `a39ef6bc`; the backend's stage D route answers a start from the base (`be3cdd49`, the user's permission). The comparison's chain `4dTrajectory/outputs/POOLED/multi/compare_20261013.run` waits: the user held it (2026-10-13, "先查原因，对照暂缓") while B15's held-out failures were read; the base it names is B15's (v17), and B16 (v18) replaces it |
+| D200 (one method of branch training) | Code `0f6c4468` (reviewed, two S2 fixed), its two broken tests `a39ef6bc`; the backend's stage D route answers a start from the base (`be3cdd49`, the user's permission). The chain `compare_20261013.run` (B15's base, v17) never ran: the user held it (2026-10-13, "先查原因，对照暂缓"). The user, 2026-10-14: from the new base. The chain `4dTrajectory/outputs/POOLED/multi/compare_20261014.run` (unit `multi-compare-d200`, run worktree `run-b20` at `2c3e7f3d`) waits for B20's last step, then runs the three arms from B20's base on `v19_20261014` / `v24_20261014`; a CPU smoke from B19's base passed |
 | MC8–MC10 | Not started |
 
 ### 0.4 Plan
@@ -132,8 +132,8 @@ control arm ended its 8 rounds (log §22).
    formal campaign and its control arm `multi_train_minority_side_20261011`); its one validation readout landed
    83.9 %; its two sets are published (drawn windows and the windows not landed, D176). O18 from its readouts; O21 for
    the user; O19 not taken up (the user, 2026-10-10).
-3. D200: the comparison of the three methods of branch training, held by the user; Claude's proposal: from B16's
-   base on v18 (prior §0.4). The user then chooses one method for stages C and D.
+3. D200: the comparison of the three methods of branch training, from B20's base on v19 (the user, 2026-10-14); its
+   chain waits for B20 (§0.3). The user then chooses one method for stages C and D.
 4. Version 2 (D153): MC8 (its code), MC9 (its memory measure, its campaign from version 1's chosen round, its
    validation readout); MC10 closes stage D.
 
