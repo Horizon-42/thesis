@@ -337,7 +337,9 @@ def _weights(model) -> str:
 #: merge of dev-two-tier did not. Since then it pins this code itself.
 #: Written again on 2026-10-14 (two-tier2-glidepath): the closed-loop sentences of vocabulary D203 moved it (the
 #: fixture's observed final runs up to 31 m above the published glidepath; its angle corrections now aim at the glidepath).
-VALUE_BEFORE_D173 = "652bf0e43556a9d240b1fe6f1a1463b73526d2e519567617fe3043bf601e9a68"
+#: Written again on 2026-10-14 (two-tier2-glidepath, prior D204): the offset right of the centreline goes into the
+#: prior on the glidepath's 100 m scale, so the synthetic prior says other words; it moved.
+VALUE_BEFORE_D173 = "d44b3db161c66932f2590ec8ee0ea0f64fdc84aeabb7bc8a636621afe41bbc38"
 
 
 def test_with_d173_s_defaults_a_value_campaign_is_the_code_s_before_bit_for_bit(setup, tmp_path, monkeypatch):

@@ -61,6 +61,7 @@ The decision numbers are shared by all documents (outline §3).
 | D127 | The live segment of a prior sentence (B6, frontend D109) is checked as stage A's segments are (vocabulary D73): the export writes each prior sentence's flown track unrounded, in its own sample format, and the backend refuses an answer whose states lie farther than the executor's bound (`STATE_BOUND_M`) from them (stage A's `fly.refuse_past_bound`), or whose outcome or end cycle differs from the sentence's (exact). Why: the export wrote the track to 0.1 m, so the 1e-6 m bound could not be applied and the prior's live answer was never refused, and it had no check of the outcome (stage B's request, checked in Claude's check of B12); a value that a later step computes from is not rounded for display (the user's rule) | Decided | User, 2026-10-06 |
 | D128 | A rerun of a val read (D119) repeats the same read: the claim records the reader's options (free generation: its airports, flights of each airport, samples, seed, chunk, device, temperature and bound of go-arounds; the validation readout: its split and device), and a rerun with other options is refused by name. An error that a reader can find only after its claim (free generation: an airport with no val sentence) locks that val read for good: it cannot be run again with other options. A runner that finds its output with its readout written while the claim is not marked spent marks it spent, then refuses. The claim file is written whole (atomically) and held under an exclusive lock while the reader runs, so two runs to one output cannot both read. B5's claims (written by B12's code, spent when its readouts are written) need no options: the export and the backend read only their output. Why: free generation writes its val sentences before its readout, so a run stopped between them leaves val results on disk while the claim may be run again; with the same options a rerun computes the same read, so nothing can be chosen after val has been seen; a kill between the readout and the spent mark left the claim open for good (Claude's check of B12, `readouts/2026-10-06_stage_b_b12_check.zh.md` §2 items 1, 2, 6, 7) | Decided | User, 2026-10-06, on Claude's check of B12; the options and the lock after an error: user, 2026-10-06, on stage B's readings of B13 |
 | D202 | B5's campaign starts the next two steps after the running one early when they are a fold's steps (its free generation, the next fold's training run): each makes its checks (D69, D73) and, a training run, its data on the CPU, then waits for its turn before it uses the GPU, reads an earlier step's output or writes a file. The turns come in the plan's order, one step on the GPU at a time; the choice, the base's steps and the readers of the val days start only at their turn. A step started early gives what it gives when started at its turn (a test on fixed inputs); `campaign.json` and the campaign's settings keep their format, so that a campaign started before this change resumes on it. Host memory: a training run holds at most 2.9 GB (B15's `memory.json`), a free generation 2.5 GB, so three steps at once hold less than 10 GB of the 31 GB of this machine; each step runs with one CPU thread (the campaign's launch sets `OMP_NUM_THREADS=1`). Why: in B15 the GPU waited about 3 min before each training run and 1.5 min before each free generation while the CPU made the checks and the data (the user, 2026-10-13: "把1 2 3 的优化做了"; the checks once a campaign and the data once a fold save no more time when this work runs beside the GPU) | Decided | User, 2026-10-13 |
+| D204 | The offset right of a candidate's final goes in as asinh(d / 100 m), on the scale of the height above its glidepath (D65), not asinh(d / 1 km): one constant for the two offsets from a final's path (`prior/inputs.py` `PATH_OFFSET_SCALE_M`). The distance before the threshold stays asinh(d / 1 km). The checkpoint format is `ts-prior-checkpoint-v9`; a v8 checkpoint read its inputs on the old scale and is refused by name. Why: the landing asks for the same accuracy across and in height (the evaluation's lateral gate is half the runway width, 15–23 m; the vertical gate ±22 m). On 1 km, 20 m off the centreline was the input 0.02: in B16 (configuration A, seed 1337, on `v18_20261013`) the folds crossed the threshold a median 9–30 m off the centreline at their held-out airports and did not turn back. The same folds on 100 m (a trial, `outputs/POOLED/prior/prior_lateral100_20261013`, read-only): landed 47.0 → 80.2 % of the held-out sentences, at every airport (KRDU 35.2 → 71.2, KMSY 29.3 → 84.8, KSJC 43.7 → 86.8, KSMF 75.7 → 81.6, KSTL 51.1 → 76.6 %); the lateral gate failed 857 → 101 times, the vertical gate 70 → 128 (more flights reach the crossing on the centreline) | Decided | User, 2026-10-13 ("should algin lateral and vertical input, since they have similar accuracy requirement"), 2026-10-14 ("/100 是定了的") |
 
 ### 0.2 Open items
 
@@ -79,7 +80,9 @@ The commits, test counts and measurements of every milestone are in `readouts/20
 | B7 | Done 2026-10-06 (`d1386a77`): `docs/reference/runners.md` R56–R62; the code index of §11 |
 | B14 (D138) | Built and reviewed: `65adf480`; merged into `dev-two-tier`. Its real-data check done 2026-10-06 by stage D's implementer: B5's fold `C_full_s1337/KRDU` spoken again with `BATCH` on the select days, all 400 sentences word for word its readout's (log §6). The per-aircraft form and its check once a process are retired by outline D187 (stage D's implementer, D184) |
 | B15 | Done 2026-10-13 (code `7e72a059`, run from the run worktree `run-b15` at `0ac795e5`): `4dTrajectory/outputs/POOLED/prior/prior_b15_20261013` (`ts-prior-campaign-v4`, on `v17_20261013` / `v22_20261013` at Δ = 4 s; read-only, `SHA256SUMS`, 201 files). Chosen: configuration C (score 1.981; A 2.041 and 2.019 at its two seeds, the seed scale 0.0225). The base's val read: landed 90.3 %. The folds' landed share at their held-out airports: C 62.8 %, A 50.2 % and 54.5 % (B5 on v12, under the judge before D196: 82.6, 82.9, 86.3 %). The diagnosis: the folds settle 20–40 m off the centreline and fail the evaluation's lateral gate; the labels answer the centreline offset softly (vocabulary D201). Readout `readouts/2026-10-13_b15_prior.zh.md` |
-| B16 | B15's campaign on `v18_20261013` / `v23_20261013` (vocabulary D201; the user, 2026-10-13: "采用，做 v18 并重跑 B"): next |
+| B16 | B15's campaign on `v18_20261013` / `v23_20261013` (vocabulary D201; the user, 2026-10-13: "采用，做 v18 并重跑 B"), from `run-b16` at `b953ac13`: paused by the user on 2026-10-13 after 14 of its 31 steps (configuration A, seed 1337, the five folds; configuration C, KMSY and KRDU), not resumed: superseded by B19. `4dTrajectory/outputs/POOLED/prior/prior_b16_20261013`. Configuration A's folds landed 47.0 % at their held-out airports and crossed 9–30 m off the centreline (D204) |
+| B18 (D204) | The offset right of a final on the glidepath's scale; `ts-prior-checkpoint-v9`. Tried on B16's configuration A folds (`prior_lateral100_20261013`, from `run-lateral` at `938b4110`): landed 80.2 % at the held-out airports. Committed on `two-tier2-glidepath` |
+| B19 | B15's campaign on `v19_20261014` / `v24_20261014` (vocabulary D203) with the inputs of D204 (the user, 2026-10-14: "再跑一遍CV，如果确认效果更好了，那么就在新的标注数据上跑base模型的正式训练"): the folds first; the choice, the base and its one val read only if the folds are better than B16's and the trial's |
 | Multi-aircraft control D190 (2) | Built by stage D's implementer (outline D184), 7893d787, merged (88b5d671): the copies a speaker takes of a line hold their rows to where they part once (`prior/model.py` `Front`, `Past.together` chooses the front; `Past.taken` deleted); a line reads its front `COPIED` (bit for bit) or `MERGED` (no copy, the last bits), `Speaker(…, attention=)`; a past with no front (training, prior_behaviour) computes as before: prior_behaviour the same bytes (stage D's log §20; §7 items 1 and 3 name `Past.taken`: stage D's requests item 87) |
 | Claude's checks | At `5313b6cd` (`readouts/2026-10-05_stage_b_check.zh.md`; corrections B10, D105–D108) at `44f6000f` (`readouts/2026-10-05_stage_b_check_2.zh.md`; corrections B12, D119–D122), of B12 at `2190fe0a` (`readouts/2026-10-06_stage_b_b12_check.zh.md`; corrections B13, D127, D128), and of B13 at `142272f0` (`readouts/2026-10-06_stage_b_b13_check.zh.md`: no S1, no correction; its findings on the behaviour check's coverage are dropped, outline D131). None found a leak into an input, a mask or a choice |
 
@@ -87,11 +90,12 @@ Proposals (where the design says nothing): none open.
 
 ### 0.4 Plan
 
-1. B16: B15's campaign (configurations A and C, A's second seed, the base and its one val read) on `v18_20261013` /
-   `v23_20261013`, from a run worktree at a `two-tier2` commit; its report gives the folds' landed share at their
-   held-out airports against B15's, and the evaluation's failed gates.
+1. B19: B15's campaign (configurations A and C, A's second seed) on `v19_20261014` / `v24_20261014` with the
+   inputs of D204, from a run worktree at a `two-tier2-glidepath` commit; the folds first. If they land more at
+   their held-out airports than B16's configuration A (47.0 %) and the trial of D204 (80.2 %), the choice, the base
+   and its one val read follow; its report gives the folds' landed share and the evaluation's failed gates.
 2. B5's base and the stage C and D models trained from it read `v12_20261005`, which the code of `two-tier2` does not
-   open. Multi-aircraft control D200's comparison names B15's base; Claude's proposal: B16's.
+   open. Multi-aircraft control D200's comparison names B15's base; Claude's proposal: B19's.
 
 ---
 
@@ -172,10 +176,11 @@ its targets; the inputs of the row are computed before them.
   data holds a digest of the landings (§8, item 1).
 - **Candidate tokens (D41, D65).** Each candidate vector goes through one shared network. The candidate tokens reach a
   row through one attention over them whose weights sum to one: a sum would grow with the number of candidates.
-- **Scales (D41, D65).** Every input has a fixed scale in SI units (§9): the distances along and across a candidate
-  asinh(d / 1 km), linear within a few hundred metres of a final; the heights (above E, above a threshold) h / 1 km; the
-  height above a glidepath asinh(h / 100 m), linear near the glidepath, where the value has a meaning, and compressed
-  far from it (an aircraft high above an opposite runway's extended glidepath is thousands of metres above it); the
+- **Scales (D41, D65, D204).** Every input has a fixed scale in SI units (§9): the distance before a candidate's
+  threshold asinh(d / 1 km), linear within a few hundred metres of it; the heights (above E, above a threshold)
+  h / 1 km; the two offsets from a final's path, right of its centreline and above its glidepath, asinh(d / 100 m),
+  linear near the path, where the value has a meaning, and compressed far from it (an aircraft high above an opposite
+  runway's extended glidepath is thousands of metres above it); the
   ground speed v / 100 m/s; the vertical rate v / 10 m/s; the landings in 30 min n / 10; in the variant `constants` the
   length l / 1 km and the threshold elevation MSL h / 1 km.
 - **Words in force** before the row: the runway in force as its candidate's token ("none yet" up to and with the first
@@ -430,7 +435,7 @@ sets its criteria (D7). The identities follow D21 (outline §3):
 | Rows before the first predicted step | 16 s: 8, 4, 2 rows at Δ = 2, 4, 8 s | Vocabulary §6, item 7 |
 | Time since a word | log(1 + t / 2 s) / 5, t in seconds; 0 up to and with the first predicted step | D17 |
 | Landings of a candidate | In [t − 30 min, t), the flight's own landing not counted | §2, D63 |
-| Input scales | Distances asinh(d / 1 km); heights / 1 km; height above a glidepath asinh(h / 100 m); ground speed / 100 m/s; vertical rate / 10 m/s; landings in 30 min / 10; length / 1 km and threshold elevation MSL / 1 km (`constants`) | D41, D65 |
+| Input scales | Distance before a threshold asinh(d / 1 km); offset right of a final and height above a glidepath asinh(d / 100 m); heights / 1 km; ground speed / 100 m/s; vertical rate / 10 m/s; landings in 30 min / 10; length / 1 km and threshold elevation MSL / 1 km (`constants`) | D41, D65, D204 |
 | RoPE base | 10,000 (heads 32 wide: periods 6.3 s to approximately 35,000 s) | D65 |
 | Configuration A | d_model 192, 4 layers, 6 heads, feed-forward 768, dropout 0.1, weight decay 0.01, learning rate 3·10⁻⁴ (linear warm-up over 500 steps, then constant), clip 1.0, 16,384 padded rows a batch, at most 30 epochs, stop after 3 | D40 |
 | Configurations B, C, D | B: d_model 128, 4 heads, feed-forward 512. C: d_model 256, 8 heads, feed-forward 1,024. D: A with dropout 0.2, weight decay 0.05. A head is 32 wide in each | D40 |
@@ -465,11 +470,11 @@ At `d14a2f76` (B13, the close of stage B). Paths relative to `4dTrajectory/ts_tr
 |---|---|
 | The features of a row: own, candidate, the variant `constants`, the words in force | `prior/batch.py:42`, `:47`, `:51`, `:54` |
 | A sentence's rows and targets (checked on construction); the heads' classes; a batch | `prior/batch.py:68` `SentenceRows`, `:150` `target_classes`, `:183` `collate` |
-| The motion of rows (D25, D60) | `prior/inputs.py:60` `motion` |
-| The inputs from the states (D13, D23, D24, D58, the scales of D41/D65) | `prior/inputs.py:86` `state_inputs` |
-| The words in force and `since` (D17), through the grammar | `prior/inputs.py:121` `Heard` |
-| A closed-loop sentence's rows: the inputs before the row's words | `prior/inputs.py:165` `sentence_rows` |
-| The flight's own key in the roster | `prior/inputs.py:204` `own_flight_key` |
+| The motion of rows (D25, D60) | `prior/inputs.py:62` `motion` |
+| The inputs from the states (D13, D23, D24, D58, the scales of D41/D65/D204) | `prior/inputs.py:88` `state_inputs`, `:37` `PATH_OFFSET_SCALE_M` |
+| The words in force and `since` (D17), through the grammar | `prior/inputs.py:146` `Heard` |
+| A closed-loop sentence's rows: the inputs before the row's words | `prior/inputs.py:195` `sentence_rows` |
+| The flight's own key in the roster | `prior/inputs.py:248` `own_flight_key` |
 | The landings: the index, its digest, the count in [t − 30 min, t) without the own landing, the roster | `prior/landings.py:38` `LandingIndex`, `:64` `digest`, `:71` `counts_before`, `:90` `roster_landings` |
 | A loop's row (D96 item 4, D105) | `prior/loop.py:31` `LoopRows` |
 | The model: RoPE, a layer's causal time attention with its cache, the candidate pool, the first layer's input, a column's logits | `prior/model.py:96` `rope_angles`, `:155` `Layer.extend`, `:184` `CandidatePool`, `:198` `Prior`, `:246` `Prior._inputs`, `:266` `Prior.column_logits` |
@@ -497,7 +502,7 @@ At `d14a2f76` (B13, the close of stage B). Paths relative to `4dTrajectory/ts_tr
 runner of stage A. From 2026-10-06 one implementer builds the milestones of every stage (outline §5 rule 1: stage
 D's, which takes over stage B's remaining steps on `dev-two-tier-v4`); the prior still reads the vocabulary only through its public interface (vocabulary §6).
 Tests use synthetic artefacts; a check on real data reads the formal artefact on the train and select days only (D85).
-The formal runs read `v18_20261013` / `v23_20261013` at Δ = 4 s (B16); B15 read `v17_20261013` / `v22_20261013`, B5 `v12_20261005` / `v17_20261005`. The rules
+The formal runs read `v19_20261014` / `v24_20261014` at Δ = 4 s (B19); B16 read `v18_20261013` / `v23_20261013`, B15 read `v17_20261013` / `v22_20261013`, B5 `v12_20261005` / `v17_20261005`. The rules
 of outline §5 apply.
 
 | Milestone | What it built | Decisions | State |
@@ -518,8 +523,10 @@ of outline §5 apply.
 | B7 | The close of stage B | — | Done |
 | B14 | The procedure masks over the batch | Outline D138, D139 | Built and reviewed (`65adf480`); its real-data check first after C10 |
 | B15 | The campaign on the labels of D196–D199 (`v17_20261013` / `v22_20261013`): configurations A and C, A's second seed, the variant `full`, the base and its validation readout | D39, D40, D85 | Done |
-| B16 | B15's campaign on the labels of D201 (`v18_20261013` / `v23_20261013`), the same settings | D39, D40, D85 | Running |
+| B16 | B15's campaign on the labels of D201 (`v18_20261013` / `v23_20261013`), the same settings | D39, D40, D85 | Paused by the user after 14 of 31 steps; superseded by B19 |
+| B18 | The offset right of a final on the glidepath's scale | D204 | Done |
 | B17 | The campaign starts a fold's next steps early | D202 | Done |
+| B19 | B15's campaign on the labels of D203 (`v19_20261014` / `v24_20261014`) with the inputs of D204, the same settings | D39, D40, D85, D204 | Running |
 
 The specifications of the milestones that are done are in `readouts/2026-10-05_stage_b_implementation_log.md` §3.
 

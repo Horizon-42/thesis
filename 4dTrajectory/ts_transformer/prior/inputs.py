@@ -5,7 +5,7 @@ the Δ rows of one aircraft.
 The distance along a candidate goes in as asinh(d / `DISTANCE_SCALE_M`): linear within a few hundred metres of the
 threshold, logarithmic out to the 25 km of the slice. The two offsets from a final's path, across (right of the
 centreline) and in height (above the glidepath), go in on one finer scale, asinh(d / `PATH_OFFSET_SCALE_M`): the
-landing asks for the same accuracy in both (the user, 2026-10-13: "should align lateral and vertical input").
+landing asks for the same accuracy in both (D204).
 
 **Motion** (D25, D60): the ground speed, the vertical rate and the direction of motion of a row come from the
 displacement between the 2 s row before it and the row, at every Δ — only positions and heights, never the stored
@@ -33,7 +33,7 @@ from ts_transformer.prior.landings import LandingIndex, utc_s
 DISTANCE_SCALE_M = 1_000.0
 HEIGHT_SCALE_M = 1_000.0
 #: The offsets from a final's path, right of the centreline and above the glidepath, go in as asinh(d /
-#: `PATH_OFFSET_SCALE_M`): linear near the path, compressed far from it (D65; the lateral one since 2026-10-13).
+#: `PATH_OFFSET_SCALE_M`): linear near the path, compressed far from it (D65, D204).
 PATH_OFFSET_SCALE_M = 100.0
 SPEED_SCALE_MPS = 100.0
 VERTICAL_RATE_SCALE_MPS = 10.0

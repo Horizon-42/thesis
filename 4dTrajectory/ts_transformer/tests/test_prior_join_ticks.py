@@ -147,8 +147,10 @@ def _zero_join_scenario(speaking, join_ticks) -> str:
 #: thread, the loop without join ticks): the reference of D150's "every join tick 0 is today's loop, bit for bit".
 #: Written again 2026-10-13: the first-principles executor (223f1e30, ts-executor-spec-v11) flies the words otherwise.
 #: The loop with no join ticks and the loop with every join tick 0 give this same digest from 223f1e30 to 288b779b.
-BEFORE_JOIN_TICKS = ("bad26a75bf272bfb41ce63f3f04072091f984e114de5719f04a05870af0b6d3a"
-                     "959fff656cc008ae09cde91f17d0858d08c717809e49eeb1357365eccd3ef049")
+#: Written again on 2026-10-14 (two-tier2-glidepath, prior D204): the offset right of the centreline goes into the
+#: prior on the glidepath's 100 m scale, so the synthetic prior says other words; every part it says moved.
+BEFORE_JOIN_TICKS = ("b90cdcad1ac2037c8f79b38674343a449eba085e88dd9d3c9fda57b94398ada9"
+                     "03353c1dacd63e981f28469d61a4dbe681b7d41e20f42b8b4729f483fd02298c")
 
 
 def test_every_join_tick_zero_says_and_flies_what_the_loop_said_before_join_ticks(tmp_path, monkeypatch):

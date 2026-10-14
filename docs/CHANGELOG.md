@@ -1,5 +1,24 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-14 — the prior's offset right of a final goes in on the glidepath's 100 m scale (prior D204); v19 / v24 built
+
+- Why: on asinh(d / 1 km), 20 m off the centreline was the input 0.02, and B16's configuration A folds (on v18) crossed
+  the threshold a median 9–30 m off the centreline at their held-out airports. The user: "should algin lateral and
+  vertical input, since they have similar accuracy requirement" (2026-10-13), "/100 是定了的" (2026-10-14).
+- `prior/inputs.py`: `right_of_final` is asinh(d / `PATH_OFFSET_SCALE_M`) = asinh(d / 100 m), the constant of
+  `height_above_glidepath` (was `GLIDEPATH_HEIGHT_SCALE_M`); the distance before the threshold stays on 1 km. Checkpoint
+  format `ts-prior-checkpoint-v9` (a v8 checkpoint is refused by name).
+- The trial on B16's configuration A folds (`outputs/POOLED/prior/prior_lateral100_20261013`): landed 47.0 → 80.2 % of
+  the held-out sentences, every airport better; lateral gate failures 857 → 101, vertical 70 → 128.
+- Tests: the synthetic prior says other words, so five pinned digests are written again (join ticks, stage C's three,
+  the value campaign) and two scenarios move their joins (`test_multi_backward` (0, 60, 90); the silent aircraft 9
+  steps behind); the early-end tests compare steps only (rows count ended flights held to the loop's next rebuild).
+  The frontend fixtures are not regenerated (the user: "先不动").
+- The labels of D203 built: `instruction_language/v19_20261014` / `executor/v24_20261014` from `d7153f16` (read-only,
+  `SHA256SUMS`). Closed loop at Δ = 4 s landed train / select / val 99.52 / 99.23 / 99.48 % (v18 98.69 / 98.05 /
+  98.59 %); the replays' crossing above the glidepath, airport medians +2.9 to +3.6 m (v18 −0.7 to +7.3 m); spec,
+  signals and open-loop sentences byte for byte v18's. Next: B19, the prior's campaign on v19 with D204.
+
 ### 2026-10-14 — the labels on the final aim at the glidepath, and their corrections go on to the threshold (vocabulary D203)
 
 - Why: B16's held-out folds failed the vertical gate only by crossing too high, and the labels themselves crossed the

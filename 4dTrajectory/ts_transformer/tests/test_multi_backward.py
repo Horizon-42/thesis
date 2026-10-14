@@ -254,7 +254,9 @@ def test_a_majority_point_out_of_reach_ends_its_continuations_early_and_finds_th
     assert (early.searches, early.found, early.to_event, early.to_end) == \
         (full.searches, full.found, full.to_event, full.to_end)
     assert early_reached[behind] == [behind] and reached[behind][0] > behind      # judged at its first step, not later
-    assert early.search_steps <= full.search_steps and early.search_rows < full.search_rows
+    # fewer steps; the rows are not compared: a step counts the rows its loop holds, a flight that ended held to the
+    # loop's next rebuild (S6), and an earlier end moves the rebuilds
+    assert early.search_steps < full.search_steps
 
 
 def test_a_point_whose_continuations_all_failed_ends_them_early_and_finds_the_same(setup, monkeypatch):
@@ -297,7 +299,9 @@ def test_a_point_whose_continuations_all_failed_ends_them_early_and_finds_the_sa
     fine = decision + FINE
     assert early_reached[fine] == [fine] and reached[fine][0] > fine
     assert early_reached[decision] == reached[decision]                # the decision point flown to the judged tick
-    assert early.search_steps <= full.search_steps and early.search_rows < full.search_rows
+    # fewer steps; the rows are not compared: a step counts the rows its loop holds, a flight that ended held to the
+    # loop's next rebuild (S6), and an earlier end moves the rebuilds
+    assert early.search_steps < full.search_steps
 
 
 @pytest.mark.parametrize("kind", [LOSS, END, GO_AROUND])
@@ -552,9 +556,9 @@ def test_the_searches_of_a_batch_step_together_and_find_what_each_finds_alone(se
     from ts_transformer.tests.test_post_window_multi import _multi
 
     s = setup
-    # every aircraft searched, two of them in a loss (ts-executor-spec-v11: with joins (0, 30, 60) the third lost
-    # separation at its first step and had no branch point)
-    multi, loop_of = _multi(s, joins=(0, 40, 80))
+    # every aircraft searched and varied in a group (ts-executor-spec-v11: with joins (0, 30, 60) the third lost
+    # separation at its first step and had no branch point; prior D204: with (0, 40, 80) the second is not searched)
+    multi, loop_of = _multi(s, joins=(0, 60, 90))
     parts = loop_of.parts
     model = _with_module(s["base"])
     rules = Rules(**credit.rules(1337, 0, DELTA))

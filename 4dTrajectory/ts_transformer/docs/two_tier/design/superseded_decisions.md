@@ -5,7 +5,8 @@ place to match the code of the branch `two-tier2-eval-landing` (commits `0437839
 2026-10-13 again for commits `e00c8d08` and `d8f21c77`, for the prior's campaign on the new labels (`7e72a059`,
 B15), for the final's lateral corrections (D201, the branch `two-tier2-centreline`), and for the branch rule and
 the frontend and backend rule (outline §5 rules 1, 8, 10, 11; the branch `two-tier2-backend-orphans`); on 2026-10-14
-for the final's vertical corrections (D203, the branch `two-tier2-glidepath`). This file
+for the final's vertical corrections (D203, the branch `two-tier2-glidepath`) and the prior's lateral input
+scale (D204, the same branch). This file
 keeps each text that the rewrite replaced, word for word, beside the text that replaced it, so that the user can compare
 them. It is not part of the design: no code and no design document cites it. An entry leaves this file when the user
 has reviewed it.
@@ -45,8 +46,11 @@ has reviewed it.
 13. On the final the angle corrections aim at the runway's published glidepath, and the corrections go on to the
    threshold (vocabulary D203; 2026-10-14): after the check of the labels' height at the threshold, the user chose
    "先修改垂直标注，同时把标注词的修正延长至通过跑道入口".
+14. The prior's offset right of a final goes in on the scale of its height above the glidepath, 100 m (prior D204;
+   2026-10-13 and 10-14): "should algin lateral and vertical input, since they have similar accuracy requirement",
+   then, for the cross-validation on the labels of D203, "/100 是定了的，一起上".
 
-The new decision rows (vocabulary D196, D197, D201, D203; outline D198) are new text, not replacements, so they are not entries
+The new decision rows (vocabulary D196, D197, D201, D203; prior D204; outline D198) are new text, not replacements, so they are not entries
 below; the rewritten rows that cite them are.
 
 ## Index
@@ -134,6 +138,8 @@ below; the rewritten rows that cite them are.
 | 79 | `vocabulary.md` | §4.9 Vertical correction, item 2 | on the final the angle corrections aim at the glidepath, and the corrections go on to the threshold (D203) |
 | 80 | `vocabulary.md` | §8 Values, closed-loop reading: correction | on the final the angle corrections aim at the glidepath, and the corrections go on to the threshold (D203) |
 | 81 | `vocabulary.md` | §8 Values, past the end of the observed path | on the final the angle corrections aim at the glidepath, and the corrections go on to the threshold (D203) |
+| 82 | `prior.md` | §2 Inputs, Scales | the offset right of a final's centreline goes in on the glidepath's scale, asinh(d / 100 m) (D204) |
+| 83 | `prior.md` | §9 Values, input scales | the offset right of a final's centreline goes in on the glidepath's scale, asinh(d / 100 m) (D204) |
 
 ## Text kept unchanged on purpose
 
@@ -1731,4 +1737,43 @@ path; on the final, the centreline and the glidepath, D201, D203). At ė = 0 the
 
 ```text
 | Closed-loop reading past the end of the observed path | on the final, corrections from the centreline and the glidepath to the threshold; off the final, no correction (one in force ends), lateral error for the readouts, no vertical error | D44, D203 |
+```
+
+### 82. `prior.md`: §2 Inputs, Scales
+
+**What changed:** the offset right of a final's centreline goes in on the glidepath's scale, asinh(d / 100 m) (D204)
+
+**Old text:**
+
+```text
+- **Scales (D41, D65).** Every input has a fixed scale in SI units (§9): the distances along and across a candidate
+  asinh(d / 1 km), linear within a few hundred metres of a final; the heights (above E, above a threshold) h / 1 km; the
+  height above a glidepath asinh(h / 100 m), linear near the glidepath, where the value has a meaning, and compressed
+  far from it (an aircraft high above an opposite runway's extended glidepath is thousands of metres above it); the
+```
+
+**New text:**
+
+```text
+- **Scales (D41, D65, D204).** Every input has a fixed scale in SI units (§9): the distance before a candidate's
+  threshold asinh(d / 1 km), linear within a few hundred metres of it; the heights (above E, above a threshold)
+  h / 1 km; the two offsets from a final's path, right of its centreline and above its glidepath, asinh(d / 100 m),
+  linear near the path, where the value has a meaning, and compressed far from it (an aircraft high above an opposite
+  runway's extended glidepath is thousands of metres above it); the
+```
+
+### 83. `prior.md`: §9 Values, input scales
+
+**What changed:** the offset right of a final's centreline goes in on the glidepath's scale, asinh(d / 100 m) (D204)
+
+**Old text:**
+
+```text
+| Input scales | Distances asinh(d / 1 km); heights / 1 km; height above a glidepath asinh(h / 100 m); ground speed / 100 m/s; vertical rate / 10 m/s; landings in 30 min / 10; length / 1 km and threshold elevation MSL / 1 km (`constants`) | D41, D65 |
+```
+
+**New text:**
+
+```text
+| Input scales | Distance before a threshold asinh(d / 1 km); offset right of a final and height above a glidepath asinh(d / 100 m); heights / 1 km; ground speed / 100 m/s; vertical rate / 10 m/s; landings in 30 min / 10; length / 1 km and threshold elevation MSL / 1 km (`constants`) | D41, D65, D204 |
 ```

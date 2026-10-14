@@ -177,13 +177,13 @@ def test_a_silent_aircraft_the_executor_finished_ends_where_the_judge_ended_it(t
     """`post_training_export.sentence_payload`: an aircraft that answered a loss, went silent (D144) and was flown on by
     the executor to an end of its own (its window not ended at the loss) is written to the judge's outcome, end and
     last state — not to the end of a row past the executor's end — with its reward the loop's 0 and its silent row; its
-    timed-out flag is the written outcome's. The copy joins 5 steps behind (the executor of design draft 5 meets a second
-    loss, which ends the window, at 4, which the earlier executor flew clear of); stage D's rule answers the first loss
-    only."""
+    timed-out flag is the written outcome's. The copy joins 9 steps behind (the executor of design draft 5 meets a second
+    loss, which ends the window, at 4, which the earlier executor flew clear of; prior D204: at 5 the window ends at a
+    second loss); stage D's rule answers the first loss only."""
     from ts_transformer.experiments.multi_train import loop_options, readout_numbers
     from ts_transformer.experiments.training_flights import last_state_cycle
 
-    s, two, window, model, keys = two_window(tmp_path, monkeypatch, joins=(0, 5))
+    s, two, window, model, keys = two_window(tmp_path, monkeypatch, joins=(0, 9))
     options = loop_options(two)
     real, spent = options["answering"], []
 
