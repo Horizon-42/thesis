@@ -1,0 +1,54 @@
+# The data the two-tier training chain (B -> C -> D) reads, relative to the repository root, measured by tracing every
+# file that train_only/smoke.sh's runners open (2026-10-15). A directory is copied whole. The harvest's track files are
+# listed by train_only/track_paths.py (one for each flight of the sentence artefact; pack_data.sh adds them).
+# The code tree's own data (aircraft/*.json, docs/literature/arrival_separation/*.csv) come with the clone.
+
+# the sentence artefact (vocabulary v19): the files at the row interval 4 s, and the readers' references
+4dTrajectory/outputs/POOLED/instruction_language/v19_20261014/SHA256SUMS
+4dTrajectory/outputs/POOLED/instruction_language/v19_20261014/spec.json
+4dTrajectory/outputs/POOLED/instruction_language/v19_20261014/candidates.json
+4dTrajectory/outputs/POOLED/instruction_language/v19_20261014/signals.json
+4dTrajectory/outputs/POOLED/instruction_language/v19_20261014/signals_train.npz
+4dTrajectory/outputs/POOLED/instruction_language/v19_20261014/signals_select.npz
+4dTrajectory/outputs/POOLED/instruction_language/v19_20261014/signals_val.npz
+4dTrajectory/outputs/POOLED/instruction_language/v19_20261014/sentences_train.npz
+4dTrajectory/outputs/POOLED/instruction_language/v19_20261014/sentences_select.npz
+4dTrajectory/outputs/POOLED/instruction_language/v19_20261014/sentences_val.npz
+4dTrajectory/outputs/POOLED/instruction_language/v19_20261014/conformance
+4dTrajectory/outputs/POOLED/instruction_language/v19_20261014/closed_loop/conformance
+4dTrajectory/outputs/POOLED/instruction_language/v19_20261014/closed_loop/train_4s.npz
+4dTrajectory/outputs/POOLED/instruction_language/v19_20261014/closed_loop/select_4s.npz
+4dTrajectory/outputs/POOLED/instruction_language/v19_20261014/closed_loop/val_4s.npz
+
+# the executor spec (v24) and its reference tracks (not its replays: readouts only)
+4dTrajectory/outputs/POOLED/executor/v24_20261014/SHA256SUMS
+4dTrajectory/outputs/POOLED/executor/v24_20261014/spec.json
+4dTrajectory/outputs/POOLED/executor/v24_20261014/conformance
+
+# the census of windows (stage C and D: the edges' reference)
+4dTrajectory/outputs/POOLED/post/windows_20261013
+
+# B21's base: a start for C and D without a new B (optional; smoke.sh starts from it when it is there)
+4dTrajectory/outputs/POOLED/prior/prior_b21_20261014/base/run
+
+# the harvest's rosters (the arrival manifest: a flight's rebuild; the tracks manifest: the landings and the day split)
+trajectory_data_process/outputs/harvest/KMSY/arrivals/manifest.json
+trajectory_data_process/outputs/harvest/KMSY/tracks/manifest.json
+trajectory_data_process/outputs/harvest/KRDU/arrivals/manifest.json
+trajectory_data_process/outputs/harvest/KRDU/tracks/manifest.json
+trajectory_data_process/outputs/harvest/KSJC/arrivals/manifest.json
+trajectory_data_process/outputs/harvest/KSJC/tracks/manifest.json
+trajectory_data_process/outputs/harvest/KSMF/arrivals/manifest.json
+trajectory_data_process/outputs/harvest/KSMF/tracks/manifest.json
+trajectory_data_process/outputs/harvest/KSTL/arrivals/manifest.json
+trajectory_data_process/outputs/harvest/KSTL/tracks/manifest.json
+
+# the procedure details (masks and the judge)
+aeroviz-4d/public/data/airports/KMSY/procedure-details
+aeroviz-4d/public/data/airports/KRDU/procedure-details
+aeroviz-4d/public/data/airports/KSJC/procedure-details
+aeroviz-4d/public/data/airports/KSMF/procedure-details
+aeroviz-4d/public/data/airports/KSTL/procedure-details
+
+# the FAA CIFP source: read by no runner of the chain; three tests check the candidates and the finals against it
+data/CIFP/CIFP_260806/FAACIFP18

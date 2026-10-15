@@ -1,0 +1,11 @@
+# The training chain's packages besides torch (train_only/setup_env.sh installs torch 2.11.0 from the CUDA 12.8 index
+# first). Measured 2026-10-15: the runners of B, C and D import only torch (and its own dependencies), numpy and the
+# repository's packages (geokit, installed editable by setup_env.sh). The versions are those of the `aeroviz` env on
+# the RTX 4060 host, where every result so far was made.
+numpy==2.5.1
+pytest==9.1.1
+pytest-xdist==3.8.0
+# for the tests only (train_only/run_tests.sh): test_prior_speaker imports the optimizer's collocation (casadi);
+# the instruction_figures runner's test draws with matplotlib
+casadi==3.7.2
+matplotlib==3.11.0
