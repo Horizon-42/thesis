@@ -580,8 +580,11 @@ default behaviour of the prior's or stage C's code. Version 1's branch groups ar
 campaign speaks its own rounds.
 
 **What it costs.** The bytes of the branch groups and the work of the loss grow with the commanded aircraft of a
-window (MC1 gives their p50 and p90): a sample holds every one of them. An update runs in pieces of one branch group
-each (post-training §9 item 10, `update_step`), so the GPU's memory is that of one window's group. The module's attention scores are ticks ×
+window (MC1 gives their p50 and p90): a sample holds every one of them. An update runs in pieces (post-training §9
+item 10, `update_step`): of version 2's window samples, one window a piece (`Samples.pieces`; samples alone, one branch
+group a piece, as before), so the GPU's memory is that of one window. A window reads no row of another window, so the
+gradient is the group's to float rounding (`test_multi_joint`). Claude's form, MC9: the first memory measure, one
+group a piece, needed a pass peak of 5.8 GB (version 1's: 1.65 GB) and did not fit beside one speaking worker. The module's attention scores are ticks ×
 aircraft² for each head and layer (about 100 for each tick of a window of ten aircraft); there are no vectors for each
 pair of aircraft, which made the archived design's 5.3 GB a layer (§9.1). MC9 measures the memory before the campaign (as MC5, D179);
 a round's time comes from its round 0.

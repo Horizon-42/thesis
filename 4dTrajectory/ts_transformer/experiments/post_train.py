@@ -1499,7 +1499,7 @@ def update_pairs(directory: Path, data: Sequence[Any], settings: Settings, rng: 
     """The updates of a round's pass (module docstring, step 4): its written groups, file by file in the order they were
     spoken, each file's groups in an order shuffled by ``rng`` (the round's numbers; D130: an update mixes branch points
     and windows), `Settings.update_groups` at a time (a file's last update may hold fewer; each group a piece of it,
-    `post.loss.update_step`: its memory a group's), each paired with
+    `post.loss.update_step`: its memory a group's; of window samples each window, `Samples.pieces`), each paired with
     `Settings.data_sentences` sentences of ``data`` drawn by ``rng``. A file is read when its first update is drawn.
     ``part_width``: the stage's token part (`Stage.part_width`). ``minority_mean``: the round's mean minority side
     (`minority_mean`), each group's advantages times its own divided by it (D195, `post.branches.MINORITY_SIDE`); None:
@@ -1509,9 +1509,9 @@ def update_pairs(directory: Path, data: Sequence[Any], settings: Settings, rng: 
         groups = [loaded[int(i)] for i in rng.permutation(len(loaded))]
         for k in range(0, len(groups), settings.update_groups):
             chosen = rng.choice(len(data), size=min(settings.data_sentences, len(data)), replace=False)
-            yield ([samples([group], device, part_width, segment_rows,  # a piece a group
-                            1.0 if minority_mean is None else group.minority / minority_mean)
-                    for group in groups[k:k + settings.update_groups]],
+            yield ([piece for group in groups[k:k + settings.update_groups]   # a piece a group (or a window)
+                    for piece in samples([group], device, part_width, segment_rows,
+                                         1.0 if minority_mean is None else group.minority / minority_mean).pieces()],
                    collate([data[int(i)] for i in chosen], device))
 
 

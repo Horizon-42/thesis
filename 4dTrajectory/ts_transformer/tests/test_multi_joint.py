@@ -361,6 +361,25 @@ def test_a_round_with_whole_windows_gives_each_sentence_its_window_and_its_pass_
         grads = [m.out.weight.grad for m in joint_modules(model)]
         reached.append(any(g is not None and bool(g.abs().sum() > 0) for g in grads))
     assert reached == [False, True]
+    # MC9: the group's samples in pieces of a window each (`Samples.pieces`) give the parts and the gradient of the
+    # group in one piece, to float rounding (the data term with the same random numbers)
+    one = samples([group], CPU, TokenPart.width)
+    windows = one.pieces()
+    assert len(windows) == len(one.traffic.windows) > 1 and all(len(p.traffic.windows) == 1 for p in windows)
+    assert sum(int(p.counted.sum()) for p in windows) == int(one.counted.sum())
+    assert samples([informative(alone.groups[k])], CPU, TokenPart.width).pieces()[0].traffic.windows is None
+    out = []
+    for pieces in ([one], windows):
+        model.zero_grad(set_to_none=True)
+        torch.manual_seed(5)
+        parts = update_step(model, PassStart(model), s["base"].eval(), pieces, collate(sentences[:1], CPU))
+        out.append((parts, [None if p.grad is None else p.grad.clone() for p in model.parameters()]))
+    (whole, expected), (apart, got) = out
+    for name in ("loss", "surrogate", "kl", "data"):
+        assert torch.allclose(getattr(apart, name), getattr(whole, name), atol=1e-6, rtol=1e-6), name
+    assert (apart.words, apart.clipped) == (whole.words, whole.clipped)
+    assert all((g is None) == (e is None) and (e is None or torch.allclose(g, e, atol=1e-6, rtol=1e-5))
+               for g, e in zip(got, expected))
 
 
 def test_a_round_of_version_2_end_to_end(setup, tmp_path, monkeypatch):

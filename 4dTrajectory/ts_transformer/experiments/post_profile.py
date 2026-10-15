@@ -127,7 +127,8 @@ def group_size(group: Any) -> tuple[int, int]:
 def pass_memory(model: Any, context: Context, directory: Path, settings: Settings, counts: Sequence[int],
                 saved: Callable[[dict[str, Any]], None] = lambda part: None, *, part_width: int) -> dict[str, Any]:
     """Part 3 of the module docstring: for each k of ``counts`` (ascending), one update's forward and backward on k
-    branch groups written in ``directory``, in pieces of a group each as the campaign runs it (`update_step`): its
+    branch groups written in ``directory``, in pieces of a group each (of window samples, of a window each,
+    `Samples.pieces`) as the campaign runs it (`update_step`): its
     peak is its largest piece's (a piece padded to its own longest sentence and widest traffic, `group_size`, D116) and
     the data term's, so the size of k matters little. The k are the longest group, the widest group (by traffic, then
     rows) and the next longest; besides k = 1 (the longest), the widest alone (``1_widest``) and the group of the
@@ -176,7 +177,8 @@ def pass_memory(model: Any, context: Context, directory: Path, settings: Setting
             out["updates"][label] = "fewer groups held"
             continue
         try:
-            batch = [samples([group], device, part_width) for group in groups]   # the campaign's pieces (`update_step`)
+            batch = [piece for group in groups                                   # the campaign's pieces (`update_step`)
+                     for piece in samples([group], device, part_width).pieces()]
             rows = collate(data, device)
             shape = {"sentences": sum(int(p.rows.asked.shape[0]) for p in batch),
                      "rows": max(int(p.rows.asked.shape[1]) for p in batch),

@@ -35,7 +35,8 @@ update's samples are given as pieces (a branch group each); each piece's surroga
 words and divided by the counted rows of the WHOLE update, and its backward taken at once, so the gradient is the
 whole update's (to float rounding: the sums are added in another order) while the memory is a piece's, whatever the
 longest group of the round. The data term is one piece (its dropout would draw other masks if cut). `update_loss`, the
-whole update at once, is the readable reference `update_step` is checked against.
+whole update at once, is the readable reference `update_step` is checked against. Of window samples, a piece is one
+window (`Samples.pieces`, MC9: a group of whole windows did not fit the GPU).
 
 **Gradient-norm clipping** (D168, `one_pass`'s ``clip_norm``): each update's gradient, over the optimizer's
 parameters, is scaled to that norm where its norm is above it, before the optimizer's step
@@ -92,6 +93,14 @@ class Samples:
         return Samples(RowTensors(*(tensor[chosen] for tensor in self.rows)), self.permitted.select(indices),
                        self.traffic.select(chosen), self.advantage[chosen],
                        self.counted[chosen])
+
+    def pieces(self) -> list[Samples]:
+        """The pieces of these samples for `update_step` (module docstring, "One update in pieces"): of window samples,
+        one piece for each window (a window reads no row of another window, so the gradient does not change, and the
+        memory is a window's); samples alone, one piece."""
+        if self.traffic.windows is None:
+            return [self]
+        return [self.select(window[window >= 0].tolist()) for window in self.traffic.windows]
 
     def __post_init__(self) -> None:
         shape = tuple(self.rows.asked.shape)

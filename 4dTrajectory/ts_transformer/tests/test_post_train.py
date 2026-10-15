@@ -194,7 +194,7 @@ def test_the_pass_shuffles_each_file_s_groups_by_the_round_s_numbers(tmp_path, m
     torch.save(list(range(10, 15)), directory / "groups_1.pt")
     segments = []
     monkeypatch.setattr(post_train, "samples", lambda groups, device, part_width, segment_rows, scale: (
-        segments.append(segment_rows), list(groups))[1])
+        segments.append(segment_rows), SimpleNamespace(pieces=lambda: [list(groups)]))[1])   # samples alone: one piece
     monkeypatch.setattr(post_train, "collate", lambda sentences, device: None)
     settings = _settings(update_groups=3)
 
@@ -1487,7 +1487,7 @@ def test_the_minority_side_weight_scales_each_group_by_its_side_over_the_round_s
     assert post_train.minority_mean(tmp_path) is None
     scales = []
     monkeypatch.setattr(post_train, "samples", lambda groups, device, part_width, segment_rows, scale: (
-        scales.append((groups[0].minority, scale)), None)[1])
+        scales.append((groups[0].minority, scale)), SimpleNamespace(pieces=lambda: [None]))[1])
     monkeypatch.setattr(post_train, "collate", lambda sentences, device: None)
     settings = _settings(update_groups=3)
     for mean in (2.0, None):
