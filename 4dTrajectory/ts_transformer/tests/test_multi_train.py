@@ -44,16 +44,17 @@ def _multi_settings(spans_s=(1.0,), **changed):
 @pytest.mark.parametrize("attention", ["copied", "merged"])
 def test_a_batch_is_spoken_with_its_campaigns_front_attention(monkeypatch, branching, attention):
     """D190 (2): stage D's batch gives its window loops its loop options and the campaign's
-    `MultiSettings.front_attention`, its branch points D143's or found backward."""
+    `MultiSettings.front_attention`, its branch points D143's or found backward; version 1's loops without the window
+    input and its groups without whole windows (D212 (5))."""
     seen = {}
 
     def spoken(*args, **kwargs):
-        seen.update(kwargs["loop_options"])
+        seen.update(kwargs["loop_options"], whole_windows=kwargs["whole_windows"])
         raise _Spoken
 
     monkeypatch.setattr(multi_train, "branch_round", spoken)
     monkeypatch.setattr(multi_train, "backward_round", spoken)
-    monkeypatch.setattr(multi_train, "loop_options", lambda context: {"answering": "the stage's"})
+    monkeypatch.setattr(multi_train, "loop_options", lambda context, joint: {"answering": "the stage's", "joint": joint})
     context = SimpleNamespace(splits={"train": {"sentences": {}, "flights": {}, "faults": {}}},
                               start_loop=lambda split, batch: None, geometries={}, finals={}, words=None,
                               interval_s=INSTRUCTION_STEP_S, variant="full", edges_reference=None,
@@ -61,7 +62,7 @@ def test_a_batch_is_spoken_with_its_campaigns_front_attention(monkeypatch, branc
     settings = _multi_settings(front_attention=attention, branching=branching)
     with pytest.raises(_Spoken):
         multi_train.speak_batch(None, context, [], [], settings, 0, None, 0)
-    assert seen == {"answering": "the stage's", "attention": attention}
+    assert seen == {"answering": "the stage's", "attention": attention, "joint": False, "whole_windows": False}
 
 
 def _stream_context(built):
@@ -174,7 +175,7 @@ def test_the_grids_interval_and_segment_credit_default_to_the_code_before_them_a
         raise _Spoken
 
     monkeypatch.setattr(multi_train, "branch_round", spoken)
-    monkeypatch.setattr(multi_train, "loop_options", lambda context: {})
+    monkeypatch.setattr(multi_train, "loop_options", lambda context, joint: {})
     with pytest.raises(_Spoken):
         multi_train.speak_batch(None, _speak_context(), [], [], segments, 3, None, 0)
     assert asked == [(segments.seed, 3, INSTRUCTION_STEP_S, 60.0)]

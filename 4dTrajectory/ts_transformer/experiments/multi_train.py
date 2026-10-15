@@ -1,5 +1,7 @@
 """MC4: stage D's campaign, version 1 (multi-aircraft control §3–§5, §7, §11 MC4; D141–D148, D152) — rounds of branch
-training in windows in which every arrival of a span L is commanded, from a chosen round of stage C.
+training in windows in which every arrival of a span L is commanded, from a chosen round of stage C. With
+``--joint-heads`` (MC8; D153, D212), version 2: each commanded aircraft also reads the other commanded aircraft of its
+window at the same tick (`multi.joint`).
 
 It is stage C's campaign (`post_train.run_campaign`, the round's skeleton, post-training §9 item 11) with stage D's
 parts (`stage_d`):
@@ -55,6 +57,11 @@ parts (`stage_d`):
 - **The identity** (§7 row 3): `MULTI_CHECKPOINT_SCHEMA`, the start's identity (`start_identity`), the procedure masks, the token part's
   format and features, the seed, the spans and their counts (`span_counts`), the kinds and c_min, and each round's
   windows by their anchors, spans, commanded flights and shifts (`window_record`).
+- **Version 2** (D153, D212; ``--joint-heads``, `MultiSettings.joint_heads`): the module beside each layer's traffic
+  attention (`multi.joint`, its output at zero at the start; its parameters at the traffic learning rate), the window
+  loop's window input (`loop_options`' ``joint``), each group's sentences with their windows (``whole_windows``), its
+  formats `MULTI_CAMPAIGN_SCHEMA_V2` and `MULTI_CHECKPOINT_SCHEMA_V2` and the module's shape in the identity. Its start
+  is one of version 1's (a round of stage C, or the base) with the module at zero.
 
 THE CHECKS, as stage C's: the closed loop's (D69, with the labeller's and the executor's) and the edge features' (D104).
 A formal campaign (not ``--smoke``) runs from a clean checkout (a run worktree at the merged commit, outline D163; its
@@ -105,6 +112,7 @@ from ts_transformer.experiments.post_window_loop import LANDED, LOST_SEPARATION,
 from ts_transformer.multi import credit
 from ts_transformer.multi.backward import BRANCHINGS, GRID, MAJORITY
 from ts_transformer.multi.census import WindowCount, loop_positions, window_losses
+from ts_transformer.multi.joint import JointConfig, add_joint_attention
 from ts_transformer.multi.separation import PAIRS, Answering
 from ts_transformer.multi.timing import (
     delays, landed, loop_spacings, order, quantiles, record_spacings, recorded_landings,
@@ -123,6 +131,9 @@ from ts_transformer.repo_layout import REPO_ROOT, git_state
 #: The formats of stage D's campaign and checkpoints, version 1 (§10).
 MULTI_CAMPAIGN_SCHEMA = "ts-multi-train-v1"
 MULTI_CHECKPOINT_SCHEMA = "ts-multi-checkpoint-v1"
+#: The formats of version 2 (D153, D212): a campaign with `MultiSettings.joint_heads`.
+MULTI_CAMPAIGN_SCHEMA_V2 = "ts-multi-train-v2"
+MULTI_CHECKPOINT_SCHEMA_V2 = "ts-multi-checkpoint-v2"
 #: The reader's name in the claim of a campaign's val read (the validation readout of stage D).
 MULTI_CLAIM_READER = "multi_validation"
 #: The format of stage D's profile (`multi_profile`), which a campaign's speaking workers are sized from (`profiled_fit`).
@@ -134,7 +145,7 @@ MEASURE_MARGIN = 1.3
 #: rounds, seed, learning rates, a start of the same traffic shape, and the select set, which the measure does not read,
 #: D179, D181 (55)) change the words spoken, not the shapes — a worker past its share stops by name.
 PROFILED_SETTINGS = ("per_kind", "spans_s", "c_min", "batch_rows", "continuations", "update_groups", "data_sentences",
-                     "branching", "front_attention", "batch_squares")
+                     "branching", "front_attention", "batch_squares", "joint_heads")
 #: The devices of ``--executor-device`` (multi-aircraft control S1). ``speak``: the executor flies on the speaker's
 #: device (the behaviour before S1). ``cpu``: the executor flies on the CPU (`Context.executor_device`).
 EXECUTOR_DEVICES = ("speak", "cpu")
@@ -204,6 +215,9 @@ class MultiSettings:
     #: `post.branches.samples`' ``segment_rows``); False, the default: up to the event (the behaviour before D200; a
     #: record without it reads so); with `GRID` only
     segment_only: bool = False
+    #: D212: version 2, the heads of the module beside each layer's traffic attention (`multi.joint.JointConfig`); None,
+    #: the default: version 1 (the behaviour before it; a record without it reads so)
+    joint_heads: int | None = None
 
     def __post_init__(self) -> None:
         if set(self.per_kind) != set(KINDS) or min(self.per_kind.values()) < 0 or not any(self.per_kind.values()):
@@ -246,6 +260,23 @@ class MultiSettings:
                              f"{self.spans_s}")
         if self.gpu_squares < 0:
             raise ValueError(f"gpu_squares {self.gpu_squares}: 0 (off) or more")
+        if self.joint_heads is not None and self.joint_heads <= 0:
+            raise ValueError(f"joint_heads {self.joint_heads}: positive (version 2), or none (version 1)")
+
+    @property
+    def joint(self) -> bool:
+        """Whether the campaign is version 2 (D212)."""
+        return self.joint_heads is not None
+
+    @property
+    def campaign_schema(self) -> str:
+        """The format of the campaign's record: version 1's or version 2's."""
+        return MULTI_CAMPAIGN_SCHEMA_V2 if self.joint else MULTI_CAMPAIGN_SCHEMA
+
+    @property
+    def checkpoint_schema(self) -> str:
+        """The format of the campaign's checkpoints: version 1's or version 2's."""
+        return MULTI_CHECKPOINT_SCHEMA_V2 if self.joint else MULTI_CHECKPOINT_SCHEMA
 
 
 def span_key(span_s: float) -> str:
@@ -290,13 +321,13 @@ def window_record(window: Window) -> dict[str, Any]:
             "shifts_s": [0.0] + [item.shift_s for item in window.joined], "kind": kind_of(window)}
 
 
-def loop_options(context: Context) -> dict[str, Any]:
+def loop_options(context: Context, joint: bool = False) -> dict[str, Any]:
     """Stage D's options of the window loop (post-training §9 item 5): the rule of who answers (D145), the token part
     (D152) and the device of the executor (multi-aircraft control S1). The executor device is the device that
-    `Context.start_loop` starts the executor on."""
+    `Context.start_loop` starts the executor on. ``joint``: version 2's window input (D212; `MultiSettings.joint`)."""
     return {"answering": Answering(context.separations, context.finals, context.words.spec.step_s),
             "token_part": TokenPart(context.words), "part_width": TokenPart.width,
-            "executor_device": context.executor_device}
+            "executor_device": context.executor_device, "joint": joint}
 
 
 # ---- the draw
@@ -355,7 +386,8 @@ def speak_batch(model: Prior, context: Context, windows: Sequence[Window], place
     common = dict(interval_s=context.interval_s, variant=context.variant, edges_reference=context.edges_reference,
                   faults=train["faults"], device=context.device, split="train", continuations=settings.continuations,
                   rules=Rules(**credit.rules(settings.seed, round_, context.interval_s, settings.branch_every_s)),
-                  loop_options={**loop_options(context), "attention": settings.front_attention})
+                  loop_options={**loop_options(context, settings.joint), "attention": settings.front_attention},
+                  whole_windows=settings.joint)
     data = (model, context.start_loop("train", batch), batch, places, train["sentences"], train["flights"],
             context.geometries, context.finals, context.words)
     majority = settings.continuations // 2 + 1 if settings.branching == MAJORITY else None
@@ -423,7 +455,7 @@ def read_batch(model: Prior, context: Context, windows: Sequence[Window], places
     window_loop = WindowLoop(model, loop, order, batch, data["sentences"], data["flights"], context.geometries,
                              context.finals, context.words, interval_s=context.interval_s,
                              variant=context.variant, edges_reference=context.edges_reference, faults=data["faults"],
-                             observed=observed, device=context.device, **loop_options(context))
+                             observed=observed, device=context.device, **loop_options(context, settings.joint))
     numbers = [readout_numbers(settings.seed, places[int(window_loop.window_of[b])], int(window_loop.member_of[b]),
                                draw) for b in range(len(window_loop.order))]
     results = window_loop.run(numbers)
@@ -548,10 +580,14 @@ def _empty() -> dict[str, Any]:
 
 
 def multi_settings_of(record: dict[str, Any]) -> MultiSettings:
-    """A campaign's settings as its ``campaign.json`` records them, refused unless it is a campaign of stage D."""
-    if record["schema"] != MULTI_CAMPAIGN_SCHEMA:
-        raise ValueError(f"a {record['schema']} campaign, not {MULTI_CAMPAIGN_SCHEMA}")
-    return MultiSettings(**record["inputs"]["settings"])
+    """A campaign's settings as its ``campaign.json`` records them, refused unless it is a campaign of stage D whose
+    format is its settings' version's (D212)."""
+    if record["schema"] not in (MULTI_CAMPAIGN_SCHEMA, MULTI_CAMPAIGN_SCHEMA_V2):
+        raise ValueError(f"a {record['schema']} campaign, not {MULTI_CAMPAIGN_SCHEMA} or {MULTI_CAMPAIGN_SCHEMA_V2}")
+    settings = MultiSettings(**record["inputs"]["settings"])
+    if record["schema"] != settings.campaign_schema:
+        raise ValueError(f"a {record['schema']} campaign whose settings are {settings.campaign_schema}'s")
+    return settings
 
 
 def round_model(context: Context, settings: MultiSettings, out: Path, round_: int) -> Prior:
@@ -561,10 +597,10 @@ def round_model(context: Context, settings: MultiSettings, out: Path, round_: in
     model, _ = stage_d().start_model(context, settings)
     state = torch.load(out / f"round_{round_}" / "checkpoint.pt", weights_only=False, map_location=context.device)
     held = state["identity"]
-    expected = {"schema": MULTI_CHECKPOINT_SCHEMA, "procedure_masks": PROCEDURE_MASKS,
+    expected = {"schema": settings.checkpoint_schema, "procedure_masks": PROCEDURE_MASKS,
                 "token_part": {"schema": TOKENS_SCHEMA, "features": list(PART_FEATURES)}, "seed": settings.seed,
                 "spans_s": list(settings.spans_s), "per_kind": settings.per_kind, "per_span": span_counts(settings),
-                "c_min": settings.c_min}
+                "c_min": settings.c_min, **joint_identity(settings)}
     start = start_identity(context, settings)
     if ({k: held[k] for k in expected} != expected or held["start"] != start
             or held["start"]["base"] != context.base_identity or len(held["rounds"]) != round_ + 1):
@@ -704,6 +740,11 @@ def start_identity(context: Context, settings: MultiSettings) -> dict[str, Any]:
     return torch.load(start_checkpoint(settings.start), weights_only=False, map_location="cpu")["identity"]
 
 
+def joint_identity(settings: MultiSettings) -> dict[str, Any]:
+    """Version 2's part of a checkpoint's identity (D212): the module's shape; none for version 1."""
+    return {"joint": JointConfig(settings.joint_heads).to_dict()} if settings.joint else {}
+
+
 def segment_rows_of(settings: MultiSettings, interval_s: float) -> int | None:
     """D200: the rows from a branch point to the next (`MultiSettings.branch_every_s` in Δ rows) where the campaign
     counts only them (`MultiSettings.segment_only`); None: up to the event."""
@@ -727,6 +768,8 @@ def stage_d() -> Stage:
                                                  formal=context.formal))
             model, _ = start_model(context, source)
         add_token_part(model, TokenPart.width, TOKENS_SCHEMA)
+        if settings.joint:                                            # D212: version 2's module, its output at 0
+            add_joint_attention(model, JointConfig(settings.joint_heads))
         return model.to(context.device).eval()
 
     def optimizer_of(model: Prior, settings: MultiSettings) -> torch.optim.Optimizer:
@@ -751,10 +794,10 @@ def stage_d() -> Stage:
     def identity(context: Context, settings: MultiSettings, out: Path, rounds: int) -> dict[str, Any]:
         if "identity" not in started:                                 # a resumed campaign, or a start from the base
             started["identity"] = start_identity(context, settings)
-        return {"schema": MULTI_CHECKPOINT_SCHEMA, "start": started["identity"], "procedure_masks": PROCEDURE_MASKS,
+        return {"schema": settings.checkpoint_schema, "start": started["identity"], "procedure_masks": PROCEDURE_MASKS,
                 "token_part": {"schema": TOKENS_SCHEMA, "features": list(PART_FEATURES)}, "seed": settings.seed,
                 "spans_s": list(settings.spans_s), "per_kind": settings.per_kind, "per_span": span_counts(settings),
-                "c_min": settings.c_min,
+                "c_min": settings.c_min, **joint_identity(settings),
                 "rounds": [json.loads((out / f"round_{r}" / "round.json").read_text(encoding="utf-8"))["windows"]
                            for r in range(rounds)]}
 
@@ -823,6 +866,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
                         help="R2: the data term's weight in each update (default: post.loss.DATA_WEIGHT)")
     parser.add_argument("--group-weight", choices=GROUP_WEIGHTS, default=MultiSettings.group_weight,
                         help="D195: each group's weight in the pass (default: every group's advantages as they are)")
+    parser.add_argument("--joint-heads", type=int, default=MultiSettings.joint_heads,
+                        help="D212: version 2, the heads of the module that reads the other commanded aircraft of a "
+                             "window at the same tick (default: none, version 1)")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--speak-workers", type=int, default=1)
     parser.add_argument("--speak-device",
@@ -852,7 +898,7 @@ def settings_from(args: argparse.Namespace, start: dict[str, Any] | None) -> Mul
                          args.weight_decay, args.update_groups, args.data_sentences, args.select_per_airport, start,
                          args.branching, args.front_attention, args.cpu_batches, args.cpu_period, args.data_weight,
                          args.group_weight, args.batch_squares, args.gpu_squares, args.traffic_hidden,
-                         args.traffic_heads, args.branch_every_s, args.segment_only)
+                         args.traffic_heads, args.branch_every_s, args.segment_only, args.joint_heads)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -934,7 +980,7 @@ def main(argv: list[str] | None = None) -> int:
                             host_budget=fit["host_budget"], cpu_deferred=fit["cpu_deferred"])
     context = replace(context, device=device, base=context.base.to(device).eval())
     try:
-        open_campaign(out, inputs, git, opened["checks"], schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER,
+        open_campaign(out, inputs, git, opened["checks"], schema=settings.campaign_schema, reader=MULTI_CLAIM_READER,
                       settings_type=MultiSettings, restart_round=args.restart_round)
         run_campaign(out, settings, context, speakers, stage=stage)
     finally:

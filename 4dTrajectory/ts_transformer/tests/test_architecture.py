@@ -1078,7 +1078,9 @@ POST_INTERFACE = {
     "post.speed_mask": {"speed_check", "along_course_speeds"},
     "post.reward": {"reward"},
     "post.traffic_attention": {"TrafficConfig", "Traffic", "traffic_of", "TrafficTokens", "TrafficAttention",
-                               "add_traffic_attention", "parameter_groups", "TokenPart", "add_token_part"},
+                               "add_traffic_attention", "parameter_groups", "TokenPart", "add_token_part",
+                               "add_beside"},                               # D212: version 2's module
+
     "post.branches": {"first_numbers", "continuation_numbers", "branch_points", "Group", "Sentence", "samples",
                       "BRANCH_EVERY_S", "CONTINUATIONS", "EQUAL", "MINORITY_SIDE", "GROUP_WEIGHTS",    # D195
                       "branch_rows"},                                  # D200: stage D refuses --branch-every-s with it
