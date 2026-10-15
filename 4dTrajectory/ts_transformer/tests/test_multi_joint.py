@@ -295,27 +295,33 @@ def test_the_base_reads_only_the_counted_sentences_of_window_samples(setup):
 
 
 # ---- the round and the campaign
-def test_a_round_with_whole_windows_gives_each_sentence_its_window_and_its_pass_reaches_the_module(setup):
-    """D212 (3): with ``whole_windows`` a round's groups are version 1's, each sentence holding its window's other
-    sentences at their join ticks; with the module at zero a window sample gives its own rows version 1's sample's
+@pytest.mark.parametrize("branching", ["grid", "majority"])
+def test_a_round_with_whole_windows_gives_each_sentence_its_window_and_its_pass_reaches_the_module(setup, branching):
+    """D212 (3): with ``whole_windows`` a round's groups are version 1's (D143's grid, `branch_round`, or D192's
+    majority point, `backward_round`), each sentence holding its window's other sentences at their join ticks; with the module at zero a window sample gives its own rows version 1's sample's
     log-probabilities (within the float tolerance), and an update of window samples reaches the module (its output
     layer), one of samples alone does not. (Every aircraft of the synthetic window loses separation, so every group's
     rewards are 0: one continuation is given a reward of 1, which only sets the advantages.)"""
-    from ts_transformer.experiments.post_branches import Rules, branch_round
+    from ts_transformer.experiments.post_branches import Rules, backward_round, branch_round
     from ts_transformer.multi import credit
     from ts_transformer.post.loss import PassStart, update_step
     from ts_transformer.tests.test_post_window_loop import DELTA
 
     s = setup
-    multi, loop_of = _multi(s)
+    # the majority's search varies every aircraft with the joins of `test_multi_backward`'s searches
+    joins = JOINS if branching == "grid" else (0, 60, 90)
+    multi, loop_of = _multi(s, joins=joins)
     parts = loop_of.parts
     model = _version_2(s["base"], joint_weights=False)
     common = dict(interval_s=DELTA, variant="full", edges_reference=s["reference"],
-                  faults={s["geometry"].code: {}}, device=CPU, seed=1337, round_=0, split="train", continuations=2,
+                  faults={s["geometry"].code: {}}, device=CPU, split="train", continuations=2,
                   rules=Rules(**credit.rules(1337, 0, DELTA)), loop_options=_options(s))
     data = (model, parts["start"], [multi], [5], parts["sentences"], parts["flights"], s["geometries"], s["finals"],
             s["words"])
-    alone, whole = branch_round(*data, **common), branch_round(*data, **common, whole_windows=True)
+    if branching == "grid":
+        alone, whole = (branch_round(*data, **common, seed=1337, round_=0, whole_windows=w) for w in (False, True))
+    else:
+        alone, whole = (backward_round(*data, **common, majority=2, whole_windows=w) for w in (False, True))
     assert len(alone.groups) == len(whole.groups) and whole.groups
 
     def informative(group):
@@ -325,8 +331,8 @@ def test_a_round_with_whole_windows_gives_each_sentence_its_window_and_its_pass_
     for a, w in zip(map(informative, alone.groups), map(informative, whole.groups)):
         assert (a.window, a.branch, a.varied, a.next_branch) == (w.window, w.branch, w.varied, w.next_branch)
         for x, y in zip(a.sentences, w.sentences):
-            assert not x.window and y.join == JOINS[w.varied]
-            assert [p.join for p in y.window] == [j for m, j in enumerate(JOINS) if m != w.varied]
+            assert not x.window and y.join == joins[w.varied]
+            assert [p.join for p in y.window] == [j for m, j in enumerate(joins) if m != w.varied]
             assert np.array_equal(x.rows.time_s, y.rows.time_s) and (x.reward, x.until) == (y.reward, y.until)
         apart, together = samples([a], CPU, TokenPart.width), samples([w], CPU, TokenPart.width)
         with torch.no_grad():
@@ -338,7 +344,7 @@ def test_a_round_with_whole_windows_gives_each_sentence_its_window_and_its_pass_
         segment, segment_together = (samples([g], CPU, TokenPart.width, segment_rows=2) for g in (a, w))
         moved = torch.zeros_like(segment_together.counted[owners])
         own = segment.counted.shape[1]
-        moved[:, JOINS[w.varied]:JOINS[w.varied] + own] = segment.counted
+        moved[:, joins[w.varied]:joins[w.varied] + own] = segment.counted
         assert torch.equal(segment_together.counted[owners], moved)
         cut += int(segment.counted.sum() < apart.counted.sum())
     assert cut                                          # the segment ends before the sentence's end somewhere
