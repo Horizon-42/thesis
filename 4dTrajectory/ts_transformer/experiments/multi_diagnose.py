@@ -40,10 +40,9 @@ from __future__ import annotations
 import argparse
 import json
 from collections import Counter
-from typing import NamedTuple
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, NamedTuple, Sequence
 
 import numpy as np
 import torch
@@ -57,11 +56,10 @@ from ts_transformer.experiments.post_diagnose import (
     BOOTSTRAP_RESAMPLES, COMMANDED, INTERVAL, OTHER_CLASSES, STRAIGHT_LINE_S, failures, loss_fields, seal, traffic_off,
 )
 from ts_transformer.experiments.post_train import Speakers, done_rounds, inputs_here, open_context
-from ts_transformer.experiments.post_window_loop import LOST_SEPARATION, checked_edges
+from ts_transformer.experiments.post_window_loop import LANDED, LOST_SEPARATION, checked_edges
 from ts_transformer.instructions.artefact import load_day_split
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.post.landings import window_landings
-from ts_transformer.post.reward import LANDED
 from ts_transformer.prior.source import airport_landings
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
@@ -150,7 +148,8 @@ def _parts(windows: Sequence[Any], part: Any) -> dict[str, Any]:
 
 def counted_failures(lines: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Each field's counts and shares (`post_diagnose.failures`) over the aircraft lost in the window lines ``lines``,
-    in all, by airport and by span."""
+    in all, by airport and by span (every span read; the airports with a loss). Field 4's shares are over the losses
+    against a recorded aircraft only, field 1's over every loss."""
     lost = [{"airport": line["airport"], "span": line["span"], "outcome": LOST_SEPARATION, "fields": item["fields"]}
             for line in lines for item in line["lost"]]
     out = failures(lost, D_OTHER_CLASSES)

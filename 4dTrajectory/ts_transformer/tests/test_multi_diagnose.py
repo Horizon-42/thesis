@@ -49,14 +49,21 @@ def _argv(w, out, *more):
             *more]
 
 
-def test_a_round_is_read_on_off_and_from_its_start_and_the_outputs_are_sealed(world, tmp_path):
+def test_a_round_is_read_on_off_and_from_its_start_and_the_outputs_are_sealed(world, tmp_path, monkeypatch):
     """The select days opened formal without data; the read on is the round's readout (checked); then off and the
     campaign's start; a line a window and read, its lost aircraft with their fields; the summary by airport and span
     with its three paired differences; the failures; the directory sealed."""
     w = world
     out = tmp_path / "diagnose"
+    models, zeroed = [], []
+    read, off = diagnose.selection_read, diagnose.traffic_off
+    monkeypatch.setattr(diagnose, "selection_read", lambda model, *a, **k: (models.append(model), read(model, *a, **k))[1])
+    monkeypatch.setattr(diagnose, "traffic_off", lambda model: (zeroed.append((len(models), model)), off(model))[1])
     assert diagnose.main(_argv(w, out)) == 0
     assert w.opened == [(("select",), False, True)]
+    # off zeroes the round's model after its read on and reads that model; the start is another model
+    assert len(models) == 3 and zeroed == [(1, models[0])]
+    assert models[1] is models[0] and models[2] is not models[0]
     windows = stage_d().selection(w.context, w.settings, "select")
     lines = [json.loads(x) for x in (out / "per_window.jsonl").read_text().splitlines()]
     assert [x["read"] for x in lines] == [r for r in diagnose.READS for _ in windows]
@@ -155,6 +162,22 @@ def test_a_joined_aircraft_s_fields_are_read_on_its_own_rows_and_a_commanded_oth
     against_anchor = post_diagnose.loss_fields(window, 1, _end(window, 1, window.commanded.key, first + 5), SEPARATION,
                                                FINALS, _landings(ahead), STEP, None)
     assert against_anchor["other_class"] == post_diagnose.COMMANDED and "start_conflict" not in against_anchor
+
+
+def test_the_lost_lines_name_each_lost_aircraft_by_its_place_in_the_window(monkeypatch):
+    """A window whose anchor landed and whose joined aircraft lost separation: one line, member 1, its key, the loss on
+    the window's steps, its fields."""
+    ahead = _record("ahead", -20_000.0, 100.0)
+    window = _joined_window(ahead)
+    first = int(round(OBSERVATION_S / DELTA))
+    lost = _end(window, 1, ahead.key, first + 5)
+    ends = [SimpleNamespace(outcome=LANDED), lost]
+    context = SimpleNamespace(separations={"KXXX": SEPARATION}, finals={"KXXX": FINALS},
+                              words=SimpleNamespace(spec=SimpleNamespace(step_s=STEP)))
+    monkeypatch.setattr(diagnose, "window_landings", lambda window, roster: roster)
+    (line,) = diagnose.lost_lines(window, ends, context, {"KXXX": _landings(ahead)})
+    assert (line["member"], line["aircraft"], line["other"]) == (1, window.commanded_all[1].key, ahead.key)
+    assert line["loss_step"] == first + 5 + 3 and line["fields"]["other_class"] == post_diagnose.LEADER
 
 
 def test_the_paired_difference_counts_aircraft_in_their_windows_and_the_failures_by_span():

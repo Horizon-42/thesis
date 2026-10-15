@@ -129,8 +129,8 @@ def runway_at_loss(result: WindowResult) -> int:
 
 
 def state_at(result: WindowResult, step: int, every: int) -> np.ndarray:
-    """``[3]`` the commanded aircraft's e, n and MSL height at the window's step ``step`` (its 2 s rows from row 0,
-    ``every`` rows a step)."""
+    """``[3]`` the commanded aircraft's e, n and MSL height at its own Δ row ``step`` (its 2 s rows from its own row 0,
+    ``every`` rows a step; stage C's commanded aircraft: the window's step)."""
     return np.asarray(result.states[step * every, :3], dtype=np.float64)
 
 
