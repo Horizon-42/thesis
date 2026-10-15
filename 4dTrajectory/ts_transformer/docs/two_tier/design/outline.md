@@ -115,9 +115,9 @@ they came from. Each document lists the identities of its parts.
 | Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62, D66, D67, D69–D71, D73, D74, D77–D84, D86–D90, D97, D102, D111, D126, D196, D197, D199, D201, D203 | O8, O22 |
 | Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60, D63–D65, D68, D72, D75, D96, D105–D108, D111, D118–D122, D126–D128, D202, D204–D206, D209 | O25 |
 | Post-training | D29–D31, D36, D37, D76, D91–D94, D98–D101, D103–D105, D107, D110, D113–D117, D123–D125, D129, D130, D132, D137, D157, D161, D162, D165, D167–D171, D173–D176, D185, D207, D208 | O15 |
-| Multi-aircraft control | D140–D146, D148–D153, D164, D166, D172, D179–D183, D186, D188–D195, D200, D210 | O18–O21 |
+| Multi-aircraft control | D140–D146, D148–D153, D164, D166, D172, D179–D183, D186, D188–D195, D200, D210, D211 | O18–O21 |
 
-The next free numbers: D211, O27.
+The next free numbers: D212, O27.
 
 ---
 
@@ -127,7 +127,8 @@ Stages A–D are built: each stage's §0.3 gives its state, its implementation l
 
 1. One method of branch training for stages C and D: `majority` (multi-aircraft control D210; the user, 2026-10-15,
    after D200's comparison from B21's base: the three methods land the same, 80.4–80.8 % in round 3). First the cause
-   of the losses of separation, which fell in none of the arms (about 17 % of the commanded aircraft every round); then
+   of the losses of separation, which fell in none of the arms (about 17 % of the commanded aircraft every round), by
+   the diagnostic readout of stage D (D211); then
    `majority` in stage C's `post_train`; then the formal campaigns. Prior O25 (wind) is open.
 2. Version 2 of the multi-aircraft control (multi-aircraft control D153, MC8–MC10).
 3. The test days at the end: the check of the labelling (D198), KAUS in its three parts (D158).

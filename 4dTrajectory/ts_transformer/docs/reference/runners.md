@@ -1769,3 +1769,26 @@ chosen when an outcome of any of its commanded aircraft is one of `--outcomes`. 
 
 ### R74 · `run_ts.py multi_val_evaluation` — a stage D round's val windows flown again and graded by the evaluation package — archived 2026-10-13 → `archive/two_tier_readouts_2026_10/` (`docs/reference/entries.md` there)
 
+
+### R75 · `run_ts.py multi_diagnose` — a stage D round read with its traffic on and off and from its start, and the fields of each loss of separation (multi-aircraft control D211)
+
+2026-10-15 (the user, after D200: the losses of separation fell in none of its arms; the cause first). Stage C's
+diagnostic readout (R66, D175) on a stage D campaign: round `--round` reads the campaign's select windows with the
+readout's numbers three times in one process — `on` (the round's model; its summed readout must be `round.json`'s
+`selection_readout`, or the run stops by name), `off` (the same model, the output layer of every traffic module at
+zero, `post_diagnose.traffic_off`), `start` (the campaign's start, `Stage.start`: from the base, the base with
+zero-output traffic modules; from a round of stage C, that round). For each commanded aircraft that lost separation,
+D175's fields on its own rows (`post_diagnose.loss_fields` with its place in the window): the other aircraft
+(`commanded` when it is commanded too; else `no_landing`, `leader`, `follower`, `other_runway`), the distance to its
+threshold, the time from its own first predicted step, and, against a recorded aircraft only, in conflict at its first
+predicted step; no field 5. Writes, into a new directory: `intent.json` (`--intent`, before the reads), `config.json`,
+`per_window.jsonl` (`multi_train.window_line`, its read, its lost aircraft with their fields), `summary.json` (each
+read: landed, lost separation, mean reward, outcomes of the commanded aircraft, in all, by airport and by span; on −
+off, on − start, off − start with a 95 % interval from 2,000 resamples of the windows), `failures.json` (the fields'
+counts and shares, in all, by airport, by span), `log.jsonl`, `SHA256SUMS` (schema `ts-multi-diagnose-v1`); read-only
+at the end. No criterion is applied. Select days only; the checks first; a clean tree unless `--smoke`; every batch on
+`--device` (`--speak-workers`). Tests: `tests/test_multi_diagnose.py`.
+
+    python run_ts.py multi_diagnose --campaign 4dTrajectory/outputs/POOLED/multi/<campaign id> --round 3 \
+        --intent <intent.json> --out 4dTrajectory/outputs/POOLED/multi/diagnose_<campaign>_r<round>_<date> \
+        [--speak-workers 3] [--device cuda]
