@@ -477,11 +477,26 @@ def selection_readout(model: Prior, context: Context, windows: Sequence[Window],
     here (``stage``'s `Stage.read_batch`) or by ``speakers`` (refused unless they run ``stage``), summed by airport,
     span (`span_key`) and kind, each with its ``all``; an airport's ``reward_mean`` is its ``all`` of both. ``lines``,
     when given, gets each window's line (`window_line`) in place order."""
+    places, read = selection_read(model, context, windows, settings, speakers, stage=stage, split=split)
+    return selection_summed(windows, places, read, lines)
+
+
+def selection_read(model: Prior, context: Context, windows: Sequence[Window], settings: MultiSettings,
+                   speakers: Speakers | None, *, stage: Stage, split: str) -> tuple[list[list[int]], list[Any]]:
+    """The batches of the readout of ``windows`` (`selection_readout`): their places and, for each, what
+    ``stage``'s `Stage.read_batch` gives, read here or by ``speakers`` (refused unless they run ``stage``)."""
     if speakers is not None and speakers.stage is not stage:
         raise ValueError("the speaking workers run another stage's parts than the one given (Speakers(..., stage=))")
     places = stage.batches(windows, settings)
     read = (speakers.read(model, windows, places, split) if speakers is not None else
             [stage.read_batch(model, context, windows, p, settings, split) for p in places])
+    return places, read
+
+
+def selection_summed(windows: Sequence[Window], places: Sequence[Sequence[int]], read: Sequence[Any],
+                     lines: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """The readout (`selection_readout`) of the batches ``read`` at ``places`` of ``windows``; ``lines``, when given,
+    gets each window's line (`window_line`) in place order."""
     counted: dict[str, dict[str, dict[str, dict[str, Any]]]] = {}
     read_lines = []
     for batch, parts in zip(places, read, strict=True):
