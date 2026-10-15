@@ -1,5 +1,15 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-15 — B21 done: the prior without the landings input, under the stop of D205
+
+- `4dTrajectory/outputs/POOLED/prior/prior_b21_20261014` (read-only, `SHA256SUMS`), from `run-b21` at `f1f2a21a`,
+  12 h. Held-out landed: A s1337 92.0 %, C 89.8 %, A s2024 88.4 % (B19 84.6 / 83.8 / 80.3 %). Scores A 1.407,
+  A s2024 1.428, C 1.434, seed scale 0.021: configuration A.
+- The base (epoch 141, best 126) lands 97.2 % of the val days (B19's base 93.0 %), teacher-forced val loss 1.038
+  (1.160). Report `4dTrajectory/ts_transformer/docs/two_tier/readouts/2026-10-15_b21_prior.zh.md`.
+- The D200 comparison starts from this base (01:21 UTC); its chain script's profile log name was fixed first (the
+  name was read after `shift 3`).
+
 ### 2026-10-14 — a prior's checkpoint opens on the meaning and the day split (prior D209)
 
 - Why: after D63 the user asked for a proposal on the identity's other entries, then chose: the spec sha, the

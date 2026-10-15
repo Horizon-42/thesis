@@ -89,7 +89,7 @@ The commits, test counts and measurements of every milestone are in `readouts/20
 | B18 (D204) | The offset right of a final on the glidepath's scale; `ts-prior-checkpoint-v9`. Tried on B16's configuration A folds (`prior_lateral100_20261013`, from `run-lateral` at `938b4110`): landed 80.2 % at the held-out airports. Committed on `two-tier2-glidepath` |
 | B19 | B15's campaign on `v19_20261014` / `v24_20261014` (vocabulary D203) with the inputs of D204 (the user, 2026-10-14: "再跑一遍CV，如果确认效果更好了，那么就在新的标注数据上跑base模型的正式训练"): the folds first; the choice, the base and its one val read only if the folds are better than B16's and the trial's. Done 2026-10-14 (`prior_b19_20261014`, read-only): held-out landed A s1337 84.6 %, C 83.8 %, A s2024 80.3 % (B16 A 47.0 %, trial 80.2 %, B15 50–63 %); configuration A chosen; the base stopped at epoch 13 by patience 3 (best 10) and lands 87.2 % of the val days (B15's base 90.3 %), vectored 77.0 % (84.2 %). The user, 2026-10-14 (B19's second val read): the base is A on every airport for 30 epochs, the select-loss best epoch kept (`prior_b19_base30_20261014`, best epoch 30; select days 92.3 %, the 13-epoch base 87.6 %); it lands **93.0 % of the val days** (straight-in 95.9 %, vectored 88.0 %; B15's base 90.3 / 93.7 / 84.2 %). Superseded by B20: every run of B19 stopped early (D205; 100 epochs: the select days 92.3 → 96.2 %). Readout `readouts/2026-10-14_b19_prior.zh.md` |
 | B20 | B19's campaign (configurations A and C, A's second seed, the choice, the base and its one val read) on `v19_20261014` / `v24_20261014` with D204 and the stop of D205 (the user, 2026-10-14: "新规则重跑整个活动"), from `run-b20` at `2c3e7f3d`: paused by the user on 2026-10-14 for the trial of D206 after the folds KMSY, KRDU and KSJC of A seed 1337 (KSMF stopped in training); not resumed: superseded by B21 (D206). `4dTrajectory/outputs/POOLED/prior/prior_b20_20261014`, read-only. Held-out landed (all 400 sentences): KMSY 92.0 %, KRDU 84.8 %, KSJC 94.2 % |
-| B21 | B20's campaign without the landings input (D206; the user, 2026-10-14: "直接采用，重跑整个活动"): `4dTrajectory/outputs/POOLED/prior/prior_b21_20261014`: running |
+| B21 | B20's campaign without the landings input (D206; the user, 2026-10-14: "直接采用，重跑整个活动"), from `run-b21` at `f1f2a21a`, 2026-10-14 13:13 – 10-15 01:19 UTC. Done (`4dTrajectory/outputs/POOLED/prior/prior_b21_20261014`, read-only, `SHA256SUMS` 201 files): held-out landed A s1337 92.0 %, C 89.8 %, A s2024 88.4 % (B19 84.6 / 83.8 / 80.3 %); scores A 1.407, A s2024 1.428, C 1.434, the seed scale 0.021: configuration A. **The base** (A on every airport, stopped at epoch 141, best 126, select 1.132) **lands 97.2 % of the val days** (straight-in 98.2 %, vectored 95.3 %; B19's base 93.0 / 95.9 / 88.0 %), teacher-forced val loss 1.038 (B19's 1.160). Readout `readouts/2026-10-15_b21_prior.zh.md` |
 | Multi-aircraft control D190 (2) | Built by stage D's implementer (outline D184), 7893d787, merged (88b5d671): the copies a speaker takes of a line hold their rows to where they part once (`prior/model.py` `Front`, `Past.together` chooses the front; `Past.taken` deleted); a line reads its front `COPIED` (bit for bit) or `MERGED` (no copy, the last bits), `Speaker(…, attention=)`; a past with no front (training, prior_behaviour) computes as before: prior_behaviour the same bytes (stage D's log §20; §7 items 1 and 3 name `Past.taken`: stage D's requests item 87) |
 | Claude's checks | At `5313b6cd` (`readouts/2026-10-05_stage_b_check.zh.md`; corrections B10, D105–D108) at `44f6000f` (`readouts/2026-10-05_stage_b_check_2.zh.md`; corrections B12, D119–D122), of B12 at `2190fe0a` (`readouts/2026-10-06_stage_b_b12_check.zh.md`; corrections B13, D127, D128), and of B13 at `142272f0` (`readouts/2026-10-06_stage_b_b13_check.zh.md`: no S1, no correction; its findings on the behaviour check's coverage are dropped, outline D131). None found a leak into an input, a mask or a choice |
 
@@ -97,11 +97,10 @@ Proposals (where the design says nothing): none open.
 
 ### 0.4 Plan
 
-1. B21: B20's campaign without the landings input (D206), from a run worktree at a `two-tier2-glidepath` commit:
-   the folds, the choice, the base and its one val read. Its report compares the folds and the base with B20's
-   three folds, the trial's two and B19's.
+1. B21's base (`prior_b21_20261014/base/run`) is the prior of stage C and D's next runs. Multi-aircraft control
+   D200's comparison runs from it (the user, 2026-10-14), from 2026-10-15 01:21 UTC.
 2. B5's base and the stage C and D models trained from it read `v12_20261005`, which the code of `two-tier2` does not
-   open. Multi-aircraft control D200's comparison names B15's base; the user, 2026-10-14: from the new base (B21's).
+   open.
 
 ---
 
@@ -366,7 +365,10 @@ The rules, fixed before the runs:
 **The cost, measured.** At Δ = 4 s on `v12_20261005` (the log §1): configuration A 26 s, C 36 s an epoch on all five
 airports; the largest batches reserve 1.73 GB (A) and 2.26 GB (C) of the GPU; a chunk of free generation (400 flights,
 one of them to its two go-arounds, the cache 1,056 rows) 4.16 GB (A) and 5.55 GB (C). In B5, configuration A's first
-folds took 11–14 min a training run (with its process's checks) and 3–6 min its free generation.
+folds took 11–14 min a training run (with its process's checks) and 3–6 min its free generation. In B21 (`v19_20261014`,
+the stop of D205, an RTX 4060): an epoch of a fold 21 s (A) and 30 s (C), of the base 26 s; a fold's training run
+25–55 min, its free generation 1 min; the base 64 min; the whole campaign 12 h; the largest batches reserve 1.86 GB
+(A) and 2.44 GB (C).
 
 ## 6 Running at a new airport
 
@@ -529,7 +531,7 @@ of outline §5 apply.
 | B17 | The campaign starts a fold's next steps early | D202 | Done |
 | B19 | B15's campaign on the labels of D203 (`v19_20261014` / `v24_20261014`) with the inputs of D204, the same settings | D39, D40, D85, D204 | Superseded by B20 (D205). Done: configuration A; the base (30 epochs, `prior_b19_base30_20261014`) lands 93.0 % of the val days |
 | B20 | B19's campaign with the stop of D205 | D39, D40, D85, D204, D205 | Paused by the user after the folds KMSY, KRDU and KSJC of A seed 1337; superseded by B21 |
-| B21 | B20's campaign without the landings input | D39, D40, D85, D204–D206 | Running |
+| B21 | B20's campaign without the landings input | D39, D40, D85, D204–D206 | Done: configuration A; the base lands 97.2 % of the val days |
 
 The specifications of the milestones that are done are in `readouts/2026-10-05_stage_b_implementation_log.md` §3.
 
