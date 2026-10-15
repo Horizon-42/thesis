@@ -108,7 +108,9 @@ from ts_transformer.experiments.post_train import (
     round_start, run_campaign, save_batch_file, settings_of, source_campaign, speak_device_refused, speak_round,
     start_checkpoint, start_model, start_of, traffic_model, train_pass, workers_fit,
 )
-from ts_transformer.experiments.post_window_loop import LANDED, LOST_SEPARATION, WindowLoop, checked_edges
+from ts_transformer.experiments.post_window_loop import (
+    LANDED, LOST_SEPARATION, WindowLoop, checked_edges, turns_readout,
+)
 from ts_transformer.multi import credit
 from ts_transformer.multi.backward import BRANCHINGS, GRID, MAJORITY
 from ts_transformer.multi.census import WindowCount, loop_positions, window_losses
@@ -504,12 +506,18 @@ def window_line(place: int, window: Window, ends: Sequence[Any], losses: Mapping
 
 def selection_readout(model: Prior, context: Context, windows: Sequence[Window], settings: MultiSettings,
                       speakers: Speakers | None, *, stage: Stage, split: str = "select",
-                      lines: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+                      lines: list[dict[str, Any]] | None = None, turns: dict[str, Any] | None = None
+                      ) -> dict[str, Any]:
     """The readout of ``windows`` of ``split`` (module docstring; `multi_validation`: the val days): its batches read
     here (``stage``'s `Stage.read_batch`) or by ``speakers`` (refused unless they run ``stage``), summed by airport,
     span (`span_key`) and kind, each with its ``all``; an airport's ``reward_mean`` is its ``all`` of both. ``lines``,
-    when given, gets each window's line (`window_line`) in place order."""
+    when given, gets each window's line (`window_line`) in place order; ``turns``, when given, the turns of every
+    commanded aircraft (`turns_readout`, post-training D214), apart from the readout."""
     places, read = selection_read(model, context, windows, settings, speakers, stage=stage, split=split)
+    if turns is not None:
+        turns.update(turns_readout((windows[place].scene.geometry.code, end)
+                                   for batch, parts in zip(places, read, strict=True)
+                                   for place, (ends, *_) in zip(batch, parts, strict=True) for end in ends))
     return selection_summed(windows, places, read, lines)
 
 

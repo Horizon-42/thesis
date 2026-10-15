@@ -55,7 +55,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Callable, Mapping, NamedTuple, Sequence
+from typing import Any, Callable, Iterable, Mapping, NamedTuple, Sequence
 
 import numpy as np
 import torch
@@ -64,10 +64,11 @@ from ts_transformer.autopilot.start import Loop, Move, moved_signals
 from ts_transformer.experiments.prior_speaking_loop import SpeakingLoop
 from ts_transformer.inference.separation import Loss, Traffic
 from ts_transformer.instructions.airport import AirportGeometry
-from ts_transformer.instructions.artefact import ClosedLoopSentence
+from ts_transformer.instructions.artefact import STATE_COLUMNS, ClosedLoopSentence
+from ts_transformer.instructions.envelope import bank_deg_from_turn_rate
 from ts_transformer.instructions.grammar import column_words
 from ts_transformer.instructions.labeller.interval import OBSERVATION_S
-from ts_transformer.instructions.words import COLUMNS, RUNWAY, RUNWAY_GO_AROUND, SPEED, UNCHANGED, Words
+from ts_transformer.instructions.words import COLUMNS, HEADING, RUNWAY, RUNWAY_GO_AROUND, SPEED, UNCHANGED, Words
 from ts_transformer.post.conformance import Checked, require_conforming_edges
 from ts_transformer.post.edges import TOKEN_FEATURES, Pairs, each_tokens, window_tokens
 from ts_transformer.post.fault_census import STEPS_BEFORE_EVENT, reads_fault
@@ -114,12 +115,82 @@ def checked_edges(reference: Path) -> Checked:
     return _CHECKED[reference]
 
 
+#: A bank counts toward a reversal only above this (degrees): the small rolls of a heading held are not reversals.
+BANK_FLOOR_DEG = 3.0
+
+
+@dataclass(frozen=True)
+class Turns:
+    """How often an aircraft's heading and bank turn back (post-training D214). ``heading_reversals``: the heading words
+    said that turn the other way than the heading word before them (`heading_reversals`), over ``spoken_s``, the rows
+    said times the row interval. ``bank_reversals``: the changes of the bank's side (`bank_reversals`), over
+    ``flown_s``, the time flown from the first predicted step."""
+
+    heading_reversals: int
+    spoken_s: float
+    bank_reversals: int
+    flown_s: float
+
+
+def heading_reversals(words: np.ndarray, n_heading: int) -> int:
+    """The heading words of the said rows ``words [M, 5]`` that turn the other way than the heading word before them.
+    A turn is the change of class the short way round. A runway word (a runway or a go-around) starts a new count: the
+    classes after it are relative to another course."""
+    count, turn, last = 0, 0, None
+    for row in np.asarray(words):
+        if row[RUNWAY] != UNCHANGED:
+            turn, last = 0, None
+        if row[HEADING] == UNCHANGED:
+            continue
+        if last is not None:
+            change = (int(row[HEADING]) - last + n_heading // 2) % n_heading - n_heading // 2
+            if change != 0:
+                count += int(turn != 0 and (change > 0) != (turn > 0))
+                turn = change
+        last = int(row[HEADING])
+    return count
+
+
+def bank_reversals(states: np.ndarray, row_s: float) -> int:
+    """The changes of the bank's side over the 2 s rows ``states [rows, 6]`` (`STATE_COLUMNS`). The bank of a row is
+    the coordinated bank of its track rate at its ground speed (`bank_deg_from_turn_rate`), so an observed track and a
+    flown track read the same way. Only the rows with a bank above `BANK_FLOOR_DEG` count."""
+    track = states[:, STATE_COLUMNS.index("track_deg")]
+    speed = states[:, STATE_COLUMNS.index("ground_speed_mps")]
+    rate = ((np.diff(track) + 180.0) % 360.0 - 180.0) / row_s
+    bank = np.sign(rate) * bank_deg_from_turn_rate(rate, (speed[1:] + speed[:-1]) / 2.0)
+    sides = np.sign(bank[np.abs(bank) > BANK_FLOOR_DEG])
+    return int((sides[1:] != sides[:-1]).sum())
+
+
+def turns_readout(ends: Iterable[tuple[str, WindowResult]]) -> dict[str, Any]:
+    """The turns (`Turns`) of the commanded aircraft ``ends`` (each with its airport) summed by airport and over all:
+    the aircraft, the sums, and the reversals per minute spoken and flown (post-training D214); None where nothing was
+    spoken or flown."""
+    summed: dict[str, dict[str, Any]] = {}
+    for code, end in ends:
+        for key in (code, "all"):
+            c = summed.setdefault(key, {"aircraft": 0, "heading_reversals": 0, "spoken_s": 0.0, "bank_reversals": 0,
+                                        "flown_s": 0.0})
+            c["aircraft"] += 1
+            for name in ("heading_reversals", "spoken_s", "bank_reversals", "flown_s"):
+                c[name] += getattr(end.turns, name)
+
+    def per_min(count: int, seconds: float) -> float | None:
+        return 60.0 * count / seconds if seconds > 0 else None
+
+    return {key: {**c, "heading_reversals_per_min": per_min(c["heading_reversals"], c["spoken_s"]),
+                  "bank_reversals_per_min": per_min(c["bank_reversals"], c["flown_s"])}
+            for key, c in sorted(summed.items())}
+
+
 @dataclass(frozen=True)
 class WindowResult:
     """One commanded aircraft's end (a window's, in stage C): the commanded flight (its place in the split's signals),
     the kind of window, the outcome (the judge's, or `LOST_SEPARATION`), the loss and the other aircraft's key where it
     ended so (with the step of the loss), the reward, the go-arounds said, the words said, the states on the 2 s rows
-    from row 0 and the rows where the speed mask acted (D101)."""
+    from row 0, the rows where the speed mask acted (D101) and how its heading and bank turned back and forth
+    (`Turns`)."""
 
     index: int
     kind: str
@@ -134,6 +205,7 @@ class WindowResult:
     speed_mask_rows: int
     faulty_steps: int               # D114: the steps at which a recorded aircraft reads a faulty point
     loss_reads_fault: bool          # D114: the loss's other aircraft reads one at the event or in the 2 Δ before it
+    turns: Turns                    # post-training D214
     #: the judge's crossing (its runway index, its cycle row, …) of an aircraft the executor ended `landed`, a silent
     #: one's too (the window's later judgement over its threshold, `_judged`, and stage D's readouts read it); else None
     crossing: Mapping[str, Any] | None = None
@@ -702,18 +774,22 @@ class WindowLoop:
                 g = generated[b]
                 outcome, go_arounds = g.outcome, g.go_arounds
                 crossing = g.crossing if outcome == LANDED else None
-            said = self.speaking.said(b)
+            said, states = self.speaking.said(b), self.speaking.states(b)
             go_arounds = int((said[:, RUNWAY] == RUNWAY_GO_AROUND).sum()) if go_arounds is None else go_arounds
+            flown = states[self.speaking.start * self.every:]
             out.append(WindowResult(
                 index=index, kind=window.kind, outcome=outcome, loss=self.loss[b], loss_step=self.loss_step[b],
                 other=self.other[b], reward=reward(outcome, go_arounds, self.loss[b] is not None),
-                go_arounds=go_arounds, words=said, states=self.speaking.states(b),
-                speed_mask_rows=int(self.speed_mask_rows[b]),
+                go_arounds=go_arounds, words=said, states=states, speed_mask_rows=int(self.speed_mask_rows[b]),
                 faulty_steps=sum(bool(keys) for keys in self._reading[w].values()),
                 loss_reads_fault=self.loss_step[b] is not None and any(
                     self.other[b] in self._reading[w][step]
                     for step in range(self.loss_step[b] - STEPS_BEFORE_EVENT, self.loss_step[b] + 1)
-                    if step in self._reading[w]), crossing=crossing))
+                    if step in self._reading[w]),
+                turns=Turns(heading_reversals(said, self.speaking.words.n_heading),
+                            len(said) * self.every * self.step_s, bank_reversals(flown, self.step_s),
+                            max(len(flown) - 1, 0) * self.step_s),
+                crossing=crossing))
         return out
 
 

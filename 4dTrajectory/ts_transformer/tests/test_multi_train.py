@@ -474,6 +474,9 @@ def test_a_round_of_stage_d_from_the_base_end_to_end(setup, tmp_path, monkeypatc
     post_train.run_campaign(out, settings, context, stage=stage)
     identity = torch.load(out / "round_0" / "checkpoint.pt", weights_only=False)["identity"]
     assert identity["start"] == {"base": context.base_identity, "traffic": TrafficConfig(16, 4).to_dict()}
+    record = json.loads((out / "round_0" / "round.json").read_text())
+    turns, readout = record["turns_readout"], record["selection_readout"]       # D214: every commanded aircraft's
+    assert turns["all"]["aircraft"] == sum(readout[code]["all"]["all"]["aircraft"] for code in readout)
     assert not multi_train.round_model(context, settings, out, 0).training
     with pytest.raises(ValueError, match="another start, base"):
         multi_train.round_model(context, replace(settings, traffic_hidden=8), out, 0)

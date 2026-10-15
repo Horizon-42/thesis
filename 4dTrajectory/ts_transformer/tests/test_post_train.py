@@ -1043,6 +1043,9 @@ def test_a_campaign_round_end_to_end(setup, tmp_path, monkeypatch):
     assert record["speaking"]["windows"] == 1 and sum(record["speaking"]["outcomes"].values()) == 1
     readout = record["selection_readout"][s["geometry"].code]
     assert readout["windows"] == 1 and sum(readout["outcomes"].values()) == 1
+    turns = record["turns_readout"]                       # D214: the same ends' turns, beside the readout
+    assert set(turns) == {s["geometry"].code, "all"} and turns["all"]["aircraft"] == 1
+    assert turns["all"] == turns[s["geometry"].code] and turns["all"]["spoken_s"] > 0
     identity = torch.load(out / "round_0" / "checkpoint.pt", weights_only=False)["identity"]
     assert identity["schema"] == post_train.POST_CHECKPOINT_SCHEMA and identity["base"] == {"base": "the fixture's"}
     assert identity["rounds"] == [record["windows"]]

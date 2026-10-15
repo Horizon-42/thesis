@@ -442,6 +442,8 @@ ratio's denominator is the model at the start of the pass; the traffic attention
      and the landing order against the recorded order, beside the records of the same windows (O18);
    - the share of informative groups, the windows whose second pass differed, the rows where the speed-word mask
      acted, the faulty points (post-training D114);
+   - beside the selection readout, apart from it: how often each commanded aircraft's heading words and flown bank
+     turn back, by airport and over all (post-training D214, `turns_readout`);
    - a baseline, once (MC1): the commanded aircraft flown on their own closed-loop sentences of the artefact in the
      same windows (the executor's own losses of separation; the archived design measured 1.17 points above the
      records, §9.1).

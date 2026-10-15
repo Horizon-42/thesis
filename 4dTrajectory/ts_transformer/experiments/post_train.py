@@ -40,7 +40,8 @@ EACH ROUND r:
    ends). No criterion is applied (D7); the validation days are never read here (`post_validation` reads
    them once, for the chosen round, with the same readout).
 6. **The round's record** ``round_<r>/round.json`` (the draw, its windows, the speaking, the bytes of its groups, the
-   pass, the readout, the commit as information), then **its checkpoint** ``round_<r>/checkpoint.pt`` (§4 item 3): the
+   pass, the readout, the turns of the readout's ends apart from it (`turns_readout`, D214), the commit as
+   information), then **its checkpoint** ``round_<r>/checkpoint.pt`` (§4 item 3): the
    model, the optimizer and the identity (`identity`); then its groups files are deleted (only its own pass reads
    them, and a round is done once its checkpoint is written).
 
@@ -115,7 +116,7 @@ from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
 from ts_transformer.autopilot.start import NO_MOVE, Start
 from ts_transformer.experiments.post_branches import branch_round, stage_c_rules
 from ts_transformer.experiments.post_window_loop import (
-    WindowLoop, WindowResult, checked_edges, moved_commanded, start_move_of,
+    WindowLoop, WindowResult, checked_edges, moved_commanded, start_move_of, turns_readout,
 )
 from ts_transformer.experiments.post_windows import (    # D103's shifts and C9's ranges: one definition, the census's
     A_APART_S, A_LANDING_SHIFT_S, B_HEIGHT_M, B_SPEED_SCALE, B_TURN_DEG, D_SHIFT_S,
@@ -438,8 +439,8 @@ def _stage_c_draw(context: Context, settings: Settings, round_: int) -> tuple[li
 
 
 def _stage_c_readout(model: Prior, context: Context, windows: Sequence[Window], settings: Settings,
-                     speakers: Speakers | None, *, stage: Stage) -> dict[str, Any]:
-    return selection_readout(model, context, windows, settings, speakers=speakers, stage=stage)
+                     speakers: Speakers | None, *, stage: Stage, turns: dict[str, Any]) -> dict[str, Any]:
+    return selection_readout(model, context, windows, settings, speakers=speakers, stage=stage, turns=turns)
 
 
 #: Stage C's campaign (module docstring): its parts of a round, each read from this module when it is called (as the
@@ -450,7 +451,7 @@ STAGE_C = Stage(start_model=lambda context, settings: start_model(context, setti
                 draw=lambda context, settings, round_: _stage_c_draw(context, settings, round_),
                 speak=lambda *args, stage, launch: speak_round(*args, stage=stage, launch=launch),
                 selection=lambda context, settings, split: selection_windows(context, settings, split),
-                readout=lambda *args, stage: _stage_c_readout(*args, stage=stage),
+                readout=lambda *args, stage, turns: _stage_c_readout(*args, stage=stage, turns=turns),
                 record=lambda window: window_record(window),
                 speak_batch=lambda *args: speak_batch(*args), read_batch=lambda *args: read_batch(*args), part_width=0,
                 batches=lambda windows, settings: batches(windows, settings.batch_windows),
@@ -1934,16 +1935,21 @@ def read_batch(model: Prior, context: Context, windows: Sequence[Window], places
 
 
 def selection_readout(model: Prior, context: Context, windows: Sequence[Window], settings: Settings,
-                      split: str = "select", speakers: Speakers | None = None, *, stage: Stage = STAGE_C
-                      ) -> dict[str, Any]:
+                      split: str = "select", speakers: Speakers | None = None, *, stage: Stage = STAGE_C,
+                      turns: dict[str, Any] | None = None) -> dict[str, Any]:
     """Step 5 of a round: the select windows' first pass (no branch), its ends by airport (module docstring); the
     same readout of ``split``'s windows (`post_validation`: the val days). Its batches read here (``stage``'s
     `Stage.read_batch`, stage C's `read_batch`), or by ``speakers`` (C13: the same ends, summed here in batch order;
-    one process is the reference mode; refused unless they run ``stage``)."""
+    one process is the reference mode; refused unless they run ``stage``). ``turns``, when given, gets the turns of the
+    same ends (`turns_readout`, D214), apart from the readout: the readouts held by earlier rounds stay comparable."""
     _require_stage(speakers, stage)
     places = stage.batches(windows, settings)
     read = (speakers.read(model, windows, places, split) if speakers is not None else
             [stage.read_batch(model, context, windows, p, settings, split) for p in places])
+    if turns is not None:
+        turns.update(turns_readout((windows[p].scene.geometry.code, end)
+                                   for batch, ends in zip(places, read, strict=True)
+                                   for p, end in zip(batch, ends, strict=True)))
     return counted_ends(windows, places, read)
 
 
@@ -2235,7 +2241,8 @@ def run_campaign(out: Path, settings: Settings, context: Context, speakers: Spea
                             round_=round_, companion=companion)
         if speakers is not None and context.device.type == "cuda":
             torch.cuda.empty_cache()     # the memory of the pass, before the speakers read
-        readout = stage.readout(model, context, select, settings, speakers, stage=stage)
+        turns: dict[str, Any] = {}
+        readout = stage.readout(model, context, select, settings, speakers, stage=stage, turns=turns)
         written = sorted([*directory.glob("groups_*.pt"), *directory.glob("kept_*.pt"),
                           *directory.glob("sentences_*.pt")])
         record = {
@@ -2244,7 +2251,8 @@ def run_campaign(out: Path, settings: Settings, context: Context, speakers: Spea
             "speak_device": str(speakers.device if speakers is not None else context.device),      # information
             "cpu_workers": speakers.cpu_workers if speakers is not None else 0,       # information (D191)
             "windows": [stage.record(w) for w in windows], "speaking": spoken,
-            "groups_bytes": sum(p.stat().st_size for p in written), "pass": passed, "selection_readout": readout}
+            "groups_bytes": sum(p.stat().st_size for p in written), "pass": passed, "selection_readout": readout,
+            "turns_readout": turns}
         write_json_atomic(directory / "round.json", record)
         closed = stage.close_round(context, settings, out, round_, companion, record)   # after the record it may name
         if closed:
