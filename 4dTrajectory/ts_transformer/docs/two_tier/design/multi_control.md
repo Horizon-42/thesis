@@ -140,7 +140,14 @@ control arm ended its 8 rounds (log §22).
    +1.1 points landed [−0.0, +2.2], lost separation −0.7 [−1.8, +0.4] (no measurable change); on − off +1.3 [+0.1, +2.4]
    (the model reads the traffic little); 66.8 % of the 781 lost aircraft lost against another commanded aircraft,
    76 % of all losses 10–20 km from the threshold, 5 % of the losses against a recorded aircraft in conflict at the
-   start. The next step is the user's.
+   start. The user's next steps (2026-10-15): (a) stage C's full campaign with seg60's settings (post-training D170)
+   from B21's base, 14 rounds, `outputs/POOLED/post/post_seg60_b21_20261015` (its script
+   `post_seg60_b21_20261015.run/run.sh` is written; it starts only on the user's word); (b) version 2 (D153, MC8): each
+   commanded aircraft reads the other commanded aircraft's hidden states at the same tick — the user chose this form,
+   not a sequential row in which an aircraft reads the words just said to the others. Version 2's module is stage D's
+   own with its output at zero, so stage C's code and checkpoints are not changed and (a) and (b) run side by side.
+   Open for the user at version 2's launch: D153 starts it from version 1's chosen round; the new chain would start it
+   from the new stage C round.
 4. Version 2 (D153): MC8 (its code), MC9 (its memory measure, its campaign from version 1's chosen round, its
    validation readout); MC10 closes stage D.
 
