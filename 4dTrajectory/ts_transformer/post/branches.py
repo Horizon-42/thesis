@@ -24,6 +24,13 @@ aircraft), its sentences are that aircraft's, its rewards the window's (the call
 its rows only from the branch point up to the aircraft's event (``Sentence.until``: the row of its end or of its loss,
 from which it is silent, D144); stage C's sentences end at their event (no bound). The numbers of each aircraft are the
 caller's rule (`experiments.post_branches.branch_round`); stage C's are D94's, below.
+
+**A window sample** (multi-aircraft control D153, D212; post-training §9 item 9). A sentence may hold the other commanded
+aircraft of its window (``Sentence.window``: each one's sentence placed at its join tick on the window's ticks, `Placed`;
+``Sentence.join``: its own). `samples` then gives each such sentence as a window sample: every sentence of the window on
+the window's ticks (`prior.batch.collate`'s ``starts``), the window input of the traffic module's input (each window's
+rows; its rows of sentences as keys), and only its own rows counted, as a sentence alone counts them. A sentence without
+``window`` is a sample alone, as before.
 """
 
 from __future__ import annotations
@@ -90,6 +97,17 @@ def branch_points(start: int, end_step: int, interval_s: float, every_s: float =
 
 
 @dataclass(frozen=True)
+class Placed:
+    """A commanded aircraft's sentence placed on its window's ticks (module docstring, D212): its rows with the words
+    said as targets, the speaker's records of them, its tokens at each row and its join tick."""
+
+    rows: Any
+    permitted: Permitted
+    tokens: list[np.ndarray]
+    join: int
+
+
+@dataclass(frozen=True)
 class Sentence:
     """One sentence of a group: its rows with the words said as targets (`prior.batch.SentenceRows`), the speaker's
     records of them, its tokens at each row and its reward."""
@@ -101,6 +119,11 @@ class Sentence:
     #: the row of its event (its end, or the row from which it is silent), after which no row is counted; None: its rows
     #: end there (stage C's)
     until: int | None = None
+    #: D212: the other commanded aircraft of its window, in their order among its commanded aircraft (module docstring);
+    #: empty: a sample alone (stage C's, version 1's)
+    window: tuple[Placed, ...] = ()
+    #: D212: its own join tick on its window's ticks (read with ``window``)
+    join: int = 0
 
 
 @dataclass(frozen=True)
@@ -155,6 +178,11 @@ def samples(groups: Sequence[Group], device: torch.device, part_width: int = 0, 
              for sentence, advantage in zip(group.sentences, group.advantages())]
     if not items:
         raise ValueError("no informative group: no sample")
+    if any(s.window for s, _, _ in items):
+        ends = [None if segment_rows is None else g.branch + segment_rows if g.next_branch is None
+                else min(g.branch + segment_rows, g.next_branch)
+                for g in groups if g.informative for _ in g.sentences]          # in the order of ``items``
+        return _window_samples(items, ends, device, part_width, scale)
     rows = collate([s.rows for s, _, _ in items], device)
     length = rows.asked.shape[1]
     empty = np.zeros((0, items[0][0].tokens[0].shape[1]), dtype=np.float32)
@@ -172,6 +200,39 @@ def samples(groups: Sequence[Group], device: torch.device, part_width: int = 0, 
     advantage = torch.tensor([a * scale for _, a, _ in items], dtype=torch.float32, device=device)[:, None] * counted
     return Samples(rows, Permitted.join([s.permitted for s, _, _ in items]), traffic_of(tokens, device, part_width),
                    advantage, counted)
+
+
+def _window_samples(items: Sequence[tuple[Sentence, float, int]], ends: Sequence[int | None], device: torch.device,
+                    part_width: int, scale: float) -> Samples:
+    """`samples` of sentences with their windows (module docstring): each item's sentence and the other sentences of its
+    window, each from its join tick, its window's rows one window of the window input, its rows of sentences the keys;
+    only each item's own rows counted, from its branch point up to its event (``Sentence.until``) and its segment's end
+    (``ends``, None: none), each in its own rows moved to the window's ticks by its join tick."""
+    placed: list[Placed] = []
+    windows: list[list[int]] = []
+    owners: list[int] = []
+    for sentence, _, _ in items:
+        here = [Placed(sentence.rows, sentence.permitted, sentence.tokens, sentence.join), *sentence.window]
+        owners.append(len(placed))
+        windows.append(list(range(len(placed), len(placed) + len(here))))
+        placed += here
+    rows = collate([p.rows for p in placed], device, [p.join for p in placed])
+    length = rows.asked.shape[1]
+    empty = np.zeros((0, items[0][0].tokens[0].shape[1]), dtype=np.float32)
+    tokens = [[empty] * p.join + p.tokens + [empty] * (length - p.join - len(p.tokens)) for p in placed]
+    begin, until = np.full(len(placed), length), np.full(len(placed), length)
+    advantage = np.zeros(len(placed), dtype=np.float32)
+    for (sentence, a, branch), end, b in zip(items, ends, owners):
+        j = sentence.join
+        begin[b] = j + branch
+        until[b] = min(length if sentence.until is None else j + sentence.until, length if end is None else j + end)
+        advantage[b] = a * scale
+    steps = torch.arange(length, device=device)[None, :]
+    counted = (rows.asked & (steps >= torch.as_tensor(begin, device=device)[:, None])
+               & (steps < torch.as_tensor(until, device=device)[:, None]))
+    return Samples(rows, Permitted.join([p.permitted for p in placed]),
+                   traffic_of(tokens, device, part_width, windows, rows.present),
+                   torch.as_tensor(advantage, device=device)[:, None] * counted, counted)
 
 
 @dataclass(frozen=True)

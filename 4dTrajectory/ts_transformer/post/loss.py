@@ -45,6 +45,12 @@ kept (`LossParts.grad_norm`), clipped or not; with ``clip_norm`` None no gradien
 **Passes per round** (D169, `passes`): E passes over a round's samples, each drawn in its own order by the caller, the
 ratio of every pass against the same `PassStart` (the model that spoke the samples, at the round's start), the clip of
 the ratio unchanged; one pass is `one_pass`.
+
+**Window samples** (multi-aircraft control D153, D212; `post.branches.samples`): a sample is a window, several rows of
+the batch of which only one counts rows; every window counts some. The model and the model that spoke read every row
+(each row reads the others of its window); the base reads only the rows of the sentences with counted rows (it has no
+module that reads another row), the others get the model's own log-probability (no pull). Samples alone (stage C's,
+version 1's) count rows in every sentence: the base reads them all, as before.
 """
 
 from __future__ import annotations
@@ -80,7 +86,8 @@ class Samples:
     counted: torch.Tensor
 
     def select(self, indices: Sequence[int]) -> Samples:
-        """The samples ``indices``, in that order (each tensor's first axis), padded as here."""
+        """The samples ``indices``, in that order (each tensor's first axis), padded as here; of window samples, whole
+        windows only (`Traffic.select`)."""
         chosen = torch.as_tensor(list(indices), device=self.advantage.device)
         return Samples(RowTensors(*(tensor[chosen] for tensor in self.rows)), self.permitted.select(indices),
                        self.traffic.select(chosen), self.advantage[chosen],
@@ -92,7 +99,16 @@ class Samples:
             raise ValueError(f"the advantage and the counted rows are [B, R] = {shape} beside the rows")
         if (self.counted & ~self.rows.asked).any():
             raise ValueError("a counted row is a row the speaker said")
-        if not self.counted.any(dim=1).all():
+        counts = self.counted.any(dim=1)
+        if self.traffic.windows is not None:              # window samples: every window counts some rows
+            windows = self.traffic.windows
+            real = windows >= 0
+            if not (counts[windows.clamp(min=0)] & real).any(dim=1).all():
+                raise ValueError("every window sample counts some rows: one without carries no gradient")
+            in_window = torch.zeros_like(counts)
+            in_window[windows[real]] = True
+            counts = counts | in_window                   # the other rows of a window count none
+        if not counts.all():
             raise ValueError("every sample counts some rows: a sample without one carries no gradient")
 
 
@@ -162,6 +178,21 @@ def pull_to_base(log_p: torch.Tensor, base_log_p: torch.Tensor, counted: torch.T
     return _per_row(_pull_words(log_p, base_log_p), counted)
 
 
+def base_log_probability(base: Prior, samples: Samples, model_log_p: torch.Tensor) -> torch.Tensor:
+    """The base's log-probability of ``samples``' words (`masked_log_probability`, no traffic input), read on the
+    sentences with counted rows only (module docstring, window samples); every other sentence gets ``model_log_p``
+    (the model's, detached), so its pull is zero. With every sentence counted (samples alone), every one is read, as
+    before."""
+    owners = samples.counted.any(dim=1)
+    if bool(owners.all()):
+        return masked_log_probability(base, samples.rows, samples.permitted)
+    index = torch.nonzero(owners)[:, 0]
+    out = model_log_p.detach().clone()
+    out[index] = masked_log_probability(base, RowTensors(*(tensor[index] for tensor in samples.rows)),
+                                        samples.permitted.select(index.tolist()))
+    return out
+
+
 def data_term(model: Prior, rows: RowTensors) -> torch.Tensor:
     """The teacher-forced loss per step of a batch of single-aircraft samples (prior §7 item 4, `batch_nll`), in
     training mode (dropout on); the model is put back in eval mode after it."""
@@ -183,7 +214,7 @@ def update_loss(model: Prior, start: PassStart, base: Prior, samples: Samples, d
     log_p = masked_log_probability(model, samples.rows, samples.permitted, samples.traffic)
     with torch.no_grad():
         start_log_p = masked_log_probability(start.model, samples.rows, samples.permitted, samples.traffic)
-        base_log_p = masked_log_probability(base, samples.rows, samples.permitted)
+        base_log_p = base_log_probability(base, samples, log_p)
     reward, words, clipped = surrogate(log_p, start_log_p, samples.advantage, samples.counted)
     kl = pull_to_base(log_p, base_log_p, samples.counted)
     teacher = data_term(model, data)
@@ -208,7 +239,7 @@ def update_step(model: Prior, start: PassStart, base: Prior, pieces: Sequence[Sa
         log_p = masked_log_probability(model, piece.rows, piece.permitted, piece.traffic)
         with torch.no_grad():
             start_log_p = masked_log_probability(start.model, piece.rows, piece.permitted, piece.traffic)
-            base_log_p = masked_log_probability(base, piece.rows, piece.permitted)
+            base_log_p = base_log_probability(base, piece, log_p)
         loss, counted_words, counted_clipped = _surrogate_words(log_p, start_log_p, piece.advantage, piece.counted,
                                                                 CLIP)
         reward = _counted_sum(loss, piece.counted)
@@ -245,7 +276,7 @@ def update_gradients(model: Prior, start: PassStart, base: Prior, pieces: Sequen
         log_p = masked_log_probability(model, piece.rows, piece.permitted, piece.traffic)
         with torch.no_grad():
             start_log_p = masked_log_probability(start.model, piece.rows, piece.permitted, piece.traffic)
-            base_log_p = masked_log_probability(base, piece.rows, piece.permitted)
+            base_log_p = base_log_probability(base, piece, log_p)
         loss, _, _ = _surrogate_words(log_p, start_log_p, piece.advantage, piece.counted, CLIP)
         add("surrogate", torch.autograd.grad(_counted_sum(loss, piece.counted) / rows, parameters, retain_graph=True,
                                              allow_unused=True))

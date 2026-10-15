@@ -42,6 +42,12 @@ wake minimum at the threshold behind a commanded leader is judged as behind a re
 2026-10-07). A window ends when every commanded aircraft is done or silent (D144): its silent ones are halted then. Each
 commanded aircraft gives its own result (`results`). A stage C window (one commanded aircraft, joining at tick 0) is
 flown as before, bit for bit: silent is its window's end.
+
+**The window input** (multi-aircraft control D153, D212; ``joint``): the traffic module's input of each tick holds the
+rows of each window that the speaker holds (`traffic_attention.Traffic.windows`) and, as keys, its rows that have
+joined and are still flown, silent ones too (``Traffic.key``): the rows of each one's sentence (`samples`). A row no
+longer flown is said with the batch until it leaves, and its rows are not its sentence's: it is no key. Without
+``joint`` (the default) the input has none, as before.
 """
 
 from __future__ import annotations
@@ -183,12 +189,12 @@ class WindowLoop:
                  observed: Mapping[int, np.ndarray], device: torch.device, answering: Answering = responsible,
                  token_part: TokenPartOf | None = None, part_width: int = 0,
                  value_reader: ValueReaderOf | None = None, attention: str = COPIED,
-                 executor_device: torch.device | None = None) -> None:
+                 executor_device: torch.device | None = None, joint: bool = False) -> None:
         """``value_reader``: what a value network reads at each row beside the model (D171; `values`), never in the
         model's tokens; None: nothing read. ``attention``: how a window's copies read the front of the speaker's cache
         they hold once (`SpeakingLoop`; multi-aircraft control D190 (2)). ``executor_device``: the device of the executor
         (`SpeakingLoop`; multi-aircraft control S1). Stage D gives it in `multi_train.loop_options`. None: the executor
-        follows the speaker."""
+        follows the speaker. ``joint``: the window input of each tick (module docstring, D212)."""
         checked_edges(edges_reference)
         if loop.most_go_arounds != MOST_GO_AROUNDS:
             raise ValueError(f"the loop was started for {loop.most_go_arounds} go-arounds a flight, not {MOST_GO_AROUNDS} "
@@ -197,6 +203,7 @@ class WindowLoop:
             raise ValueError("a token part comes with its width, and only with it")
         self.order, self.windows, self.words, self.device = list(order), list(windows), words, device
         self.answering, self.token_part, self.part_width = answering, token_part, part_width
+        self.joint = joint
         place = {index: b for b, index in enumerate(self.order)}
         members = [[place.get(i, -1) for i in w.signal_indices] for w in self.windows]
         if sorted(b for rows in members for b in rows) != list(range(len(self.order))):
@@ -349,7 +356,13 @@ class WindowLoop:
             if self.token_part is not None:
                 row = np.concatenate((row, np.asarray(self.token_part(self, b, placed), dtype=np.float32)), axis=1)
             rows.append(row)
-        return traffic_of([[row] for row in rows], self.device, self.part_width), rows
+        if not self.joint:
+            return traffic_of([[row] for row in rows], self.device, self.part_width), rows
+        inside = list(self.speaking.inside)
+        place = {b: k for k, b in enumerate(inside)}
+        windows = [held for held in ([place[b] for b in members if b in place] for members in self.members) if held]
+        key = (joined & self.speaking.alive)[inside][:, None]
+        return traffic_of([[row] for row in rows], self.device, self.part_width, windows, key), rows
 
     def _alone(self, t: int, ticks: Sequence[_Tick | None], joined: np.ndarray
                ) -> dict[int, tuple[AircraftAt, AircraftAt, np.ndarray]]:
@@ -531,6 +544,7 @@ class WindowLoop:
         out.order, out.words = [self.order[b] for b in rows], self.words
         out.device = self.device if device is None else torch.device(device)
         out.answering, out.token_part, out.part_width = self.answering, self.token_part, self.part_width
+        out.joint = self.joint
         out.windows = [self.windows[w] for w in index]
         out.members, k = [], 0
         for w in index:
@@ -580,6 +594,7 @@ class WindowLoop:
         out.order = [loop.order[b] for loop, _, r, _ in moved for b in r]
         out.words, out.device = first.words, torch.device(device)
         out.answering, out.token_part, out.part_width = first.answering, first.token_part, first.part_width
+        out.joint = first.joint
         out.windows = [loop.windows[w] for loop, i, _, _ in moved for w in i]
         out.members, out._next, k, n = [], {}, 0, 0
         for loop, i, _, _ in moved:

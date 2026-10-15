@@ -24,13 +24,20 @@ token beside the edge features (``Traffic.part``, ``[B, R, N, width]``; `traffic
 edge features), through its own projection (`TokenPart`, added to the shared token network by `add_token_part`, under
 its own format name) whose weights start at zero, so the start says what the module says without it. Without a part,
 the module, its tokens and its shape are as before, bit for bit: a checkpoint of stage C loads as it did.
+
+**A module beside it, and its window input** (multi-aircraft control D153, D212; post-training §9 item 7). A caller may
+put a module of its own beside each layer's module (`add_beside`, ``TrafficAttention.beside``): it gets the same row
+and input, and its output is added to the module's; its parameters are in the traffic group of `parameter_groups`. Its
+input travels with the module's: ``Traffic.windows``, the rows of the batch of each window of commanded aircraft (rows
+of one window are on the same ticks), and ``Traffic.key``, the rows that the other rows of their window read at the same
+tick. The traffic module reads neither. Without them and without a module beside, the module is as before, bit for bit.
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import asdict, dataclass, field
-from typing import Any, Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
 import numpy as np
 import torch
@@ -65,6 +72,11 @@ class Traffic:
     present: torch.Tensor
     #: a caller's token part (module docstring): ``[B, R, N, width]`` float32 beside the tokens, or None
     part: torch.Tensor | None = None
+    #: a window input (module docstring): ``[G, M]`` int64, the rows of each window, −1 after its last; no row in two
+    #: windows. None: no window
+    windows: torch.Tensor | None = None
+    #: ``[B, R]`` bool beside ``windows``: the rows that the other rows of their window read at the same tick
+    key: torch.Tensor | None = None
     #: the tokens embedded by the shared token network in the present forward pass (the first layer's module sets it)
     embedded: torch.Tensor | None = field(default=None, init=False, compare=False, repr=False)
 
@@ -75,18 +87,47 @@ class Traffic:
             raise ValueError("present is a bool [B, R, N] beside the tokens")
         if self.part is not None and (self.part.dim() != 4 or self.part.shape[:3] != self.tokens.shape[:3]):
             raise ValueError(f"a token part is [B, R, N, width] beside the tokens, not {tuple(self.part.shape)}")
+        if (self.windows is None) != (self.key is None):
+            raise ValueError("a window input is the windows and the key rows together")
+        if self.windows is not None:
+            rows = self.windows[self.windows >= 0]
+            if (self.windows.dim() != 2 or self.windows.dtype != torch.int64 or self.key.dtype != torch.bool
+                    or self.key.shape != self.tokens.shape[:2] or len(rows.unique()) != len(rows)
+                    or bool((rows >= self.tokens.shape[0]).any())):
+                raise ValueError("windows are [G, M] int64 rows of the batch (−1 after a window's last), each row in "
+                                 "one window at most; the key rows are [B, R] bool beside the tokens")
 
     def select(self, indices: torch.Tensor) -> Traffic:
-        """The rows of the samples ``indices`` (the first axis), the part with them."""
-        return Traffic(self.tokens[indices], self.present[indices],
-                       None if self.part is None else self.part[indices])
+        """The rows of the samples ``indices`` (the first axis), the part with them; with a window input, whole windows
+        only (a selection that splits a window is refused), each window's rows in their new places."""
+        if self.windows is None:
+            return Traffic(self.tokens[indices], self.present[indices],
+                           None if self.part is None else self.part[indices])
+        chosen = [int(i) for i in indices]
+        place = {row: k for k, row in enumerate(chosen)}
+        kept = []
+        for window in self.windows.tolist():
+            rows = [row for row in window if row >= 0]
+            inside = [row in place for row in rows]
+            if any(inside) and not all(inside):
+                raise ValueError("a selection of samples with a window input keeps whole windows")
+            if all(inside) and rows:
+                kept.append([place[row] for row in rows])
+        width = max([1] + [len(rows) for rows in kept])
+        windows = torch.full((len(kept), width), -1, dtype=torch.int64, device=self.windows.device)
+        for g, rows in enumerate(kept):
+            windows[g, :len(rows)] = torch.tensor(rows, dtype=torch.int64)
+        return Traffic(self.tokens[indices], self.present[indices], None if self.part is None else self.part[indices],
+                       windows, self.key[indices])
 
 
-def traffic_of(rows: Sequence[Sequence[np.ndarray]], device: torch.device, part_width: int = 0) -> Traffic:
+def traffic_of(rows: Sequence[Sequence[np.ndarray]], device: torch.device, part_width: int = 0,
+               windows: Sequence[Sequence[int]] | None = None, key: np.ndarray | torch.Tensor | None = None) -> Traffic:
     """`Traffic` from each aircraft's rows of tokens (``rows[b][r]``: ``[N_br, len(TOKEN_FEATURES) + part_width]``, the
     edge features (`edges.tokens`) and then a caller's token part, module docstring), every aircraft with the same
     number of rows; padded to the largest N (at least 1, so that a batch without traffic has a shape). Without a part
-    (``part_width`` 0), ``Traffic.part`` is None."""
+    (``part_width`` 0), ``Traffic.part`` is None. ``windows`` and ``key``: a window input (module docstring), each
+    window's rows and the ``[B, R]`` key rows; None: none."""
     counts = {len(r) for r in rows}
     if len(counts) != 1:
         raise ValueError("every aircraft of a batch has the same number of rows")
@@ -100,10 +141,19 @@ def traffic_of(rows: Sequence[Sequence[np.ndarray]], device: torch.device, part_
         for r, row in enumerate(aircraft):
             tokens[b, r, :len(row)] = row
             present[b, r, :len(row)] = True
+    if (windows is None) != (key is None):
+        raise ValueError("a window input is the windows and the key rows together")
+    grouped = keys = None
+    if windows is not None:
+        grouped = torch.full((len(windows), max([1] + [len(w) for w in windows])), -1, dtype=torch.int64)
+        for g, window in enumerate(windows):
+            grouped[g, :len(window)] = torch.as_tensor(list(window), dtype=torch.int64)
+        grouped, keys = grouped.to(device), torch.as_tensor(key, device=device)
     if not part_width:
-        return Traffic(torch.as_tensor(tokens, device=device), torch.as_tensor(present, device=device))
+        return Traffic(torch.as_tensor(tokens, device=device), torch.as_tensor(present, device=device), None, grouped,
+                       keys)
     return Traffic(torch.as_tensor(tokens[..., :features], device=device), torch.as_tensor(present, device=device),
-                   torch.as_tensor(np.ascontiguousarray(tokens[..., features:]), device=device))
+                   torch.as_tensor(np.ascontiguousarray(tokens[..., features:]), device=device), grouped, keys)
 
 
 class TokenPart(nn.Module):
@@ -153,8 +203,16 @@ class TrafficAttention(nn.Module):
         self.out = nn.Linear(d, d)
         nn.init.zeros_(self.out.weight)
         nn.init.zeros_(self.out.bias)
+        #: a caller's module beside this one (module docstring, `add_beside`): ``beside(x, extra)`` → ``[B, R, d]``,
+        #: added to this module's output; None: none
+        self.beside: nn.Module | None = None
 
     def forward(self, x: torch.Tensor, extra: Traffic | None) -> torch.Tensor:
+        own = self._own(x, extra)
+        return own if self.beside is None else own + self.beside(x, extra)
+
+    def _own(self, x: torch.Tensor, extra: Traffic | None) -> torch.Tensor:
+        """This module's own output (module docstring)."""
         if extra is None:                   # a sample without a scene (module docstring)
             return torch.zeros_like(x)
         batch, rows, d = x.shape
@@ -191,6 +249,15 @@ def add_token_part(model: Prior, width: int, schema: str) -> TokenPart:
         raise ValueError(f"the traffic attention has a token part already ({tokens.part.schema})")
     tokens.part = TokenPart(model.config.d_model, width, schema).to(next(tokens.parameters()).device)
     return tokens.part
+
+
+def add_beside(model: Prior, make: Callable[[int], nn.Module]) -> None:
+    """Put a caller's module ``make(i)`` beside the traffic attention of each layer i of ``model`` (module docstring),
+    on that module's device; refused when a layer has one."""
+    for i, module in enumerate(traffic_modules(model)):
+        if module.beside is not None:
+            raise ValueError(f"layer {i}'s traffic attention has a module beside it already")
+        module.beside = make(i).to(module.out.weight.device)
 
 
 def traffic_modules(model: Prior) -> list[TrafficAttention]:
