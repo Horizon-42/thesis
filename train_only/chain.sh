@@ -10,10 +10,11 @@
 # done are skipped; post_train / multi_train: the last checkpoint); a stage whose last round is there is skipped.
 # The settings below are those of the last formal runs: B = B21's campaign; C = post_seg60's settings (the user's chosen
 # stage C campaign) from the base; D = D200's arm (b), the grid every 60 s, credit to the next branch point. Change them
-# to the method the user chooses after D200 (multi_control D200) before a formal run.
+# to the method the user chooses after D200 (multi_control D200) before a formal run. New settings take a new tag: a
+# stage whose last round is there is skipped whatever its settings, and the profiles of a tag are reused.
 set -u
 TAG=${1:?a tag for the run names, e.g. 20261020}
-ROOT=$(git rev-parse --show-toplevel)
+ROOT=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 cd "$ROOT"
 P=4dTrajectory/outputs/POOLED
 I=$P/instruction_language/v19_20261014
@@ -24,7 +25,8 @@ C=$P/post/post_$TAG
 D=$P/multi/multi_$TAG
 LOG=$P/train_only_$TAG.log
 mkdir -p $P/prior $P/post $P/multi
-# the speaking workers; the runners measure their memory and refuse a number that does not fit (O15, D191)
+# the speaking workers (2 or more each: multi_profile measures a worker beside another); the runners measure their
+# memory and refuse a number that does not fit (O15, D191)
 SPEAK_WORKERS=${SPEAK_WORKERS:-3}
 CPU_WORKERS=${CPU_WORKERS:-4}
 D_START=${D_START:-c}                       # c: D starts from C's last round; base: from B's base (D200)

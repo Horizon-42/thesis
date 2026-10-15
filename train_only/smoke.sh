@@ -1,15 +1,17 @@
 #!/bin/bash
-# The training chain at a small size, before a formal chain on a new machine: every runner of B, C and D once, on the
-# formal inputs, each told it is a smoke (no result; a tree with changes allowed). B: a fold's training run (2 epochs on
-# 20 sentences of each airport and split) and its free generation, the base's training run, its validation and free
-# generation readouts on the select days (a smoke never reads the val days, D85). C: two rounds of post_train from the
-# start. D: two rounds of multi_train from the start, and two from C's last round. The start: B21's base when it is in
-# place (train_only/data_paths.txt carries it), else this smoke's own base (it lands little, so C and D may update
-# nothing; every step still runs).
+# The training chain at a small size, before a formal chain on a new machine, on the formal inputs (no result; a tree
+# with changes allowed). B: prior_campaign's runners one by one (its own --smoke trains up to 150 epochs a fold) — a
+# fold's training run (2 epochs on 20 sentences of each airport and split) and its free generation, the base's training
+# run, its validation and free generation readouts on the select days (a smoke never reads the val days, D85).
+# C: two rounds of post_train with 2 speaking workers. D: two rounds of multi_train from the start; then, as chain.sh
+# runs D, multi_profile and two rounds from C's last round with 2 speaking workers and their profile — on CUDA also the
+# profile of CPU workers and 2 CPU workers (refused beside a speak device that is the CPU, so not with `cpu`).
+# The start of C and D: B21's base when it is in place (train_only/data_paths.txt carries it), else this smoke's own
+# base (it lands little, so C and D may update nothing; every step still runs).
 #
 #   train_only/smoke.sh [device]          cuda (default) or cpu; the output goes to 4dTrajectory/outputs/POOLED/smoke_<UTC>
 #
-# Measured on the RTX 4060 host with the CPU (2026-10-15): about 35 min.
+# Measured on the RTX 4060 host with the CPU (2026-10-15, beside a running campaign): about 48 min.
 set -u
 DEVICE=${1:-cuda}
 ROOT=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
@@ -40,18 +42,31 @@ python run_ts.py prior_free_generation --prior $O/prior/base/run "${B[@]}" --spl
 BASE=$P/prior/prior_b21_20261014/base/run
 [ -f $BASE/procedure_masks.json ] || BASE=$O/prior/base/run
 echo "C and D start from $BASE"
-COMMON=(--prior $BASE --instructions $I --executor $E --windows $WIN --device $DEVICE --smoke
+COMMON=(--prior $BASE --instructions $I --executor $E --windows $WIN --device $DEVICE
         --prior-lr 1e-5 --traffic-lr 1e-4 --weight-decay 0.01 --update-groups 4 --data-sentences 4 --select-per-airport 2)
-step "C: post_train"
-python run_ts.py post_train --method branch --segment-only --branch-every-s 60 "${COMMON[@]}" --out $O/post \
-    --rounds 2 --windows-real 2 --windows-a 2 --windows-d 2 --windows-b 2 --batch-windows 4 --continuations 2 \
-    --seed 1337 --traffic-hidden 64 --traffic-heads 4 --select-seed 1337 || fail C
+step "C: post_train, 2 speaking workers"
+python run_ts.py post_train --method branch --segment-only --branch-every-s 60 "${COMMON[@]}" --smoke --speak-workers 2 \
+    --out $O/post --rounds 2 --windows-real 2 --windows-a 2 --windows-d 2 --windows-b 2 --batch-windows 4 \
+    --continuations 2 --seed 1337 --traffic-hidden 64 --traffic-heads 4 --select-seed 1337 || fail C
 D=(--front-attention merged --rounds 2 --windows-real 2 --windows-compressed 2 --spans-s 300 600 1200 --c-min 0.8
    --batch-rows 64 32 24 --continuations 2 --seed 2035)
 step "D from the start: multi_train"
-python run_ts.py multi_train --branching grid --branch-every-s 60 --segment-only "${COMMON[@]}" "${D[@]}" \
-    --traffic-hidden 64 --traffic-heads 4 --out $O/multi_base || fail D1
-step "D from C: multi_train"
-python run_ts.py multi_train --branching majority "${COMMON[@]}" "${D[@]}" --start-campaign $O/post --start-round 1 \
+python run_ts.py multi_train --branching majority "${COMMON[@]}" --smoke "${D[@]}" --traffic-hidden 64 --traffic-heads 4 \
+    --out $O/multi_base || fail D1
+# D from C's last round the way chain.sh runs it: the profiles, the speaking workers and (on CUDA) the CPU workers
+FROM_C=("${COMMON[@]}" "${D[@]}" --branching grid --branch-every-s 60 --segment-only --start-campaign $O/post
+        --start-round 1)
+SPLIT=(); CPU=()
+if [ $DEVICE = cuda ]; then
+    SPLIT=(--cpu-batches 8 --cpu-period 15)
+    step "D: multi_profile, speaking workers on the CPU"
+    python run_ts.py multi_profile "${FROM_C[@]}" "${SPLIT[@]}" --speak-workers 2 --speak-device cpu \
+        --out $O/profile_cpu || fail P2
+    CPU=(--cpu-workers 2 --cpu-profile $O/profile_cpu)
+fi
+step "D: multi_profile, speaking workers on $DEVICE"
+python run_ts.py multi_profile "${FROM_C[@]}" "${SPLIT[@]}" --speak-workers 2 --out $O/profile_speak || fail P1
+step "D from C: multi_train, 2 speaking workers, the profiles"
+python run_ts.py multi_train "${FROM_C[@]}" "${SPLIT[@]}" --smoke --speak-workers 2 --profile $O/profile_speak "${CPU[@]}" \
     --out $O/multi_c || fail D2
 step "ALL DONE: $O"

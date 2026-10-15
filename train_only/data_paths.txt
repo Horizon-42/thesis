@@ -28,7 +28,7 @@
 # the census of windows (stage C and D: the edges' reference)
 4dTrajectory/outputs/POOLED/post/windows_20261013
 
-# B21's base: a start for C and D without a new B (optional; smoke.sh starts from it when it is there)
+# B21's base: a start for C and D without a new B (smoke.sh starts from it; chain.sh does not read it)
 4dTrajectory/outputs/POOLED/prior/prior_b21_20261014/base/run
 
 # the harvest's rosters (the arrival manifest: a flight's rebuild; the tracks manifest: the landings and the day split)
