@@ -32,7 +32,7 @@ CPU_WORKERS=${CPU_WORKERS:-4}
 D_START=${D_START:-c}                       # c: D starts from C's last round; base: from B's base (D200)
 
 # --- settings -----------------------------------------------------------------------------------------------------
-C_ROUNDS=8
+C_ROUNDS=14                 # the user, 2026-10-15 (as the local campaign post_seg60_b21_20261015)
 C_SETTINGS=(--method branch --segment-only --branch-every-s 60 --rounds $C_ROUNDS --windows-real 1000 --windows-a 1000
             --windows-d 1000 --windows-b 1000 --batch-windows 64 --continuations 8 --seed 2028 --prior-lr 1e-5
             --traffic-lr 1e-4 --weight-decay 0.01 --update-groups 4 --data-sentences 64 --select-per-airport 200
