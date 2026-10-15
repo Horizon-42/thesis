@@ -136,8 +136,11 @@ control arm ended its 8 rounds (log §22).
 3. D200: the comparison of the three methods of branch training, from B21's base on v19 (the user, 2026-10-14: from
    the new base; prior D206), with the reward of post-training D207: done 2026-10-15 (§0.3). The user chose `majority`
    for stages C and D (D210), and the cause of the losses of separation first: in none of the three arms did they fall
-   in 4 rounds. The diagnosis first (D211: D200's arm (c), round 3, read on, off and from its start); then `majority`
-   in stage C's `post_train`, then the formal campaigns.
+   in 4 rounds. The diagnosis (D211) is read (2026-10-15, `readouts/2026-10-15_stage_d_diagnose.zh.md`): on − start
+   +1.1 points landed [−0.0, +2.2], lost separation −0.7 [−1.8, +0.4] (no measurable change); on − off +1.3 [+0.1, +2.4]
+   (the model reads the traffic little); 66.8 % of the 781 lost aircraft lost against another commanded aircraft,
+   76 % of all losses 10–20 km from the threshold, 5 % of the losses against a recorded aircraft in conflict at the
+   start. The next step is the user's.
 4. Version 2 (D153): MC8 (its code), MC9 (its memory measure, its campaign from version 1's chosen round, its
    validation readout); MC10 closes stage D.
 
