@@ -17,10 +17,8 @@
 ## 1 服务器上的步骤
 
 ```bash
-# 1) 代码：分支没有推到 origin。任选其一：
-#    a) 推送后在服务器上 git clone，然后 git checkout two-tier2-train-only
-#    b) 在本机打包：git bundle create train-only.bundle two-tier2-train-only
-#       拷到服务器后：git clone -b two-tier2-train-only train-only.bundle thesis
+# 1) 代码：分支已推到 origin（2026-10-15）
+git clone -b two-tier2-train-only https://github.com/Horizon-42/thesis.git thesis && cd thesis
 # 2) 数据：在本机（数据所在的 checkout 或其 worktree）执行，直接拷进服务器上的仓库目录
 train_only/pack_data.sh size                                   # 先看大小
 train_only/pack_data.sh rsync user@a40-host:/path/to/thesis    # 或: train_only/pack_data.sh tar /path/bundle.tar
@@ -68,10 +66,10 @@ prior_free_generation、prior_validation、post_train、两种起点的 multi_tr
 - **test 日的航迹和 KAUS 不出本机**：清单不含 test 日的航迹文件，也不含 KAUS（留出机场）。两个名册（arrivals、tracks
   manifest）是整份拷的，里面有 test 日航班的名册行（只有元数据：航班号、跑道、时间等，没有轨迹）。
 - **val 只读一次**：`chain.sh` 的 B 是正式活动，它的 base 会读一次 val（由 base 目录里的 claim 文件记账）。同一个 base 不能再读。
-- **C、D 的设置要在 D200 选定后再定**：`chain.sh` 里的设置是目前最近的正式设置（B = B21 的活动；C = post_seg60 的设置，从
-  base 出发；D = D200 的 (b) 臂：每 60 s 分支、功劳记到下一个分支点）。用户选定 D200 的方法后改 `chain.sh` 的 SETTINGS 段；
-  `D_START=base` 让 D 直接从 B 的 base 出发（D200 的做法），默认 `c` 从 C 的最后一轮出发。改了设置就换一个新 tag：同一个
-  tag 下，最后一轮已在的阶段会被跳过，profile 也会沿用。
+- **C、D 的设置**：用户 2026-10-15 在 D200 之后选了 `majority`（multi_control D210），并决定正式训练之前先查清失去间隔
+  为什么不降。`chain.sh` 的 D 已改成 D200 的 (c) 臂（`--branching majority`）；C 仍是 post_seg60 的设置，因为 C 的
+  post_train 还没有 `majority`，移植合并后再改 C。`D_START=base` 让 D 直接从 B 的 base 出发（D200 的做法），默认 `c` 从
+  C 的最后一轮出发。改了设置就换一个新 tag：同一个 tag 下，最后一轮已在的阶段会被跳过，profile 也会沿用。
 - **工作进程数**：`SPEAK_WORKERS`（默认 3）、`CPU_WORKERS`（默认 4），各至少 2（multi_profile 要测一个进程旁边另一个）。runner 会先测内存，放不下就按名拒绝；A40 显存 48 GB，
   可以加大，主机内存和 CPU 核数决定 CPU 工作进程数。
 - **没有为 A40 改代码**：例如几个 fold 同时训练、TF32/BF16，都需要改代码，属于用户的决定，本分支没有做。

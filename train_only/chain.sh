@@ -8,10 +8,10 @@
 #
 # A resume after a stop or a crash: the same command again. Each runner resumes on its own (prior_campaign: the steps
 # done are skipped; post_train / multi_train: the last checkpoint); a stage whose last round is there is skipped.
-# The settings below are those of the last formal runs: B = B21's campaign; C = post_seg60's settings (the user's chosen
-# stage C campaign) from the base; D = D200's arm (b), the grid every 60 s, credit to the next branch point. Change them
-# to the method the user chooses after D200 (multi_control D200) before a formal run. New settings take a new tag: a
-# stage whose last round is there is skipped whatever its settings, and the profiles of a tag are reused.
+# The settings below: B = B21's campaign; C = post_seg60's settings (the user's chosen stage C campaign) from the base;
+# D = D200's arm (c), `majority` (the method the user chose for stages C and D, multi_control D210, 2026-10-15). Stage
+# C's post_train has no `majority` yet: C changes when its port is merged. New settings take a new tag: a stage whose
+# last round is there is skipped whatever its settings, and the profiles of a tag are reused.
 set -u
 TAG=${1:?a tag for the run names, e.g. 20261020}
 ROOT=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
@@ -41,7 +41,7 @@ D_ROUNDS=4
 D_SETTINGS=(--rounds $D_ROUNDS --windows-real 500 --windows-compressed 500 --spans-s 300 600 1200 --c-min 0.8
             --batch-rows 64 32 24 --continuations 8 --seed 2035 --prior-lr 1e-5 --traffic-lr 1e-4 --weight-decay 0.01
             --update-groups 4 --data-sentences 64 --select-per-airport 100 --front-attention merged
-            --cpu-batches 8 --cpu-period 15 --gpu-squares 200 --branching grid --branch-every-s 60 --segment-only)
+            --cpu-batches 8 --cpu-period 15 --gpu-squares 200 --branching majority)
 # -------------------------------------------------------------------------------------------------------------------
 
 log() { echo "$(date -u +%FT%TZ) $*" | tee -a $LOG; }
