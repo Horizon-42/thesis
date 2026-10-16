@@ -1651,7 +1651,11 @@ checkpoint.
   workers are sized from `--profile` (`multi_profile`) and, with CPU workers, `--cpu-profile` (a `multi_profile
   --speak-device cpu` of the same inputs and settings). D200: without `--start-campaign`/`--start-round` it starts
   from the base, its traffic shape `--traffic-hidden`/`--traffic-heads`; `--branch-every-s` and `--segment-only`
-  (the grid only) as stage C's P55, a group's credit ending at the varied aircraft's next branch point.
+  (the grid only) as stage C's P55, a group's credit ending at the varied aircraft's next branch point. D217 (with
+  `--branching backward`/`majority` only; each default D182's): `--search-points` (candidate points at most),
+  `--judged-after-s`, `--fine-point`/`--no-fine-point`, `--common-cut` (every sentence of a group counted up to the
+  event + the judged span). D218: `--start-campaign` may name a campaign of stage D; its round starts the new one as
+  trained (a new seed, the same `--joint-heads`).
 - A clean tree unless `--smoke`; formal runs from a detached run worktree (D163).
 - Writes `campaign.json` (`ts-post-train-v1`) and, for each round, `round.json` and `checkpoint.pt`
   (`ts-post-checkpoint-v1`).
