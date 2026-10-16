@@ -7,20 +7,27 @@ from __future__ import annotations
 import json
 import os
 import stat
-from dataclasses import replace
+from dataclasses import asdict, replace
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
+import torch
 
 from ts_transformer.experiments import multi_diagnose as diagnose
-from ts_transformer.experiments import post_diagnose
-from ts_transformer.experiments.multi_train import stage_d
+from ts_transformer.experiments import multi_train, post_diagnose, post_train
+from ts_transformer.experiments.multi_train import MULTI_CLAIM_READER, MultiSettings, stage_d
 from ts_transformer.experiments.post_window_loop import LANDED, LOST_SEPARATION
 from ts_transformer.instructions.labeller.interval import OBSERVATION_S
 from ts_transformer.instructions.words import COLUMNS, RUNWAY, UNCHANGED
+from ts_transformer.multi.joint import joint_modules
+from ts_transformer.multi.windows import REAL_KIND
 from ts_transformer.post.scene import REAL, Joined, Scene, Window
+from ts_transformer.post.traffic_attention import traffic_modules
 from ts_transformer.tests.test_multi_compare import GIT, campaign  # noqa: F401
+from ts_transformer.tests.test_multi_train import _multi_settings
+from ts_transformer.tests.test_post_branches import _ahead
+from ts_transformer.tests.test_post_train import _context
 from ts_transformer.tests.test_post_diagnose import DELTA, FINALS, GEOMETRY, SEPARATION, STEP, _landings, _record
 from ts_transformer.tests.test_post_window_loop import setup  # noqa: F401
 
@@ -29,9 +36,34 @@ INTENT = {"G0": "on below start in lost separation with the interval excluding 0
 
 @pytest.fixture
 def world(setup, campaign, monkeypatch, tmp_path):  # noqa: F811
-    """The campaign of `test_multi_compare` with this runner's checks stubbed, its context the fixture's, its roster
-    landings the setup's (the runner reads them itself, D175), the intent written."""
+    """The campaign of `test_multi_compare` in the world of `_world`."""
     out, context, settings, opened = campaign
+    return _world(setup, out, context, settings, opened, monkeypatch, tmp_path)
+
+
+@pytest.fixture
+def world_v2(setup, monkeypatch, tmp_path):  # noqa: F811
+    """A stage D campaign of version 2 (D212) of one round from the base (`test_multi_joint`'s), in the world of
+    `world`."""
+    s = setup
+    context = _context(s)
+    window = replace(_ahead(s["windows"][0]), span_s=1.0)
+    settings = replace(_multi_settings(rounds=1, start=None, traffic_hidden=16, traffic_heads=4), joint_heads=4)
+    out = tmp_path / "multi_v2"
+    inputs = {"prior": str(tmp_path / "prior"), "instructions": str(s["directory"]),
+              "executor": str(tmp_path / "executor"), "windows": str(tmp_path / "census"),
+              "procedure_root": str(tmp_path / "cifp"), "settings": asdict(settings), "smoke": False}
+    with monkeypatch.context() as patch:
+        patch.setattr(multi_train, "draw_windows", lambda context, settings, rng: ([window], {"drawn": {REAL_KIND: 1}}))
+        post_train.open_campaign(out, inputs, GIT, {}, schema=settings.campaign_schema, reader=MULTI_CLAIM_READER,
+                                 settings_type=MultiSettings)
+        post_train.run_campaign(out, settings, context, stage=stage_d())
+    return _world(s, out, context, settings, [], monkeypatch, tmp_path)
+
+
+def _world(setup, out, context, settings, opened, monkeypatch, tmp_path):  # noqa: F811
+    """The campaign at ``out`` with this runner's checks stubbed, its context ``context``, its roster landings the
+    setup's (the runner reads them itself, D175), the intent written."""
     monkeypatch.setattr(diagnose, "git_state", lambda: GIT)
     monkeypatch.setattr(diagnose, "require_conforming_closed_loop", lambda *a: (None, {"checks": {"stub": True}}, None))
     monkeypatch.setattr(diagnose, "checked_edges", lambda path: None)
@@ -118,6 +150,56 @@ def test_the_options_are_refused_by_name_before_anything_is_read(world, tmp_path
             diagnose.main(argv)
         assert message in capsys.readouterr().err
     assert w.opened == [] and not (tmp_path / "d").exists()
+
+
+def test_a_round_of_version_2_is_read_with_its_joint_modules_off_too(world_v2, tmp_path, monkeypatch):
+    """D216: a version 2 round is read on, with its joint modules off, with its traffic modules off too, and from its
+    start; the read on is the round's readout (checked); the summary holds the difference on − joint_off besides
+    version 1's three."""
+    w = world_v2
+    out = tmp_path / "diagnose"
+    models, zeroed = [], []
+
+    def zero(modules):
+        return all(not m.out.weight.any() and not m.out.bias.any() for m in modules)
+
+    read, joint, traffic = diagnose.selection_read, diagnose.joint_off, diagnose.traffic_off
+    monkeypatch.setattr(diagnose, "selection_read", lambda model, *a, **k: (
+        models.append((model, zero(joint_modules(model)), zero(traffic_modules(model)))), read(model, *a, **k))[1])
+    monkeypatch.setattr(diagnose, "joint_off", lambda model: (zeroed.append(("joint", len(models), model)),
+                                                              joint(model))[1])
+    monkeypatch.setattr(diagnose, "traffic_off", lambda model: (zeroed.append(("traffic", len(models), model)),
+                                                                traffic(model))[1])
+    assert diagnose.main(_argv(w, out)) == 0
+    assert [m for m, *_ in models[:3]] == [models[0][0]] * 3 and models[3][0] is not models[0][0]
+    # the joint modules off after the read on, the traffic modules too after the read joint_off: off reads no other
+    # aircraft at all (the fixture's round made no update, so the zero checks below hold either way)
+    assert zeroed == [("joint", 1, models[0][0]), ("traffic", 2, models[0][0])]
+    assert models[1][1] and models[2][1:] == (True, True) and models[3][1]
+    lines = [json.loads(x) for x in (out / "per_window.jsonl").read_text().splitlines()]
+    windows = stage_d().selection(w.context, w.settings, "select")
+    assert [x["read"] for x in lines] == [r for r in diagnose.READS_V2 for _ in windows]
+    summary = json.loads((out / "summary.json").read_text())
+    assert list(summary["reads"]) == list(diagnose.READS_V2)
+    assert set(summary["differences"]) == {"on-off", "on-start", "off-start", "on-joint_off"}
+    assert json.loads((out / "config.json").read_text())["reads"] == list(diagnose.READS_V2)
+    assert set(json.loads((out / "failures.json").read_text())) == {"schema", *diagnose.READS_V2}
+
+
+def test_joint_off_zeroes_the_joint_modules_output_layers_only(world_v2):
+    w = world_v2
+    model = multi_train.round_model(w.context, w.settings, w.out, 0)
+    for module in joint_modules(model):
+        torch.nn.init.ones_(module.out.weight)
+        torch.nn.init.ones_(module.out.bias)
+    before = {k: v.clone() for k, v in model.state_dict().items()}
+    assert diagnose.joint_off(model) is model
+    after = model.state_dict()
+    for name, value in after.items():
+        if ".beside.out." in name:
+            assert not value.any(), name
+        else:
+            assert torch.equal(before[name], value), name
 
 
 # ---- the fields of a commanded aircraft after the anchor, on the two-runway airport of `test_post_diagnose`

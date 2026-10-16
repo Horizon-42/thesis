@@ -9,7 +9,10 @@ aircraft its own, `multi_train.readout_numbers`) three times in one process: ``o
 same model with the output layer of every traffic module set to zero (`post_diagnose.traffic_off`), the rest
 unchanged; ``start``, the campaign's start (`Stage.start`: from the base, the base with zero-output traffic modules,
 D200; from a round of stage C, that round). The read ``on`` must give the round's ``round.json`` readout again, or the
-run stops by name.
+run stops by name. A campaign of version 2 (D212; D216) is read four times: ``on``; ``joint_off``, the same model with
+the output layer of every joint module set to zero (`multi.joint.joint_off`: no commanded aircraft reads the others'
+rows); ``off``, besides that the traffic modules' (the model reads no other aircraft); ``start`` (its joint modules at
+zero, so the start reads as version 1 of the same start).
 
 WHAT A READ WRITES: one line per window and read in ``per_window.jsonl`` (`multi_train.window_line` and its read) and,
 for each commanded aircraft that lost separation, its place in the window, its key, the other aircraft, the window's
@@ -20,8 +23,9 @@ readout of draws).
 
 THE OUTPUTS, into a new directory: ``intent.json`` (``--intent``'s decision rules, written before the reads),
 ``config.json``, ``per_window.jsonl``, ``summary.json`` (each read's commanded aircraft: landed, lost separation, mean
-reward and outcomes, in all, by airport and by span; the paired differences on − off, on − start and off − start
-with a 95 % interval from 2,000 bootstrap resamples of the windows, an aircraft's outcome counted in its window),
+reward and outcomes, in all, by airport and by span; the paired differences on − off, on − start and off − start, and
+of version 2 on − joint_off, with a 95 % interval from 2,000 bootstrap resamples of the windows, an aircraft's outcome
+counted in its window),
 ``failures.json`` (each field's counts and shares over the aircraft lost, of each read, in all, by airport and by
 span), ``log.jsonl`` and ``SHA256SUMS``; the directory read-only at the end. No criterion is applied here: the
 intent's rules are read by whoever reports.
@@ -49,8 +53,8 @@ import torch
 
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
 from ts_transformer.experiments.multi_train import (
-    MULTI_CAMPAIGN_SCHEMA, multi_settings_of, round_model, selection_read, selection_summed, span_key, stage_d,
-    window_line, window_record,
+    MULTI_CAMPAIGN_SCHEMA, MULTI_CAMPAIGN_SCHEMA_V2, multi_settings_of, round_model, selection_read, selection_summed,
+    span_key, stage_d, window_line, window_record,
 )
 from ts_transformer.experiments.post_diagnose import (
     BOOTSTRAP_RESAMPLES, COMMANDED, INTERVAL, OTHER_CLASSES, STRAIGHT_LINE_S, failures, loss_fields, seal, traffic_off,
@@ -59,6 +63,7 @@ from ts_transformer.experiments.post_train import Speakers, done_rounds, inputs_
 from ts_transformer.experiments.post_window_loop import LANDED, LOST_SEPARATION, checked_edges
 from ts_transformer.instructions.artefact import load_day_split
 from ts_transformer.io_utils import utc_now, write_json_atomic
+from ts_transformer.multi.joint import joint_off
 from ts_transformer.post.landings import window_landings
 from ts_transformer.prior.source import airport_landings
 from ts_transformer.repo_layout import REPO_ROOT, git_state
@@ -67,11 +72,13 @@ from ts_transformer.repo_layout import REPO_ROOT, git_state
 MULTI_DIAGNOSE_SCHEMA = "ts-multi-diagnose-v1"
 #: The split read: the select days (D85: never val).
 SPLIT = "select"
-#: The three reads (module docstring), in the order read.
-ON, OFF, START = "on", "off", "start"
+#: The three reads (module docstring), in the order read; version 2's four (D216).
+ON, OFF, START, JOINT_OFF = "on", "off", "start", "joint_off"
 READS = (ON, OFF, START)
-#: The paired differences of `summary`.
+READS_V2 = (ON, JOINT_OFF, OFF, START)
+#: The paired differences of `summary`; version 2's (D216).
 PAIRS = ((ON, OFF), (ON, START), (OFF, START))
+PAIRS_V2 = (*PAIRS, (ON, JOINT_OFF))
 #: Field 1's classes in stage D (D175's and `COMMANDED`).
 D_OTHER_CLASSES = (*OTHER_CLASSES, COMMANDED)
 
@@ -170,11 +177,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     campaign, out, intent_path = (p if p.is_absolute() else REPO_ROOT / p for p in (args.campaign, args.out, args.intent))
     record = json.loads((campaign / "campaign.json").read_text(encoding="utf-8"))
-    if record["schema"] != MULTI_CAMPAIGN_SCHEMA:
-        parser.error(f"{campaign} is a {record['schema']} campaign, not {MULTI_CAMPAIGN_SCHEMA}")
+    if record["schema"] not in (MULTI_CAMPAIGN_SCHEMA, MULTI_CAMPAIGN_SCHEMA_V2):
+        parser.error(f"{campaign} is a {record['schema']} campaign, not {MULTI_CAMPAIGN_SCHEMA} or "
+                     f"{MULTI_CAMPAIGN_SCHEMA_V2}")
     if record["inputs"]["smoke"] and not args.smoke:
         parser.error(f"{campaign} is a smoke campaign: only a --smoke readout reads it")
     done, settings = done_rounds(campaign), multi_settings_of(record)
+    reads, pairs = (READS_V2, PAIRS_V2) if settings.joint else (READS, PAIRS)
     if not 0 <= args.round < done:
         parser.error(f"{campaign} holds the checkpoints of rounds 0–{done - 1}: --round {args.round}")
     if args.speak_workers < 1:
@@ -211,7 +220,7 @@ def main(argv: list[str] | None = None) -> int:
         write_json_atomic(out / "intent.json", intent)                             # the rules, before the reads
         write_json_atomic(out / "config.json", {
             "schema": MULTI_DIAGNOSE_SCHEMA, "written_utc": utc_now(), "campaign": str(campaign), "round": args.round,
-            "reads": list(READS), "settings": inputs["settings"], "start": record["inputs"]["settings"]["start"],
+            "reads": list(reads), "settings": inputs["settings"], "start": record["inputs"]["settings"]["start"],
             "instructions": str(instructions), "executor": str(executor), "checks": opened["checks"], "git": git,
             "smoke": args.smoke, "device": str(device), "speak_workers": args.speak_workers,
             "straight_line_s": STRAIGHT_LINE_S, "bootstrap": {"resamples": BOOTSTRAP_RESAMPLES, "interval": INTERVAL,
@@ -227,8 +236,10 @@ def main(argv: list[str] | None = None) -> int:
         model = round_model(context, settings, campaign, args.round)
         ends: dict[str, list[list[Any]]] = {}
         lines: dict[str, list[dict[str, Any]]] = {}
-        for read in READS:
-            if read == OFF:
+        for read in reads:
+            if read == JOINT_OFF:
+                joint_off(model)
+            elif read == OFF:                          # version 2: its joint modules are off from the read before
                 traffic_off(model)
             elif read == START:
                 model = stage.start(context, settings)[0].eval()
@@ -259,10 +270,10 @@ def main(argv: list[str] | None = None) -> int:
     rng = np.random.default_rng([settings.seed, 1 << 29])
     write_json_atomic(out / "summary.json", {
         "schema": MULTI_DIAGNOSE_SCHEMA, "written_utc": utc_now(), "round": args.round,
-        "reads": {read: reading(windows, ends[read]) for read in READS},
-        "differences": {f"{a}-{b}": paired(windows, ends[a], ends[b], rng) for a, b in PAIRS}})
+        "reads": {read: reading(windows, ends[read]) for read in reads},
+        "differences": {f"{a}-{b}": paired(windows, ends[a], ends[b], rng) for a, b in pairs}})
     write_json_atomic(out / "failures.json", {"schema": MULTI_DIAGNOSE_SCHEMA,
-                                              **{read: counted_failures(lines[read]) for read in READS}})
+                                              **{read: counted_failures(lines[read]) for read in reads}})
     log({"written": "summary.json, failures.json"})
     seal(out)
     return 0

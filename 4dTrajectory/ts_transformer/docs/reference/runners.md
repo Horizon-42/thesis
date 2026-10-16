@@ -1777,7 +1777,9 @@ diagnostic readout (R66, D175) on a stage D campaign: round `--round` reads the 
 readout's numbers three times in one process — `on` (the round's model; its summed readout must be `round.json`'s
 `selection_readout`, or the run stops by name), `off` (the same model, the output layer of every traffic module at
 zero, `post_diagnose.traffic_off`), `start` (the campaign's start, `Stage.start`: from the base, the base with
-zero-output traffic modules; from a round of stage C, that round). For each commanded aircraft that lost separation,
+zero-output traffic modules; from a round of stage C, that round). A version 2 campaign (D212) is read four times
+(D216): `on`, `joint_off` (the output layer of every joint module at zero, `multi.joint.joint_off`), `off` (the traffic
+modules' too), `start` (its joint modules at zero); its summary adds on − joint_off. For each commanded aircraft that lost separation,
 D175's fields on its own rows (`post_diagnose.loss_fields` with its place in the window): the other aircraft
 (`commanded` when it is commanded too; else `no_landing`, `leader`, `follower`, `other_runway`), the distance to its
 threshold, the time from its own first predicted step, and, against a recorded aircraft only, in conflict at its first

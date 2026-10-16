@@ -98,3 +98,13 @@ def joint_modules(model: Prior) -> list[JointAttention]:
     if len(found) != model.config.layers:
         raise ValueError(f"{len(found)} joint modules in a prior of {model.config.layers} layers")
     return found
+
+
+def joint_off(model: Prior) -> Prior:
+    """``model`` with the output layer of every module (`joint_modules`) set to zero, in place: no row reads another
+    row of its window, as at version 2's start (module docstring); every other weight unchanged."""
+    with torch.no_grad():
+        for module in joint_modules(model):
+            module.out.weight.zero_()
+            module.out.bias.zero_()
+    return model
