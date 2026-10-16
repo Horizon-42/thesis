@@ -189,6 +189,39 @@ def _speak_context():
                            device=torch.device("cpu"))
 
 
+def test_d217_the_search_settings_default_to_d182_go_with_the_backward_search_and_parse():
+    """D217: `MultiSettings`' search settings default to D182's (a record without them reads so), go with a search
+    backward only (refused by name with the grid), are positive, are profiled, and the runner's flags set them."""
+    settings = _multi_settings(branching="majority")
+    assert (settings.search_points, settings.judged_after_s, settings.fine_point, settings.common_cut) == (
+        8, 60.0, True, False)
+    recorded = asdict(settings)
+    for key in ("search_points", "judged_after_s", "fine_point", "common_cut"):
+        del recorded[key]
+    assert MultiSettings(**recorded) == settings
+    for changed in ({"search_points": 10}, {"judged_after_s": 64.0}, {"fine_point": False}, {"common_cut": True}):
+        replace(settings, **changed)
+        with pytest.raises(ValueError, match=r"backward search's \(D217\), not the grid's"):
+            _multi_settings(**changed)
+    for wrong in ({"search_points": 0}, {"judged_after_s": 0.0}):
+        with pytest.raises(ValueError, match="positive"):
+            replace(settings, **wrong)
+    assert {"search_points", "judged_after_s", "fine_point"} <= set(multi_train.PROFILED_SETTINGS)
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    multi_train.add_arguments(parser)
+    required = ["--prior", "p", "--instructions", "i", "--executor", "e", "--windows", "w", "--rounds", "1",
+                "--windows-real", "1", "--windows-compressed", "0", "--spans-s", "1", "--c-min", "0.6",
+                "--batch-rows", "2", "--seed", "1", "--prior-lr", "1e-4", "--traffic-lr", "1e-3",
+                "--weight-decay", "0", "--update-groups", "1", "--data-sentences", "1", "--select-per-airport", "1",
+                "--branching", "majority"]
+    plain = multi_train.settings_from(parser.parse_args(required), settings.start)
+    assert (plain.search_points, plain.judged_after_s, plain.fine_point, plain.common_cut) == (8, 60.0, True, False)
+    given = multi_train.settings_from(parser.parse_args(required + ["--search-points", "10", "--judged-after-s", "64",
+                                                                    "--no-fine-point", "--common-cut"]),
+                                      settings.start)
+    assert (given.search_points, given.judged_after_s, given.fine_point, given.common_cut) == (10, 64.0, False, True)
+
+
 def test_a_start_from_the_base_takes_its_own_traffic_shape_a_start_from_a_round_its_campaigns():
     """D200: `MultiSettings.start` None (the base) goes with a positive traffic shape, a start from a round of stage C
     with none (its campaign's shape, D164; a record without the fields reads so); the runner's `start_from` gives None
@@ -486,6 +519,67 @@ def test_a_round_of_stage_d_from_the_base_end_to_end(setup, tmp_path, monkeypatc
     post_train.run_campaign(out, raised, context, stage=stage_d())
     resumed = torch.load(out / "round_1" / "checkpoint.pt", weights_only=False)["identity"]
     assert resumed["start"] == identity["start"] and len(resumed["rounds"]) == 2
+
+
+def test_a_campaign_of_stage_d_starts_from_a_round_of_stage_d(setup, tmp_path, monkeypatch):
+    """D218: a campaign of stage D from round 0 of another campaign of stage D (from the base here) starts with that
+    round's weights as trained, its checkpoints' start that round's identity, and `round_model` reads the base through
+    it; the runner's `start_from` names the round (`multi_start_of`); the stage refuses by name other bytes, the
+    source's seed, another version (joint_heads) and a smoke source under a formal campaign; `require_finished` counts a
+    source of stage D's rounds."""
+    from ts_transformer.io_utils import file_sha256
+
+    s = setup
+    short_round(monkeypatch, s)
+    context = _context(s)
+    window = replace(_ahead(s["windows"][0]), span_s=1.0)                  # of the campaign's span
+    monkeypatch.setattr(multi_train, "draw_windows",
+                        lambda context, settings, rng: ([window], {"drawn": {REAL_KIND: 1}}))
+    options = dict(schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER, settings_type=MultiSettings)
+    paths = {key: str(tmp_path / "inputs" / key) for key in post_train.INPUT_PATHS}
+
+    def campaign(out, settings, smoke=False, run=None):
+        post_train.open_campaign(out, {**paths, "settings": asdict(settings), "smoke": smoke},
+                                 {"head": "x", "dirty": False}, {}, **options)
+        post_train.run_campaign(out, run or settings, context, stage=stage_d())
+
+    source = tmp_path / "stage_d"
+    first = _multi_settings(rounds=1, start=None, traffic_hidden=16, traffic_heads=4)
+    campaign(source, first)
+    checkpoint = source / "round_0" / "checkpoint.pt"
+    start = {"campaign": source.as_posix(), "round": 0, "checkpoint_sha256": file_sha256(checkpoint)}
+    given = SimpleNamespace(start_campaign=source, start_round=0, traffic_hidden=None, traffic_heads=None)
+    assert multi_train.start_from(given, formal=True) == multi_train.multi_start_of(source, 0, formal=True) == start
+    settings = _multi_settings(rounds=1, start=start, seed=2025)
+    stage = stage_d()
+    model, _ = stage.start(context, settings)
+    trained = multi_train.round_model(context, first, source, 0).state_dict()
+    started = model.state_dict()
+    assert started.keys() == trained.keys() and all(torch.equal(started[n], v) for n, v in trained.items())
+    later = tmp_path / "later"
+    campaign(later, settings)
+    identity = torch.load(later / "round_0" / "checkpoint.pt", weights_only=False)["identity"]
+    assert identity["start"] == torch.load(checkpoint, weights_only=False)["identity"]
+    assert multi_train.start_base(identity["start"]) == context.base_identity
+    assert not multi_train.round_model(context, settings, later, 0).training
+    with pytest.raises(ValueError, match="not the checkpoint the campaign started from"):
+        stage.start(context, replace(settings, start={**start, "checkpoint_sha256": "0" * 64}))
+    with pytest.raises(ValueError, match=r"takes another seed.*\(D162\)"):
+        stage.start(context, replace(settings, seed=first.seed))
+    with pytest.raises(ValueError, match=r"keeps its version, D218"):
+        stage.start(context, replace(settings, joint_heads=2))
+    smoke = tmp_path / "stage_d_smoke"
+    campaign(smoke, first, smoke=True)
+    with pytest.raises(ValueError, match="is a smoke campaign: a formal campaign does not start from it"):
+        multi_train.multi_start_of(smoke, 0, formal=True)
+    with pytest.raises(ValueError, match="is a smoke campaign: a formal campaign does not start from it"):
+        stage.start(replace(context, formal=True),
+                    replace(settings, start=multi_train.multi_start_of(smoke, 0, formal=False)))
+    require_finished(source)
+    unfinished = tmp_path / "unfinished"                           # D166 item 19: one of its two rounds done
+    campaign(unfinished, replace(first, rounds=2), run=first)
+    with pytest.raises(ValueError, match=r"has done 1 of its 2 rounds.*\(D166 item 19\)"):
+        require_finished(unfinished)
 
 
 def test_stage_ds_start_is_refused_by_name_through_the_one_function(setup, tmp_path, monkeypatch):

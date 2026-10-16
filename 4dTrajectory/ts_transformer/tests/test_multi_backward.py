@@ -67,9 +67,9 @@ def test_a_continuation_avoids_its_event():
     assert not avoids(end, answered="B", partner_answered_v=False, ended=None, go_around=False)    # its loss, still flown
 
 
-def _searched(candidates, judged, majority=None):
+def _searched(candidates, judged, majority=None, fine=FINE):
     """`search`'s steps on ``candidates``, a point tried answered by ``judged(point)``; its requests in order."""
-    calls, steps, answer = [], search(candidates, FINE, majority), None
+    calls, steps, answer = [], search(candidates, fine, majority), None
     while True:
         try:
             kind, p = steps.send(answer)
@@ -147,6 +147,21 @@ def test_a_decision_point_where_5_of_8_avoid_is_the_majority_point_and_one_group
     assert found.tried == (92, 84, 88) and [c for c in calls if c[0] == "chosen"] == [("chosen", 84)]
 
 
+def test_d217_the_search_takes_its_points_its_judged_span_and_the_fine_point_as_settings():
+    """D217: at most ``count`` candidate points (10: back to 320 s), continuations judged at the event + 64 s, and with
+    no fine point the search goes from the decision point straight on back to the majority point."""
+    long = Event(400, END, outcome="timeout")
+    assert points(long, 10, DELTA, 10) == [400 - STEP * j for j in range(1, 11)]
+    assert backward.judged_until(long, DELTA, 64.0) == 416
+    candidates = [100 - STEP * j for j in range(1, 11)]              # 92, 84, …, 20
+    counts = {92: 0, 84: 0, 76: 1, 68: 4, 60: 4, 52: 4, 44: 4, 36: 4, 28: 4, 20: 5}
+    found, calls = _searched(candidates, lambda p: _avoiding(counts[p]), majority=5, fine=None)
+    assert (found.decision, found.fine, found.majority) == (76, None, 20)
+    assert found.groups == (76, 20) and found.kinds == (backward.DECISION, backward.MAJORITY_POINT)
+    assert found.tried == (92, 84, 76, 68, 60, 52, 44, 36, 28, 20)          # the 9th and 10th points back
+    assert [c for c in calls if c[0] == "chosen"] == [("chosen", 76), ("chosen", 20)]
+
+
 def test_no_majority_point_within_the_bound_leaves_the_decision_points_groups():
     candidates = [100 - STEP * j for j in range(1, 9)]
     found, _ = _searched(candidates, lambda p: _avoiding(4 if p <= 88 else 0), majority=5)
@@ -154,13 +169,13 @@ def test_no_majority_point_within_the_bound_leaves_the_decision_points_groups():
     assert found.tried == (92, 84, 88, 76, 68, 60, 52, 44, 36)               # every point back, not past the bound
 
 
-def _backward(s, model, rules, continuations=2, majority=None):
+def _backward(s, model, rules, continuations=2, majority=None, **searched):
     (window,) = s["windows"]
     return backward_round(model, lambda flights: s["moved_loop"](start_move_of(window)), [window], [0],
                           {0: s["stored"]}, s["flights"], s["geometries"], s["finals"],
                           s["words"], interval_s=DELTA, variant="full", edges_reference=s["reference"],
                           faults={s["geometry"].code: {}}, device=CPU, split="train", continuations=continuations,
-                          rules=rules, majority=majority)
+                          rules=rules, majority=majority, **searched)
 
 
 def test_a_round_found_backward_on_a_window_whose_first_avoiding_point_is_known(setup, monkeypatch):
@@ -201,6 +216,38 @@ def test_a_round_found_backward_on_a_window_whose_first_avoiding_point_is_known(
     *_, ends = finished                                                # the decision point's continuations, to the end
     assert [c.reward for c in group.continuations] == [credit.window_reward([r.reward]) for r in ends]
     assert all(not np.isnan(c.reward) for c in group.continuations)
+
+
+def test_d217_a_round_without_the_fine_point_judges_at_64_s_and_cuts_every_sentence_at_the_judged_tick(setup,
+                                                                                                       monkeypatch):
+    """D217 on the synthetic window with the judgement replaced (as above): no fine point is tried, every point tried is
+    flown to the event + 64 s at most, and with ``common_cut`` every sentence of the group — the first one and each
+    continuation — is counted up to the judged tick in its own rows (each sentence's own bound made later than it here,
+    so that the cut binds); without it each keeps its own bound."""
+    s = setup
+    model = _with_module(s["base"])
+    rules = Rules(**credit.rules(1337, 0, DELTA))
+    reached, events = [], {}
+
+    def judged(loop, own, v, happened, point):
+        events["event"] = happened
+        reached.append((point, int(loop.speaking.t - loop.origins[own[0]])))
+        return [Trial(point <= happened.tick - 3 * STEP, False) for _ in own]
+
+    monkeypatch.setattr(post_branches, "_trials", judged)
+    monkeypatch.setattr(post_branches, "_until", lambda loop, b, joined: 10_000)       # its own bound: past the cut
+    searched = dict(search_points=10, judged_after_s=64.0, fine_point=False)
+    found = _backward(s, model, rules, **searched, common_cut=True)
+    happened = events["event"]
+    until = backward.judged_until(happened, DELTA, 64.0)
+    decision = happened.tick - 3 * STEP
+    assert [p for p, _ in reached] == [happened.tick - STEP, happened.tick - 2 * STEP, decision]   # no fine point
+    assert all(t <= until for _, t in reached)
+    (group,) = found.groups
+    assert group.branch == decision                                    # the window's join tick is 0
+    assert [sentence.until for sentence in group.sentences] == [until] * 3
+    (alone,) = _backward(s, model, rules, **searched).groups
+    assert [sentence.until for sentence in alone.sentences] == [10_000] * 3
 
 
 def test_a_round_found_backward_judges_its_continuations_by_what_they_did(setup):

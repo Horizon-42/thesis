@@ -7,13 +7,16 @@ shared branch round's (`experiments.post_branches.backward_round`); this module 
 - **The event** of a varied aircraft v (`event`): D143's — the tick of v's own end or of the earliest loss that it is
   in — and for an aircraft that landed after a go-around, its first go-around if earlier. Its kind: `LOSS` (with the
   other aircraft of that loss), `GO_AROUND`, or `END` (v's outcome).
-- **The candidate points** (`points`): back from the event every `COARSE_S`, the latest first, at most `POINTS`, never
-  before v's first predicted step; ticks of the window's grid.
-- **A continuation avoids the event** (`avoids`, D182 (3)), judged at `AFTER_S` after it (`judged_until`): v answers for
+- **The candidate points** (`points`): back from the event every `COARSE_S`, the latest first, at most the search's
+  count (`POINTS`, D182's; D217: `MultiSettings.search_points`), never before v's first predicted step; ticks of the
+  window's grid.
+- **A continuation avoids the event** (`avoids`, D182 (3)), judged at the judged span after it (`judged_until`;
+  `AFTER_S`, D182's; D217: `MultiSettings.judged_after_s`): v answers for
   no loss, for every kind of event (a worse end, a loss of separation, does not take the event's place), and for a
   loss the pair keeps its separation, for a go-around v says none, for another end v's same outcome does not happen.
 - **The search** (`search`): the first point going back where a continuation avoids the event is the decision point,
-  a group; then the point `FINE_S` after it, a group when a continuation of it avoids the event; then point B, the first
+  a group; then the point `FINE_S` after it, a group when a continuation of it avoids the event (none with D217's
+  `MultiSettings.fine_point` off); then point B, the first
   point (from the decision point back, within the same points) where a continuation avoids the event with no go-around
   said by v from the point to the judged tick, a group — B is the decision point when one of its avoiding
   continuations says none, and then one group. Every other point tried gives none; an event that no point avoids gives
@@ -38,7 +41,8 @@ from ts_transformer.multi.credit import event as d143_event
 GRID, BACKWARD, MAJORITY = "grid", "backward", "majority"
 BRANCHINGS = (GRID, BACKWARD, MAJORITY)
 #: The search's steps (D182): back from the event every 32 s, at most 8 points; one point 16 s after the decision point;
-#: each continuation tried judged at 60 s after the event.
+#: each continuation tried judged at 60 s after the event. D217: the count, the fine point and the judged span are
+#: `MultiSettings`' settings, these their defaults (the behaviour before D217).
 COARSE_S, FINE_S, POINTS, AFTER_S = 32.0, 16.0, 8, 60.0
 #: The kinds of an event (module docstring).
 LOSS, GO_AROUND, END = "loss", "go_around", "end"
@@ -119,15 +123,15 @@ def event(aircraft: Sequence[Aircraft], v: int, outcome: str, first_go_around: i
     return Event(tick, END, outcome=outcome)
 
 
-def points(happened: Event, first_step: int, interval_s: float) -> list[int]:
-    """The candidate points of an event (module docstring), the latest first."""
+def points(happened: Event, first_step: int, interval_s: float, count: int = POINTS) -> list[int]:
+    """The candidate points of an event (module docstring), the latest first, at most ``count``."""
     step = ticks_of(COARSE_S, interval_s)
-    return [t for t in (happened.tick - step * j for j in range(1, POINTS + 1)) if t >= first_step]
+    return [t for t in (happened.tick - step * j for j in range(1, count + 1)) if t >= first_step]
 
 
-def judged_until(happened: Event, interval_s: float) -> int:
-    """The tick at which a continuation is judged: the event + `AFTER_S`."""
-    return happened.tick + ticks_of(AFTER_S, interval_s)
+def judged_until(happened: Event, interval_s: float, after_s: float = AFTER_S) -> int:
+    """The tick at which a continuation is judged: the event + ``after_s``."""
+    return happened.tick + ticks_of(after_s, interval_s)
 
 
 def avoids(happened: Event, *, answered: str | None, partner_answered_v: bool, ended: str | None,
@@ -154,13 +158,14 @@ def out_of_reach(failed: int, continuations: int, need: int) -> bool:
     return continuations - failed < need
 
 
-def search(candidates: Sequence[int], fine_ticks: int, majority: int | None = None
+def search(candidates: Sequence[int], fine_ticks: int | None, majority: int | None = None
            ) -> Generator[tuple[str, int], Sequence[Trial] | None, Found]:
     """The search of one varied aircraft (module docstring) over its ``candidates`` (the latest first), step by step:
     it yields ``(TRY, p)``, and the caller flies point p's continuations to the judged tick and sends their trials back;
     it yields ``(CHOOSE, p)`` for the point it tried last, and the caller flies that point's continuations on to their
     window's end, makes its group and sends nothing; it returns what it found. ``majority``: the avoiding continuations
-    that make the majority point (D192), which then takes point B's place; None: point B (D182)."""
+    that make the majority point (D192), which then takes point B's place; None: point B (D182). ``fine_ticks``: the
+    fine point's ticks after the decision point; None: no fine point (D217)."""
 
     def behind(trials: Sequence[Trial]) -> bool:
         """Whether a point's ``trials`` make it point B, or the majority point."""
@@ -180,11 +185,12 @@ def search(candidates: Sequence[int], fine_ticks: int, majority: int | None = No
     if decision is None:
         return Found(None, None, None, tuple(tried))
     at_decision = behind(trials)
-    point = decision + fine_ticks
-    tried.append(point)
-    if any(t.avoids for t in (yield TRY, point)):
-        fine = point
-        yield CHOOSE, point
+    if fine_ticks is not None:
+        point = decision + fine_ticks
+        tried.append(point)
+        if any(t.avoids for t in (yield TRY, point)):
+            fine = point
+            yield CHOOSE, point
     if not at_decision:
         for p in candidates[k + 1:]:
             tried.append(p)
