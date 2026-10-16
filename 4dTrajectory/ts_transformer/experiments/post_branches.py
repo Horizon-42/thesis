@@ -512,11 +512,11 @@ def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loo
 
         def until(loop: WindowLoop, b: int) -> int | None:
             """Row ``b``'s bound (`_until`), cut at the judged tick in its own rows with ``common_cut`` (D217)."""
-            own = _until(loop, b, joined)
+            bound = _until(loop, b, joined)
             if not common_cut:
-                return own
+                return bound
             cut = loop.own_row(b, s.until)
-            return cut if own is None else min(own, cut)
+            return cut if bound is None else min(bound, cut)
 
         kept = tuple(Sentence(*made[b], rules.reward([ended[c] for c in rows_w]), until(joint, b),
                               **_placed(joint, b, made, whole_windows))

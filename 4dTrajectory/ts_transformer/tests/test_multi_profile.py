@@ -95,6 +95,7 @@ def test_the_runner_measures_its_worker_on_the_speaking_device(tmp_path, monkeyp
 
     base = SimpleNamespace(to=lambda device: base, eval=lambda: base)    # no CUDA touched
     calls = []
+    monkeypatch.setattr(multi_train, "of_stage_d", lambda source: False)       # a source of stage C
     monkeypatch.setattr(multi_train, "start_of", lambda source, round_, formal: {"campaign": "c", "round": 0,
                                                                                 "checkpoint_sha256": "0" * 64})
     monkeypatch.setattr(multi_profile, "git_state", lambda: {"head": "x", "dirty": False})

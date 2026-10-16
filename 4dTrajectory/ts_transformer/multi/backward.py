@@ -65,8 +65,8 @@ class Event:
 
 @dataclass(frozen=True)
 class Trial:
-    """One continuation of a point, judged at the event + `AFTER_S`: whether it avoids the event, and whether v said a
-    go-around from the point to then."""
+    """One continuation of a point, judged at the judged tick (`judged_until`): whether it avoids the event, and whether
+    v said a go-around from the point to then."""
 
     avoids: bool
     go_around: bool

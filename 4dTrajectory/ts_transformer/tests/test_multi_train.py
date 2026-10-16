@@ -49,7 +49,9 @@ def test_a_batch_is_spoken_with_its_campaigns_front_attention(monkeypatch, branc
     seen = {}
 
     def spoken(*args, **kwargs):
-        seen.update(kwargs["loop_options"], whole_windows=kwargs["whole_windows"])
+        seen.update(kwargs["loop_options"], whole_windows=kwargs["whole_windows"],
+                    **{key: kwargs[key] for key in ("search_points", "judged_after_s", "fine_point", "common_cut")
+                       if key in kwargs})
         raise _Spoken
 
     monkeypatch.setattr(multi_train, "branch_round", spoken)
@@ -59,10 +61,13 @@ def test_a_batch_is_spoken_with_its_campaigns_front_attention(monkeypatch, branc
                               start_loop=lambda split, batch: None, geometries={}, finals={}, words=None,
                               interval_s=INSTRUCTION_STEP_S, variant="full", edges_reference=None,
                               device=torch.device("cpu"))
-    settings = _multi_settings(front_attention=attention, branching=branching)
+    searched = {"search_points": 10, "judged_after_s": 64.0, "fine_point": False, "common_cut": True}
+    settings = _multi_settings(front_attention=attention, branching=branching,
+                               **(searched if branching == "backward" else {}))
     with pytest.raises(_Spoken):
         multi_train.speak_batch(None, context, [], [], settings, 0, None, 0)
-    assert seen == {"answering": "the stage's", "attention": attention, "joint": False, "whole_windows": False}
+    assert seen == {"answering": "the stage's", "attention": attention, "joint": False, "whole_windows": False,
+                    **(searched if branching == "backward" else {})}     # D217: the search's settings passed on
 
 
 def _stream_context(built):
@@ -568,6 +573,8 @@ def test_a_campaign_of_stage_d_starts_from_a_round_of_stage_d(setup, tmp_path, m
         stage.start(context, replace(settings, seed=first.seed))
     with pytest.raises(ValueError, match=r"keeps its version, D218"):
         stage.start(context, replace(settings, joint_heads=2))
+    with pytest.raises(ValueError, match="holds the checkpoints of rounds 0–0, not 1"):
+        multi_train.multi_start_of(source, 1, formal=False)
     smoke = tmp_path / "stage_d_smoke"
     campaign(smoke, first, smoke=True)
     with pytest.raises(ValueError, match="is a smoke campaign: a formal campaign does not start from it"):
@@ -825,6 +832,7 @@ def test_the_runner_records_stage_ds_campaign_and_opens_its_context_formal_or_sm
     calls = []
     start = {"campaign": "c", "round": 0, "checkpoint_sha256": "0" * 64}
     fake_stage = SimpleNamespace(start=lambda context, settings: calls.append(("start", settings.start)))
+    monkeypatch.setattr(multi_train, "of_stage_d", lambda source: False)       # a source of stage C
     monkeypatch.setattr(multi_train, "start_of", lambda source, round_, formal: (calls.append(("start_of", formal)),
                                                                                     start)[1])
     monkeypatch.setattr(multi_train, "require_finished", lambda source: calls.append(("finished", source)))
@@ -1178,6 +1186,7 @@ def test_the_runner_sizes_its_workers_from_the_profile_before_any_process_uses_t
     base = SimpleNamespace(to=lambda device: base, eval=lambda: base)    # no CUDA touched
     calls = []
     start = {"campaign": "c", "round": 0, "checkpoint_sha256": "0" * 64}
+    monkeypatch.setattr(multi_train, "of_stage_d", lambda source: False)       # a source of stage C
     monkeypatch.setattr(multi_train, "start_of", lambda source, round_, formal: start)
     monkeypatch.setattr(multi_train, "git_state", lambda: {"head": "x", "dirty": False})
     monkeypatch.setattr(multi_train, "require_conforming_closed_loop", lambda i, e: (None, {"checks": {}}, None))

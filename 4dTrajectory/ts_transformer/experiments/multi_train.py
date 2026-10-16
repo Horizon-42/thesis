@@ -182,8 +182,7 @@ class MultiSettings:
     select_per_airport: int
     #: the start (D164): round ``round`` of stage C's campaign ``campaign`` (repository-relative; D218: or of stage D's,
     #: `multi_start_of`) and its checkpoint's ``checkpoint_sha256`` (`post_train.start_of`); or None (D200): the base
-    #: with zero-output traffic modules of the
-    #: shape `traffic_hidden`, `traffic_heads` (`post_train.traffic_model`)
+    #: with zero-output traffic modules of the shape `traffic_hidden`, `traffic_heads` (`post_train.traffic_model`)
     start: dict[str, Any] | None
     #: where a round's branch points are (D182, MC12): `GRID`, D143's (the default: the behaviour before D182; a record
     #: without the setting reads as it), or `BACKWARD` / `MAJORITY`, found back from each varied aircraft's event with
@@ -828,7 +827,8 @@ def stage_d() -> Stage:
     def shaped(context: Context, settings: MultiSettings) -> Prior:
         """The model of stage D's shape, with the token part (its weights at zero): from the base (D200), the base
         with zero-output traffic modules of the campaign's seed and traffic shape (`post_train.traffic_model`); from a
-        round of stage C, stage C's start model of the source campaign's settings."""
+        round of stage C, stage C's start model of the source campaign's settings; from a round of stage D (D218), the
+        source campaign's own shape (its token part and module trained, its joint_heads this campaign's)."""
         if settings.start is None:
             model = traffic_model(context, settings.seed, TrafficConfig(settings.traffic_hidden, settings.traffic_heads))
         elif of_stage_d(REPO_ROOT / settings.start["campaign"]):         # D218: the source's own shape
@@ -874,7 +874,7 @@ def stage_d() -> Stage:
         if context.formal:
             require_finished(REPO_ROOT / settings.start["campaign"])
         model = shaped(context, settings)
-        model.load_state_dict({**model.state_dict(), **source.state_dict()})       # the round's, the token part at 0
+        model.load_state_dict({**model.state_dict(), **source.state_dict()})   # the round's (stage C: the token part at 0)
         started["identity"] = identity
         return model, optimizer_of(model, settings)
 
