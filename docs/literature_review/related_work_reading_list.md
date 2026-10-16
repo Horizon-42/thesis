@@ -1,7 +1,7 @@
 # Related Work 论文清单
 
 依据：`docs/Final Proposal.md`（物理约束的生成式 4D 进近航迹预测：控制参数生成 → 可微运动学 → 可微惩罚约束 → 多机协调；对比三类基线；三个评价维度）。
-范围：优先选仓库中**已有**的论文，共 53 篇（其中 IPOPT 与 CasADi 两篇是这次下载补入的；ICAO Doc 9854、Doc 4444 放在 `docs/literature/aviation/`）。2.1、2.4–2.8 的路径相对于 `docs/literature/`（PDF 不入 git，缺失时跑对应文件夹的 `download.sh`）；**2.2、2.3 新增的路径相对于仓库根目录**（它们在 `aerodynamic_model/docs/`、`4dTrajectory/docs/`、`docs/literature/` 下，此前没有纳入清单）。
+范围：优先选仓库中**已有**的论文，共 54 篇（其中 IPOPT 与 CasADi 两篇是这次下载补入的；ICAO Doc 9854、Doc 4444 放在 `docs/literature/aviation/`）。2.1、2.4–2.8 的路径相对于 `docs/literature/`（PDF 不入 git，缺失时跑对应文件夹的 `download.sh`）；**2.2、2.3 新增的路径相对于仓库根目录**（它们在 `aerodynamic_model/docs/`、`4dTrajectory/docs/`、`docs/literature/` 下，此前没有纳入清单）。
 ★ = 必引；其余为择引。
 
 **引用来源说明**：作者、标题以 PDF 首页为准；会议/期刊、卷期页码、DOI 用 Crossref 或出版社页面核对过，或摘自各文件夹 README 里已核对的条目。有几篇仓库里的 PDF 是预印本，而我引用的是发表版（Fioretto、BarrierNet、Jung 等），已在 `.bib` 的 `note` 里写明。
@@ -93,6 +93,7 @@ Final Proposal 的基线类别 1 是"传统优化方法"，而本仓库的 `4dTr
 | | ICAO, *Doc 9854, Global Air Traffic Management Operational Concept*, AN/458, First Edition, 2005 | `docs/literature/aviation/doc-9854-global-atm-ops-concept.pdf` | 择引：全球 ATM 运行概念，给"战术阶段修正计划"一类运行背景提供官方出处；它不是方法论文，只用于界定运行场景 |
 | | ICAO, *Doc 4444, Procedures for Air Navigation Services — Air Traffic Management (PANS-ATM)*, AN/501, Sixteenth Edition, 2016 | `docs/literature/aviation/doc-4444-pans-atm-16ed-2016.pdf` | 择引：ATC 程序与间隔规定的官方出处（雷达间隔、尾流间隔、雷达引导与进近排序等），为"间隔评价"与"ATC 指令"一类运行约束提供依据；它不是方法论文。PDF 为 16 版原文（瑞士 BAZL 托管），不含其后各修订（Amendment） |
 | | G. Enea, M. Porretta, "A Comparison of 4D-Trajectory Operations Envisioned for NextGen and SESAR, Some Preliminary Findings," *Proc. ICAS 2012*（国际航空科学理事会会议；出处取自 PDF 末页版权声明，页码和地点 PDF 未印） | `docs/literature/aviation/tbo/comparsion of nextgen and sesar.pdf` | 择引：美国 NextGen 与欧洲 SESAR 对 4D 基于轨迹运行（TBO）的构想、支持技术和人在回路仿真的对比，为"4D 轨迹"这一运行背景提供出处；它不是方法论文，只用于界定运行场景。`.bib` 键 `enea2012nextgensesar4d` |
+| | FAA, *NextGen Final Report, 2025*, Federal Aviation Administration, 2025（封面只印 2025；PDF 创建于 2026-01-07） | `docs/literature/aviation/tbo/FAA_NextGen_Final_Report_2025.pdf` | 择引：FAA 对 NextGen 21 年工作的官方总结，把 TBO 和先进空中交通（AAM）列为后续方向，给"NextGen 之后的 TBO"这一运行背景提供出处；它不是方法论文，也没有给出 TBO 的新定义。`.bib` 键 `faa2025nextgenfinal` |
 | | 到达排序的经典：Erzberger & Itoh 2014、Lee & Balakrishnan 2008 | 见 2.6 | 优化类到达调度基线 |
 
 > **空白**：优化法能保证动力学与约束，但逐架求解、对终端区密集流量代价高，且不学习历史数据中的运行模式；预测类模型则相反。本文要把两者结合（见 Proposal 第 3 段）。
