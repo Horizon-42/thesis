@@ -14,7 +14,7 @@
  *  • the CLOSED-LOOP sentence at each row interval Δ (`vocabulary.rowIntervalsS`): the words the closed-loop reading
  *    says to the executor from the first predicted step on, one Δ row apart, a word the reading ADDED marked
  *    (`correction`), with the states the executor flew — observed before the first predicted step, flown from it — and
- *    the judge's outcome, the threshold crossing and the decision-altitude (DA) check.
+ *    the judge's outcome, the threshold crossing, the decision-altitude (DA) check and the evaluation's landing verdict.
  *
  * ONE CLOCK: flight time, seconds from the observed track's row 0. The closed-loop states are on the 2 s rows from the
  * sentence's `firstRow` (state row k is observed row `firstRow + k`); the first predicted step is state row `flownFromRow`;
@@ -43,8 +43,9 @@ export const TRAINING_INDEX_SCHEMA = "aeroviz-training-index-v3";
 export const TRAINING_INDEX_FILE = "index_v5.json";
 /** MIRROR of `SAMPLE_SCHEMA`: a set's sample (v11, D135: a flown sentence is the one block of every stage, its track
  *  unrounded, `parseFlownBlock`; v12, the angle and speed leads: the vocabulary's `angleLeadS` and `speedLeadS`, a tube and
- *  a speed span from their `firstRow`; an older set is refused by name). */
-export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v12";
+ *  a speed span from their `firstRow`; v13 (the user, 2026-10-12), a landing is the evaluation's verdict: the outcomes
+ *  `landed` / `landing_failed` and the crossing's `evaluation` beside its DA check; an older set is refused by name). */
+export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v13";
 /** MIRROR of `SET_KIND`: a stage-A set — flights read back through the closed loop. */
 export const TRAINING_SET_KIND = "closed-loop-readback";
 /** MIRROR of `instructions.spec.READING_RULE`: what a word MEANS, which no field can say. */
@@ -72,10 +73,13 @@ export const TRAINING_STRATA = ["straight-in", "vectored"] as const;
 export type TrainingStratum = (typeof TRAINING_STRATA)[number];
 /** MIRROR of `autopilot.judge.OUTCOMES`: how a flown flight ended. */
 export const TRAINING_OUTCOMES = [
-  "landed", "unstable_at_minimums", "crossed_too_high", "crossed_off_runway", "crossed_other_runway", "ground_contact",
-  "timeout", "dynamics_failure",
+  "landed", "landing_failed", "crossed_other_runway", "ground_contact", "timeout", "dynamics_failure",
 ] as const;
 export type TrainingOutcome = (typeof TRAINING_OUTCOMES)[number];
+/** MIRROR of `autopilot.judge.LANDING_GATES`: the gates of the evaluation's landing verdict, as its violations name
+ *  them. */
+export const TRAINING_LANDING_GATES = ["lateral", "vertical", "speed"] as const;
+export type TrainingLandingGate = (typeof TRAINING_LANDING_GATES)[number];
 /** MIRROR of `ts_transformer/experiments/post_window_loop.py` `LOST_SEPARATION`: a flight of a Training window of stage C
  *  (`trainingWindowSample.ts`) ended by its caller at a loss of separation — no judge's outcome. Stage A's reader never
  *  accepts it (its files hold the judge's outcomes only); the views draw it as an end. */
@@ -296,6 +300,22 @@ export interface TrainingDecision {
   passed: boolean;
 }
 
+/** The evaluation's verdict on an approach crossing (`judge.landing_verdict`; the user, 2026-10-12: a landing is the
+ *  evaluation package's verdict): pass or fail, the gates it failed, each value with its bounds. */
+export interface TrainingLandingEvaluation {
+  passed: boolean;
+  violations: TrainingLandingGate[];
+  /** The evaluation's cross-track offset (m) and its bound, half the runway's width. */
+  lateralM: number;
+  lateralBoundM: number;
+  /** Metres above LTP + TCH, and the bounds. */
+  verticalM: number;
+  verticalBoundsM: [number, number];
+  /** The airspeed (m/s) and the flown type's window. */
+  speedMps: number;
+  speedBoundsMps: [number, number];
+}
+
 export interface TrainingCrossing {
   /** Metres right of the centreline / above the threshold, at the crossing. */
   crossM: number;
@@ -303,8 +323,10 @@ export interface TrainingCrossing {
   /** The executor's cycle (fractional) from the first predicted step. */
   atCycle: number;
   runwayIndex: number;
-  /** null: no DA check (a crossing above the landing screen, or no DA point). */
+  /** null: no DA check (no DA point, or a crossing of another runway). A record: the outcome is the evaluation's. */
   decision: TrainingDecision | null;
+  /** The evaluation's verdict, the outcome's (null: a crossing of another runway, no landing to judge). */
+  evaluation: TrainingLandingEvaluation | null;
 }
 
 export interface TrainingReplay {
@@ -908,12 +930,29 @@ function parseDecision(reader: Reader): TrainingDecision {
   };
 }
 
-/** A threshold crossing and its decision-altitude check, as the export and the live answer write them. */
+function parseLandingEvaluation(reader: Reader): TrainingLandingEvaluation {
+  const passed = reader.oneOf("verdict", ["pass", "fail"] as const) === "pass";
+  const violations = reader.strings("violations").map((name) => {
+    if (!(TRAINING_LANDING_GATES as readonly string[]).includes(name)) reader.fail(`a violation "${name}" is no gate`);
+    return name as TrainingLandingGate;
+  });
+  if (passed !== (violations.length === 0)) reader.fail(`a ${passed ? "pass" : "fail"} with ${violations.length} gates failed`);
+  return {
+    passed, violations, lateralM: reader.number("lateralM"), lateralBoundM: reader.number("lateralBoundM"),
+    verticalM: reader.number("verticalM"), verticalBoundsM: reader.range("verticalBoundsM"),
+    speedMps: reader.number("speedMps"), speedBoundsMps: reader.range("speedBoundsMps"),
+  };
+}
+
+/** A threshold crossing, its decision-altitude check and the evaluation's verdict on it, as the export and the live
+ *  answer write them. */
 export function readCrossing(reader: Reader, candidateCount: number): TrainingCrossing {
   const decision = reader.nullableChild("decision");
+  const evaluation = reader.nullableChild("evaluation");
   return {
     crossM: reader.number("crossM"), heightM: reader.number("heightM"), atCycle: reader.number("atCycle"),
     runwayIndex: reader.integer("runwayIndex", 0, candidateCount - 1), decision: decision === null ? null : parseDecision(decision),
+    evaluation: evaluation === null ? null : parseLandingEvaluation(evaluation),
   };
 }
 
@@ -931,7 +970,7 @@ function requireWithin(reader: Reader, envelopes: TrainingEnvelopes, rows: numbe
 }
 
 /** The block of a sentence the executor flew, in every stage (D135, outline §6.2 item 7; the export's `flown_sentence`):
- *  its outcome and end cycle, the threshold crossing with its DA check, the flight to its outcome on the 2 s rows from the
+ *  its outcome and end cycle, the threshold crossing with its DA check and the evaluation's verdict, the flight to its outcome on the 2 s rows from the
  *  first predicted step (unrounded, with its attitude) and the judge's envelopes of its words on it. A stage's reader adds
  *  its own fields. */
 export interface TrainingFlownBlock {

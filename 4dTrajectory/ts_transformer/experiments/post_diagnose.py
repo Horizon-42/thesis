@@ -59,18 +59,21 @@ from ts_transformer.experiments.post_train import (
 )
 from ts_transformer.experiments.post_window_loop import LOST_SEPARATION, WindowResult, checked_edges
 from ts_transformer.inference.runway_schedule import Separation
+from ts_transformer.instructions.artefact import load_day_split
+from ts_transformer.instructions.labeller.interval import OBSERVATION_S
 from ts_transformer.instructions.words import RUNWAY
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.post.branches import BRANCH_EVERY_S, branch_rows
 from ts_transformer.post.landings import roster_key, window_landings
 from ts_transformer.post.reward import LANDED
 from ts_transformer.post.runways import approach_clock_m
-from ts_transformer.post.scene import AircraftAt, Window
+from ts_transformer.post.scene import AircraftAt, Recorded, Window
 from ts_transformer.post.traffic import commanded_loss, joined, traffic
 from ts_transformer.post.traffic_attention import traffic_modules
 from ts_transformer.prior.landings import LandingIndex
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.procedure import Final
+from ts_transformer.prior.source import airport_landings
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 #: The format of the readout's files.
@@ -79,8 +82,9 @@ DIAGNOSE_SCHEMA = "ts-post-diagnose-v1"
 SPLIT = "select"
 #: The two reads of a model (module docstring).
 ON, OFF = "on", "off"
-#: Field 1 (D175): the other aircraft of a loss.
-NO_LANDING, LEADER, FOLLOWER, OTHER_RUNWAY = "no_landing", "leader", "follower", "other_runway"
+#: Field 1 (D175): the other aircraft of a loss; `COMMANDED` only in a window of several commanded aircraft (stage D,
+#: multi-aircraft control D211), where the other aircraft is commanded too.
+NO_LANDING, LEADER, FOLLOWER, OTHER_RUNWAY, COMMANDED = "no_landing", "leader", "follower", "other_runway", "commanded"
 OTHER_CLASSES = (NO_LANDING, LEADER, FOLLOWER, OTHER_RUNWAY)
 #: Field 2: the commanded aircraft's distance to its threshold at the loss, km (a value on an edge: the upper bin).
 DISTANCE_EDGES_KM = (10.0, 20.0, 40.0)
@@ -125,18 +129,21 @@ def runway_at_loss(result: WindowResult) -> int:
 
 
 def state_at(result: WindowResult, step: int, every: int) -> np.ndarray:
-    """``[3]`` the commanded aircraft's e, n and MSL height at the window's step ``step`` (its 2 s rows from row 0,
-    ``every`` rows a step)."""
+    """``[3]`` the commanded aircraft's e, n and MSL height at its own Δ row ``step`` (its 2 s rows from its own row 0,
+    ``every`` rows a step; stage C's commanded aircraft: the window's step)."""
     return np.asarray(result.states[step * every, :3], dtype=np.float64)
 
 
 def other_class(window: Window, other: str, runway_index: int, at: np.ndarray, time_s: float, separation: Separation,
                 landings: LandingIndex) -> str:
-    """Field 1 (D175): `NO_LANDING` when the window's landings (D105) hold none of the other aircraft ``other``; else
-    `LEADER` or `FOLLOWER` when it lands on the commanded aircraft's runway ``runway_index`` or on one separated as one
+    """Field 1 (D175): `COMMANDED` when ``other`` is a commanded aircraft of the window (stage D, D211); else
+    `NO_LANDING` when the window's landings (D105) hold none of the other aircraft ``other``; else `LEADER` or
+    `FOLLOWER` when it lands on the commanded aircraft's runway ``runway_index`` or on one separated as one
     (`Separation.one_runway`), ahead of it or behind it on the approach clock at ``time_s`` (the commanded aircraft at
     ``at``); else `OTHER_RUNWAY`."""
     geometry = window.scene.geometry
+    if other in {record.key for record in window.commanded_all}:
+        return COMMANDED
     if roster_key(other, geometry.code) not in {landing.flight_key for landing in landings.landings}:
         return NO_LANDING
     record = window.scene.flight(other)
@@ -148,18 +155,20 @@ def other_class(window: Window, other: str, runway_index: int, at: np.ndarray, t
     return LEADER if theirs > mine else FOLLOWER
 
 
-def straight_line_loss(window: Window, other: str, runway_index: int, at: np.ndarray, velocity: np.ndarray, steps: int,
-                       separation: Separation, finals: Sequence[Final], step_s: float) -> bool:
-    """Field 4 (D175): whether the commanded aircraft, moved from ``at`` (its e, n and height at its first predicted
-    step) along a straight line at ``velocity`` (m/s, the same three) with its runway ``runway_index`` in force, loses
-    separation from the other aircraft ``other`` flying its record (as the loop flies it) at one of the window's next
-    ``steps`` Δ rows: the one judge (`post.traffic`, VISUAL) at each, a loss the commanded aircraft answers for, as the
-    loop's event. A row after the other aircraft's last is not judged (it no longer counts)."""
+def straight_line_loss(window: Window, own: Recorded, other: str, runway_index: int, at: np.ndarray,
+                       velocity: np.ndarray, steps: int, separation: Separation, finals: Sequence[Final],
+                       step_s: float) -> bool:
+    """Field 4 (D175): whether the commanded aircraft ``own``, moved from ``at`` (its e, n and height at its first
+    predicted step) along a straight line at ``velocity`` (m/s, the same three) with its runway ``runway_index`` in
+    force, loses separation from the recorded aircraft ``other`` flying its record (as the loop flies it) at one of the
+    window's next ``steps`` Δ rows after that step: the one judge (`post.traffic`, VISUAL) at each, a loss the commanded
+    aircraft answers for, as the loop's event. A row after the other aircraft's last is not judged (it no longer
+    counts)."""
     interval = window.scene.interval_s
-    record, own = window.scene.flight(other), window.commanded
+    record = window.scene.flight(other)
     geometry = window.scene.geometry
     for k in range(1, steps + 1):
-        time_s = window.first_step_s + k * interval
+        time_s = own.first_step_s + k * interval
         if not record.start_s <= time_s <= record.end_s:
             continue
         here = at + velocity * (k * interval)
@@ -172,28 +181,34 @@ def straight_line_loss(window: Window, other: str, runway_index: int, at: np.nda
     return False
 
 
-def loss_fields(window: Window, result: WindowResult, separation: Separation, finals: Sequence[Final],
+def loss_fields(window: Window, member: int, result: WindowResult, separation: Separation, finals: Sequence[Final],
                 landings: LandingIndex, step_s: float, lost_every_draw: bool | None) -> dict[str, Any]:
-    """The five fields of a window that lost separation (module docstring); field 5 only where it is known — the
-    window's ceiling draws, which read the round with its traffic on, attached to the window's loss in either read."""
+    """The five fields of a commanded aircraft that lost separation (module docstring): ``window``'s commanded aircraft
+    ``member`` (`Window.commanded_all`; stage C's only one is 0), its end ``result`` (``loss_step`` on the window's
+    steps, its states on the 2 s rows from its own row 0). Field 4 only against a recorded aircraft: a commanded one
+    flies its words, not its record (stage D, D211). Field 5 only where it is known — the window's ceiling draws, which
+    read the round with its traffic on, attached to the window's loss in either read."""
     interval = window.scene.interval_s
     every = int(round(interval / step_s))
-    first = int(round((window.first_step_s - window.row0_s) / interval))
+    own = window.commanded_all[member]
+    first = int(round(OBSERVATION_S / interval))                   # its first predicted step on its own Δ rows
+    loss = result.loss_step - int(window.join_steps()[member])    # the loss on its own Δ rows
     runway = runway_at_loss(result)
-    at = state_at(result, result.loss_step, every)
+    at = state_at(result, loss, every)
     time_s = window.step_s(result.loss_step)
     threshold = window.scene.geometry.candidates[runway]
     distance_km = math.hypot(at[0] - threshold.threshold_e_m, at[1] - threshold.threshold_n_m) / 1000.0
-    after_s = time_s - window.first_step_s
-    start = state_at(result, first, every)
-    velocity = (start - np.asarray(result.states[first * every - 1, :3], dtype=np.float64)) / step_s
-    steps = min(result.loss_step - first, branch_rows(interval, STRAIGHT_LINE_S))
+    after_s = time_s - own.first_step_s
     out = {"other_class": other_class(window, result.other, runway, at, time_s, separation, landings),
            "runway": window.scene.geometry.candidates[runway].ident,
            "distance_km": distance_km, "distance_bin": bin_of(distance_km, DISTANCE_EDGES_KM, DISTANCE_BINS),
-           "after_first_step_s": after_s, "time_bin": bin_of(after_s, TIME_EDGES_S, TIME_BINS),
-           "start_conflict": straight_line_loss(window, result.other, runway, start, velocity, steps, separation,
-                                                finals, step_s)}
+           "after_first_step_s": after_s, "time_bin": bin_of(after_s, TIME_EDGES_S, TIME_BINS)}
+    if out["other_class"] != COMMANDED:
+        start = state_at(result, first, every)
+        velocity = (start - np.asarray(result.states[first * every - 1, :3], dtype=np.float64)) / step_s
+        steps = min(loss - first, branch_rows(interval, STRAIGHT_LINE_S))
+        out["start_conflict"] = straight_line_loss(window, own, result.other, runway, start, velocity, steps,
+                                                   separation, finals, step_s)
     if lost_every_draw is not None:
         out["lost_every_draw"] = lost_every_draw
     return out
@@ -248,9 +263,10 @@ def paired(codes: Sequence[str], a: tuple[Sequence[str], Sequence[float]], b: tu
             "airports": {code: part(codes_ == code) for code in sorted(set(codes))}}
 
 
-def failures(lines: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """Each field's counts and shares over the lines of windows lost to separation, in all and by airport."""
-    fields = {"other_class": OTHER_CLASSES, "distance_bin": DISTANCE_BINS, "time_bin": TIME_BINS,
+def failures(lines: Sequence[Mapping[str, Any]], other_classes: Sequence[str]) -> dict[str, Any]:
+    """Each field's counts and shares over the lines lost to separation, in all and by airport; field 1 counted over
+    ``other_classes``."""
+    fields = {"other_class": other_classes, "distance_bin": DISTANCE_BINS, "time_bin": TIME_BINS,
               "start_conflict": (True, False), "lost_every_draw": (True, False)}
 
     def part(mine: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
@@ -345,6 +361,8 @@ def main(argv: list[str] | None = None) -> int:
                                          gpu_squares=0), args.speak_workers, device)
                 if args.speak_workers > 1 else None)
     context = replace(context, device=device, base=context.base.to(device).eval())
+    # each airport's roster landings, for field 1's window landings (D105, D175): this readout alone reads them
+    rosters = airport_landings(context.geometries, load_day_split(instructions))
     windows = selection_windows(context, settings, SPLIT)
     places = batches(windows, settings.batch_windows)
     start = round_draws = None
@@ -399,8 +417,8 @@ def main(argv: list[str] | None = None) -> int:
                 if result.outcome == LOST_SEPARATION:
                     code = window.scene.geometry.code
                     line["fields"] = loss_fields(
-                        window, result, separations[code], context.finals[code],
-                        window_landings(window, context.rosters[code]), step_s,
+                        window, 0, result, separations[code], context.finals[code],
+                        window_landings(window, rosters[code]), step_s,
                         None if round_draws is None else round_draws[2][place])
                 lines[read].append(line)
             with open(out / "per_window.jsonl", "a", encoding="utf-8") as f:
@@ -419,7 +437,7 @@ def main(argv: list[str] | None = None) -> int:
         "schema": DIAGNOSE_SCHEMA, "written_utc": utc_now(), "round": args.round,
         "reads": {name: reading(codes, *values) for name, values in reads.items()},
         "differences": {f"{a}-{b}": paired(codes, reads[a], reads[b], rng) for a, b in pairs}})
-    write_json_atomic(out / "failures.json", {"schema": DIAGNOSE_SCHEMA, **{read: failures(lines[read])
+    write_json_atomic(out / "failures.json", {"schema": DIAGNOSE_SCHEMA, **{read: failures(lines[read], OTHER_CLASSES)
                                                                            for read in (ON, OFF)}})
     log({"written": "summary.json, failures.json"})
     seal(out)

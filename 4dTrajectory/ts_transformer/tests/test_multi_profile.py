@@ -91,11 +91,13 @@ def test_the_runner_measures_its_worker_on_the_speaking_device(tmp_path, monkeyp
     class FakeContext:
         device: torch.device
         base: SimpleNamespace
+        interval_s: float = 4.0
 
     base = SimpleNamespace(to=lambda device: base, eval=lambda: base)    # no CUDA touched
     calls = []
-    monkeypatch.setattr(multi_profile, "start_of", lambda source, round_, formal: {"campaign": "c", "round": 0,
-                                                                                  "checkpoint_sha256": "0" * 64})
+    monkeypatch.setattr(multi_train, "of_stage_d", lambda source: False)       # a source of stage C
+    monkeypatch.setattr(multi_train, "start_of", lambda source, round_, formal: {"campaign": "c", "round": 0,
+                                                                                "checkpoint_sha256": "0" * 64})
     monkeypatch.setattr(multi_profile, "git_state", lambda: {"head": "x", "dirty": False})
     monkeypatch.setattr(multi_profile, "require_conforming_closed_loop", lambda i, e: (None, {"checks": {}}, None))
     monkeypatch.setattr(multi_profile, "checked_edges", lambda reference: None)

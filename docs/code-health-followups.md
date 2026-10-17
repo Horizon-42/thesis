@@ -147,6 +147,7 @@ added three entries (the rows after the performance index's).
 | Two runway ends on one centreline halve the landing screen to float noise (2026-10-05) | open | compare the across-course spacing with a tolerance in `landing_cross_limit_m` and its harvest original, together | yes: the candidates' landing screens (a rebuild); none of the five airports has such a pair today (not checked on every end) |
 | `post_profile`'s `executor_step` part reads 0.0 s (2026-10-09) | open | the part's match finds no `autopilot/start.py` `step` in the stats; C8 is finished and runs no more, so no code change (multi-aircraft control D181) | no: a finished readout's report only |
 | A stage D window's identity written twice (2026-10-12) | resolved | fixed on `dev-export-identity` (2026-10-12): `STAGE_D.identity` is `partial(identity_of, "D")` (`post.window_lists`); checked on round 7's list of the formal campaign: the same 453 windows; entry removed | — |
+| Six ts tests fail at two-tier2 `c0c8520a` / `7bcd08ed` (2026-10-16, 10-17) | open | five frontend fixtures and stage C's skeleton digests are not what the code writes now; cause not traced | yes: the digests pin stage C's campaign |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
 the executor `autopilot/` and its replay, `prior_train` / `prior_select` / `prior_free_generation`, the land-by-reward
@@ -788,3 +789,21 @@ names `("autopilot/start.py", "step")` and `part_times` takes the largest cumula
 **Judgement**: the cause is not traced (the match's file or name as cProfile records it). C8 is finished and its
 profile runs no more, so the code stays as it is (D181); its numbers read without that part. Stage D's speed is measured
 by `experiments/multi_speed.py` (D181 (56)), which times the executor between two synchronisations instead.
+
+## Six ts tests fail at two-tier2 `c0c8520a` / `7bcd08ed` (2026-10-16, 10-17)
+
+**Verified** (found by D217's test run; the same failures, the same digests, in a checkout at `c0c8520a`, the commit
+before D217): `test_post_training_export.py::test_the_frontend_fixtures_are_what_the_export_writes` and
+`::test_a_listed_set_flies_each_window_as_its_selection_readout_did` (the fixtures `stage_c/index_post_v4.json`,
+`stage_c_listed/index_post_v4.json`, `stage_d/index_multi_v2.json` are not what the export writes),
+`test_post_generalised.py::test_stage_cs_campaign_is_the_campaign_before_the_skeleton_bit_for_bit` (the `campaign
+drawn` and `campaign updated` digests differ), and the known
+`test_multi_training_export.py::test_stage_d_s_set_holds_the_answered_losses_and_every_other_one_dashed`.
+**Judgement**: the cause is not traced; the fixtures' differing text names the artefact formats (closed-loop v11,
+candidates v5, executor spec v11), so a format change after the fixtures were written is likely. Regenerating a fixture
+(`AEROVIZ_WRITE_FIXTURES=1`) or a digest is the user's decision.
+**Verified 2026-10-17** (D220's test run; the same failures in a checkout at `7bcd08ed`, the commit before D220, and
+the skeleton digests also at `1d4c65b2~1`, before D219): two more fixtures fail the same way,
+`test_training_export.py::test_the_frontend_fixtures_are_what_the_export_writes` (`stage_a/index_v5.json`: it names
+`ts-instruction-closed-loop-v10`, the export writes v11) and
+`test_prior_training_export.py::test_the_frontend_fixtures_are_what_the_export_writes` (`stage_b/index_prior_v3.json`).

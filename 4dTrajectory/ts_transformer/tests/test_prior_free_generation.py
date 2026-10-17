@@ -11,10 +11,10 @@ from flight_scenarios.fas_geometry import fas_course_geometry
 from ts_transformer.autopilot.start import NO_MOVE, start_moved
 from ts_transformer.experiments.prior_free_generation import speak_and_fly
 from ts_transformer.experiments.prior_speaking_loop import flight_numbers
-from ts_transformer.instructions.artefact import load_candidates, load_day_split, signals_flights
+from ts_transformer.instructions.artefact import load_candidates, signals_flights
 from ts_transformer.instructions.grammar import apply
 from ts_transformer.instructions.words import COLUMNS, UNCHANGED
-from ts_transformer.prior.landings import Landing, LandingIndex, utc_s
+from ts_transformer.prior.landings import utc_s
 from ts_transformer.prior.model import Prior, PriorConfig
 from ts_transformer.prior.procedure import Final
 from ts_transformer.prior.speaker import MOST_GO_AROUNDS
@@ -43,16 +43,9 @@ def generate(tmp_path, monkeypatch, *, interval_s=4.0, seed=0, most=MOST_GO_AROU
     record = signals_flights(directory, "train")[0]
     geometry = geometries[record["airport"]]
     flights = {0: real_key(record, geometry.candidates[0].ident, record["landing_time_utc"])}
-    landing = utc_s(flights[0]["landing_time_utc"])
-    key = flights[0]["dataset_id"].split(":", 1)[1]
-    entry = utc_s(flights[0]["entry_time_utc"])
-    landings = {geometry.code: LandingIndex(tuple(c.ident for c in geometry.candidates),
-                                            (Landing(entry + 30.0, geometry.candidates[0].ident, "OTHER"),
-                                             Landing(landing, geometry.candidates[0].ident, key)), 0,
-                                            load_day_split(directory))}
     if spy is not None:
-        spy.update(flights=flights, geometry=geometry, landings=landings, stored=stored, words=words, batch=batch,
-                   directory=directory, observed=observed)
+        spy.update(flights=flights, geometry=geometry, stored=stored, words=words, batch=batch, directory=directory,
+                   observed=observed)
     finals = {geometry.code: tuple(Final(geometry, k, 9_000.0, fas_course_geometry(c.length_m))
                                    for k, c in enumerate(geometry.candidates))}
     torch.manual_seed(0)
@@ -60,8 +53,8 @@ def generate(tmp_path, monkeypatch, *, interval_s=4.0, seed=0, most=MOST_GO_AROU
     if speaking:
         from ts_transformer.experiments.prior_speaking_loop import SpeakingLoop
 
-        loop_ = SpeakingLoop(model, loop, order, {0: stored}, observed, flights, geometries, [landings[geometry.code]], finals,
-                             words, interval_s=interval_s, variant="full", device=CPU)
+        loop_ = SpeakingLoop(model, loop, order, {0: stored}, observed, flights, geometries, finals, words,
+                             interval_s=interval_s, variant="full", device=CPU)
         numbers = flight_numbers(seed, 0, 0)
         while loop_.observing:
             loop_.observe()
@@ -70,7 +63,7 @@ def generate(tmp_path, monkeypatch, *, interval_s=4.0, seed=0, most=MOST_GO_AROU
         while loop_.alive.any():
             loop_.step(numbers.random((1, len(COLUMNS))))
         return loop_, model
-    (generated,) = speak_and_fly(model, loop, order, {0: stored}, observed, flights, geometries, landings, finals, words,
+    (generated,) = speak_and_fly(model, loop, order, {0: stored}, observed, flights, geometries, finals, words,
                                  interval_s=interval_s, variant="full", numbers=[flight_numbers(seed, 0, 0)],
                                  device=CPU)
     return generated, stored, words, geometry
@@ -136,7 +129,7 @@ def test_the_readout_by_airport_and_stratum():
 def test_the_loop_gives_the_speaker_the_rows_the_sentence_gives(tmp_path, monkeypatch, interval_s):
     """§7 item 2: every row the loop gives the speaker — observed and flown — is, bit for bit, the row `sentence_rows`
     gives the sentence it said, read back from the flight's words and states: the time, the motion from the 2 s row
-    before, the landings at the row's UTC, the words in force, the first predicted step."""
+    before, the words in force, the first predicted step."""
     from dataclasses import replace
 
     from ts_transformer.instructions.labeller.interval import on_interval_rows
@@ -163,10 +156,9 @@ def test_the_loop_gives_the_speaker_the_rows_the_sentence_gives(tmp_path, monkey
     count = (stored.rows.start + len(generated.words) - 1) * every + 1
     sentence = replace(stored.rows, grid=generated.words.astype(np.int16), states=generated.states[:count],
                        on_interval=on_interval_rows(count, every))
-    expected = collate([sentence_rows(sentence, spy["flights"][0], geometry, spy["landings"][geometry.code], words,
-                                      interval_s=interval_s, split="train", variant="full")], CPU)
+    expected = collate([sentence_rows(sentence, spy["flights"][0], geometry, words, interval_s=interval_s,
+                                      split="train", variant="full")], CPU)
     assert len(rows) == stored.rows.start + len(generated.words)
-    assert expected.candidates[..., 6].abs().sum() > 0                  # a landing counted: the UTC times are read
     for r, row in enumerate(rows):
         for name in row._fields:
             if name != "targets":
@@ -214,10 +206,6 @@ def test_flights_done_at_different_rows_end_apart_and_never_feed_a_state_that_is
     flights = {0: record, 1: {**record, "dataset_id": record["dataset_id"] + "B"}}
     geometries = load_candidates(directory)
     geometry = geometries[record["airport"]]
-    keys = [flights[i]["dataset_id"].split(":", 1)[1] for i in (0, 1)]
-    landings = {geometry.code: LandingIndex(tuple(c.ident for c in geometry.candidates),
-                                            tuple(Landing(utc_s(record["landing_time_utc"]) + k, "09", key)
-                                                  for k, key in enumerate(keys)), 0, load_day_split(directory))}
     finals = {geometry.code: tuple(Final(geometry, k, 9_000.0, fas_course_geometry(c.length_m))
                                    for k, c in enumerate(geometry.candidates))}
     first = stored.rows.states[stored.rows.start * 2]
@@ -243,8 +231,7 @@ def test_flights_done_at_different_rows_end_apart_and_never_feed_a_state_that_is
     model = Prior(PriorConfig.from_words(words, "full", d_model=32, layers=1, heads=4, feedforward=64)).eval()
     observed = stored.rows.states[: stored.rows.start * 2]
     a, b = speak_and_fly(model, loop, [0, 1], {0: stored, 1: stored}, {0: observed, 1: observed}, flights, geometries,
-                         landings, finals, words,
-                         interval_s=4.0, variant="full",
+                         finals, words, interval_s=4.0, variant="full",
                          numbers=[flight_numbers(1, 0, i) for i in (0, 1)], device=CPU)
     assert (len(a.words), len(b.words)) == (3, 6)
     # its own words' go-arounds, none of those said after it was done
@@ -255,10 +242,10 @@ def test_flights_done_at_different_rows_end_apart_and_never_feed_a_state_that_is
 
 
 def test_the_runner_writes_its_sentences_and_readout(tmp_path, monkeypatch, capsys):
-    """`main` on A26's synthetic artefact: every live root replaced (the landings, the CIFP finals and digests, the
-    closed-loop check, the identity of a one-split artefact), a prior written as `prior_train` writes one; two samples of
-    the one flight, the files read back. The flight's stored outcome is set to a landing and its generated ones are
-    not: the readout puts it inside the prior's selection by the stored outcome (D75)."""
+    """`main` on A26's synthetic artefact: every live root replaced (the CIFP finals and digests, the closed-loop
+    check), a prior written as `prior_train` writes one; two samples of the one flight, the files read back. The
+    flight's stored outcome is set to a landing and its generated ones are not: the readout puts it inside the prior's
+    selection by the stored outcome (D75)."""
     import dataclasses
     import json
 
@@ -267,20 +254,16 @@ def test_the_runner_writes_its_sentences_and_readout(tmp_path, monkeypatch, caps
     from ts_transformer.prior import checkpoint as opening
     from ts_transformer.prior.checkpoint import CHECKPOINT_SCHEMA, save_checkpoint
     from ts_transformer.prior.procedure import PROCEDURE_MASKS
+    from ts_transformer.prior.source import opening_identity
 
     directory, words, _, stored, _ = test_start._artefact(tmp_path, monkeypatch, 4.0)
     flight = signals_flights(directory, "train")[0]
     geometry = load_candidates(directory)[flight["airport"]]
-    landings = {geometry.code: LandingIndex(tuple(c.ident for c in geometry.candidates),
-                                            (Landing(utc_s(flight["landing_time_utc"]), geometry.candidates[0].ident,
-                                                     flight["dataset_id"].split(":", 1)[1]),), 0,
-                                            load_day_split(directory))}
-    identity = {"row_interval_s": 4.0, "artefact": "synthetic", "selection": {"rule": "landed", "counts": {}}}
+    # a one-split artefact: the identity a checkpoint opens on, and no sentence file's sha256 or count (D63)
+    identity = {**opening_identity(directory, 4.0, "landed"), "selection": {"rule": "landed", "counts": {}}}
     digests = {geometry.code: {c.ident: "0" * 64 for c in geometry.candidates}}
     checked = []
     # the prior opens through `checkpoint.open_prior`: its live roots replaced there
-    monkeypatch.setattr(opening, "airport_landings", lambda geometries, days: landings)
-    monkeypatch.setattr(opening, "artefact_identity", lambda d, interval, given, rule, counted: identity)
     monkeypatch.setattr(runner, "require_conforming_closed_loop", lambda *given: checked.append(given) or (None, {"checks": {"stub": True}}, None))
     monkeypatch.setattr(opening, "procedure_digests", lambda geometries, root: digests)
     read = runner.closed_loop_sentences
@@ -303,6 +286,18 @@ def test_the_runner_writes_its_sentences_and_readout(tmp_path, monkeypatch, caps
             "--split", "train", "--per-airport", "1", "--samples", "2", "--device", "cpu", "--out", str(out), "--smoke"]
     assert runner.main(argv) == 0
     assert checked == [(directory, tmp_path / "executor")]
+    # a step started early (`--gate`): its checks first, then its turn, before the prior run is read; at its turn it
+    # gives what a step started at its turn gives
+    import io
+
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    with pytest.raises(SystemExit, match="stopped before this step's turn"):
+        runner.main(["--prior", str(tmp_path / "none"), *argv[2:-3], "--out", str(tmp_path / "early"), "--smoke", "--gate"])
+    assert len(checked) == 2 and not (tmp_path / "early").exists()
+    monkeypatch.setattr("sys.stdin", io.StringIO("go\n"))
+    assert runner.main([*argv[:-3], "--out", str(tmp_path / "early"), "--smoke", "--gate"]) == 0
+    with np.load(out / "sentences.npz") as now, np.load(tmp_path / "early" / "sentences.npz") as early:
+        assert all(np.array_equal(now[key], early[key]) for key in now.files)
     # D119: the options are checked before the val read is claimed — an airport not of the artefact claims nothing
     monkeypatch.setattr(runner, "git_state", lambda: {"head": "test", "dirty": False})
     (tmp_path / "stopped").mkdir()                       # what a run stopped while writing leaves (D119)
@@ -432,7 +427,7 @@ def test_the_rows_a_loop_said_and_its_records_give_the_probabilities_the_speaker
     from ts_transformer.prior.speaker import Permitted
     from ts_transformer.prior.train import masked_log_probability
 
-    loops = [generate(tmp_path / str(seed), monkeypatch, seed=seed, speaking=True) for seed in (0, 5)]
+    loops = [generate(tmp_path / str(seed), monkeypatch, seed=seed, speaking=True) for seed in (0, 9)]
     model = loops[0][1]
     lengths = [len(loop.speaker.drawn_probability) for loop, _ in loops]
     assert lengths[0] != lengths[1]                       # the join pads a shorter record
@@ -516,8 +511,8 @@ def fly_changed(tmp_path, monkeypatch, interval_s, *, signals_after=False, limit
         monkeypatch.setattr(start_module, "load_signals", signals)
         monkeypatch.setattr(start_module, "flight_inputs", lambda series, flights, anchors, airports, rule, device:
                             executor_inputs(flights[0], geometry, anchors[0], rule=rule))
-        monkeypatch.setattr(start_module, "Loop", lambda inputs, geometries, ias, limits, *a, **k:
-                            loop_class(inputs, geometries, ias, [x * limit_factor for x in limits], *a, **k))
+        monkeypatch.setattr(start_module, "Loop", lambda inputs, geometries, ias, typecodes, limits, *a, **k:
+                            loop_class(inputs, geometries, ias, typecodes, [x * limit_factor for x in limits], *a, **k))
         return out
 
     monkeypatch.setattr(test_start, "_artefact", artefact)
@@ -549,10 +544,10 @@ def test_the_observed_samples_after_the_first_predicted_step_and_the_time_limit_
 @pytest.mark.parametrize("interval_s", [2.0, 4.0])
 @pytest.mark.parametrize("seed", [0, 3])
 def test_free_generation_reads_none_of_the_fields_it_must_not(tmp_path, monkeypatch, interval_s, seed):
-    """D82, D23, D63: the stored flown states after the first predicted step (moved by 5 km), the words and the
-    correction marks, every withheld field (vocabulary D82) — given to the start too —, the flight record's landing time
-    and runway with its key of the real format, and its own landing in the index (600 s earlier) change no word, state,
-    outcome or record of free generation."""
+    """D82, D23: the stored flown states after the first predicted step (moved by 5 km), the words and the correction
+    marks, every withheld field (vocabulary D82) — given to the start too —, and the flight record's landing time
+    (600 s earlier) and runway with its key of the real format change no word, state, outcome or record of free
+    generation."""
     import dataclasses
 
     spy = {}
@@ -571,16 +566,11 @@ def test_free_generation_reads_none_of_the_fields_it_must_not(tmp_path, monkeypa
         lateral_m=w.lateral_m + 1e3, vertical_m=w.vertical_m - 1e3, uncorrectable=~w.uncorrectable,
         observed_row=w.observed_row * 0, matched_row=w.matched_row * 0)
     perturbed = dataclasses.replace(stored, rows=rows, withheld=withheld)
-    index = spy["landings"][geometry.code]
     own = spy["flights"][0]["dataset_id"].split(":", 1)[1]
-    (landing,) = [x for x in index.landings if x.flight_key == own]
-    # its runway and landing time changed with its key (which holds both) and its own landing in the index
-    record = real_key(spy["flights"][0], "XX", f"{np.datetime64(int(landing.time_s - 600.0), 's')}Z")
-    new = record["dataset_id"].split(":", 1)[1]
-    assert new != own
-    moved = LandingIndex(index.runways, tuple(sorted(
-        (dataclasses.replace(x, time_s=x.time_s - 600.0, flight_key=new) if x.flight_key == own else x
-         for x in index.landings), key=lambda x: x.time_s)), index.sealed, index.days)
+    landing_s = utc_s(spy["flights"][0]["landing_time_utc"])
+    # its runway and landing time changed with its key (which holds both)
+    record = real_key(spy["flights"][0], "XX", f"{np.datetime64(int(landing_s - 600.0), 's')}Z")
+    assert record["dataset_id"].split(":", 1)[1] != own
     loop, order, observed = start_moved(spy["directory"], "train", interval_s, {0: perturbed},
                                         tmp_path / "a" / "executor", {0: NO_MOVE}, most_go_arounds=MOST_GO_AROUNDS,
                                         device=CPU)
@@ -589,7 +579,7 @@ def test_free_generation_reads_none_of_the_fields_it_must_not(tmp_path, monkeypa
     torch.manual_seed(0)
     model = Prior(PriorConfig.from_words(words, "full", d_model=32, layers=1, heads=4, feedforward=64)).eval()
     (b,) = speak_and_fly(model, loop, order, {0: perturbed}, observed, {0: record}, load_candidates(spy["directory"]),
-                         {geometry.code: moved}, finals, words, interval_s=interval_s, variant="full",
+                         finals, words, interval_s=interval_s, variant="full",
                          numbers=[flight_numbers(seed, 0, 0)], device=CPU)
     for name in ("words", "states", "go_around_probability", "go_around_permitted", "on_final"):
         assert np.array_equal(getattr(a, name), getattr(b, name)), name
@@ -607,15 +597,13 @@ def two_candidate_loop(tmp_path, monkeypatch, starts, ends):
     record = signals_flights(directory, "train")[0]
     geometry = parallel_airport()
     flights = {i: {**record, "airport": geometry.code, "dataset_id": f"{geometry.code}:F{i}"} for i in range(len(starts))}
-    landings = LandingIndex(tuple(c.ident for c in geometry.candidates),
-                            tuple(Landing(utc_s(record["landing_time_utc"]) + i, geometry.candidates[0].ident, f"F{i}")
-                                  for i in range(len(starts))), 0, load_day_split(directory))
     finals = {geometry.code: tuple(Final(geometry, k, 9_000.0, fas_course_geometry(c.length_m))
                                    for k, c in enumerate(geometry.candidates))}
     torch.manual_seed(0)
     model = Prior(PriorConfig.from_words(words, "full", d_model=32, layers=1, heads=4, feedforward=64)).eval()
     loop = SpeakingLoop(model, FakeLoop(starts, ends, 2, MOST_GO_AROUNDS), list(flights), {i: stored for i in flights},
-                        {i: stored.rows.states[: stored.rows.start * 2] for i in flights}, flights, {geometry.code: geometry}, [landings] * len(starts), finals, words, interval_s=4.0,
+                        {i: stored.rows.states[: stored.rows.start * 2] for i in flights}, flights,
+                        {geometry.code: geometry}, finals, words, interval_s=4.0,
                         variant="full", device=CPU)
     while loop.observing:
         loop.observe()
@@ -739,10 +727,10 @@ def test_a_moved_start_s_rows_reach_the_inputs_of_the_first_predicted_step(tmp_p
     torch.manual_seed(0)
     model = Prior(PriorConfig.from_words(words, "full", d_model=32, layers=1, heads=4, feedforward=64)).eval()
     speaking = SpeakingLoop(model, loop, order, {0: stored}, observed, spy["flights"], {geometry.code: geometry},
-                            [spy["landings"][geometry.code]], finals, words, interval_s=4.0, variant="full", device=CPU)
+                            finals, words, interval_s=4.0, variant="full", device=CPU)
     with pytest.raises(ValueError, match="observed rows of shape"):
         SpeakingLoop(model, loop, order, {0: stored}, {0: observed[0][:-1]}, spy["flights"], {geometry.code: geometry},
-                     [spy["landings"][geometry.code]], finals, words, interval_s=4.0, variant="full", device=CPU)
+                     finals, words, interval_s=4.0, variant="full", device=CPU)
     while speaking.observing:
         speaking.observe()
     assert np.array_equal(speaking.observed[0], observed[0]) and np.array_equal(speaking.before[0], observed[0][-1])

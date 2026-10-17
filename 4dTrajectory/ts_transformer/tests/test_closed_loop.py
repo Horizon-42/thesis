@@ -13,9 +13,10 @@ import torch
 from ts_transformer.autopilot import closed_loop, replay
 from ts_transformer.autopilot.closed_loop import REVERSAL_TURN_DEG, Corrector, ObservedPath
 from ts_transformer.instructions.artefact import ClosedLoopSentence, SentenceRows, Withheld, closed_loop_sentences
+from ts_transformer.instructions.airport import curvature_radius_m, published_glidepath_height_m
 from ts_transformer.autopilot.judge import flown_track
 from ts_transformer.autopilot.params import ExecutorParams
-from ts_transformer.autopilot.speed import approach_speed_ias_mps
+from ts_transformer.autopilot.speed import approach_speeds
 from ts_transformer.instructions.labeller.interval import in_force, last_heard_row, on_interval
 from ts_transformer.instructions.labeller.read import read_flight, smooth, truncated
 from ts_transformer.instructions.labeller.records import Refused
@@ -27,6 +28,8 @@ from ts_transformer.tests.support import (
 )
 
 CPU = torch.device("cpu")
+#: errors that do not change (ė_y = ė_h = 0): the corrections read the errors now (`Corrector.row`, THE LEAD)
+STILL = (0.0, 0.0)
 
 
 def _sentence(*, grid, correction, states, on_interval, lateral_m, vertical_m, uncorrectable, observed_row, matched_row,
@@ -172,20 +175,20 @@ def _first(words, altitude_m=900.0, angle=ANGLE_LEVEL):
             SPEED: words.speed_index(70.0)}
 
 
-def test_a_heading_correction_is_one_class_toward_the_path_and_ends_under_half_the_tolerance_or_at_a_sign_change():
+def test_a_heading_correction_is_one_class_toward_the_path_and_ends_where_the_error_reaches_zero():
     words = Words(spec())
     left, right = words.n_heading - 1, 1                        # classes −5° and +5°
     corrector = Corrector(_grid([_first(words), *[{}] * 9]), 0, 0, 1, words, [90.0])
-    corrector.row(0, 0.0, 0.0, 900.0, holding=False, past_end=False)
+    corrector.row(0, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
 
     def heading(k, lateral):
-        said, added = corrector.row(k, lateral, 0.0, 900.0, holding=False, past_end=False)
+        said, added = corrector.row(k, lateral, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
         return int(said[HEADING]), bool(added[HEADING])
 
     assert heading(1, 25.0) == (UNCHANGED, False)                # inside Y = 30 m
     assert heading(2, 40.0) == (left, True)                      # right of the path: one class to the left
-    assert heading(3, 20.0) == (UNCHANGED, False)                # still over Y / 2: in force
-    assert heading(4, 10.0) == (0, True)                         # under Y / 2: the observed word again
+    assert heading(3, 10.0) == (UNCHANGED, False)                # on the same side: in force
+    assert heading(4, 0.0) == (0, True)                          # zero: the observed word again
     assert heading(5, -45.0) == (right, True)
     assert heading(6, 2.0) == (0, True)                          # the sign changed, within Y: the observed word
     assert heading(7, 35.0) == (left, True)
@@ -193,49 +196,63 @@ def test_a_heading_correction_is_one_class_toward_the_path_and_ends_under_half_t
     assert heading(9, -20.0) == (UNCHANGED, False)               # in force
 
 
-def test_a_new_observed_heading_word_ends_a_correction():
+def test_a_new_observed_heading_word_does_not_stop_a_correction():
+    """§4.9 (the user, 2026-10-13): a new observed heading word neither ends a heading correction nor stops one from
+    starting. While a correction is in force, the row says the new word one class toward the path, and that word is a
+    correction; where the correction ends at that row, the row says the new word itself."""
     words = Words(spec())
-    corrector = Corrector(_grid([_first(words), {}, {HEADING: 2}, {}]), 0, 0, 1, words, [90.0])
-    corrector.row(0, 0.0, 0.0, 900.0, holding=False, past_end=False)
-    assert int(corrector.row(1, 50.0, 0.0, 900.0, holding=False, past_end=False)[0][HEADING]) == words.n_heading - 1
-    said, added = corrector.row(2, 50.0, 0.0, 900.0, holding=False, past_end=False)            # the observed word, not a correction
-    assert int(said[HEADING]) == 2 and not added[HEADING]
-    said, added = corrector.row(3, 50.0, 0.0, 900.0, holding=False, past_end=False)            # a correction from the new word
-    assert int(said[HEADING]) == 1 and added[HEADING]
+    corrector = Corrector(_grid([_first(words), {}, {HEADING: 2}, {}, {HEADING: 4}]), 0, 0, 1, words, [90.0])
+    corrector.row(0, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
+
+    def heading(k, lateral):
+        said, added = corrector.row(k, lateral, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
+        return int(said[HEADING]), bool(added[HEADING]), bool(corrector.uncorrectable[0])
+
+    assert heading(1, 50.0) == (words.n_heading - 1, True, False)
+    assert heading(2, 50.0) == (1, True, False)                  # the new word 2, one class to the left: a correction
+    assert heading(3, 50.0) == (UNCHANGED, False, False)         # in force
+    assert heading(4, 0.0) == (4, False, False)                  # ended at the new word 4: the observed word
+    starts = Corrector(_grid([_first(words), {HEADING: 2}, {}]), 0, 0, 1, words, [90.0])
+    starts.row(0, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
+    said, added = starts.row(1, 40.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
+    assert int(said[HEADING]) == 1 and added[HEADING] and not starts.uncorrectable[0]   # starts at the new word
 
 
 def test_an_angle_correction_on_a_final_descent_and_none_on_a_level_a_climb_or_beyond_the_classes():
     words = Words(spec())
     final = {ALTITUDE: words.altitude_no_level_off, ANGLE: 3}
     corrector = Corrector(_grid([_first(words), final, *[{}] * 8]), 0, 0, 1, words, [90.0])
-    corrector.row(0, 0.0, 0.0, 900.0, holding=False, past_end=False)
-    corrector.row(1, 0.0, 0.0, 900.0, holding=False, past_end=False)
+    corrector.row(0, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
+    corrector.row(1, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
 
     def angle(k, vertical):
-        said, added = corrector.row(k, 0.0, vertical, 800.0, holding=False, past_end=False)
+        said, added = corrector.row(k, 0.0, vertical, 800.0, holding=False, unmeasured=False, rates_mps=STILL)
         return int(said[ANGLE]), bool(added[ANGLE])
 
     assert angle(2, 20.0) == (4, True)                           # too high: the next steeper class
     assert angle(3, 10.0) == (UNCHANGED, False)
-    assert angle(4, 5.0) == (3, True)                            # under H / 2: the observed class again
-    assert angle(5, -20.0) == (2, True)                          # too low: the next shallower
-    assert angle(6, 3.0) == (3, True)
-    assert angle(7, 20.0) == (4, True)
-    assert angle(8, -20.0) == (2, True)                          # an overshoot beyond H: the shallower class at once (D53)
+    assert angle(4, 5.0) == (UNCHANGED, False)                   # on the same side: in force
+    assert angle(5, 0.0) == (3, True)                            # zero: the observed class again
+    assert angle(6, -20.0) == (2, True)                          # too low: the next shallower
+    assert angle(7, 3.0) == (3, True)                            # the other sign, within H: the observed class
+    assert angle(8, 20.0) == (4, True)
+    assert angle(9, -20.0) == (2, True)                          # an overshoot beyond H: the shallower class at once (D53)
+    assert 20.0 < words.spec.closed_loop_two_class_factor * float(closed_loop.vertical_tolerance_m(
+        words, words.altitude_no_level_off))                     # every error above: one class
     level = Corrector(_grid([_first(words), *[{}] * 3]), 0, 0, 1, words, [90.0])
-    level.row(0, 0.0, 0.0, 900.0, holding=False, past_end=False)
-    assert int(level.row(1, 0.0, 60.0, 960.0, holding=False, past_end=False)[0][ANGLE]) == UNCHANGED            # a level hold: none
+    level.row(0, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
+    assert int(level.row(1, 0.0, 60.0, 960.0, holding=False, unmeasured=False, rates_mps=STILL)[0][ANGLE]) == UNCHANGED            # a level hold: none
     climb = Corrector(_grid([_first(words, 1200.0, words.angle_climb), *[{}] * 3]), 0, 0, 1, words, [90.0])
-    climb.row(0, 0.0, 0.0, 900.0, holding=False, past_end=False)
-    assert int(climb.row(1, 0.0, -60.0, 900.0, holding=False, past_end=False)[0][ANGLE]) == UNCHANGED           # a climb: none
+    climb.row(0, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
+    assert int(climb.row(1, 0.0, -60.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)[0][ANGLE]) == UNCHANGED           # a climb: none
     steepest = Corrector(_grid([_first(words, 600.0, words.n_descent), *[{}] * 3]), 0, 0, 1, words, [90.0])
-    steepest.row(0, 0.0, 0.0, 900.0, holding=False, past_end=False)
-    assert int(steepest.row(1, 0.0, 60.0, 900.0, holding=False, past_end=False)[0][ANGLE]) == UNCHANGED        # no class steeper than descent 4
+    steepest.row(0, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
+    assert int(steepest.row(1, 0.0, 60.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)[0][ANGLE]) == UNCHANGED        # no class steeper than descent 4
     shallowest = Corrector(_grid([_first(words, 600.0, 1), *[{}] * 3]), 0, 0, 1, words, [90.0])
-    shallowest.row(0, 0.0, 0.0, 900.0, holding=False, past_end=False)
-    assert int(shallowest.row(1, 0.0, -60.0, 900.0, holding=False, past_end=False)[0][ANGLE]) == UNCHANGED     # none shallower than descent 1
-    assert int(shallowest.row(2, 0.0, 60.0, 900.0, holding=False, past_end=False)[0][ANGLE]) == 2
-    said, added = shallowest.row(3, 0.0, -60.0, 900.0, holding=False, past_end=False)   # an overshoot with no class beyond
+    shallowest.row(0, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
+    assert int(shallowest.row(1, 0.0, -60.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)[0][ANGLE]) == UNCHANGED     # none shallower than descent 1
+    assert int(shallowest.row(2, 0.0, 60.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)[0][ANGLE]) == 3      # beyond 2 H: two classes
+    said, added = shallowest.row(3, 0.0, -60.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)   # an overshoot with no class beyond
     assert int(said[ANGLE]) == 1 and added[ANGLE]                                         # descent 1: the observed class
 
 
@@ -247,14 +264,14 @@ def test_the_vertical_tolerance_in_force_is_h_final_only_while_no_level_off_is_i
         words = Words(spec(closed_loop_final_vertical_m=final_vertical_m))
         final = {ALTITUDE: words.altitude_no_level_off, ANGLE: 3}
         rows = [(_first(words, 600.0, 2), 0.0, 900.0), ({}, 10.0, 850.0),          # a descent to a level: H
-                (final, 10.0, 800.0), ({}, 10.0, 700.0), ({}, 2.0, 600.0),           # the final descent: H_final
+                (final, 10.0, 800.0), ({}, 10.0, 700.0), ({}, -2.0, 600.0),          # the final descent: H_final
                 ({RUNWAY: RUNWAY_GO_AROUND, ALTITUDE: words.altitude_index(900.0), ANGLE: words.angle_climb}, 10.0, 300.0),
                 ({}, 10.0, 500.0), ({RUNWAY: 0}, 10.0, 700.0),                       # a climb: no correction
                 ({ALTITUDE: words.altitude_index(600.0), ANGLE: 2}, 10.0, 900.0), ({}, 10.0, 850.0),   # H again
                 (final, 10.0, 700.0), ({}, 10.0, 650.0)]                             # H_final again
         grid = _grid([said for said, _, _ in rows])
         corrector = Corrector(grid, 0, 0, 1, words, [90.0])
-        said = [corrector.row(k, 0.0, e_h, height, holding=False, past_end=False) for k, (_, e_h, height) in enumerate(rows)]
+        said = [corrector.row(k, 0.0, e_h, height, holding=False, unmeasured=False, rates_mps=STILL) for k, (_, e_h, height) in enumerate(rows)]
         return words, grid, said
 
     words, grid, said = read(5.0)
@@ -266,12 +283,135 @@ def test_the_vertical_tolerance_in_force_is_h_final_only_while_no_level_off_is_i
     assert not any(added[ANGLE] for _, added in before)
 
 
+def test_the_lateral_tolerance_in_force_is_y_final_only_while_no_level_off_is_in_force():
+    """Y_final (the user, 2026-10-12): an e_y between Y_final (15 m) and Y (30 m) starts a heading correction in a final
+    descent and not before it; the correction ends where e_y changes sign; the tolerance changes where "no level-off" is
+    said and where a go-around row says a level (rule 6), and again at the next final descent; at Y_final = Y no
+    correction starts anywhere."""
+    def read(final_lateral_m):
+        words = Words(spec(closed_loop_final_lateral_m=final_lateral_m))
+        final = {ALTITUDE: words.altitude_no_level_off, ANGLE: 3}
+        rows = [(_first(words, 600.0, 2), 0.0, 900.0), ({}, 20.0, 850.0),           # a descent to a level: Y
+                (final, 20.0, 800.0), ({}, 10.0, 700.0), ({}, -3.0, 600.0),          # the final descent: Y_final
+                ({RUNWAY: RUNWAY_GO_AROUND, ALTITUDE: words.altitude_index(900.0), ANGLE: words.angle_climb}, 0.0, 300.0),
+                ({}, 20.0, 500.0), ({RUNWAY: 0}, 0.0, 700.0),                        # a climb: Y
+                ({ALTITUDE: words.altitude_index(600.0), ANGLE: 2}, 0.0, 900.0), ({}, 20.0, 850.0),   # Y again
+                (final, 20.0, 700.0), ({}, 20.0, 650.0)]                             # Y_final again
+        grid = _grid([said for said, _, _ in rows])
+        corrector = Corrector(grid, 0, 0, 1, words, [90.0])
+        said = [corrector.row(k, e_y, 0.0, height, holding=False, unmeasured=False, rates_mps=STILL)
+                for k, (_, e_y, height) in enumerate(rows)]
+        return words, grid, said
+
+    words, grid, said = read(15.0)
+    assert closed_loop.lateral_tolerance_m(words, in_force(grid)[:, ALTITUDE]).tolist() == [
+        30.0, 30.0, 15.0, 15.0, 15.0, 30.0, 30.0, 30.0, 30.0, 30.0, 15.0, 15.0]
+    # one class left (toward the path) at 20 m right under Y_final; at 10 m (the same side) it stays; the observed word
+    # again at 3 m left (the other sign, within Y_final)
+    assert [k for k, (_, added) in enumerate(said) if added[HEADING]] == [2, 4, 10]
+    assert [int(said[k][0][HEADING]) for k in (2, 4, 10)] == [words.n_heading - 1, 0, words.n_heading - 1]
+    _, _, before = read(30.0)
+    assert not any(added[HEADING] for _, added in before)
+
+
+
+def test_the_rates_of_the_errors_are_the_flown_velocity_across_the_path_and_the_vertical_rate_against_its_slope():
+    """THE LEAD (the user, 2026-10-12): ė_y is the flown velocity across the matched segment, right positive; ė_h the
+    flown vertical rate minus the segment's height slope times the flown velocity along it."""
+    e = np.arange(5) * 100.0
+    path = ObservedPath(e, np.zeros(5), 500.0 - e * 0.05, 0)               # east, descending 1 in 20
+    path.match(150.0, -10.0, 480.0)
+    assert path.rates(0.0, 50.0, 0.0) == pytest.approx((-50.0, 0.0))      # north: to the left of an eastbound path
+    assert path.rates(180.0, 50.0, 0.0) == pytest.approx((50.0, 0.0))
+    assert path.rates(90.0, 70.0, -3.5) == pytest.approx((0.0, 0.0))      # along the path, on its slope
+    assert path.rates(90.0, 70.0, 0.0) == pytest.approx((0.0, 3.5))       # level over a descending path: higher
+
+
+def test_a_heading_correction_starts_on_the_error_half_a_row_and_a_lead_ahead_and_ends_on_half_a_row_and_half_a_lead():
+    """THE LEAD (the user, 2026-10-12): a heading correction starts when |e_y + ė_y (Δ/2 + L)| > Y and ends when
+    e_y + ė_y (Δ/2 + L/2) is zero or has the other sign (the user, 2026-10-13); at Δ = 2 s and L = 4 s that is 5 s and
+    3 s ahead, at Δ = 8 s 8 s and 6 s."""
+    words = Words(spec())
+    assert words.spec.heading_lead_s == 4.0 and words.spec.closed_loop_lateral_m == 30.0
+    left, right = words.n_heading - 1, 1                        # classes −5° and +5°
+
+    def corrector(every):
+        corrector = Corrector(_grid([_first(words), *[{}] * 40]), 0, 0, every, words, [90.0])
+        corrector.row(0, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
+        return corrector
+
+    def heading(corrector, k, lateral, rate):
+        said, added = corrector.row(k, lateral, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=(rate, 0.0))
+        return int(said[HEADING]), bool(added[HEADING])
+
+    every_2s = corrector(1)
+    assert heading(every_2s, 1, 40.0, -6.0) == (UNCHANGED, False)   # 40 m right, closing: 10 m 5 s ahead, inside Y
+    assert heading(every_2s, 2, 20.0, 3.0) == (left, True)          # 20 m right, opening: 35 m 5 s ahead
+    assert heading(every_2s, 3, 25.0, 0.0) == (UNCHANGED, False)    # 25 m 3 s ahead, the same side: in force
+    assert heading(every_2s, 4, 18.0, -4.0) == (UNCHANGED, False)   # 6 m 3 s ahead: in force (5 s ahead: −2 m)
+    assert heading(every_2s, 5, 10.0, -4.0) == (0, True)            # −2 m 3 s ahead, the other sign: the observed word
+    assert heading(every_2s, 6, 20.0, 1.5) == (UNCHANGED, False)    # 27.5 m 5 s ahead: inside Y
+    assert heading(every_2s, 7, 20.0, 1.8) == (UNCHANGED, False)    # 29 m 5 s ahead: inside Y (Δ + L ahead: 30.8 m)
+    assert heading(every_2s, 8, 20.0, 3.0) == (left, True)
+    # 10 m right, closing fast: −20 m 3 s ahead, the other sign within Y — the observed word (D53); 5 s ahead it would
+    # be −40 m, beyond Y, and take the opposite correction
+    assert heading(every_2s, 9, 10.0, -10.0) == (0, True)
+    every_8s = corrector(4)
+    assert heading(every_8s, 4.0, 20.0, 1.5) == (left, True)        # 32 m 8 s ahead: over Y
+    assert heading(every_8s, 8.0, 40.0, -5.0) == (UNCHANGED, False)  # 10 m 6 s ahead, the same side: in force
+    assert heading(every_8s, 12.0, 25.0, -5.0) == (0, True)         # −5 m 6 s ahead, the other sign
+    assert heading(every_8s, 16.0, -10.0, -5.0) == (right, True)    # 10 m left, opening: 50 m left 8 s ahead
+
+
+def test_an_angle_correction_moves_two_classes_while_the_error_ahead_is_beyond_the_factor():
+    """§4.9 (the user, 2026-10-13): while the error ahead on the side a correction answers is more than
+    `closed_loop_two_class_factor` × the vertical tolerance in force, the correction is two classes where that class
+    exists; one class once it is within, the observed class where it reaches zero."""
+    words = Words(spec())
+    far = words.spec.closed_loop_two_class_factor * float(closed_loop.vertical_tolerance_m(words,
+                                                                                            words.altitude_no_level_off))
+
+    def angles(observed_class, errors):
+        corrector = Corrector(_grid([_first(words), {ALTITUDE: words.altitude_no_level_off, ANGLE: observed_class},
+                                     *[{}] * len(errors)]), 0, 0, 1, words, [90.0])
+        corrector.row(0, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
+        corrector.row(1, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
+        return [int(corrector.row(k, 0.0, error, 800.0, holding=False, unmeasured=False, rates_mps=STILL)[0][ANGLE])
+                for k, error in enumerate(errors, 2)]
+
+    assert angles(1, [far + 5.0, far - 5.0, far + 5.0, 0.0]) == [3, 2, 3, 1]       # too high: two, one, two, observed
+    assert angles(3, [-(far + 5.0), 0.0, far + 5.0]) == [1, 3, 4]                   # too low: two; no class 5: one
+
+
+def test_an_angle_correction_reads_the_height_error_ahead_by_half_a_row_and_the_angle_lead():
+    """THE LEAD for the angle words: L_γ in place of L (Δ = 2 s, L_γ = 2 s, L = 4 s: 3 s and 2 s ahead; H = 15 m). The
+    vertical marker of a row without a correction (D34) reads the start error too."""
+    words = Words(spec(angle_lead_s=2.0))
+    assert words.spec.closed_loop_vertical_m == 15.0 and words.spec.heading_lead_s == 4.0
+
+    def angle(corrector, k, vertical, rate):
+        said, added = corrector.row(k, 0.0, vertical, 800.0, holding=False, unmeasured=False, rates_mps=(0.0, rate))
+        return int(said[ANGLE]), bool(added[ANGLE])
+
+    corrector = Corrector(_grid([_first(words, 600.0, 2), *[{}] * 6]), 0, 0, 1, words, [90.0])
+    corrector.row(0, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
+    assert angle(corrector, 1, 20.0, -2.0) == (UNCHANGED, False)    # 20 m high, closing: 14 m 3 s ahead
+    assert angle(corrector, 2, 10.0, 1.5) == (UNCHANGED, False)     # 14.5 m 3 s ahead (with L: 17.5 m)
+    assert angle(corrector, 3, 10.0, 2.5) == (3, True)              # 17.5 m 3 s ahead: steeper
+    assert angle(corrector, 4, 12.0, -2.0) == (UNCHANGED, False)    # 8 m 2 s ahead, the same side: in force
+    assert angle(corrector, 5, 3.0, -2.0) == (2, True)              # −1 m 2 s ahead, the other sign: the observed class
+    steepest = Corrector(_grid([_first(words, 600.0, words.n_descent), {}]), 0, 0, 1, words, [90.0])
+    steepest.row(0, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
+    assert angle(steepest, 1, 0.0, 6.0) == (UNCHANGED, False)       # 18 m high 3 s ahead, no class steeper
+    assert steepest.uncorrectable[1]
+
+
 def test_a_new_observed_altitude_word_ends_an_angle_correction():
     words = Words(spec())
     corrector = Corrector(_grid([_first(words, 600.0, 2), {}, {ALTITUDE: words.altitude_index(480.0)}]), 0, 0, 1, words, [90.0])
-    corrector.row(0, 0.0, 0.0, 900.0, holding=False, past_end=False)
-    assert int(corrector.row(1, 0.0, 30.0, 800.0, holding=False, past_end=False)[0][ANGLE]) == 3
-    said, _ = corrector.row(2, 0.0, 30.0, 800.0, holding=False, past_end=False)
+    corrector.row(0, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
+    assert int(corrector.row(1, 0.0, 30.0, 800.0, holding=False, unmeasured=False, rates_mps=STILL)[0][ANGLE]) == 3
+    said, _ = corrector.row(2, 0.0, 30.0, 800.0, holding=False, unmeasured=False, rates_mps=STILL)
     assert int(said[ANGLE]) == 2 and int(said[ALTITUDE]) == words.altitude_index(480.0)
 
 
@@ -291,14 +431,16 @@ DOWNWIND_BASE_FINAL = [(60, 0.0, 100.0, 0.0), *_turn(-90.0, 100.0), (20, 0.0, 90
 
 
 def _batch(interval_s=2.0, legs=DOWNWIND_BASE_FINAL, track_deg=270.0, altitude_m=1110.0, speeds=None, cut=0,
-           final_vertical_m=15.0):
+           final_vertical_m=15.0, end_n=0.0, **changes):
     """A synthetic flight's batch, its executor inputs at the first predicted step and the words; ``speeds``: the speed
     words its open-loop reading says instead of the observed ones, ``{2 s row: m/s}`` (none: the observed words);
     ``cut``: the observed flight and its reading end that many 2 s rows early (the slice stops short of the threshold);
-    ``final_vertical_m``: H_final (D66; H = 15 m, the reading before D66)."""
-    one, geometry = spec(closed_loop_final_vertical_m=final_vertical_m), instruction_airport()
+    ``final_vertical_m``: H_final (D66; H = 15 m, the reading before D66); ``end_n``: the observed flight's north offset,
+    m (0: its final on the centreline; a positive offset puts it left of the course 090°); ``changes``: other values
+    of the spec."""
+    one, geometry = spec(closed_loop_final_vertical_m=final_vertical_m, **changes), instruction_airport()
     words = Words(one)
-    signals = instruction_flight(*fly_legs(legs, track_deg, altitude_m, -400.0, 0.0))
+    signals = instruction_flight(*fly_legs(legs, track_deg, altitude_m, -400.0, end_n))
     reading = read_flight(signals, geometry, one, words)
     if speeds is not None or cut:
         grid = reading.words.copy()
@@ -312,7 +454,8 @@ def _batch(interval_s=2.0, legs=DOWNWIND_BASE_FINAL, track_deg=270.0, altitude_m
     observed = replay.from_row(signals, sentence.first_row)
     batch = replay.Batch(indices=[0], signals=[observed], observed=[signals], series=[None], readings=[reading],
                          sentences=[sentence], row_interval_s=interval_s, geometries=[geometry],
-                         approach_ias_mps=[approach_speed_ias_mps("A320", 62000.0)], groups=[replay.OWN], drawn={})
+                         approach_speeds=[approach_speeds("A320")], typecodes=["A320"],
+                         groups=[replay.OWN], drawn={})
     start = closed_loop.start_row(interval_s) * int(round(interval_s / one.step_s))
     return batch, executor_inputs(signals, geometry, sentence.first_row + start), words
 
@@ -337,10 +480,65 @@ def test_a_flight_whose_words_leave_an_offset_is_brought_back_by_heading_correct
     observed_held = closed_loop.in_force(reading)[sentence.withheld.observed_row, HEADING]
     steps = (in_force.astype(int) - observed_held.astype(int)) % words.n_heading
     assert set(steps.tolist()) <= {0, 1, words.n_heading - 1}  # at most one class from the observed word
-    # inside a turn every row says a new observed word, which ends a correction (§4.9): the offset the turns leave is
-    # taken out on the straight legs after them, and the final is flown within the tolerance
-    assert np.abs(sentence.withheld.lateral_m).max() > words.spec.closed_loop_lateral_m
+    # a correction goes on through a turn's new observed words (§4.9, the user, 2026-10-13), and the final is flown
+    # within the tolerance
     assert np.abs(sentence.withheld.lateral_m[-len(sentence.withheld.lateral_m) // 4:]).max() < words.spec.closed_loop_lateral_m
+
+
+def test_the_final_runway_is_the_runway_in_force_on_the_final_once_the_observed_word_says_its_course():
+    """D201, D203 (the user, 2026-10-13 and 2026-10-14): the errors are read from the centreline and the glidepath of
+    the runway in force while "no level-off" is in force and the observed heading word in force says that runway's
+    course; from the observed path at the first predicted step, before the final descent and while the observed word
+    says another track."""
+    words = Words(spec())
+    final = {ALTITUDE: words.altitude_no_level_off, ANGLE: 3}
+    corrector = Corrector(_grid([_first(words, 600.0, 2), {}, final, {HEADING: 2}, {HEADING: 0}, {}]), 0, 0, 1, words,
+                          [90.0])
+
+    def reference(k):
+        found = corrector.final_runway(k)
+        corrector.row(k, 0.0, 0.0, 600.0, holding=False, unmeasured=False, rates_mps=STILL)
+        return found
+
+    assert [reference(k) for k in range(6)] == [None, None, 0, None, 0, 0]
+
+
+def test_the_final_errors_are_the_offsets_from_the_centreline_and_the_glidepath_and_their_rates():
+    """D201, D203: 1,000 m before the threshold of 09, 18 m left of the course, 10 m above the glidepath, on a track
+    of 092° at 70 m/s and sinking 1 m/s faster than the glidepath falls under the aircraft (its slope tan 3° + d / R
+    times the speed along the course)."""
+    geometry = instruction_airport()
+    glidepath = float(published_glidepath_height_m(geometry, 0, 1000.0))
+    slope = math.tan(math.radians(3.0)) + 1000.0 / curvature_radius_m(geometry.frame.lat0, 90.0)
+    along = 70.0 * math.cos(math.radians(2.0))
+    state = np.array([-1000.0, 18.0, geometry.candidates[0].elevation_m + glidepath + 10.0, 92.0, 70.0,
+                      -slope * along - 1.0])
+    lateral, vertical, rates = closed_loop.final_errors(state, geometry, 0)
+    assert (lateral, vertical) == pytest.approx((-18.0, 10.0))         # left of the course 090°, above the glidepath
+    assert rates == pytest.approx((70.0 * math.sin(math.radians(2.0)), -1.0))   # turning right, closing 1 m/s
+
+
+def test_on_the_final_the_corrections_bring_the_flight_to_the_centreline_and_not_to_an_offset_observed_path():
+    """D201: the observed final runs 18 m left of the centreline, beyond Y_final (15 m). On the lined-up final the
+    flown path stays within Y_final of the centreline and is not taken to the observed path (the rule before D201 would
+    correct toward it); the stored e_y there is the distance from the centreline, before the final the distance from the
+    observed path."""
+    batch, inputs, words = _batch(4.0, end_n=18.0, closed_loop_final_lateral_m=15.0)
+    (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
+    every, start = 2, sentence.rows.start
+    signals = batch.signals[0]
+    span = len(batch.readings[0].words) - batch.sentences[0].first_row
+    path = ObservedPath(signals.e_m[:span], signals.n_m[:span], smooth(truncated(signals, span), words.spec).altitude_m,
+                        start * every)
+    marked = sentence.rows.states[sentence.rows.on_interval][start:]
+    from_path = np.array([path.match(*row[:3]).lateral_m for row in marked])
+    from_centre = np.array([closed_loop.final_errors(row, batch.geometries[0], 0)[0] for row in marked])
+    stored = sentence.withheld.lateral_m
+    centre_rows = np.isclose(stored, from_centre, atol=1e-9) & ~np.isclose(stored, from_path, atol=1e-9)
+    assert centre_rows.sum() > 10 and centre_rows[-1]
+    assert (centre_rows | np.isclose(stored, from_path, atol=1e-9)).all()
+    assert (np.abs(from_centre[centre_rows]) < words.spec.closed_loop_final_lateral_m).all()
+    assert abs(from_path[-1]) > words.spec.closed_loop_final_lateral_m
 
 
 def _replayed(batch, inputs, sentence, params, words, monkeypatch):
@@ -426,8 +624,8 @@ def test_each_outcome_is_stored_by_name_and_a_file_of_the_former_format_is_refus
                       sentences={k: _changed(sentence, outcome=name) for k, name in enumerate(OUTCOMES)})
     stored = closed_loop_sentences(directory, "train", 4.0, words.spec)
     assert [stored[k].withheld.outcome for k in range(len(OUTCOMES))] == list(OUTCOMES)
-    assert set(OUTCOMES) >= {"landed", "unstable_at_minimums", "crossed_too_high", "crossed_off_runway",
-                             "crossed_other_runway", "ground_contact", "timeout", "dynamics_failure"}
+    assert set(OUTCOMES) >= {"landed", "landing_failed", "crossed_other_runway", "ground_contact", "timeout",
+                             "dynamics_failure"}
     with np.load(path) as data:
         former = {name: data[name] for name in data.files}
     former["schema"] = np.array("ts-instruction-closed-loop-v7")             # the same fields, the former format
@@ -441,7 +639,7 @@ def test_the_closed_loop_file_round_trips_and_a_replay_flies_its_stored_states(t
     batch flies each from its first predicted step (its sentence and observed flight moved there) and the replay's check
     finds the stored states again."""
     from ts_transformer.experiments.executor_replay import closed_loop_columns
-    from ts_transformer.instructions.artefact import closed_loop_path, write_closed_loop
+    from ts_transformer.instructions.artefact import CLOSED_LOOP_SCHEMA, closed_loop_path, write_closed_loop
 
     batch, inputs, words = _batch(4.0)
     params = _params()
@@ -478,7 +676,7 @@ def test_the_closed_loop_file_round_trips_and_a_replay_flies_its_stored_states(t
         closed_loop_sentences(directory, "train", 8.0, words.spec)
     with pytest.raises(ValueError, match="holds sentences at 4 s, not 2 s"):
         closed_loop_sentences(directory, "train", 2.0, words.spec, path=path)        # a part file of another Δ
-    with pytest.raises(ValueError, match="is not a ts-instruction-closed-loop-v8 file read with spec"):
+    with pytest.raises(ValueError, match=f"is not a {CLOSED_LOOP_SCHEMA} file read with spec"):
         closed_loop_indices(directory, "train", 4.0, spec(closed_loop_final_vertical_m=5.0))  # another vocabulary
     assert np.array_equal(stored[7].rows.flown_states,
                           sentence.rows.states[int(np.flatnonzero(sentence.rows.on_interval)[sentence.rows.start]):])
@@ -518,7 +716,7 @@ def test_the_runner_counts_the_flights_without_a_sentence_by_reason():
     refuses give no training sentence, each counted by its reason."""
     from ts_transformer.experiments.instruction_closed_loop import merge_tallies, summarise, tally
 
-    batch, inputs, words = _batch()
+    batch, inputs, words = _batch(4.0)          # at Δ = 4 s the flown path leaves the tolerance on correctable rows
     batch = replace(batch, refused_seen=Counter({"too short": 1}))
     (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
     lateness = closed_loop.heading_lateness_rows(sentence, batch.readings[0].words[batch.sentences[0].first_row:]) * 2.0
@@ -539,7 +737,9 @@ def test_the_runner_counts_the_flights_without_a_sentence_by_reason():
     assert numbers["heading_word_lateness_s"]["n"] == len(lateness) > 0
     assert numbers["heading_word_lateness_s"]["mean"] == pytest.approx(float(lateness.mean()))
     lateral = numbers["outside_the_tolerance"]["lateral"]
-    assert lateral["outside"] > 0 and lateral["without_a_correction_toward_the_path"] == 0        # D50: the rule holds
+    # D50, a record since the corrections read the errors ahead: the count of `outside_rows`
+    assert lateral["outside"] > 0
+    assert lateral["without_a_correction_toward_the_path"] == int(_outside(batch, sentence, words)["lateral"][2].sum())
     assert lateral["correctable_rows"] == int((~sentence.withheld.uncorrectable[:, 0]).sum())
 
 
@@ -550,13 +750,14 @@ def _outside(batch, sentence, words):
 
 def test_the_rule_of_d50_reads_the_direction_of_the_correction_in_force():
     """D50 (vocabulary §12.2): on a correctable row with |e_y| > Y a heading correction toward the path is in force after it, read
-    from the stored sentence and its open-loop reading. Taken away (the observed words alone), the rule breaks on
-    exactly the rows that were outside; turned away from the path, too — a word that only cancels a correction, or one
-    on the wrong side, answers nothing."""
-    batch, inputs, words = _batch()
+    from the stored sentence and its open-loop reading. The corrections read the errors ahead (THE LEAD), so a row
+    outside whose error closes fast has none: the rule breaks on some outside rows, not on all. Taken away
+    (the observed words alone), the rule breaks on exactly the rows that were outside; turned away from the path, too —
+    a word that only cancels a correction, or one on the wrong side, answers nothing."""
+    batch, inputs, words = _batch(4.0)          # at Δ = 4 s the flown path leaves the tolerance on correctable rows
     (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
     correctable, outside, breaks = _outside(batch, sentence, words)["lateral"]
-    assert outside.any() and not breaks.any()
+    assert outside.any() and breaks.sum() < outside.sum()
     assert np.array_equal(outside, ~sentence.withheld.uncorrectable[:, 0] & (np.abs(sentence.withheld.lateral_m)
                                                                     > words.spec.closed_loop_lateral_m))
     observed = batch.readings[0].words[batch.sentences[0].first_row:]
@@ -578,7 +779,7 @@ def test_the_readings_of_d34_read_the_vertical_tolerance_in_force_at_each_row():
     errors = [0.0, 10.0, 10.0, 10.0, 10.0]
     rows, uncorrectable = [], []
     for k, (e_h, height) in enumerate(zip(errors, (900.0, 850.0, 800.0, 750.0, 700.0))):
-        rows.append(corrector.row(k, 0.0, e_h, height, holding=False, past_end=False))
+        rows.append(corrector.row(k, 0.0, e_h, height, holding=False, unmeasured=False, rates_mps=STILL))
         uncorrectable.append(corrector.uncorrectable.copy())
     n = len(rows)
     sentence = _sentence(
@@ -589,6 +790,29 @@ def test_the_readings_of_d34_read_the_vertical_tolerance_in_force_at_each_row():
     correctable, outside, breaks = closed_loop.outside_rows(sentence, observed, 0, words, [90.0])["vertical"]
     assert correctable.tolist() == [False, True, False, True, True]     # the first row and a new word: none
     assert outside.tolist() == [False, False, False, True, True] and not breaks.any()
+
+
+def test_the_readings_of_d34_read_the_lateral_tolerance_in_force_at_each_row():
+    """Y_final, D50: a row is outside laterally when |e_y| exceeds the tolerance in force there — Y_final in the final
+    descent, Y before it."""
+    words = Words(spec(closed_loop_final_lateral_m=15.0))
+    final = {ALTITUDE: words.altitude_no_level_off, ANGLE: 3}
+    observed = _grid([_first(words, 600.0, 2), {}, final, {}, {}])
+    corrector = Corrector(observed, 0, 0, 1, words, [90.0])
+    errors = [0.0, 20.0, 20.0, 20.0, 20.0]
+    rows, uncorrectable = [], []
+    for k, e_y in enumerate(errors):
+        rows.append(corrector.row(k, e_y, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL))
+        uncorrectable.append(corrector.uncorrectable.copy())
+    n = len(rows)
+    sentence = _sentence(
+        first_row=0, grid=np.array([r[0] for r in rows]), correction=np.array([r[1] for r in rows]),
+        states=np.zeros((n, 6)), on_interval=np.ones(n, bool), lateral_m=np.array(errors), vertical_m=np.zeros(n),
+        uncorrectable=np.array(uncorrectable), observed_row=np.arange(n), matched_row=np.arange(n, dtype=float),
+        start=0, timed_out=False, outcome="landed")
+    correctable, outside, breaks = closed_loop.outside_rows(sentence, observed, 0, words, [90.0])["lateral"]
+    assert correctable.tolist() == [False, True, True, True, True]          # the first row: none
+    assert outside.tolist() == [False, False, True, True, True] and not breaks.any()
 
 
 def test_a_closed_loop_flight_with_h_final_differs_only_in_its_final_descent():
@@ -641,7 +865,7 @@ def test_an_overshoot_takes_the_opposite_correction_in_its_row_and_the_rule_of_d
     answer nothing there, and the rule counts it."""
     words = Words(spec())
     corrector = Corrector(_grid([_first(words, 900.0, ANGLE_LEVEL), *[{}] * 5]), 0, 0, 1, words, [90.0])
-    rows = [corrector.row(s, e_y, 0.0, 900.0, holding=False, past_end=False)
+    rows = [corrector.row(s, e_y, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
             for s, e_y in enumerate((0.0, 60.0, -60.0, -60.0, 0.0))]
     grid = np.array([r[0] for r in rows])
     n = len(grid)
@@ -668,11 +892,11 @@ def test_no_angle_correction_while_the_executor_holds_the_level_reached_by_a_des
     descends toward the level, corrections go on."""
     words = Words(spec())
     corrector = Corrector(_grid([_first(words, 1080.0, 2), *[{}] * 5]), 0, 0, 1, words, [90.0])
-    corrector.row(0, 0.0, 0.0, 1300.0, holding=False, past_end=False)
-    assert int(corrector.row(1, 0.0, 30.0, 1110.0, holding=False, past_end=False)[0][ANGLE]) == 3   # 30 m above: still descending
-    said, added = corrector.row(2, 0.0, 30.0, 1081.5, holding=True, past_end=False)   # the same error, the level held: ended
+    corrector.row(0, 0.0, 0.0, 1300.0, holding=False, unmeasured=False, rates_mps=STILL)
+    assert int(corrector.row(1, 0.0, 30.0, 1110.0, holding=False, unmeasured=False, rates_mps=STILL)[0][ANGLE]) == 3   # 30 m above: still descending
+    said, added = corrector.row(2, 0.0, 30.0, 1081.5, holding=True, unmeasured=False, rates_mps=STILL)   # the same error, the level held: ended
     assert int(said[ANGLE]) == 2 and added[ANGLE]
-    assert int(corrector.row(3, 0.0, 30.0, 1080.0, holding=True, past_end=False)[0][ANGLE]) == UNCHANGED   # and none starts
+    assert int(corrector.row(3, 0.0, 30.0, 1080.0, holding=True, unmeasured=False, rates_mps=STILL)[0][ANGLE]) == UNCHANGED   # and none starts
 
 
 def test_a_repeated_observed_position_is_no_segment():
@@ -765,7 +989,8 @@ def test_read_chunked_puts_each_result_in_its_place(monkeypatch):
                          readings=batch.readings * 3,
                          sentences=[short, batch.sentences[0], batch.sentences[0]], row_interval_s=2.0,
                          geometries=batch.geometries * 3,
-                         approach_ias_mps=batch.approach_ias_mps * 3, groups=batch.groups * 3, drawn={})
+                         approach_speeds=batch.approach_speeds * 3, typecodes=batch.typecodes * 3,
+                         groups=batch.groups * 3, drawn={})
     monkeypatch.setattr(closed_loop, "start_inputs", lambda part, params, step_s, device: closed_loop._rows(
         closed_loop.FlightInputs(*(torch.cat([getattr(inputs, n)] * len(part.sentences)) for n in (
             "initial_state", "aero_params", "frame_params", "max_thrust_n"))), list(range(len(part.sentences)))))
@@ -777,32 +1002,48 @@ def test_read_chunked_puts_each_result_in_its_place(monkeypatch):
             assert result.withheld.outcome == alone.withheld.outcome
 
 
+def test_the_lateness_reads_the_new_observed_heading_words_said_under_a_correction():
+    """A12, D199: a new observed heading word said while a heading correction is in force (one class toward the path, a
+    correction) is still an observed word heard at its row: the lateness reads it."""
+    batch, inputs, words = _batch()
+    (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
+    observed = batch.readings[0].words[batch.sentences[0].first_row:]
+    rows = np.arange(len(observed))
+    heard = np.maximum.accumulate(np.where(observed[:, HEADING] != UNCHANGED, rows, 0))[sentence.withheld.observed_row]
+    passes = np.r_[False, np.diff(heard) != 0] & (sentence.rows.grid[:, HEADING] != UNCHANGED)
+    corrected = passes & sentence.rows.correction[:, HEADING]
+    assert corrected.any() and (passes & ~corrected).any()
+    lateness = closed_loop.heading_lateness_rows(sentence, observed)
+    assert len(lateness) == int(passes.sum())
+    assert np.array_equal(lateness, sentence.withheld.matched_row[passes] - heard[passes])
+
+
 def test_the_rows_without_a_correction_are_marked_for_the_ablation():
     """D34: the rows where §4.9 makes no correction — the first predicted step, a new observed word, a level hold, a climb,
     no class beyond — are marked per column, and each flight's largest error on them is read."""
     words = Words(spec())
     corrector = Corrector(_grid([_first(words, 600.0, words.n_descent), {HEADING: 2}, {}, {}]), 0, 0, 1, words, [90.0])
-    corrector.row(0, 0.0, 0.0, 900.0, holding=False, past_end=False)
+    corrector.row(0, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
     assert corrector.uncorrectable.tolist() == [True, True]                  # the first predicted step
-    corrector.row(1, 40.0, 30.0, 900.0, holding=False, past_end=False)
-    assert corrector.uncorrectable.tolist() == [True, True]                  # a new heading word; no class steeper
-    corrector.row(2, 40.0, -30.0, 900.0, holding=False, past_end=False)
+    corrector.row(1, 40.0, 30.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
+    assert corrector.uncorrectable.tolist() == [False, True]                 # a new heading word, corrected; no class steeper
+    corrector.row(2, 40.0, -30.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
     assert corrector.uncorrectable.tolist() == [False, False]                # both corrected
-    corrector.row(3, 40.0, -30.0, 600.0, holding=True, past_end=False)
+    corrector.row(3, 40.0, -30.0, 600.0, holding=True, unmeasured=False, rates_mps=STILL)
     assert corrector.uncorrectable.tolist() == [False, True]                 # the level held
     climb = Corrector(_grid([_first(words, 1200.0, words.angle_climb), {}]), 0, 0, 1, words, [90.0])
-    climb.row(0, 0.0, 0.0, 900.0, holding=False, past_end=False)
-    climb.row(1, 0.0, -30.0, 900.0, holding=False, past_end=False)
+    climb.row(0, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
+    climb.row(1, 0.0, -30.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
     assert climb.uncorrectable.tolist() == [False, True]                     # a climb
     shallow = Corrector(_grid([_first(words, 600.0, 1), {}, {}]), 0, 0, 1, words, [90.0])
-    shallow.row(0, 0.0, 0.0, 900.0, holding=False, past_end=False)
-    shallow.row(1, 0.0, -30.0, 900.0, holding=False, past_end=False)
+    shallow.row(0, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
+    shallow.row(1, 0.0, -30.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
     assert shallow.uncorrectable.tolist() == [False, True]                   # descent 1, too low: none shallower
-    shallow.row(2, 0.0, 5.0, 900.0, holding=False, past_end=False)
+    shallow.row(2, 0.0, 5.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
     assert shallow.uncorrectable.tolist() == [False, False]                  # within H: nothing to correct
     level = Corrector(_grid([_first(words, 600.0, 2), {ALTITUDE: words.altitude_index(480.0)}]), 0, 0, 1, words, [90.0])
-    level.row(0, 0.0, 0.0, 900.0, holding=False, past_end=False)
-    level.row(1, 0.0, 30.0, 900.0, holding=False, past_end=False)
+    level.row(0, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
+    level.row(1, 0.0, 30.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
     assert level.uncorrectable.tolist() == [False, True]                     # a new observed altitude word
     assert closed_loop.uncorrected_m(np.array([5.0, -40.0, 9.0]), np.array([True, False, True])) == 9.0
     batch, inputs, words = _batch()
@@ -833,7 +1074,7 @@ def test_a_flight_on_schedule_hears_in_closed_loop_the_words_the_interval_grid_s
     for every in (1, 2, 4):
         expected = in_force(on_interval(grid, 0, 2.0 * every, 2.0, np.full(len(rows), 900.0), words, [90.0]))
         corrector = Corrector(grid, 0, 0, every, words, [90.0])
-        said = [corrector.row(float(k * every), 0.0, 0.0, 900.0, holding=False, past_end=False)[0]
+        said = [corrector.row(float(k * every), 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)[0]
                 for k in range(len(expected))]
         assert np.array_equal(in_force(np.array(said)), expected)
 
@@ -851,35 +1092,84 @@ def test_past_the_end_of_the_observed_path_its_last_segment_goes_on_without_a_he
 
 
 def test_past_the_end_of_the_observed_path_no_correction_starts_and_one_in_force_ends():
-    """D44: past the end the reading says no correction, lateral or vertical; one in force ends (the observed word again),
-    and the rows count as rows without correction (D34)."""
+    """D44: where the errors have no reference (past the end of the observed path, off the final) the reading says no
+    correction, lateral or vertical; one in force ends (the observed word again), and the rows count as rows without
+    correction (D34)."""
     words = Words(spec())
     final = {ALTITUDE: words.altitude_no_level_off, ANGLE: 3}
     corrector = Corrector(_grid([_first(words), final, *[{}] * 6]), 0, 0, 1, words, [90.0])
-    corrector.row(0, 0.0, 0.0, 900.0, holding=False, past_end=False)
-    corrector.row(1, 0.0, 0.0, 900.0, holding=False, past_end=False)
-    said, added = corrector.row(2, 50.0, 20.0, 800.0, holding=False, past_end=False)
+    corrector.row(0, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
+    corrector.row(1, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
+    said, added = corrector.row(2, 50.0, 20.0, 800.0, holding=False, unmeasured=False, rates_mps=STILL)
     assert int(said[HEADING]) == words.n_heading - 1 and int(said[ANGLE]) == 4 and added[[HEADING, ANGLE]].all()
-    said, added = corrector.row(3, 50.0, math.nan, 790.0, holding=False, past_end=True)    # ended: the observed words
+    said, added = corrector.row(3, 50.0, math.nan, 790.0, holding=False, unmeasured=True, rates_mps=STILL)    # ended: the observed words
     assert int(said[HEADING]) == 0 and int(said[ANGLE]) == 3 and corrector.uncorrectable.all()
-    said, _ = corrector.row(4, 80.0, math.nan, 780.0, holding=False, past_end=True)        # and none starts
+    said, _ = corrector.row(4, 80.0, math.nan, 780.0, holding=False, unmeasured=True, rates_mps=STILL)        # and none starts
     assert (said == UNCHANGED).all() and corrector.uncorrectable.all()
 
 
-def test_a_flight_whose_observed_path_ends_early_gets_no_correction_past_its_end():
-    """D44 on a flight: the observed slice ends 60 s (4.5 km) before the threshold; the flown aircraft flies on to the
-    threshold on its words, its rows there say no correction, have no e_h and count as rows without correction."""
-    batch, inputs, words = _batch(cut=30)
+def _observed_path(batch, sentence, words):
+    """The observed path the closed-loop reading of ``batch``'s flight compares with (`closed_loop.read`)."""
+    signals = batch.signals[0]
+    span = len(batch.readings[0].words) - batch.sentences[0].first_row
+    return ObservedPath(signals.e_m[:span], signals.n_m[:span], smooth(truncated(signals, span), words.spec).altitude_m,
+                        sentence.rows.start * int(round(batch.row_interval_s / words.spec.step_s)))
+
+
+def test_past_the_end_of_the_observed_path_off_the_final_a_flight_gets_no_correction():
+    """D44 on a flight: the observed slice ends 240 s before the threshold, before the final descent (off the final). Past
+    its end the rows have no e_h, permit no correction and say the observed words (at most a correction in force ends);
+    e_y is measured there."""
+    batch, inputs, words = _batch(2.0, cut=120)
     (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
-    assert isinstance(sentence, ClosedLoopSentence)
     past = np.isnan(sentence.withheld.vertical_m)
-    assert past.sum() > 20 and past[int(np.argmax(past)):].all()          # from the end of the path to the threshold
+    assert past.sum() > 20 and past[int(np.argmax(past)):].all()          # from the end of the path on
     observed = closed_loop.in_force(batch.readings[0].words[batch.sentences[0].first_row:])[sentence.withheld.observed_row]
     held = closed_loop.in_force(sentence.rows.grid)
     assert np.array_equal(held[past][:, [HEADING, ANGLE]], observed[past][:, [HEADING, ANGLE]])  # the observed words
-    assert sentence.rows.correction[past].sum() <= 2 and sentence.withheld.uncorrectable[past].all()  # at most a correction ended
+    assert sentence.rows.correction[past].sum() <= 2 and sentence.withheld.uncorrectable[past].all()
+    assert not sentence.withheld.uncorrectable[~past, 0].all()           # before the end: lateral corrections permitted
     assert np.isfinite(sentence.withheld.lateral_m).all()
-    assert closed_loop.largest_m(sentence.withheld.vertical_m) == float(np.abs(sentence.withheld.vertical_m[~past]).max())
+
+
+def test_on_the_final_the_angle_corrections_bring_the_flight_to_the_glidepath_and_not_to_an_observed_path_above_it():
+    """D203 (the user, 2026-10-14): the observed final runs up to 31 m above the published glidepath, beyond H_final.
+    On the lined-up final the stored e_h is the flown height above the glidepath, angle corrections answer it, and the
+    flight crosses the threshold within H_final of the glidepath — not with the observed path, which the flown aircraft
+    has left by more than H_final at the path's end."""
+    batch, inputs, words = _batch(4.0)
+    (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
+    path = _observed_path(batch, sentence, words)
+    marked = sentence.rows.states[sentence.rows.on_interval][sentence.rows.start:]
+    from_path = np.array([path.match(*row[:3]).vertical_m for row in marked])
+    from_glidepath = np.array([closed_loop.final_errors(row, batch.geometries[0], 0)[1] for row in marked])
+    stored = sentence.withheld.vertical_m
+    final = np.isclose(stored, from_glidepath, atol=1e-9) & ~np.isclose(stored, from_path, atol=1e-9)
+    assert final.sum() > 10 and final[int(np.argmax(final)):].all()     # from the lined-up final to the threshold
+    assert (final | np.isclose(stored, from_path, atol=1e-9)).all()
+    assert sentence.rows.correction[final, ANGLE].any()
+    # the last row with an observed height (the slice ends 400 m before the threshold)
+    assert abs(stored[-1]) < words.spec.closed_loop_final_vertical_m < abs(from_path[np.isfinite(from_path)][-1])
+
+
+def test_on_the_final_the_corrections_go_on_past_the_end_of_the_observed_path_to_the_threshold():
+    """D203 (the user, 2026-10-14), D44: the observed slice ends 60 s (4.5 km) before the threshold, on the lined-up
+    final. The centreline and the glidepath go on past the end, so the rows there have errors from them and permit
+    corrections, and the end of the slice changes nothing: no observed word comes after it, and the sentence is the one
+    read on the whole slice."""
+    batch, inputs, words = _batch(4.0, cut=30)
+    (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
+    path = _observed_path(batch, sentence, words)
+    marked = sentence.rows.states[sentence.rows.on_interval][sentence.rows.start:]
+    past = np.array([path.match(*row[:3]).past_end for row in marked])
+    assert past.sum() > 10 and past[int(np.argmax(past)):].all()          # from the end of the path to the threshold
+    at_final = np.array([closed_loop.final_errors(row, batch.geometries[0], 0)[:2] for row in marked[past]])
+    assert np.array_equal(np.column_stack([sentence.withheld.lateral_m, sentence.withheld.vertical_m])[past], at_final)
+    assert not sentence.withheld.uncorrectable[past].any()
+    whole, inputs, _ = _batch(4.0)
+    (on_whole,) = closed_loop.read(whole, inputs, _params(), words, device=CPU)
+    assert np.array_equal(sentence.rows.grid, on_whole.rows.grid)
+    assert np.array_equal(sentence.rows.states, on_whole.rows.states)
 
 
 def test_the_observed_words_wait_while_the_flown_aircraft_is_behind():
@@ -887,15 +1177,15 @@ def test_the_observed_words_wait_while_the_flown_aircraft_is_behind():
     on — and the word comes at the row whose matched point reaches it."""
     words = Words(spec())
     corrector = Corrector(_grid([_first(words), {HEADING: 2}, {}, {}]), 0, 0, 1, words, [90.0])
-    corrector.row(0, 0.0, 0.0, 900.0, holding=False, past_end=False)
-    said, _ = corrector.row(0, 0.0, 0.0, 900.0, holding=False, past_end=False)                 # behind: still at row 0
+    corrector.row(0, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
+    said, _ = corrector.row(0, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)                 # behind: still at row 0
     assert (said == UNCHANGED).all() and corrector.observed_row == 0
-    said, added = corrector.row(0, 50.0, 0.0, 900.0, holding=False, past_end=False)            # behind, and 50 m right: corrected
+    said, added = corrector.row(0, 50.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)            # behind, and 50 m right: corrected
     assert int(said[HEADING]) == words.n_heading - 1 and added[HEADING]
-    said, added = corrector.row(1, 50.0, 0.0, 900.0, holding=False, past_end=False)            # the word, where it was heard
-    assert int(said[HEADING]) == 2 and not added[HEADING] and corrector.observed_row == 1
-    corrector.row(3, 0.0, 0.0, 900.0, holding=False, past_end=False)
-    said, _ = corrector.row(2, 0.0, 0.0, 900.0, holding=False, past_end=False)                 # a matched point back: no row twice
+    said, added = corrector.row(1, 50.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)            # the word, where it was heard
+    assert int(said[HEADING]) == 1 and added[HEADING] and corrector.observed_row == 1     # one class left: the correction goes on
+    corrector.row(3, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
+    said, _ = corrector.row(2, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)                 # a matched point back: no row twice
     assert (said == UNCHANGED).all() and corrector.observed_row == 3
 
 
@@ -903,18 +1193,18 @@ def test_a_flown_aircraft_ahead_passes_two_observed_rows_in_one_and_hears_the_la
     words = Words(spec())
     corrector = Corrector(_grid([_first(words), {HEADING: 2, SPEED: words.speed_index(80.0)}, {HEADING: 4}, {}]), 0, 0,
                           1, words, [90.0])
-    corrector.row(0, 0.0, 0.0, 900.0, holding=False, past_end=False)
-    said, added = corrector.row(2, 50.0, 0.0, 900.0, holding=False, past_end=False)
+    corrector.row(0, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
+    said, added = corrector.row(2, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
     assert int(said[HEADING]) == 4 and int(said[SPEED]) == words.speed_index(80.0) and not added.any()
-    assert corrector.observed_row == 2 and corrector.uncorrectable[0]          # a new observed heading word: no correction
-    said, _ = corrector.row(2, 0.0, 0.0, 900.0, holding=False, past_end=False)                 # nothing new
+    assert corrector.observed_row == 2
+    said, _ = corrector.row(2, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)                 # nothing new
     assert (said == UNCHANGED).all()
 
 
 def test_the_first_predicted_step_says_every_column_in_force_where_the_matched_point_is():
     words = Words(spec())
     corrector = Corrector(_grid([_first(words), {HEADING: 2}, {}, {HEADING: 4}]), 0, 1, 1, words, [90.0])
-    said, added = corrector.row(0, 0.0, 0.0, 900.0, holding=False, past_end=False)             # never before the first predicted step
+    said, added = corrector.row(0, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)             # never before the first predicted step
     assert int(said[HEADING]) == 2 and (said != UNCHANGED).all() and not added.any() and corrector.observed_row == 1
 
 
@@ -928,9 +1218,9 @@ def test_a_heading_word_passed_with_a_runway_word_is_said_in_the_frame_where_it_
 
     def heard(rows, courses):
         corrector = Corrector(_grid([final, go, *rows]), 0, 0, 1, words, courses)
-        corrector.row(0, 0.0, 0.0, 300.0, holding=False, past_end=False)
-        corrector.row(1, 0.0, 0.0, 300.0, holding=False, past_end=False)
-        said, added = corrector.row(3, 0.0, 0.0, 900.0, holding=False, past_end=False)
+        corrector.row(0, 0.0, 0.0, 300.0, holding=False, unmeasured=False, rates_mps=STILL)
+        corrector.row(1, 0.0, 0.0, 300.0, holding=False, unmeasured=False, rates_mps=STILL)
+        said, added = corrector.row(3, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
         assert int(said[RUNWAY]) == 1 and not added.any()
         return int(said[HEADING]), corrector.target_deg
 
@@ -947,11 +1237,11 @@ def test_a_change_of_runway_alone_says_no_heading_word_and_a_correction_is_in_th
     final = {RUNWAY: 0, HEADING: 2, ALTITUDE: words.altitude_no_level_off, ANGLE: 3, SPEED: words.speed_index(70.0)}
     go = {RUNWAY: RUNWAY_GO_AROUND, ALTITUDE: words.altitude_index(900.0), ANGLE: words.angle_climb}
     corrector = Corrector(_grid([final, go, {RUNWAY: 1}, {}, {}]), 0, 0, 1, words, [90.0, 96.0])
-    corrector.row(0, 0.0, 0.0, 300.0, holding=False, past_end=False)
-    corrector.row(1, 0.0, 0.0, 300.0, holding=False, past_end=False)
-    said, _ = corrector.row(2, 0.0, 0.0, 900.0, holding=False, past_end=False)
+    corrector.row(0, 0.0, 0.0, 300.0, holding=False, unmeasured=False, rates_mps=STILL)
+    corrector.row(1, 0.0, 0.0, 300.0, holding=False, unmeasured=False, rates_mps=STILL)
+    said, _ = corrector.row(2, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
     assert int(said[RUNWAY]) == 1 and int(said[HEADING]) == UNCHANGED and corrector.target_deg == pytest.approx(100.0)
-    said, added = corrector.row(3, 40.0, 0.0, 900.0, holding=False, past_end=False)     # right of the path
+    said, added = corrector.row(3, 40.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)     # right of the path
     assert int(said[HEADING]) == 0 and added[HEADING]          # 100° under 96°: class 1, one class left: class 0 (96°)
 
 
@@ -968,7 +1258,7 @@ def test_the_observed_heading_words_of_a_turn_are_said_at_the_nearest_row_on_ave
         corrector = Corrector(grid, first_row, 0, every, words, [90.0])
         lateness, said_rows, s = [], [], 0
         while corrector.next < len(rows) - first_row - 1:
-            said, added = corrector.row(s * every * 0.97, 0.0, 0.0, 900.0, holding=False, past_end=False)
+            said, added = corrector.row(s * every * 0.97, 0.0, 0.0, 900.0, holding=False, unmeasured=False, rates_mps=STILL)
             said_rows.append((said, added, corrector.observed_row, corrector.matched_row))
             if s and said[HEADING] != UNCHANGED:      # the word's 2 s row, counted from the sentence's first row
                 lateness.append(corrector.matched_row - (corrector.heading_row[corrector.observed_row] - first_row))
@@ -1096,7 +1386,8 @@ def test_the_runner_reads_the_same_files_and_summary_with_any_number_of_workers(
     monkeypatch.setattr(replay, "open_executor",
                         lambda executor, instructions: (_params(), {"sha256": "e", "checks": {}}, words))
     monkeypatch.setattr(replay, "draw_readings", draw)
-    monkeypatch.setattr(replay, "flight_approach_ias_mps", lambda series, group: approach_speed_ias_mps("A320", 62000.0))
+    monkeypatch.setattr(replay, "flight_approach_speeds", lambda series: approach_speeds("A320"))
+    monkeypatch.setattr(replay, "flown_typecode", lambda series: "A320")
     monkeypatch.setattr(closed_loop, "start_inputs", inputs)
     monkeypatch.setattr(runner, "git_state", lambda: clean)
     monkeypatch.setattr(runner, "POOL_OPTIONS", {"start_method": "fork"})
@@ -1329,7 +1620,7 @@ def test_the_readers_two_parts_have_their_names():
         "lateral_m", "vertical_m", "uncorrectable", "observed_row", "matched_row"]
 
 
-@pytest.mark.parametrize("runner", ["executor_replay", "closed_loop_start_check", "final_descent_tolerance"])
+@pytest.mark.parametrize("runner", ["executor_replay", "closed_loop_start_check"])
 def test_a_readout_that_serves_a_choice_reads_train_or_select_only(runner, capsys):
     """A37, D85: the val days are read once, in the stage's validation readout; a readout runner refuses them."""
     import importlib

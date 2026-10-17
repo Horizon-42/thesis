@@ -1,28 +1,17 @@
-"""The landings of a window's scene (post-training §3 "Landing context", D105): what the commanded aircraft's inputs and
-the reward's present landing direction count.
+"""The landings of a window's scene (post-training D105): the diagnostic readout reads them (D175, `post_diagnose`); no
+loop does (D206, D207, D208).
 
 A window's landings are its airport's roster landings (`prior.landings.LandingIndex`, prior §7 item 2: the tracks
 roster less the sealed test days) with the window's changes:
 
-- a real window, and window B (only its commanded aircraft's start is moved): the roster's landings, unchanged — so a
-  window without other aircraft reads what free generation reads (§2 item 1);
+- a real window, and window B (only its commanded aircraft's start is moved): the roster's landings, unchanged;
 - window A: the inserted aircraft's landing added, at its source flight's roster landing shifted by the window's shift,
   on the same runway, under the inserted aircraft's own key (`scene.INSERTED_SUFFIX`);
 - window D: the moved aircraft's roster landing moved by its shift.
 
 A landing that a shift puts on a sealed test day is left out and counted with the index's sealed landings (C32); one
 that a shift puts on a day outside the day split is refused by the index itself (`LandingIndex`, prior D105). The
-commanded aircraft's own landing stays in the index: the function of a loop's row leaves it out by its key (D31, D63).
-
-**A window of several commanded aircraft** (multi-aircraft control D147 item 1, D149; post-training §9 item 2): each
-commanded aircraft's landings (`commanded_landings`) are the window's, less every other commanded aircraft's own (its
-recorded landing is that aircraft's future), with its own at its record's time in the window (moved by its shift in a
-compressed window), which the function of a loop's row leaves out by its key. A stage C window: the window's landings.
-
-**What a loop's rows count** (multi-aircraft control D189 (0)): of those, a commanded aircraft holds only the landings
-from 30 min before its window's row 0 to the latest time a row of its loop is said (the caller's), and its own: a row
-counts the 30 min before it, so every count is the same, and a landing added in the loop (D147 item 2) copies tens of
-landings, not the airport's roster.
+commanded aircraft's own landing stays in the index.
 """
 
 from __future__ import annotations
@@ -39,28 +28,6 @@ from ts_transformer.prior.landings import Landing, LandingIndex
 def roster_key(dataset_id: str, airport: str) -> str:
     """The tracks roster's key of a flight of the signals (`prior.inputs.own_flight_key`)."""
     return own_flight_key({"dataset_id": dataset_id, "airport": airport})
-
-
-def commanded_landings(window: Window, roster: LandingIndex, until_s: float) -> list[LandingIndex]:
-    """Each commanded aircraft's landings in ``window`` (module docstring), the anchor first, of those its rows can
-    count: from 30 min before the window's row 0 to ``until_s`` (no row of its loop is said at or after it while one of
-    the loop's aircraft is flown: a loop that holds windows ended, as loops flown together can, says their rows, which
-    no sentence reads), and its own; one Δ more before row 0 (a row's time is its flight's entry time and row, the window's
-    to rounding)."""
-    airport = window.scene.geometry.code
-    own = [roster_key(record.key, airport) for record in window.commanded_all]
-    base = window_landings(window, roster).counted(window.row0_s - window.scene.interval_s, until_s, own)
-    if not window.joined:
-        return [base]
-    landings = {landing.flight_key: landing for landing in base.landings}
-    shifts = [0.0, *(item.shift_s for item in window.joined)]
-    out = []
-    for key, shift in zip(own, shifts):
-        kept = {k: landing for k, landing in landings.items() if k not in own}
-        kept[key] = replace(landings[key], time_s=landings[key].time_s + shift)
-        out.append(LandingIndex(base.runways, tuple(sorted(kept.values(), key=lambda item: (item.time_s, item.flight_key))),
-                                base.sealed, base.days))
-    return out
 
 
 def window_landings(window: Window, roster: LandingIndex) -> LandingIndex:

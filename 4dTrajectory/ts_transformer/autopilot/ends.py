@@ -40,7 +40,7 @@ def crossing_ends(cross_m: Any, off_course_deg: Any, go_around: Any, runway_in_f
     """A crossing of a candidate's threshold plane, interpolated ``cross_m`` right of its centreline, at the row after
     it ``off_course_deg`` off its course, under the go-around state ``go_around``; ``runway_in_force``: the candidate is R.
     ``(approach, other)``: an approach crossing of R (G false, lined up, inside the landing screen's lateral limit
-    ``landing_limit_m``: what it is — landed, unstable, too high, off the runway — the judge reads) and a crossing of
+    ``landing_limit_m``: whether it is a landing the evaluation decides, `judge.landing_verdict`) and a crossing of
     another candidate that ends the flight (G false, lined up with it, inside its runway limit ``on_runway_m``,
     `runway_lateral_limit_m`, at any height). While G is true no crossing is an event (D33)."""
     flying = _false(go_around) & (abs(off_course_deg) <= spec.lined_up_deg)

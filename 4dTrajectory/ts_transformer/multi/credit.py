@@ -2,17 +2,20 @@
 training (post-training §9 item 6, `experiments.post_branches.Rules`, which `rules` gives as its fields).
 
 - **The window's reward** W (`window_reward`, D141): the sum of its commanded aircraft's rewards (post-training D30,
-  each with its own landings, D140); not divided by their count. With one commanded aircraft, that aircraft's reward.
+  D207); not divided by their count. With one commanded aircraft, that aircraft's reward.
 - **Spoken again** (D143): a window whose W is less than its count of commanded aircraft.
 - **The varied aircraft** (`varied`, D143): each commanded aircraft with r < 1, and each commanded aircraft of a loss
   of separation that one of them answers for (the other aircraft of that loss, even with r = 1).
 - **Their branch points** (`points`, D143): a varied aircraft v's own first predicted step and the points of the
-  window's grid after it — the anchor's first predicted step and every `BRANCH_EVERY_S` after it — before v's event:
+  window's grid after it — the anchor's first predicted step and every `BRANCH_EVERY_S` after it (D200: or the
+  campaign's interval) — before v's event:
   the step of its own end, or of the earliest loss that it is in (answering or not), whichever is earlier. Ticks of
   the window's grid (the loop's ticks). With one commanded aircraft, stage C's points (post-training D37).
 - **The numbers** (§3.3, D142): each commanded aircraft's own stream, from the seed, the round, the window's place in
   the round and the aircraft's place in the window (`first_numbers`); a continuation's from these, the branch point and
-  k (`continuation_numbers`, for the varied aircraft only: the others go on from their own first-sentence streams).
+  k (`continuation_numbers`, for the varied aircraft only: the others go on from their own first-sentence streams);
+  a draw's of standard GRPO (`draw_numbers`, D221: every aircraft's own stream of the draw, draw 0 its first
+  sentence's).
 """
 
 from __future__ import annotations
@@ -22,7 +25,7 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from ts_transformer.post.branches import branch_points
+from ts_transformer.post.branches import BRANCH_EVERY_S, branch_points
 
 
 @dataclass(frozen=True)
@@ -68,11 +71,11 @@ def event(aircraft: Sequence[Aircraft], v: int) -> int:
     return min([aircraft[v].end] + losses)
 
 
-def points(aircraft: Sequence[Aircraft], v: int, interval_s: float) -> list[int]:
+def points(aircraft: Sequence[Aircraft], v: int, interval_s: float, every_s: float = BRANCH_EVERY_S) -> list[int]:
     """The branch points of aircraft ``v`` (module docstring), ticks: its first predicted step, then the window's grid
-    (from the anchor's first predicted step, ``aircraft[0]``'s) after it, before its event."""
+    (from the anchor's first predicted step, ``aircraft[0]``'s, every ``every_s``) after it, before its event."""
     first, end = aircraft[v].first_step, event(aircraft, v)
-    grid = [t for t in branch_points(aircraft[0].first_step, end, interval_s) if t > first]
+    grid = [t for t in branch_points(aircraft[0].first_step, end, interval_s, every_s) if t > first]
     return ([first] if first < end else []) + grid
 
 
@@ -84,6 +87,14 @@ def first_numbers(seed: int, round_: int, place: int, member: int) -> np.random.
 def continuation_numbers(seed: int, round_: int, place: int, member: int, tick: int, k: int) -> np.random.Generator:
     """The numbers of continuation ``k`` of the varied aircraft ``member`` at the branch point ``tick``."""
     return np.random.default_rng([seed, round_, place, member, tick, k])
+
+
+def draw_numbers(seed: int, round_: int, place: int, member: int, draw: int) -> np.random.Generator:
+    """The numbers of commanded aircraft ``member``'s sentence in draw ``draw`` of the window at ``place`` (standard
+    GRPO, D221): draw 0 its first sentence's (`first_numbers`), draw d a stream of its own (its fifth number, 2**30, is
+    no tick of a continuation's)."""
+    return (first_numbers(seed, round_, place, member) if draw == 0
+            else np.random.default_rng([seed, round_, place, member, 1 << 30, draw]))
 
 
 def aircraft_of(loop: Any, rows: Sequence[int], results: Sequence[Any]) -> list[Aircraft]:
@@ -98,14 +109,15 @@ def aircraft_of(loop: Any, rows: Sequence[int], results: Sequence[Any]) -> list[
     return out
 
 
-def rules(seed: int, round_: int, interval_s: float) -> dict[str, Any]:
-    """Stage D's rules of branch training (module docstring), as the fields of `experiments.post_branches.Rules`."""
+def rules(seed: int, round_: int, interval_s: float, every_s: float = BRANCH_EVERY_S) -> dict[str, Any]:
+    """Stage D's rules of branch training (module docstring), as the fields of `experiments.post_branches.Rules`; the
+    grid every ``every_s`` (D143's `BRANCH_EVERY_S`, or the campaign's `MultiSettings.branch_every_s`, D200)."""
     def chosen(window: Any, loop: Any, rows: Sequence[int], results: Sequence[Any]) -> list[tuple[int, list[int]]]:
         aircraft = aircraft_of(loop, rows, results)
-        return [(v, points(aircraft, v, interval_s)) for v in varied(aircraft)]
+        return [(v, points(aircraft, v, interval_s, every_s)) for v in varied(aircraft)]
 
     return dict(first=lambda place, member: first_numbers(seed, round_, place, member),
                 continuation=lambda place, member, v, tick, k: continuation_numbers(seed, round_, place, member, tick, k),
                 reward=lambda results: window_reward([r.reward for r in results]),
                 again=lambda results: spoken_again([r.reward for r in results]),
-                varied=chosen)
+                varied=chosen, draw=lambda place, member, d: draw_numbers(seed, round_, place, member, d))

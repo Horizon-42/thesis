@@ -9,7 +9,7 @@ start's moved rows; with `NO_MOVE`, the closed-loop sentence's, bit for bit), ea
 as the speaker reads them; of the closed-loop sentence the loop reads only its first row and its first predicted step
 (D82: its rows alone). From the first predicted step on, `step` says one row:
 the inputs from the states the executor flew (D32, §2) through the prior's one function of a loop's row
-(`prior.loop.LoopRows`, D96 item 4, with each flight's own landings, D105), the speaker under its masks, the bound of D68
+(`prior.loop.LoopRows`, D96 item 4), the speaker under its masks, the bound of D68
 ("go-around" forbidden after a flight's last) and the caller's masks, with the caller's random numbers and input of the
 added modules; the loop flies the row for Δ seconds. A flight ends when the executor is done with it (its crossing, its
 time limit, or the dynamics), or when the caller ends it (`end`: a loss of separation, post-training D93); an ended
@@ -23,15 +23,14 @@ join tick j, observed from it to its first predicted step (its own rows 0 … s 
 said while it is flown. `step` advances one tick for every flight, each by its own clock (the speaker's row of several
 roles, `Speaker.say`; the executor's step once the loop's clock reaches tick s, where a flight of join tick 0 starts);
 `observe` is the phase of a loop whose join ticks are all 0. Each flight's records, words, states and sentence are of its
-own rows from its row 0 (`sentences`, `said`, `states`, `generated`). A landing may be added to chosen flights' landings
-while the loop runs (`add_landing`, `LoopRows.add_landing`); a copy keeps them and the join ticks. With every join tick 0
-the loop is the loop without join ticks, bit for bit.
+own rows from its row 0 (`sentences`, `said`, `states`, `generated`). With every join tick 0 the loop is the loop
+without join ticks, bit for bit.
 
 **Rows that leave** (multi-aircraft control D193 (3), S6). A join (`together`) keeps in the speaker and the executor only
 the flights still flown. A flight no longer flown leaves them: nothing says or flies it after. The loop keeps what is
-read of it later as a `Left` record: its outcome, its states, its landings, its sentence's inputs and its permitted
-words. Each flight keeps its place in ``order``, so a caller reads a flight that left as it reads one still held
-(`said`, `states`, `outcome`, `landings`, `sentences`, `permitted`, `generated`). A copy (`copy`) keeps each flight as
+read of it later as a `Left` record: its outcome, its states, its sentence's inputs and its permitted words. Each
+flight keeps its place in ``order``, so a caller reads a flight that left as it reads one still held
+(`said`, `states`, `outcome`, `sentences`, `permitted`, `generated`). A copy (`copy`) keeps each flight as
 it is: held or left.
 """
 
@@ -51,8 +50,6 @@ from ts_transformer.instructions.grammar import column_words
 from ts_transformer.instructions.labeller.interval import interval_rows
 from ts_transformer.instructions.words import COLUMNS, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words
 from ts_transformer.prior.batch import RowTensors, SentenceRows
-from ts_transformer.prior.inputs import own_flight_key
-from ts_transformer.prior.landings import Landing, LandingIndex, utc_s
 from ts_transformer.prior.loop import LoopRows
 from ts_transformer.prior.model import COPIED, Prior
 from ts_transformer.prior.procedure import Final
@@ -100,7 +97,6 @@ class Left:
 
     outcome: Outcome | None            # the judge's; None: the caller ended the flight (`SpeakingLoop.end`)
     states: np.ndarray                 # `SpeakingLoop.states`
-    landings: LandingIndex             # its landings when it left (its reward reads those before its first step)
     inputs: dict[str, np.ndarray]      # the inputs of its sentence's rows, by `SentenceRows` field (`_own_inputs`)
     permitted: Permitted               # `SpeakingLoop.permitted`
 
@@ -108,16 +104,16 @@ class Left:
 class SpeakingLoop:
     """The closed loop of the flights ``order`` of ``loop`` (module docstring). ``sentences``, ``observed`` (each
     flight's observed rows before its first predicted step as the start gave them back, `STATE_COLUMNS`) and
-    ``flights`` (their records in the split's signals: airport, entry time, key) by their place in the signals; ``landings`` each flight's,
-    in ``order`` (D105); ``finals`` each airport's (the procedure masks); ``attention``: how its copies read the front
-    of the speaker's cache they hold once (`Speaker`; multi-aircraft control D190 (2)). ``executor_device``: the device that the
-    start's ``loop`` (the executor) was started on (multi-aircraft control S1). The executor stays on this device, and
-    so do its copies and joins. The speaker stays on ``device``. A loop started on another device is refused. None: the
+    ``flights`` (their records in the split's signals: airport, entry time, key) by their place in the signals;
+    ``finals`` each airport's (the procedure masks); ``attention``: how its copies read the front of the speaker's cache
+    they hold once (`Speaker`; multi-aircraft control D190 (2)). ``executor_device``: the device that the start's
+    ``loop`` (the executor) was started on (multi-aircraft control S1). The executor stays on this device, and so do its
+    copies and joins. The speaker stays on ``device``. A loop started on another device is refused. None: the
     executor follows the speaker, and each copy and join moves it to the speaker's device (the behaviour before S1)."""
 
     def __init__(self, model: Prior, loop: Loop, order: Sequence[int], sentences: Mapping[int, ClosedLoopSentence],
                  observed: Mapping[int, np.ndarray], flights: Mapping[int, Mapping[str, Any]], geometries: Mapping[str, AirportGeometry],
-                 landings: Sequence[LandingIndex], finals: Mapping[str, Sequence[Final]], words: Words, *,
+                 finals: Mapping[str, Sequence[Final]], words: Words, *,
                  interval_s: float, variant: str, device: torch.device, temperature: float = 1.0,
                  attention: str = COPIED, executor_device: torch.device | None = None) -> None:
         if executor_device is not None and loop.executor.state.device.type != torch.device(executor_device).type:
@@ -137,12 +133,9 @@ class SpeakingLoop:
         self.join_ticks = loop.join_ticks.copy()
         self.speaker = Speaker(model, words, self.finals, capacity=int(self.join_ticks.max()) + self.start + FIRST_ROWS,
                                temperature=temperature, attention=attention)
-        # the inputs of a row: the prior's one function of a loop's row (D96 item 4), each flight's own landings (D105)
-        self.rows_of = LoopRows(self.geometries, landings, [own_flight_key(f) for f in self.flights],
-                                np.array([utc_s(f["entry_time_utc"]) for f in self.flights]),
-                                np.array([r.first_row for r in rows]), self.start, variant=variant,
-                                interval_s=interval_s, step_s=words.spec.step_s, device=device,
-                                join_ticks=self.join_ticks)
+        # the inputs of a row: the prior's one function of a loop's row (D96 item 4)
+        self.rows_of = LoopRows(self.geometries, self.start, variant=variant, interval_s=interval_s,
+                                step_s=words.spec.step_s, device=device, join_ticks=self.join_ticks)
         shape = (self.start * self.every, len(STATE_COLUMNS))
         wrong = [i for i in self.order if np.shape(observed[i]) != shape]
         if wrong:
@@ -312,11 +305,6 @@ class SpeakingLoop:
         out[self.held] = values
         return out
 
-    def add_landing(self, flights: Sequence[int], landing: Landing) -> None:
-        """``landing`` added to the landings of the flights ``flights`` (places in ``order``; module docstring): the rows
-        after its time count it (`LoopRows.add_landing`)."""
-        self.rows_of.add_landing([self._slot[b] for b in flights if self.held[b]], landing)
-
     def end(self, flights: np.ndarray) -> None:
         """The caller ends the flights ``flights`` (``[B]`` bool) after the row said last (a loss of separation,
         post-training D93): halted as a done flight is. Its outcome is the caller's: the judge has none for a flight the
@@ -390,8 +378,8 @@ class SpeakingLoop:
         out = []
         for b, permitted in zip(flights, self.permitted(flights)):
             k = self._slot[b]
-            left = Left(None if self.ended[b] else self.loop.outcome(k), self.states(b), self.rows_of.landings[k],
-                        self._own_inputs(b), permitted)
+            left = Left(None if self.ended[b] else self.loop.outcome(k), self.states(b), self._own_inputs(b),
+                        permitted)
             for value in [left.states, *left.inputs.values(), *permitted.masks, permitted.time_s, permitted.own]:
                 value.flags.writeable = False
             out.append(left)
@@ -405,10 +393,6 @@ class SpeakingLoop:
         if self.left[flight].outcome is None:
             raise ValueError(f"flight {flight} was ended by the caller: it has no judge's outcome")
         return self.left[flight].outcome
-
-    def landings(self, flight: int) -> LandingIndex:
-        """``flight``'s landings as the loop counts them now (`add_landing`); a flight that left, those when it left."""
-        return self.left[flight].landings if flight in self.left else self.rows_of.landings[self._slot[flight]]
 
     def in_force(self, flight: int) -> Any:
         """The words in force of held ``flight`` (the speaker's, `Speaker.in_force`)."""

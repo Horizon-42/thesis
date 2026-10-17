@@ -105,7 +105,8 @@ MIN_CALIBRATION_FLIGHTS = 30
 FAN_INTERVAL_ALPHA = min(CONFORMAL_ALPHAS)
 
 #: Where `predict --cta-from-quantiles` writes the fan, and how one leaf is named. The
-#: directory grammar lives HERE rather than in `cli.predict` so `experiments.quantile_fan_readout`
+#: directory grammar lives HERE rather than in `cli.predict` so
+#: `archive/one_tier_runners_2026_10/experiments/quantile_fan_readout.py` (archived)
 #: can read a fan without importing the CLI (and torch with it); a readout that guessed the
 #: spelling would report an empty fan as a missing one.
 QUANTILE_DIR_NAME = "quantiles"

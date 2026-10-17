@@ -148,7 +148,7 @@ def main(argv: list[str] | None = None) -> int:
     if prior.config["run"]["held_out"] is not None:
         raise SystemExit(f"{prior_dir} is a fold (held out {prior.config['run']['held_out']}): the validation readout is "
                          f"the base's (§12 B5)")
-    geometries, landings, interval_s = prior.geometries, prior.landings, prior.interval_s
+    geometries, interval_s = prior.geometries, prior.interval_s
     selection, checkpoint = prior.selection, prior.checkpoint
     if checkpoint.run["sample"] is not None and not args.smoke:
         raise SystemExit(f"{prior_dir} is a smoke prior (a sample of the sentences): no formal readout")
@@ -158,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.split == "val":
         claim_validation_read(prior_dir, "prior_validation", out, {"split": args.split, "device": str(device)})
         require_selection_of(instructions, interval_s, checkpoint.identity, args.split)
-    source = ArtefactSource(instructions, interval_s, variant, landings, selection)
+    source = ArtefactSource(instructions, interval_s, variant, selection)
     airports = sorted(geometries)
     loss = {airport: evaluate(model, source.sentences(args.split, airport), tokens, device) for airport in airports}
     pooled = evaluate(model, [s for airport in airports for s in source.sentences(args.split, airport)], tokens, device)

@@ -9,7 +9,7 @@ import pytest
 import torch
 
 from ts_transformer.autopilot import closed_loop, replay
-from ts_transformer.autopilot.speed import approach_speed_ias_mps
+from ts_transformer.autopilot.speed import approach_speeds
 from ts_transformer.experiments import lead_ablation as readout
 from ts_transformer.instructions.labeller.read import read_flight
 from ts_transformer.instructions.words import ANGLE, Words
@@ -50,7 +50,8 @@ def _value(monkeypatch, column, seconds, interval_s=2.0):
     flight = instruction_flight(*fly_legs(LEGS, 270.0, 1079.0, -400.0, 0.0))
     drawn = replay.Drawn(indices=[5], signals=[flight], series=[None], groups=[replay.OWN],
                          geometries={flight.airport: geometry}, description={"excluded": {}}, excluded_seen=Counter())
-    monkeypatch.setattr(replay, "flight_approach_ias_mps", lambda series, group: approach_speed_ias_mps("A320", 62000.0))
+    monkeypatch.setattr(replay, "flight_approach_speeds", lambda series: approach_speeds("A320"))
+    monkeypatch.setattr(replay, "flown_typecode", lambda series: "A320")
     led = readout.spec_with_lead(spec(), column, seconds)
     sentence = replay.sentence_on_interval(read_flight(flight, geometry, led, Words(led)), flight, interval_s, geometry,
                                            Words(led))

@@ -21,18 +21,15 @@ from ts_transformer.experiments.prior_speaking_loop import SpeakingLoop, flight_
 from ts_transformer.instructions.artefact import load_candidates, load_day_split, load_spec, signals_flights
 from ts_transformer.instructions.words import COLUMNS
 from ts_transformer.post.conformance import reference_steps, write_edge_reference
-from ts_transformer.post.landings import roster_key, window_landings
-from ts_transformer.post.reward import GO_AROUND_FACTOR, LANDED, present_runways, reward
+from ts_transformer.post.landings import roster_key
+from ts_transformer.post.reward import GO_AROUND_FACTOR, LANDED, reward
 from ts_transformer.post.scene import INSERTED, INSERTED_SUFFIX, MovedScene, airport_scenes, real_windows
 from ts_transformer.post.traffic_attention import TrafficConfig, add_traffic_attention, traffic_modules
-from ts_transformer.prior.batch import variant_features
-from ts_transformer.prior.inputs import LANDINGS_SCALE
 from ts_transformer.prior.landings import Landing, LandingIndex, utc_s
 from ts_transformer.prior.model import Prior, PriorConfig
 from ts_transformer.prior.procedure import Final
 from ts_transformer.prior.speaker import MOST_GO_AROUNDS
 from ts_transformer.tests import test_start
-from ts_transformer.tests.support import fixture_days, parallel_airport
 
 CPU = torch.device("cpu")
 DELTA = 4.0
@@ -97,8 +94,8 @@ def _with_module(base, weights=True):
 
 def _window_loop(s, model, windows, faults=None):
     loop, order, observed = s["moved_loop"](start_move_of(windows[0]))
-    return WindowLoop(model, loop, order, windows, {0: s["stored"]}, s["flights"], s["geometries"],
-                      {s["geometry"].code: s["roster"]}, s["finals"], s["words"], interval_s=DELTA, variant="full",
+    return WindowLoop(model, loop, order, windows, {0: s["stored"]}, s["flights"], s["geometries"], s["finals"],
+                      s["words"], interval_s=DELTA, variant="full",
                       edges_reference=s["reference"], faults={s["geometry"].code: faults or {}}, observed=observed,
                       device=CPU)
 
@@ -110,7 +107,7 @@ def test_a_window_without_other_aircraft_is_free_generation_bit_for_bit(setup):
     assert len(s["windows"]) == 1 and not len(s["windows"][0].others_at(10))
     loop, order, observed = s["moved_loop"](NO_MOVE)
     (free,) = speak_and_fly(s["base"], loop, order, {0: s["stored"]}, observed, s["flights"], s["geometries"],
-                            {s["geometry"].code: s["roster"]}, s["finals"], s["words"], interval_s=DELTA,
+                            s["finals"], s["words"], interval_s=DELTA,
                             variant="full", numbers=[flight_numbers(7, 0, 0)], device=CPU)
     windows = _window_loop(s, _with_module(s["base"]), s["windows"])
     (window,) = windows.run([flight_numbers(7, 0, 0)])
@@ -120,7 +117,7 @@ def test_a_window_without_other_aircraft_is_free_generation_bit_for_bit(setup):
     # the speaker's probabilities too, bit for bit: free generation's loop as `speak_and_fly` runs it
     loop, order, observed = s["moved_loop"](NO_MOVE)
     speaking = SpeakingLoop(s["base"], loop, order, {0: s["stored"]}, observed, s["flights"], s["geometries"],
-                            [s["roster"]], s["finals"], s["words"], interval_s=DELTA, variant="full", device=CPU)
+                            s["finals"], s["words"], interval_s=DELTA, variant="full", device=CPU)
     numbers = flight_numbers(7, 0, 0)
     while speaking.observing:
         speaking.observe()
@@ -148,56 +145,14 @@ def test_a_loss_of_separation_that_the_commanded_aircraft_answers_for_ends_its_w
     assert result.states.shape[0] == (start_row + 1) * loop.every + 1
 
 
-def test_the_landing_context_counts_the_windows_landings_never_the_commanded_aircrafts_own(setup):
-    """D31, D105: at every row said, the commanded aircraft's landings input is its window's landings (an inserted
-    aircraft's at its shifted time) without its own landing."""
-    s = setup
-    (window,) = s["windows"]
-    own = window.scene.flights[0]
-    key = own.key + INSERTED_SUFFIX
-    shift = round((window.row0_s + 30.0 - own.landing_s) / DELTA) * DELTA          # it lands 30 s into the window
-    inserted = replace(window, kind=INSERTED, moved=((key, shift),),
-                       scene=MovedScene(window.scene, added=(own.shifted(shift, DELTA, key=key),)))
-    loop = _window_loop(s, _with_module(s["base"], weights=False), [inserted])
-    loop.run([flight_numbers(7, 0, 0)])
-    (rows,) = loop.speaking.sentences("train")
-    times = window.row0_s + np.arange(len(rows.time_s)) * DELTA
-    counts = window_landings(inserted, s["roster"]).counts_before(times, without=s["key"])[:, 0]
-    feature = variant_features("full").index("landings_30min")
-    assert np.allclose(rows.candidates[:, 0, feature], counts / LANDINGS_SCALE)
-    without_insert = s["roster"].counts_before(times, without=s["key"])[:, 0]
-    assert (counts == without_insert + (times > own.landing_s + shift)).all()     # the inserted landing, from its time
-    assert (counts > without_insert).any()
-
-
 def test_the_reward_table():
     """§2 item 2, D30."""
-    present = np.array([True, False])
-    assert reward(LANDED, 0, 0, present, False) == 1.0
-    assert reward(LANDED, 0, 2, present, False) == pytest.approx(GO_AROUND_FACTOR ** 2)
-    assert reward(LANDED, 1, 0, present, False) == 0.0                   # a runway of another direction
-    assert reward(LANDED, 0, 0, present, True) == 0.0                    # a loss of separation
+    assert reward(LANDED, 0, False) == 1.0
+    assert reward(LANDED, 2, False) == pytest.approx(GO_AROUND_FACTOR ** 2)
+    assert reward(LANDED, 0, True) == 0.0                                # a loss of separation
     for other in OUTCOMES[1:]:
-        assert reward(other, None, 0, present, False) == 0.0
+        assert reward(other, 0, False) == 0.0
     assert LANDED == OUTCOMES[0]                                         # the mirror of the judge's literal
-    with pytest.raises(ValueError, match="names the runway"):
-        reward(LANDED, None, 0, present, False)
-
-
-def test_the_present_landing_direction():
-    """§2 item 2: a runway within 90° of a runway with a landing in the 30 min before the first predicted step, without
-    the commanded aircraft's own landing."""
-    geometry = parallel_airport()                                        # 09 and 09L, both 090°
-    days = fixture_days()
-    noon = utc_s(f"{days.days['train'][0]}T12:00:00Z")
-    index = LandingIndex(("09", "09L"), (Landing(noon - 600.0, "09L", "x"), Landing(noon + 60.0, "09", "own")), 0, days)
-    assert present_runways(index, geometry, noon, "own").tolist() == [True, True]
-    assert present_runways(index, geometry, noon - 700.0, "own").tolist() == [True, True]     # none in the 30 min: all
-    alone = LandingIndex(("09", "09L"), (Landing(noon - 60.0, "09", "own"),), 0, days)
-    assert present_runways(alone, geometry, noon, "own").tolist() == [True, True]             # its own is not counted
-    turned = replace(geometry, candidates=(geometry.candidates[0], replace(geometry.candidates[1], course_deg=270.0)))
-    opposite = LandingIndex(("09", "09L"), (Landing(noon - 600.0, "09", "x"), Landing(noon + 60.0, "09", "own")), 0, days)
-    assert present_runways(opposite, turned, noon, "own").tolist() == [True, False]          # 180° from the landing
 
 
 def test_the_window_loop_reads_no_time_limit():

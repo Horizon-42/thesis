@@ -25,7 +25,10 @@ from aeroviz_backend.autopilot_segment.fly import FlownSegment, last_state
 #: a word of the closed-loop sentence at Δ, flown from its first predicted step; no model sentence, no procedure's masks.
 #: v10 (executor design draft 5): the thrust, bank and load factor are what the actuators had reached (the lag plant),
 #: no longer the commands, which lead them.
-SCHEMA = "aeroviz-autopilot-segment-v10"
+#: v11 (the user, 2026-10-12: a crossing's ``evaluation`` (the evaluation's verdict on an approach crossing,
+#: `judge.landing_verdict`) beside its ``decision`` (the decision-altitude check, a record); the outcomes ``landed`` /
+#: ``landing_failed``.
+SCHEMA = "aeroviz-autopilot-segment-v11"
 #: The end of a segment its stop ended (the executor got there); otherwise the judge's outcome (`judge.OUTCOMES`).
 #: MIRROR of `trainingAutopilot.ts` (`TRAINING_AUTOPILOT_SEGMENT_END`).
 SEGMENT_END = "segment_end"
@@ -70,7 +73,7 @@ def segment_payload(result: FlownSegment, geometry: Any, hae_minus_msl_m: float,
                     # replay writes it; a dynamics failure's track ends one state before it)
                     "endCycle": last_state(result) if verdict is None else verdict.end_row},
         "track": track_payload(result, geometry, hae_minus_msl_m, aero_params),
-        # flown to its outcome: the judge's crossing and decision-altitude check, as the export writes them
+        # flown to its outcome: the judge's crossing, decision-altitude check and evaluation's verdict, as the export writes them
         "crossing": None if verdict is None else crossing_payload(verdict, result.flown, 0, geometry),
         # the live flight against the artefact's stored flown states on the 2 s rows both have
         "stored": {"rows": apart["rows"], "horizontalM": round(apart["horizontalM"], 9),

@@ -1,4 +1,5 @@
-"""The prior's inputs of a row (prior design §2, §7 item 2; milestone B1): the landings before a step."""
+"""The prior's inputs of a row (prior design §2, §7 item 2; milestone B1), and the index of landings that the loops'
+reward reads (no input of the prior, D206)."""
 
 from __future__ import annotations
 
@@ -13,12 +14,10 @@ from ts_transformer.instructions.artefact import STATE_COLUMNS, signals_flights
 from ts_transformer.instructions.words import HEADING, RUNWAY, Words
 from ts_transformer.prior.batch import CANDIDATE_FEATURES, OWN_FEATURES
 from ts_transformer.prior.inputs import (
-    GLIDEPATH_HEIGHT_SCALE_M, SPEED_SCALE_MPS, VERTICAL_RATE_SCALE_MPS, sentence_rows, since_input,
+    PATH_OFFSET_SCALE_M, SPEED_SCALE_MPS, VERTICAL_RATE_SCALE_MPS, sentence_rows, since_input,
 )
-from ts_transformer.prior.landings import (
-    LANDINGS_WINDOW_S, Landing, LandingIndex, read_roster_landings, roster_landings, utc_s,
-)
-from ts_transformer.prior.source import ArtefactSource, artefact_identity
+from ts_transformer.prior.landings import Landing, LandingIndex, read_roster_landings, roster_landings, utc_s
+from ts_transformer.prior.source import ArtefactSource, artefact_identity, opened_entries, opening_identity
 from ts_transformer.tests.support import (
     INSTRUCTION_AIRPORT_ELEVATION_M, TEST_GLIDEPATH_DEG, TEST_TCH_M, fixture_days, fly_legs, instruction_flight,
     instruction_spec, parallel_airport, prior_artefact, prior_closed_loop_sentence,
@@ -29,7 +28,7 @@ def record(key, runway, time_utc, outcome="assigned"):
     return {"flight_key": key, "outcome": outcome, "runway": runway, "landing_time_utc": time_utc}
 
 
-def test_the_landings_index_counts_the_30_min_before_a_step_without_the_test_days(tmp_path):
+def test_the_landings_index_holds_the_rosters_assigned_landings_without_the_test_days(tmp_path):
     days = fixture_days()
     train_day, test_day = days.days["train"][0], days.days["test"][0]
     records = [
@@ -44,14 +43,7 @@ def test_the_landings_index_counts_the_30_min_before_a_step_without_the_test_day
     path.write_text(json.dumps({"records": records}))
     index = read_roster_landings(path, ("05L", "23R"), days)
     assert [landing.flight_key for landing in index.landings] == ["A", "B", "C"] and index.sealed == 1
-    noon = utc_s(f"{train_day}T12:00:00Z")
-    times = np.array([noon, noon + 1.0, noon + 25 * 60.0, noon + LANDINGS_WINDOW_S, noon + LANDINGS_WINDOW_S + 1.0])
-    # [t − 30 min, t): a landing at t is not before it; one exactly 30 min before is
-    assert index.counts_before(times, without="C").tolist() == [[0, 0], [1, 0], [2, 0], [2, 0], [1, 0]]
-    assert index.counts_before(times, without="B").tolist() == [[0, 0], [1, 0], [1, 0], [1, 1], [0, 1]]
-    with pytest.raises(ValueError, match="does not land in the index"):
-        index.counts_before(times, without="D")
-    assert index.digest() != roster_landings(records[:2], ("05L", "23R"), days).digest()
+    assert roster_landings(records[:2], ("05L", "23R"), days).sealed == 0
 
 
 def test_the_landings_index_refuses_a_day_outside_the_split():
@@ -60,8 +52,8 @@ def test_the_landings_index_refuses_a_day_outside_the_split():
 
 
 def test_an_index_built_from_given_landings_refuses_a_sealed_test_day_by_itself():
-    """D105, C32: a loop's caller builds each aircraft's landings from `Landing`s (a window's scene); the index refuses
-    a landing on a sealed test day, or on a day outside the split, whoever built it."""
+    """D105, C32: a window's landings are built from `Landing`s (post-training D105); the index refuses a landing on a
+    sealed test day, or on a day outside the split, whoever built it, and landings out of time-then-flight order."""
     from ts_transformer.data.day_split import SealedDay
 
     days = fixture_days()
@@ -72,40 +64,9 @@ def test_an_index_built_from_given_landings_refuses_a_sealed_test_day_by_itself(
         LandingIndex(("05L",), (Landing(on["train"], "05L", "A"), Landing(on["test"], "05L", "T")), 0, days)
     with pytest.raises(KeyError, match="not in this day split"):
         LandingIndex(("05L",), (Landing(utc_s("2031-01-01T12:00:00Z"), "05L", "A"),), 0, days)
-
-
-def test_a_landing_added_gives_the_index_built_whole_and_checks_only_itself(monkeypatch):
-    """Multi-aircraft control D186 (1): `with_landing` puts the new landing in its place and checks only it — the same
-    index as one built whole from every landing (landings, sealed, counts, digest), ties in time ordered by flight; the
-    index refuses landings out of time-then-flight order."""
-    from ts_transformer.prior import landings as module
-
-    days = fixture_days()
-    runways = ("05L", "23R")
-    noon = utc_s(f"{days.days['train'][0]}T12:00:00Z")
-    rng = np.random.default_rng(3)
-    added = [Landing(noon + float(rng.integers(0, 40)) * 30.0, runways[int(rng.integers(0, 2))], f"F{k:02d}")
-             for k in rng.permutation(24)]
-    index = LandingIndex(runways, (), 0, days)
-    calls = []
-    real = module.operational_day
-    monkeypatch.setattr(module, "operational_day", lambda moment: calls.append(1) or real(moment))
-    for k, landing in enumerate(added):
-        index = index.with_landing(landing)
-        assert len(calls) == k + 1                                   # the new landing's day only
-    monkeypatch.undo()
-    test_day = utc_s(f"{days.days['test'][0]}T12:00:00Z")
-    index = index.with_landing(Landing(test_day, "05L", "SEALED"))
-    whole = LandingIndex(runways, tuple(sorted(added, key=lambda item: (item.time_s, item.flight_key))), 1, days)
-    assert index.landings == whole.landings and index.sealed == whole.sealed and index.digest() == whole.digest()
-    assert len({landing.time_s for landing in added}) < len(added), "ties in time"
-    probe = noon + np.arange(-1800.0, 1500.0, 7.0)
-    for landing in added:
-        assert np.array_equal(index.counts_before(probe, without=landing.flight_key),
-                              whole.counts_before(probe, without=landing.flight_key))
-    tied = (Landing(noon, "05L", "B"), Landing(noon, "05L", "A"))
+    tied = (Landing(on["train"], "05L", "B"), Landing(on["train"], "05L", "A"))
     with pytest.raises(ValueError, match="time order, then flight order"):
-        LandingIndex(runways, tied, 0, days)
+        LandingIndex(("05L",), tied, 0, days)
 
 
 # ---- the inputs of a sentence's rows (B1)
@@ -121,45 +82,37 @@ def candidate(rows, k, name):
     return rows.candidates[:, k, CANDIDATE_FEATURES.index(name)]
 
 
-def flight_and_index(split="train", i=1):
+def flight_record(split="train", i=1):
     words = Words(instruction_spec())
     legs = [(160, 0.0, 75.0 - 2.0 * i, -1.5)]
     signals = instruction_flight(*fly_legs(legs, 90.0, 750.0 + 30.0 * i, -400.0, 0.0), dataset_id=f"KXXX:F{split}{i}",
                                  split=split)
     record = {"dataset_id": signals.dataset_id, "airport": "KXXX", "runway": "09",
               "entry_time_utc": signals.entry_time_utc, "landing_time_utc": signals.landing_time_utc}
-    index = roster_landings([{"flight_key": f"F{split}{i}", "outcome": "assigned", "runway": "09",
-                              "landing_time_utc": signals.landing_time_utc}], ("09", "09L"), fixture_days())
-    return words, signals, record, index
+    return words, signals, record
 
 
-def real_key(record, index, runway, landing_time_utc):
+def real_key(record, runway, landing_time_utc):
     """``record`` with a flight key of the real format (`flight_scenarios.identity.flight_key`:
-    ``<id>_<runway>_<icao24>_<landing time stamp>``) of ``runway`` and ``landing_time_utc``, and ``index`` with its own
-    landing (the one of the record's old key) under the new key."""
+    ``<id>_<runway>_<icao24>_<landing time stamp>``) of ``runway`` and ``landing_time_utc``."""
     import re
 
     key = f"TST123_{runway}_a1b2c3_{re.sub(r'[^0-9TZ]', '', landing_time_utc)}"
-    from ts_transformer.prior.inputs import own_flight_key
-
-    old = own_flight_key(record)
-    landings = tuple(replace(x, flight_key=key) if x.flight_key == old else x for x in index.landings)
-    return ({**record, "dataset_id": f"{record['airport']}:{key}", "runway": runway,
-             "landing_time_utc": landing_time_utc}, LandingIndex(index.runways, landings, index.sealed, index.days))
+    return {**record, "dataset_id": f"{record['airport']}:{key}", "runway": runway, "landing_time_utc": landing_time_utc}
 
 
-def rows_of(sentence, record, index, words, interval_s, geometry=None, variant="full"):
-    return sentence_rows(sentence, record, geometry or parallel_airport(), index, words, interval_s=interval_s,
-                         split="train", variant=variant)
+def rows_of(sentence, record, words, interval_s, geometry=None, variant="full"):
+    return sentence_rows(sentence, record, geometry or parallel_airport(), words, interval_s=interval_s, split="train",
+                         variant=variant)
 
 
 @pytest.mark.parametrize("interval_s", INTERVALS)
 def test_the_motion_comes_from_the_2_s_displacement_and_row_0_has_none(interval_s):
-    words, signals, record, index = flight_and_index()
+    words, signals, record = flight_record()
     every = int(interval_s / 2)
     for first_row in (0, 1):            # D60: also when the data have a 2 s row before row 0
         sentence = prior_closed_loop_sentence(signals, words, interval_s=interval_s, first_row=first_row).rows
-        rows = rows_of(sentence, record, index, words, interval_s)
+        rows = rows_of(sentence, record, words, interval_s)
         assert own(rows, "no_motion")[0] == 1.0 and not own(rows, "no_motion")[1:].any()
         assert own(rows, "ground_speed")[0] == 0.0 and own(rows, "vertical_rate")[0] == 0.0
         assert not rows.candidates[0, :, [CANDIDATE_FEATURES.index("motion_minus_course_sin"),
@@ -192,12 +145,12 @@ def test_the_motion_s_velocity_east_and_north_is_the_2_s_displacement():
 def test_only_positions_and_heights_give_the_motion():
     """§2 (D25): the stored track, ground speed and vertical rate of the states (on the observed rows the start rule's
     velocity, which at row 0 reads the row after it, D77) change no input."""
-    words, signals, record, index = flight_and_index()
+    words, signals, record = flight_record()
     sentence = prior_closed_loop_sentence(signals, words, interval_s=2.0).rows
     states = sentence.states.copy()
     for name in ("track_deg", "ground_speed_mps", "vertical_rate_mps"):
         states[:, STATE_COLUMNS.index(name)] += 17.0
-    a, b = (rows_of(s, record, index, words, 2.0) for s in (sentence, replace(sentence, states=states)))
+    a, b = (rows_of(s, record, words, 2.0) for s in (sentence, replace(sentence, states=states)))
     for name in ("own", "candidates", "heading_in_force", "since"):
         assert np.array_equal(getattr(a, name), getattr(b, name)), name
 
@@ -205,20 +158,18 @@ def test_only_positions_and_heights_give_the_motion():
 @pytest.mark.parametrize("interval_s", INTERVALS)
 def test_a_change_of_the_runway_word_leaves_the_rows_up_to_the_first_predicted_step_bit_for_bit(interval_s):
     """D23: the artefact writes the landed runway at the first predicted step; no input up to that step reads it — nor
-    the flight record's runway and landing time, nor its own landing in the index (another runway, 600 s earlier), nor
-    its key of the real format (``<id>_<runway>_<icao24>_<landing time>``), which holds both and changes with them."""
-    words, signals, record, index = flight_and_index()
-    record, index = real_key(record, index, record["runway"], record["landing_time_utc"])
+    the flight record's runway and landing time (another runway, 600 s earlier), nor its key of the real format
+    (``<id>_<runway>_<icao24>_<landing time>``), which holds both and changes with them."""
+    words, signals, record = flight_record()
+    record = real_key(record, record["runway"], record["landing_time_utc"])
     sentence = prior_closed_loop_sentence(signals, words, interval_s=interval_s, go_around=True).rows
     grid = sentence.grid.copy()
     grid[0, RUNWAY], grid[20, RUNWAY] = 1, 1
-    (own,) = index.landings
-    earlier = f"{np.datetime64(int(own.time_s - 600.0), 's')}Z"
-    other, moved = real_key(record, LandingIndex(index.runways, (Landing(own.time_s - 600.0, "09L", own.flight_key),),
-                                                 index.sealed, index.days), "09L", earlier)
+    earlier = f"{np.datetime64(int(utc_s(record['landing_time_utc']) - 600.0), 's')}Z"
+    other = real_key(record, "09L", earlier)
     assert other["dataset_id"] != record["dataset_id"]
-    a = rows_of(sentence, record, index, words, interval_s)
-    b = rows_of(replace(sentence, grid=grid), other, moved, words, interval_s)
+    a = rows_of(sentence, record, words, interval_s)
+    b = rows_of(replace(sentence, grid=grid), other, words, interval_s)
     upto = slice(0, a.first_step + 1)
     for name in ("time_s", "own", "candidates", "runway_in_force", "go_around", "heading_in_force", "words_in_force",
                  "since"):
@@ -227,26 +178,41 @@ def test_a_change_of_the_runway_word_leaves_the_rows_up_to_the_first_predicted_s
 
 
 def test_the_height_above_the_glidepath_against_a_hand_computation():
-    words, signals, record, index = flight_and_index()
+    words, signals, record = flight_record()
     sentence = prior_closed_loop_sentence(signals, words, interval_s=2.0).rows
-    rows = rows_of(sentence, record, index, words, 2.0)
+    rows = rows_of(sentence, record, words, 2.0)
     j = 20
     e, h = sentence.states[j, STATE_COLUMNS.index("e_m")], sentence.states[j, STATE_COLUMNS.index("height_m")]
     d = -e                                                     # "09": threshold at the origin, course 090°
     radius = curvature_radius_m(35.0, 90.0)
     glidepath = TEST_TCH_M + d * np.tan(np.radians(TEST_GLIDEPATH_DEG)) + d * d / (2 * radius)
-    expected = np.arcsinh(((h - 100.0) - glidepath) / GLIDEPATH_HEIGHT_SCALE_M)                 # D65
+    expected = np.arcsinh(((h - 100.0) - glidepath) / PATH_OFFSET_SCALE_M)                      # D65
     assert candidate(rows, 0, "height_above_glidepath")[j] == pytest.approx(expected, rel=1e-5)
     assert own(rows, "height_above_elevation")[j] == pytest.approx((h - INSTRUCTION_AIRPORT_ELEVATION_M) / 1000.0)
 
 
+def test_the_offset_right_of_the_centreline_is_on_the_glidepath_s_scale():
+    """The user, 2026-10-13 ("should align lateral and vertical input"): right of the centreline goes in as asinh(d /
+    100 m), as the height above the glidepath does. Candidate "09" of the parallel airport runs east from the origin:
+    right is south."""
+    from ts_transformer.prior.inputs import state_inputs
+
+    geometry = parallel_airport()
+    at = np.array([[-3000.0, -30.0, 500.0], [-3000.0, 12.0, 500.0]])
+    before = at - np.array([140.0, 0.0, 0.0])
+    _, candidates = state_inputs(at, before, np.ones(2, bool), geometry, "full", 2.0)
+    right = candidates[:, 0, CANDIDATE_FEATURES.index("right_of_final")]
+    assert geometry.candidates[0].ident == "09" and PATH_OFFSET_SCALE_M == 100.0
+    assert right == pytest.approx(np.arcsinh(np.array([30.0, -12.0]) / PATH_OFFSET_SCALE_M), rel=1e-9)
+
+
 def test_the_rows_from_the_first_predicted_step_are_the_flown_states():
-    words, signals, record, index = flight_and_index()
+    words, signals, record = flight_record()
     sentence = prior_closed_loop_sentence(signals, words, interval_s=4.0).rows
     states = sentence.states.copy()
     flown = int(np.flatnonzero(sentence.on_interval)[sentence.start])
     states[flown:, STATE_COLUMNS.index("height_m")] += 50.0
-    a, b = (rows_of(s, record, index, words, 4.0) for s in (sentence, replace(sentence, states=states)))
+    a, b = (rows_of(s, record, words, 4.0) for s in (sentence, replace(sentence, states=states)))
     first = a.first_step
     assert np.array_equal(a.own[:first], b.own[:first])
     heights = own(b, "height_above_elevation")[first:] - own(a, "height_above_elevation")[first:]
@@ -254,9 +220,9 @@ def test_the_rows_from_the_first_predicted_step_are_the_flown_states():
 
 
 def test_the_words_in_force_follow_the_sentence_through_a_go_around():
-    words, signals, record, index = flight_and_index()
+    words, signals, record = flight_record()
     sentence = prior_closed_loop_sentence(signals, words, interval_s=2.0, go_around=True).rows
-    rows = rows_of(sentence, record, index, words, 2.0)
+    rows = rows_of(sentence, record, words, 2.0)
     s = rows.first_step
     assert (rows.runway_in_force[: s + 1] == -1).all() and (rows.runway_in_force[s + 1:] == 0).all()
     assert not rows.go_around[: s + 13].any() and rows.go_around[s + 13: s + 21].all() and not rows.go_around[s + 21:].any()
@@ -279,12 +245,12 @@ def permuted_airport(geometry, order):
 
 
 def test_a_permutation_of_the_candidates_permutes_their_vectors_and_nothing_else():
-    words, signals, record, index = flight_and_index()
+    words, signals, record = flight_record()
     sentence = prior_closed_loop_sentence(signals, words, interval_s=2.0).rows
     swapped = sentence.grid.copy()
     swapped[0, RUNWAY] = 1                                     # "09" is candidate 1 of the permuted airport
-    a = rows_of(sentence, record, index, words, 2.0)
-    b = rows_of(replace(sentence, grid=swapped), record, index, words, 2.0,
+    a = rows_of(sentence, record, words, 2.0)
+    b = rows_of(replace(sentence, grid=swapped), record, words, 2.0,
                 geometry=permuted_airport(parallel_airport(), [1, 0]))
     assert np.array_equal(b.candidates, a.candidates[:, [1, 0]])
     for name in ("own", "heading_in_force", "words_in_force", "since", "go_around", "time_s"):
@@ -293,61 +259,39 @@ def test_a_permutation_of_the_candidates_permutes_their_vectors_and_nothing_else
 
 
 def test_an_airport_with_more_candidates_than_any_training_airport_is_read():
-    words, signals, record, _ = flight_and_index()
+    words, signals, record = flight_record()
     data = parallel_airport().to_dict()
     extra = [{**data["candidates"][0], "ident": f"X{k}", "threshold_n_m": 2000.0 + 900.0 * k} for k in range(7)]
     data["candidates"] += extra
     data["runway_ends"] += [{key: c[key] for key in ("ident", "threshold_e_m", "threshold_n_m", "course_deg")}
                             for c in extra]
     geometry = AirportGeometry.from_dict(data)
-    index = roster_landings([{"flight_key": "Ftrain1", "outcome": "assigned", "runway": "09",
-                              "landing_time_utc": record["landing_time_utc"]}],
-                            [c.ident for c in geometry.candidates], fixture_days())
-    rows = rows_of(prior_closed_loop_sentence(signals, words, interval_s=2.0).rows, record, index, words, 2.0, geometry)
+    rows = rows_of(prior_closed_loop_sentence(signals, words, interval_s=2.0).rows, record, words, 2.0, geometry)
     assert rows.candidates.shape[1] == 9
 
 
 def test_the_constants_variant_adds_the_length_and_the_threshold_elevation():
-    words, signals, record, index = flight_and_index()
+    words, signals, record = flight_record()
     sentence = prior_closed_loop_sentence(signals, words, interval_s=2.0).rows
-    full, constants = (rows_of(sentence, record, index, words, 2.0, variant=v) for v in ("full", "constants"))
+    full, constants = (rows_of(sentence, record, words, 2.0, variant=v) for v in ("full", "constants"))
     assert np.array_equal(constants.candidates[..., : full.candidates.shape[2]], full.candidates)
     assert constants.candidates[3, 0, -2:] == pytest.approx([3.0, 0.1])
 
 
-def test_a_flight_never_counts_its_own_landing():
-    """Its own landing is the answer (a closed-loop sentence can fly past the observed landing time): here it is put 20 s
-    after the entry, inside the rows, and still never counted; another flight's landing on "09L" is."""
-    words, signals, record, _ = flight_and_index()
-    sentence = prior_closed_loop_sentence(signals, words, interval_s=2.0).rows
-    entry = utc_s(record["entry_time_utc"])
-    index = LandingIndex(("09", "09L"), (Landing(entry + 10.0, "09L", "OTHER"), Landing(entry + 20.0, "09", "Ftrain1")),
-                         0, fixture_days())
-    rows = rows_of(sentence, record, index, words, 2.0)
-    assert not candidate(rows, 0, "landings_30min").any()
-    counted = candidate(rows, 1, "landings_30min")
-    assert not counted[:6].any() and (counted[6:] == 0.1).all()      # row 5 is at 10 s: [t − 30 min, t) excludes it
-    with pytest.raises(ValueError, match="does not land in the index"):
-        rows_of(sentence, record, LandingIndex(("09", "09L"), (), 0, fixture_days()), words, 2.0)
-
-
 def test_the_artefact_source_reads_every_sentence_and_its_identity(tmp_path):
     directory = tmp_path / "artefact"
-    words, records = prior_artefact(directory, interval_s=4.0)
-    days = fixture_days()
-    source = ArtefactSource(directory, 4.0, "full", {"KXXX": roster_landings(records["KXXX"], ("09", "09L"), days)},
-                            "all")
+    words, _ = prior_artefact(directory, interval_s=4.0)
+    source = ArtefactSource(directory, 4.0, "full", "all")
     for split in ("train", "select", "val"):
         sentences = source.sentences(split, "KXXX")
         assert [s.flight_key for s in sentences] == [f["dataset_id"] for f in signals_flights(directory, split)]
         assert {s.split for s in sentences} == {split} and sentences[1].go_around.any()
     with pytest.raises(ValueError, match="development splits"):
         source.sentences("test", "KXXX")
-    identity = artefact_identity(directory, 4.0, source.landings, "all")
+    identity = artefact_identity(directory, 4.0, "all")
+    assert "landings" not in identity                                                   # D63 (the user, 2026-10-14)
     assert identity["spec_sha256"] == words.spec.sha256 and set(identity["sentence_files"]) == {"train", "select", "val"}
     assert identity["candidates"]["airports"]["KXXX"]["candidates"][0]["vertical_path"]["crossing_height_m"] == TEST_TCH_M
-    with pytest.raises(ValueError, match="landings of"):
-        ArtefactSource(directory, 4.0, "full", {}, "all")
 
 
 def test_in_a_turn_the_motion_is_the_2_s_displacement_not_the_rows():
@@ -356,9 +300,9 @@ def test_in_a_turn_the_motion_is_the_2_s_displacement_not_the_rows():
     words = Words(instruction_spec())
     signals = instruction_flight(*fly_legs([(160, 3.0, 75.0, -1.5)], 90.0, 750.0, -400.0, 0.0),
                                  dataset_id="KXXX:Ftrain1", split="train")
-    _, _, record, index = flight_and_index()
+    _, _, record = flight_record()
     sentence = prior_closed_loop_sentence(signals, words, interval_s=8.0).rows
-    rows = rows_of(sentence, record, index, words, 8.0)
+    rows = rows_of(sentence, record, words, 8.0)
     e, n = (sentence.states[:, STATE_COLUMNS.index(name)] for name in ("e_m", "n_m"))
     for j in (2, 7):
         r = 4 * j
@@ -382,15 +326,13 @@ def crossing_airport():
 def test_a_heading_word_keeps_the_track_it_was_heard_with_and_reads_against_the_new_runway():
     """D46: the heading word said under "09" (course 090°, +5°: track 095°) keeps its track when the runway changes to
     "18" (course 180°): the input becomes 095° − 180° = −85°; a heading word heard under "18" says a track from 180°."""
-    words, signals, record, _ = flight_and_index()
+    words, signals, record = flight_record()
     geometry = crossing_airport()
-    index = roster_landings([{"flight_key": "Ftrain1", "outcome": "assigned", "runway": "09",
-                              "landing_time_utc": record["landing_time_utc"]}], ("09", "18"), fixture_days())
     sentence = prior_closed_loop_sentence(signals, words, interval_s=2.0).rows
     grid = sentence.grid.copy()
     grid[10, RUNWAY] = 1
     grid[15, HEADING] = words.heading_index(-10.0)
-    rows = rows_of(replace(sentence, grid=grid), record, index, words, 2.0, geometry)
+    rows = rows_of(replace(sentence, grid=grid), record, words, 2.0, geometry)
     s = rows.first_step
 
     def angle(deg):
@@ -399,19 +341,6 @@ def test_a_heading_word_keeps_the_track_it_was_heard_with_and_reads_against_the_
     assert rows.heading_in_force[s + 10] == pytest.approx(angle(5.0), abs=1e-6)
     assert rows.heading_in_force[s + 11] == pytest.approx(angle(-85.0), abs=1e-6)
     assert rows.heading_in_force[s + 16] == pytest.approx(angle(-10.0), abs=1e-6)
-
-
-def test_the_rows_utc_time_is_the_flights_entry_and_its_2_s_rows():
-    """The landings window is read at each Δ row's UTC time: the entry plus 2 s for each signals row, the sentence's
-    first row included — at Δ = 4 s from signals row 1, Δ row j is signals row 1 + 2j."""
-    words, signals, record, _ = flight_and_index()
-    sentence = prior_closed_loop_sentence(signals, words, interval_s=4.0, first_row=1).rows
-    entry = utc_s(record["entry_time_utc"])
-    index = LandingIndex(("09", "09L"), (Landing(entry + 13.0, "09L", "OTHER"),
-                                         Landing(entry + 3_600.0, "09", "Ftrain1")), 0, fixture_days())
-    counted = candidate(rows_of(sentence, record, index, words, 4.0), 1, "landings_30min")
-    # Δ row 3 is signals row 7, at entry + 14 s: the first after the landing at 13 s
-    assert not counted[:3].any() and (counted[3:] == 0.1).all()
 
 
 def test_the_flight_key_mirror_reads_the_dataset_id_as_the_data_plane_writes_it():
@@ -426,44 +355,31 @@ def test_the_flight_key_mirror_reads_the_dataset_id_as_the_data_plane_writes_it(
         own_flight_key({"dataset_id": dataset_flight_key(source, 0), "airport": "KSJC"})
 
 
-def test_the_landings_digest_holds_each_landings_flight_runway_and_time_only():
-    """D63: a change of a landing's time or runway in the roster changes the digest; a change of another field of the
-    roster does not; the landings left out on the sealed test days count."""
-    days = fixture_days()
-    train_day, test_day = days.days["train"][0], days.days["test"][0]
-    records = [{**record("A", "05L", f"{train_day}T12:00:00Z"), "icao24": "abc123", "file": "a.json"},
-               {**record("B", "23R", f"{train_day}T12:20:00Z"), "icao24": "def456", "file": "b.json"},
-               record("C", "05L", f"{test_day}T12:00:00Z")]
-
-    def digest(rows):
-        return roster_landings(rows, ("05L", "23R"), days).digest()
-
-    base = digest(records)
-    assert digest([{**records[0], "icao24": "zzz999", "file": "elsewhere.json"}, *records[1:]]) == base
-    assert digest([{**records[0], "landing_time_utc": f"{train_day}T12:00:02Z"}, *records[1:]]) != base
-    assert digest([{**records[0], "runway": "23R"}, *records[1:]]) != base
-    assert digest(records[:2]) != base                                    # one sealed landing fewer
-
-
-def test_a_run_refuses_landings_whose_digest_differs_from_the_identity(tmp_path):
-    """D63: the identity is computed again from the landings read again; a checkpoint of other landings is refused."""
+def test_a_checkpoint_opens_on_the_meaning_and_the_day_split_and_never_on_a_description(tmp_path):
+    """D63 (the user, 2026-10-14): a checkpoint opens on the spec, the candidate table, Δ, the day split and the
+    selection's rule (`opened_entries`), each refused by name when it differs. The sha256 of the sentence and signal
+    files, the selection's counts and a landings entry written before describe the data: kept as written, not compared.
+    `opening_identity` is the opened entries of the artefact's identity, read without a sentence."""
     from ts_transformer.prior.checkpoint import load_checkpoint, save_checkpoint
     from ts_transformer.prior.model import Prior, PriorConfig
 
     directory = tmp_path / "artefact"
-    words, by_airport = prior_artefact(directory, interval_s=2.0)
-    records = by_airport["KXXX"]
-    days = fixture_days()
-    landings = {"KXXX": roster_landings(records, ("09", "09L"), days)}
+    words, _ = prior_artefact(directory, interval_s=2.0)
     model = Prior(PriorConfig.from_words(words, "full", d_model=32, layers=1, heads=4, feedforward=64))
+    today = artefact_identity(directory, 2.0, "landed")
+    assert opening_identity(directory, 2.0, "landed") == opened_entries(today)
+    described = {**today, "sentence_files": {"train": "1" * 64}, "signals_files": {"val": "2" * 64},
+                 "selection": {"rule": "landed", "counts": {}}, "landings": {"KXXX": "0" * 64}}
     path = tmp_path / "checkpoint.pt"
-    save_checkpoint(path, model, model.state_dict(), identity=artefact_identity(directory, 2.0, landings, "landed"),
+    save_checkpoint(path, model, model.state_dict(), identity=described,
                     run={"airports": ["KXXX"], "held_out": None}, train_config={})
-    load_checkpoint(path, artefact_identity(directory, 2.0, landings, "landed"))
-    moved = [{**records[0], "landing_time_utc": records[0]["landing_time_utc"].replace(":00Z", ":04Z")}, *records[1:]]
-    with pytest.raises(ValueError, match=r"\['landings'\] differ"):
-        load_checkpoint(path, artefact_identity(directory, 2.0, {"KXXX": roster_landings(moved, ("09", "09L"), days)},
-                                                "landed"))
+    assert load_checkpoint(path, today).identity == described                            # kept as written
+    assert load_checkpoint(path, opening_identity(directory, 2.0, "landed")).identity == described
+    for key, value in (("spec_sha256", "c" * 64), ("day_split", {}), ("candidates", {}), ("row_interval_s", 4.0)):
+        with pytest.raises(ValueError, match=rf"\['{key}'\] differ"):
+            load_checkpoint(path, {**today, key: value})
+    with pytest.raises(ValueError, match=r"\['selection'\] differ"):
+        load_checkpoint(path, opening_identity(directory, 2.0, "all"))
 
 
 # ---- the selection of the base's sentences (B8, D75)
@@ -474,7 +390,7 @@ def test_landed_keeps_exactly_the_landed_sentences_and_all_keeps_every_one():
 
     assert LANDING == OUTCOMES[0] == "landed"                       # the mirror of the judge's name (D74)
     stored = [Stored("train", "KXXX", "vectored", "landed", False),
-              Stored("train", "KXXX", "vectored", "crossed_too_high", False),
+              Stored("train", "KXXX", "vectored", "landing_failed", False),
               Stored("train", "KYYY", "straight-in", "landed", False), Stored("select", "KXXX", "vectored", "timeout", False)]
     assert [kept("landed", s.outcome, s.faulty) for s in stored] == [True, False, True, False]
     assert all(kept("all", s.outcome, s.faulty) for s in stored)
@@ -482,7 +398,7 @@ def test_landed_keeps_exactly_the_landed_sentences_and_all_keeps_every_one():
     assert record["rule"] == "landed"
     assert record["counts"]["train"]["KXXX"]["vectored"] == {
         "landed": {"kept": 1, "left_out_fault": 0, "left_out_outcome": 0},
-        "crossed_too_high": {"kept": 0, "left_out_fault": 0, "left_out_outcome": 1}}
+        "landing_failed": {"kept": 0, "left_out_fault": 0, "left_out_outcome": 1}}
     total = sum(sum(cell.values()) for split in record["counts"].values() for airport in split.values()
                 for stratum in airport.values() for cell in stratum.values())
     assert total == len(stored)
@@ -524,7 +440,7 @@ def test_the_source_reads_only_the_selected_sentences_and_the_identity_counts_ev
     from ts_transformer.prior.selection import selection_totals
 
     directory = tmp_path / "artefact"
-    _, records = prior_artefact(directory, interval_s=4.0, outcomes=("landed", "crossed_too_high"))
+    prior_artefact(directory, interval_s=4.0, outcomes=("landed", "landing_failed"))
     spec = load_spec(directory)
     with np.load(directory / "sentences_train.npz") as arrays:
         labelled = {name: arrays[name] for name in arrays.files}
@@ -536,27 +452,26 @@ def test_the_source_reads_only_the_selected_sentences_and_the_identity_counts_ev
     path.unlink()
     write_closed_loop(path, spec, executor_params_sha256=str(data["executor_params_sha256"]), row_interval_s=4.0,
                       start_row=int(data["start_row"]), sentences={1: stored[1], 0: stored[0]})
-    landings = {"KXXX": roster_landings(records["KXXX"], ("09", "09L"), fixture_days())}
-    landed = ArtefactSource(directory, 4.0, "full", landings, "landed")
-    every = ArtefactSource(directory, 4.0, "full", landings, "all")
+    landed = ArtefactSource(directory, 4.0, "full", "landed")
+    every = ArtefactSource(directory, 4.0, "full", "all")
     for split in SPLITS:
         flights = signals_flights(directory, split)
         assert [s.flight_key for s in landed.sentences(split, "KXXX")] == [flights[0]["dataset_id"]]
         assert sorted(s.flight_key for s in every.sentences(split, "KXXX")) == [f["dataset_id"] for f in flights]
-    identity = artefact_identity(directory, 4.0, landings, "landed")
+    identity = artefact_identity(directory, 4.0, "landed")
     record = identity["selection"]
     assert record["rule"] == "landed"
     assert record["counts"]["train"]["KXXX"] == {
         "vectored": {"landed": {"kept": 1, "left_out_fault": 0, "left_out_outcome": 0}},
-        "straight-in": {"crossed_too_high": {"kept": 0, "left_out_fault": 0, "left_out_outcome": 1}}}
+        "straight-in": {"landing_failed": {"kept": 0, "left_out_fault": 0, "left_out_outcome": 1}}}
     for split in SPLITS:
         cells = [cell for stratum in record["counts"][split]["KXXX"].values() for cell in stratum.items()]
         assert sum(sum(c.values()) for _, c in cells) == len(
             load_closed_loop(closed_loop_path(directory, split, 4.0), spec)["signal_index"])
-        assert {o: sum(c["kept"] for name, c in cells if name == o) for o in ("landed", "crossed_too_high")} == {
-            "landed": 1, "crossed_too_high": 0}
+        assert {o: sum(c["kept"] for name, c in cells if name == o) for o in ("landed", "landing_failed")} == {
+            "landed": 1, "landing_failed": 0}
     assert selection_totals(record) == {split: {"kept": 1, "left_out_fault": 0, "left_out_outcome": 1} for split in SPLITS}
-    other = artefact_identity(directory, 4.0, landings, "all")
+    other = artefact_identity(directory, 4.0, "all")
     assert selection_totals(other["selection"]) == {split: {"kept": 2, "left_out_fault": 0, "left_out_outcome": 0}
                                                     for split in SPLITS}
     assert {k for k in identity if identity[k] != other[k]} == {"selection"}
@@ -569,18 +484,16 @@ def test_a_loop_s_row_is_the_sentence_s_row_bit_for_bit(interval_s):
     import torch
 
     from ts_transformer.prior.batch import collate
-    from ts_transformer.prior.inputs import Heard, own_flight_key
-    from ts_transformer.prior.landings import utc_s
+    from ts_transformer.prior.inputs import Heard
     from ts_transformer.prior.loop import LoopRows
 
-    words, signals, record, index = flight_and_index()
+    words, signals, record = flight_record()
     rows = prior_closed_loop_sentence(signals, words, interval_s=interval_s, go_around=True).rows
     geometry = parallel_airport()
-    expected = collate([rows_of(rows, record, index, words, interval_s)], torch.device("cpu"))
+    expected = collate([rows_of(rows, record, words, interval_s)], torch.device("cpu"))
     every = int(round(interval_s / words.spec.step_s))
-    loop = LoopRows([geometry], [index], [own_flight_key(record)],
-                    np.array([utc_s(record["entry_time_utc"])]), np.array([rows.first_row]), rows.start,
-                    variant="full", interval_s=interval_s, step_s=words.spec.step_s, device=torch.device("cpu"))
+    loop = LoopRows([geometry], rows.start, variant="full", interval_s=interval_s, step_s=words.spec.step_s,
+                    device=torch.device("cpu"))
     heard = Heard(geometry, words)
     for t in range(rows.start + len(rows.grid)):
         r = t * every
@@ -598,34 +511,22 @@ def test_a_loop_s_row_is_the_sentence_s_row_bit_for_bit(interval_s):
 def test_a_loop_s_rows_of_each_airport_at_once_are_each_aircraft_s_rows_alone():
     """Multi-aircraft control D186 (3): `LoopRows` computes the state inputs of each airport's aircraft at once; each
     aircraft's inputs and position are those of a loop of that aircraft alone (`select`), bit for bit — seven aircraft
-    of two airports interleaved, join ticks, rows with and without motion, each its own landings (counted: the
-    landings input differs between aircraft)."""
+    of two airports interleaved, join ticks, rows with and without motion."""
     import torch
 
-    from ts_transformer.prior.batch import variant_features
     from ts_transformer.prior.inputs import Heard
     from ts_transformer.prior.loop import LoopRows
     from ts_transformer.tests.support import raised_airport
 
     words = Words(instruction_spec())
-    days = fixture_days()
     airports = [parallel_airport(), raised_airport(parallel_airport(), 400.0)]
-    noon = utc_s(f"{days.days['train'][0]}T12:00:00Z")
     rng = np.random.default_rng(9)
     count = 7
     geometries = [airports[b % 2] for b in range(count)]
-    keys = [f"F{b}" for b in range(count)]
-    landings = [LandingIndex(("09", "09L"), tuple(sorted(              # each its own, in its rows' 30 min
-        (Landing(noon - 1500.0 + 60.0 * k + 37.0 * b, ("09", "09L")[k % 2], f"O{b}_{k}") for k in range(3)),
-        key=lambda item: (item.time_s, item.flight_key))) + (Landing(noon + 900.0 + b, "09", keys[b]),), 0, days)
-        for b in range(count)]
-    loop = LoopRows(geometries, landings, keys, np.full(count, noon - 1200.0), rng.integers(0, 5, count), 3,
-                    variant="full", interval_s=4.0, step_s=words.spec.step_s, device=torch.device("cpu"),
-                    join_ticks=np.array([0, 0, 2, 1, 0, 3, 0]))
+    loop = LoopRows(geometries, 3, variant="full", interval_s=4.0, step_s=words.spec.step_s,
+                    device=torch.device("cpu"), join_ticks=np.array([0, 0, 2, 1, 0, 3, 0]))
     alone = [loop.select([b]) for b in range(count)]
     heard = [Heard(g, words) for g in geometries]
-    column = variant_features("full").index("landings_30min")
-    read = []
     for t in range(8):
         at = np.column_stack([rng.uniform(-30_000, 5_000, count), rng.uniform(-8_000, 8_000, count),
                               rng.uniform(150, 3_000, count), rng.normal(0, 60, (count, 3))])
@@ -637,36 +538,6 @@ def test_a_loop_s_rows_of_each_airport_at_once_are_each_aircraft_s_rows_alone():
             for name, x, y in zip(rows._fields, rows, mine):
                 assert torch.equal(x[b: b + 1], y), (t, b, name)
             assert all(np.array_equal(x[b: b + 1], y) for x, y in zip(position, place))
-        read.append(rows.candidates[..., column])
-    landings_read = torch.stack(read)                            # the landing input really compared: aircraft apart
-    assert (landings_read != 0).any() and len({tuple(x.flatten().tolist()) for x in landings_read.unbind(1)}) > 1
-
-
-def test_each_aircraft_of_a_loop_counts_its_own_landings():
-    """D105: two aircraft of one airport at one place and time, given other landings, read other landing inputs and
-    nothing else different; `select` keeps each aircraft's own."""
-    import torch
-
-    from ts_transformer.prior.inputs import Heard, own_flight_key
-    from ts_transformer.prior.loop import LoopRows
-
-    words, signals, record, index = flight_and_index()
-    rows = prior_closed_loop_sentence(signals, words, interval_s=2.0).rows
-    geometry = parallel_airport()
-    entry = utc_s(record["entry_time_utc"])
-    scene = LandingIndex(index.runways, tuple(sorted((*index.landings, Landing(entry + 1.0, "09L", "INSERTED")),
-                                                     key=lambda landing: landing.time_s)), 0, fixture_days())
-    loop = LoopRows([geometry, geometry], [index, scene], [own_flight_key(record)] * 2, np.array([entry, entry]),
-                    np.array([rows.first_row] * 2), rows.start, variant="full", interval_s=2.0,
-                    step_s=words.spec.step_s, device=torch.device("cpu"))
-    at, before = rows.states[[5, 5]], rows.states[[4, 4]]
-    got, _ = loop(5, at, before, True, [Heard(geometry, words), Heard(geometry, words)])
-    landings = CANDIDATE_FEATURES.index("landings_30min")
-    assert got.candidates[0, 0, 1, landings] == 0.0 and got.candidates[1, 0, 1, landings] == 0.1    # 09L
-    other = [k for k in range(got.candidates.shape[-1]) if k != landings]
-    assert torch.equal(got.candidates[0, ..., other], got.candidates[1, ..., other]) and torch.equal(got.own[0], got.own[1])
-    picked, _ = loop.select([1, 0])(5, at, before, True, [Heard(geometry, words), Heard(geometry, words)])
-    assert torch.equal(picked.candidates[0], got.candidates[1]) and torch.equal(picked.candidates[1], got.candidates[0])
 
 
 def test_the_source_leaves_out_a_marked_flight_under_landed_and_its_mark_changes_no_input(tmp_path, monkeypatch):
@@ -676,36 +547,34 @@ def test_the_source_leaves_out_a_marked_flight_under_landed_and_its_mark_changes
     from ts_transformer.prior import source as source_module
 
     directory = tmp_path / "artefact"
-    _, records = prior_artefact(directory, interval_s=4.0, outcomes=("landed", "crossed_too_high"))
-    landings = {"KXXX": roster_landings(records["KXXX"], ("09", "09L"), fixture_days())}
-    plain = ArtefactSource(directory, 4.0, "full", landings, "all").sentences("train", "KXXX")
+    prior_artefact(directory, interval_s=4.0, outcomes=("landed", "landing_failed"))
+    plain = ArtefactSource(directory, 4.0, "full", "all").sentences("train", "KXXX")
     monkeypatch.setattr(source_module, "faulty_flights",
                         lambda d, split: {0: ("a fault",)} if split == "train" else {})
-    assert ArtefactSource(directory, 4.0, "full", landings, "landed").sentences("train", "KXXX") == []
-    marked = ArtefactSource(directory, 4.0, "full", landings, "all").sentences("train", "KXXX")
+    assert ArtefactSource(directory, 4.0, "full", "landed").sentences("train", "KXXX") == []
+    marked = ArtefactSource(directory, 4.0, "full", "all").sentences("train", "KXXX")
     assert [s.flight_key for s in marked] == [s.flight_key for s in plain]
     for a, b in zip(plain, marked):
         for name in ("time_s", "own", "candidates", "runway_in_force", "go_around", "heading_in_force",
                      "words_in_force", "since", "targets"):
             assert np.array_equal(getattr(a, name), getattr(b, name)), name
-    cells = artefact_identity(directory, 4.0, landings, "landed")["selection"]["counts"]["train"]["KXXX"]
+    cells = artefact_identity(directory, 4.0, "landed")["selection"]["counts"]["train"]["KXXX"]
     assert sum(c["left_out_fault"] for stratum in cells.values() for c in stratum.values()) == 1
     assert sum(c["left_out_outcome"] for stratum in cells.values() for c in stratum.values()) == 1
 
 
-def test_the_val_readers_recount_the_selection_and_the_identity_binds_the_signals(tmp_path, monkeypatch):
+def test_the_val_readers_recount_the_selection_from_todays_outcomes_and_marks(tmp_path, monkeypatch):
     """D85, D111: after the claim, a val reader recounts the split's selection from today's outcomes and marks
     (`source.require_selection_of`): the same counts pass, a changed mark is refused, a split with no sentence is refused
-    by name; the identity holds each split's stored signals (`signals_files`), from which the marks are read, so a
-    changed val signals file refuses a prior before any claim (`checkpoint.open_prior` compares the identity)."""
+    by name. The identity holds the sha256 of each split's stored signals (`signals_files`), from which the marks are
+    read, as a description of the data, not compared (D209): the recount is what refuses."""
     from ts_transformer.instructions.artefact import SPLITS
     from ts_transformer.prior import source as source_module
     from ts_transformer.prior.source import require_selection_of
 
     directory = tmp_path / "artefact"
-    _, records = prior_artefact(directory, interval_s=4.0, outcomes=("landed", "crossed_too_high"))
-    landings = {"KXXX": roster_landings(records["KXXX"], ("09", "09L"), fixture_days())}
-    identity = artefact_identity(directory, 4.0, landings, "landed")
+    prior_artefact(directory, interval_s=4.0, outcomes=("landed", "landing_failed"))
+    identity = artefact_identity(directory, 4.0, "landed")
     assert set(identity["signals_files"]) == set(SPLITS)
     require_selection_of(directory, 4.0, identity, "val")
     with monkeypatch.context() as patch:                      # an artefact with no val sentence
@@ -715,10 +584,6 @@ def test_the_val_readers_recount_the_selection_and_the_identity_binds_the_signal
     monkeypatch.setattr(source_module, "faulty_flights", lambda d, split: {0: ("a fault",)} if split == "val" else {})
     with pytest.raises(ValueError, match="faulty-track marks changed"):
         require_selection_of(directory, 4.0, identity, "val")
-    signals = directory / "signals_val.npz"
-    signals.write_bytes(signals.read_bytes() + b"\0")
-    assert artefact_identity(directory, 4.0, landings, "landed", counted=("train", "select"))["signals_files"]["val"] != \
-        identity["signals_files"]["val"]
 
 
 def test_loop_rows_take_one_first_predicted_step_for_the_batch():
@@ -726,14 +591,13 @@ def test_loop_rows_take_one_first_predicted_step_for_the_batch():
     refused by name."""
     import torch
 
-    from ts_transformer.prior.inputs import own_flight_key
     from ts_transformer.prior.loop import LoopRows
 
-    words, signals, record, index = flight_and_index()
+    words = Words(instruction_spec())
     geometry = parallel_airport()
     for start in (np.array([8, 9]), 8.0, True):
         with pytest.raises(ValueError, match="one Δ row for the batch"):
-            LoopRows([geometry] * 2, [index] * 2, [own_flight_key(record)] * 2, np.zeros(2), np.zeros(2, dtype=int),
-                     start, variant="full", interval_s=4.0, step_s=words.spec.step_s, device=torch.device("cpu"))
-    LoopRows([geometry] * 2, [index] * 2, [own_flight_key(record)] * 2, np.zeros(2), np.zeros(2, dtype=int), np.int64(8),
-             variant="full", interval_s=4.0, step_s=words.spec.step_s, device=torch.device("cpu"))
+            LoopRows([geometry] * 2, start, variant="full", interval_s=4.0, step_s=words.spec.step_s,
+                     device=torch.device("cpu"))
+    LoopRows([geometry] * 2, np.int64(8), variant="full", interval_s=4.0, step_s=words.spec.step_s,
+             device=torch.device("cpu"))

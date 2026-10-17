@@ -27,8 +27,8 @@ import type { TrainingSelection } from "./trainingSample";
 
 /** MIRROR of `aeroviz_backend/autopilot_segment/window.py` `SCHEMA`: the backend's answer; anything else is refused by
  *  name. A name changes with the payload's shape, on both sides, in one change (v2: the request names the aircraft; v3:
- *  and the stage whose index lists the set). */
-export const TRAINING_WINDOW_AUTOPILOT_SCHEMA = "aeroviz-autopilot-window-segment-v3";
+ *  and the stage whose index lists the set; v4: the outcomes `landed` / `landing_failed` and the crossing's `evaluation` (the evaluation's landing verdict, the user 2026-10-12) beside its DA check). */
+export const TRAINING_WINDOW_AUTOPILOT_SCHEMA = "aeroviz-autopilot-window-segment-v4";
 export const TRAINING_WINDOW_AUTOPILOT_PATH = "/autopilot/window-segment";
 /** This page's window requests, as the backend knows them: a client id of their own, apart from stage A's and B's. */
 export const TRAINING_WINDOW_CLIENT_ID = `${TRAINING_AUTOPILOT_CLIENT_ID}-window`;

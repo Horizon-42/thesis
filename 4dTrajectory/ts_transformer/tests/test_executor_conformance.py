@@ -159,9 +159,10 @@ def test_every_way_of_flying_gives_the_same_flown_states(monkeypatch):
     signals, reading = _downwind()
     one = _batch(signals, reading, 4.0)
     batch = replace(one, **{name: getattr(one, name) * 2 for name in (
-        "indices", "signals", "observed", "readings", "sentences", "geometries", "groups")}, approach_ias_mps=[])
+        "indices", "signals", "observed", "readings", "sentences", "geometries", "typecodes", "groups")},
+        approach_speeds=[])
     inputs, _, _, approach = _physics(batch.signals[0], instruction_airport())
-    batch.approach_ias_mps = [float(approach[0])] * 2
+    batch.approach_speeds = [tuple(approach[0].tolist())] * 2
     monkeypatch.setattr(type(batch), "inputs", lambda self, rule, device: FlightInputs(
         *(torch.cat([getattr(inputs, f.name)] * 2) for f in dataclasses.fields(FlightInputs))))
     words = Words(instruction_spec())

@@ -178,6 +178,23 @@ describe("the sample", () => {
     expect(flight.closedLoop["4"].replay.crossing!.decision).toBeNull();
     expect(flight.closedLoop["8"].replay.crossing).toBeNull();
   });
+
+  it("reads the evaluation's verdict on a crossing, and refuses one whose verdict is not its failed gates or that names no gate", () => {
+    const sample = stageASample();
+    expect(sample.flights[0].closedLoop["2"].replay.crossing!.evaluation).toMatchObject({
+      passed: false, violations: ["vertical"], lateralBoundM: 22.86, verticalBoundsM: [-22, 22], speedBoundsMps: [67.81, 78.1],
+    });
+    const pass = stageASampleFile();
+    pass.flights[0].closedLoop["2"].replay.crossing.evaluation.verdict = "pass";
+    const a = parseTrainingSample(pass, TRAINING_SPLITS);
+    expect(a.ok).toBe(false);
+    if (!a.ok) expect(a.problem).toContain("a pass with 1 gates failed");
+    const gate = stageASampleFile();
+    gate.flights[0].closedLoop["2"].replay.crossing.evaluation.violations = ["glidepath"];
+    const b = parseTrainingSample(gate, TRAINING_SPLITS);
+    expect(b.ok).toBe(false);
+    if (!b.ok) expect(b.problem).toContain('a violation "glidepath" is no gate');
+  });
 });
 
 describe("the flown flight (replay.track)", () => {

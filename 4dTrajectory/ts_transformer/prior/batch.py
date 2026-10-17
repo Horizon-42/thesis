@@ -42,10 +42,10 @@ from ts_transformer.instructions.words import COLUMNS, RUNWAY, RUNWAY_GO_AROUND,
 OWN_FEATURES = ("height_above_elevation", "ground_speed", "vertical_rate", "no_motion")
 #: The inputs that come from the motion in the 2 s before a row (D25): 0 at row 0, which has no state before it (D60).
 OWN_MOTION_FEATURES = ("ground_speed", "vertical_rate")
-#: A candidate vector (D23, D24): the aircraft in the frame of the candidate, the height above its glidepath, the
-#: landings on it in the 30 min before the step.
+#: A candidate vector (D23, D24): the aircraft in the frame of the candidate and the height above its glidepath; no
+#: landings on it (D206).
 CANDIDATE_FEATURES = ("before_threshold", "right_of_final", "height_above_threshold", "motion_minus_course_sin",
-                      "motion_minus_course_cos", "height_above_glidepath", "landings_30min")
+                      "motion_minus_course_cos", "height_above_glidepath")
 CANDIDATE_MOTION_FEATURES = ("motion_minus_course_sin", "motion_minus_course_cos")
 #: The runway constants of the variant ``constants`` (D39).
 RUNWAY_CONSTANT_FEATURES = ("length", "threshold_elevation")
@@ -180,14 +180,21 @@ class RowTensors(NamedTuple):
                             for name, value in zip(self._fields, self)))
 
 
-def collate(sentences: Sequence[SentenceRows], device: torch.device) -> RowTensors:
-    """``sentences`` as one batch on ``device`` (module docstring); every one must have the same candidate width."""
+def collate(sentences: Sequence[SentenceRows], device: torch.device, starts: Sequence[int] | None = None
+            ) -> RowTensors:
+    """``sentences`` as one batch on ``device`` (module docstring); every one must have the same candidate width.
+    ``starts`` (multi-aircraft control D153, D212): each sentence's first row in the batch, its join tick on its window's
+    ticks; the rows before it are not present (padding). None: every sentence from row 0."""
     if not sentences:
         raise ValueError("an empty batch")
     width = sentences[0].candidates.shape[2]
     if any(s.candidates.shape[2] != width for s in sentences):
         raise ValueError("the sentences of a batch have candidate vectors of different widths")
-    count, rows = len(sentences), max(s.rows for s in sentences)
+    if starts is None:
+        starts = [0] * len(sentences)
+    if len(starts) != len(sentences) or min(starts) < 0:
+        raise ValueError(f"a start of 0 or more for each of the {len(sentences)} sentences, not {list(starts)}")
+    count, rows = len(sentences), max(j + s.rows for j, s in zip(starts, sentences))
     slots = max(s.candidates.shape[1] for s in sentences)
     time_s = np.zeros((count, rows), dtype=np.float32)
     own = np.zeros((count, rows, len(OWN_FEATURES)), dtype=np.float32)
@@ -202,13 +209,13 @@ def collate(sentences: Sequence[SentenceRows], device: torch.device) -> RowTenso
     first = np.zeros((count, rows), dtype=bool)
     asked = np.zeros((count, rows), dtype=bool)
     targets = np.zeros((count, rows, len(COLUMNS)), dtype=np.int64)
-    for b, s in enumerate(sentences):
-        n, k = s.rows, s.candidates.shape[1]
-        time_s[b, :n], own[b, :n], candidates[b, :n, :k], valid[b, :k] = s.time_s, s.own, s.candidates, True
-        runway[b, :n], go_around[b, :n], heading[b, :n] = s.runway_in_force, s.go_around, s.heading_in_force
-        words[b, :n], since[b, :n], present[b, :n] = s.words_in_force, s.since, True
-        first[b, s.first_step], asked[b, s.first_step: n] = True, True
-        targets[b, :n] = target_classes(s.targets)
+    for b, (j, s) in enumerate(zip(starts, sentences)):
+        n, k = j + s.rows, s.candidates.shape[1]
+        time_s[b, j:n], own[b, j:n], candidates[b, j:n, :k], valid[b, :k] = s.time_s, s.own, s.candidates, True
+        runway[b, j:n], go_around[b, j:n], heading[b, j:n] = s.runway_in_force, s.go_around, s.heading_in_force
+        words[b, j:n], since[b, j:n], present[b, j:n] = s.words_in_force, s.since, True
+        first[b, j + s.first_step], asked[b, j + s.first_step: n] = True, True
+        targets[b, j:n] = target_classes(s.targets)
     arrays = (time_s, own, candidates, valid, runway, go_around, heading, words, since, present, first, asked, targets)
     return RowTensors(*(torch.as_tensor(a, device=device) for a in arrays))
 

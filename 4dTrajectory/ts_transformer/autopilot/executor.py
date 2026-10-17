@@ -89,7 +89,7 @@ class Executor:
     interleaves it with the speaker (the prior says a step's words, the executor flies the step). The words of a cycle
     are given to `cycle`; everything else — the laws' state, the bank, what is recorded — lives here."""
 
-    def __init__(self, inputs: FlightInputs, runways: Runways, charts: AirportCharts, approach_ias_mps: torch.Tensor,
+    def __init__(self, inputs: FlightInputs, runways: Runways, charts: AirportCharts, approach_speeds: torch.Tensor,
                  params: ExecutorParams, words: Words, *, step_s: float, time_limit_s: torch.Tensor,
                  start_cycle: torch.Tensor | None = None, reserve_s: float = 0.0) -> None:
         """``step_s``: the sentence's row interval (a row's words are heard on the cycle that starts it);
@@ -115,7 +115,7 @@ class Executor:
         self.plant = Plant(inputs, params)
         self.lateral = Lateral(batch, params, spec, device)
         self.vertical = Vertical(batch, params, words, device)
-        self.speed = Speed(approach_ias_mps, params, spec)
+        self.speed = Speed(approach_speeds, params, spec)
         self.state = inputs.initial_state
         #: the plant's actuators (the aircraft's) and the observer's estimate of them: thrust fraction, bank, load factor;
         #: the thrust is the first cycle's (`cycle`), NaN until then
@@ -183,7 +183,7 @@ class Executor:
                 value = getattr(law, held)
                 setattr(law, held, None if value is None else pick(value))   # the lateral word before any is heard
             setattr(out, name, law)
-        out.speed.approach_ias_mps = pick(self.speed.approach_ias_mps)
+        out.speed.approach_speeds = pick(self.speed.approach_speeds)
         out.states, out.commands, out.wanted, out.sentence_times, out.runway_rows, out.actuator_rows = (
             [pick(rows) for rows in record]
             for record in (self.states, self.commands, self.wanted, self.sentence_times, self.runway_rows,
@@ -258,7 +258,7 @@ class Executor:
         out.count = counts.pop()
         if out.count == 0:                  # a batch that has flown no cycle anchors its first as a new batch does
             out.lateral.word_deg = None
-        out.speed.approach_ias_mps = rows(lambda e: e.speed.approach_ias_mps)
+        out.speed.approach_speeds = rows(lambda e: e.speed.approach_speeds)
         out.states, out.commands, out.wanted, out.sentence_times, out.runway_rows, out.actuator_rows = (
             records(lambda e, name=name: getattr(e, name))
             for name in ("states", "commands", "wanted", "sentence_times", "runway_rows", "actuator_rows"))
@@ -413,12 +413,12 @@ class Executor:
 
 
 def fly(inputs: FlightInputs, sentences: Sentences, runways: Runways, charts: AirportCharts,
-        approach_ias_mps: torch.Tensor, params: ExecutorParams, words: Words, *, time_limit_s: torch.Tensor,
+        approach_speeds: torch.Tensor, params: ExecutorParams, words: Words, *, time_limit_s: torch.Tensor,
         reserve_s: float) -> Flown:
     """Fly every flight's sentence on its own rows (D57: a cycle's sentence time is the time flown, a step's words heard
     on the cycle that starts it), until each is done or its time limit (``reserve_s``: the time its go-arounds may add,
     `Executor`)."""
-    executor = Executor(inputs, runways, charts, approach_ias_mps, params, words, step_s=sentences.step_s,
+    executor = Executor(inputs, runways, charts, approach_speeds, params, words, step_s=sentences.step_s,
                         time_limit_s=time_limit_s, reserve_s=reserve_s)
     for cycle in range(executor.cycles):
         sentence_s = torch.full_like(executor.now().e_m, cycle * params.cycle_s)

@@ -25,19 +25,17 @@ import torch
 from ts_transformer.autopilot import closed_loop, replay, single
 from ts_transformer.autopilot.executor import Flown
 from ts_transformer.autopilot.frame import ALT, LAT, LON
-from ts_transformer.autopilot.judge import Verdict
+from ts_transformer.autopilot.judge import LANDED, LANDING_FAILED, Verdict
 from ts_transformer.autopilot.flights import FlightInputs
 from ts_transformer.autopilot.params import ExecutorParams
-from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.autopilot.start import require_startable
+from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import ClosedLoopSentence, closed_loop_sentences, load_sentences, load_signals
 from ts_transformer.instructions.labeller.read import Reading, read_flight
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.words import Words
 
 CPU = torch.device("cpu")
-#: The outcomes of an approach crossing, whose crossing carries the judge's decision-altitude check (`judge._outcome`).
-APPROACH_OUTCOMES = ("landed", "unstable_at_minimums")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -129,7 +127,7 @@ def fly_single(batch: replay.Batch, inputs: FlightInputs, j: int, params: Execut
     loop (`single.fly`) — its time limit and reserve — to its end, or stopped before cycle ``stop_cycle``."""
     limits, reserve = replay.time_limits_s(batch, params, words.spec.step_s), replay.reserve_s(batch)
     flight = FlightInputs(**{f.name: getattr(inputs, f.name)[j: j + 1] for f in dataclasses.fields(FlightInputs)})
-    return single.fly(flight, batch.geometries[j], batch.approach_ias_mps[j], batch.sentences[j].grid, params, words,
+    return single.fly(flight, batch.geometries[j], batch.approach_speeds[j], batch.sentences[j].grid, params, words,
                       step_s=batch.row_interval_s, time_limit_s=limits[j], reserve_s=reserve, stop_cycle=stop_cycle,
                       superseded=superseded)
 
@@ -141,18 +139,26 @@ def last_state_cycle(outcome: str, end_row: int) -> int:
     return end_row - 1 if outcome == "dynamics_failure" else end_row
 
 
+#: The outcomes of an approach crossing, whose crossing carries the judge's decision-altitude check and the evaluation's
+#: verdict (`judge._outcome`).
+APPROACH_OUTCOMES = (LANDED, LANDING_FAILED)
+
+
 def crossing_payload(verdict: Verdict, flown: Flown, j: int, geometry: AirportGeometry) -> dict[str, Any] | None:
     """A verdict's threshold crossing as the Training view draws it (None: no crossing): where it crossed, at which
-    cycle from the first predicted step and which candidate; for an approach crossing the decision-altitude check (D38)
-    with the DA point's place and height (None: the judge wrote none — a crossing above the landing screen, or no DA
-    point)."""
+    cycle from the first predicted step and which candidate; for an approach crossing the decision-altitude check (D38,
+    a record) with the DA point's place and height (None: no DA point), and the evaluation's verdict on the crossing
+    (`judge.landing_verdict`: pass or fail, the gates failed, each value with its bounds). Both are None on a crossing
+    of another runway."""
     if verdict.crossing is None:
         return None
     crossing = verdict.crossing
     out = {"crossM": round(crossing["cross_m"], 2), "heightM": round(crossing["height_m"], 2),
-           "atCycle": round(crossing["at_row"], 3), "runwayIndex": int(crossing["runway_index"]), "decision": None}
-    # the judge writes a decision-altitude check (None: no DA point) on the crossings it reads as approaches: those
-    decision = crossing["decision"] if verdict.outcome in APPROACH_OUTCOMES else None
+           "atCycle": round(crossing["at_row"], 3), "runwayIndex": int(crossing["runway_index"]), "decision": None,
+           "evaluation": None}
+    if verdict.outcome not in APPROACH_OUTCOMES:
+        return out
+    decision = crossing["decision"]
     if decision is not None:
         state = flown.states[j, decision["row"]].cpu().numpy()
         e, n = geometry.frame.horizontal_from_latlon(float(state[LAT]), float(state[LON]))
@@ -163,4 +169,10 @@ def crossing_payload(verdict: Verdict, flown: Flown, j: int, geometry: AirportGe
             "coneHalfWidthM": round(decision["cone_half_width_m"], 2),
             "aboveGlidepathM": round(decision["above_glidepath_m"], 2), "lateralOk": bool(decision["lateral_ok"]),
             "verticalOk": bool(decision["vertical_ok"]), "passed": bool(decision["passed"])}
+    graded = crossing["evaluation"]
+    out["evaluation"] = {
+        "verdict": graded["verdict"], "violations": list(graded["violations"]),
+        "lateralM": round(graded["lateral_m"], 2), "lateralBoundM": round(graded["lateral_bound_m"], 2),
+        "verticalM": round(graded["vertical_m"], 2), "verticalBoundsM": [round(b, 2) for b in graded["vertical_bounds_m"]],
+        "speedMps": round(graded["speed_mps"], 2), "speedBoundsMps": [round(b, 2) for b in graded["speed_bounds_mps"]]}
     return out

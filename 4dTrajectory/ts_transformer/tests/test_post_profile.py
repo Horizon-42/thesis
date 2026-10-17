@@ -60,9 +60,11 @@ def test_an_update_out_of_memory_is_recorded_and_stops_the_larger_ones(tmp_path,
 
     def batch_of(groups, device, part_width):
         rows = max(len(g.sentences[0].tokens) for g in groups)
-        return SimpleNamespace(chosen=[post_profile.group_size(g) for g in groups],
-                               rows=SimpleNamespace(asked=torch.zeros(len(groups), rows, dtype=torch.bool)),
-                               traffic=SimpleNamespace(tokens=torch.zeros(len(groups), rows, 2, 4)))
+        batch = SimpleNamespace(chosen=[post_profile.group_size(g) for g in groups],
+                                rows=SimpleNamespace(asked=torch.zeros(len(groups), rows, dtype=torch.bool)),
+                                traffic=SimpleNamespace(tokens=torch.zeros(len(groups), rows, 2, 4)))
+        batch.pieces = lambda: [batch]                                  # samples alone: one piece
+        return batch
 
     monkeypatch.setattr(post_profile, "update_step", update)
     monkeypatch.setattr(post_profile, "samples", batch_of)

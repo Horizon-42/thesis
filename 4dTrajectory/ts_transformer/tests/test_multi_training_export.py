@@ -54,7 +54,7 @@ def two_window(tmp_path, monkeypatch, joins=(0, 8)):
             return parts["start"]
 
     two = TwoContext(**{**{f.name: getattr(context, f.name) for f in fields(context)},
-                        "splits": {"train": data, "select": data}, "rosters": parts["rosters"]})
+                        "splits": {"train": data, "select": data}})
     model = _with_module(s["base"])
     add_token_part(model, TokenPart.width, TOKENS_SCHEMA)
     model.eval()                                     # the part added in training mode: the speaker reads eval (D107)
@@ -177,13 +177,13 @@ def test_a_silent_aircraft_the_executor_finished_ends_where_the_judge_ended_it(t
     """`post_training_export.sentence_payload`: an aircraft that answered a loss, went silent (D144) and was flown on by
     the executor to an end of its own (its window not ended at the loss) is written to the judge's outcome, end and
     last state — not to the end of a row past the executor's end — with its reward the loop's 0 and its silent row; its
-    timed-out flag is the written outcome's. The copy joins 5 steps behind (the executor of design draft 5 meets a second
-    loss, which ends the window, at 4, which the earlier executor flew clear of); stage D's rule answers the first loss
-    only."""
+    timed-out flag is the written outcome's. The copy joins 9 steps behind (the executor of design draft 5 meets a second
+    loss, which ends the window, at 4, which the earlier executor flew clear of; prior D204: at 5 the window ends at a
+    second loss); stage D's rule answers the first loss only."""
     from ts_transformer.experiments.multi_train import loop_options, readout_numbers
     from ts_transformer.experiments.training_flights import last_state_cycle
 
-    s, two, window, model, keys = two_window(tmp_path, monkeypatch, joins=(0, 5))
+    s, two, window, model, keys = two_window(tmp_path, monkeypatch, joins=(0, 9))
     options = loop_options(two)
     real, spent = options["answering"], []
 
@@ -237,7 +237,8 @@ def test_stage_d_s_positions_and_listed_parts_are_the_readout_s(tmp_path, monkey
 
     monkeypatch.setattr(multi_export, "flown_positions", capture("export"))
     monkeypatch.setattr(census, "flown_positions", capture("readout"))       # the readout's, through `loop_positions`
-    settings = SimpleNamespace(spans_s=[window.span_s], batch_rows=[2], batch_squares=[], seed=2027, select_per_airport=1)
+    settings = SimpleNamespace(spans_s=[window.span_s], batch_rows=[2], batch_squares=[], seed=2027, readout_seed=2027,
+                               select_per_airport=1)
     flying = multi_export.stage_d_flying(two, settings, multi_export.STAGE_D.readout_numbers(settings))
     flown_ends = []
     end = flying.end
@@ -272,8 +273,12 @@ def test_stage_d_s_positions_and_listed_parts_are_the_readout_s(tmp_path, monkey
     ours_numbers = multi_export.STAGE_D.readout_numbers(settings)(3, 1).random(4)
     assert ours_numbers.tolist() == multi_train.readout_numbers(2027, 3, 1).random(4).tolist()
     assert tuple(multi_export.STAGE_D.identity(window)) == IDENTITY_FIELDS["D"]
-    assert tuple(multi_export.STAGE_D.selection_fields(SimpleNamespace(seed=2027, select_per_airport=1,
+    assert tuple(multi_export.STAGE_D.selection_fields(SimpleNamespace(readout_seed=2027, select_per_airport=1,
                                                                        spans_s=[300.0]))) == SELECTION_FIELDS["D"]
+    shifted = SimpleNamespace(**{**vars(settings), "readout_seed": 7})         # D219 (3): the readout's seed draws
+    assert (multi_export.STAGE_D.readout_numbers(shifted)(3, 1).random(4).tolist()
+            == multi_train.readout_numbers(7, 3, 1).random(4).tolist())
+    assert multi_export.STAGE_D.selection_fields(shifted)["select_seed"] == 7
     assert tuple(export.STAGE_C.identity(window)) == IDENTITY_FIELDS["C"]
     assert tuple(export.STAGE_C.selection_fields(SimpleNamespace(select_seed=7, select_per_airport=1))) == \
         SELECTION_FIELDS["C"]

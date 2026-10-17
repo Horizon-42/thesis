@@ -24,6 +24,7 @@ from ts_transformer.experiments.post_train import (
 from ts_transformer.autopilot.start import Start, start_moved
 from ts_transformer.instructions.artefact import closed_loop_sentences
 from ts_transformer.post.branches import EQUAL, MINORITY_SIDE, continuation_numbers, first_numbers
+from ts_transformer.post.loss import DATA_WEIGHT
 from ts_transformer.post.scene import INSERTED, LEADER_MOVED, MOVED_START, NO_START_MOVE, REAL
 from ts_transformer.prior.checkpoint import claim_validation_read
 from ts_transformer.prior.source import ArtefactSource
@@ -49,7 +50,7 @@ def test_a_batch_is_spoken_with_its_campaigns_front_attention(monkeypatch, atten
 
     monkeypatch.setattr(post_train, "branch_round", spoken)
     context = SimpleNamespace(splits={"train": {"sentences": {}, "flights": {}, "faults": {}}},
-                              start_loop=lambda split, batch: None, geometries={}, rosters={}, finals={}, words=None,
+                              start_loop=lambda split, batch: None, geometries={}, finals={}, words=None,
                               interval_s=DELTA, variant="full", edges_reference=None, device=CPU)
     with pytest.raises(_Spoken):
         post_train.speak_batch(None, context, [], [], _settings(front_attention=attention), 0, None, 0)
@@ -83,9 +84,9 @@ def _context(s):
 
     train["signals"] = {x.dataset_id: x for x in load_signals(s["directory"], "train")}
     train["start"] = Start(s["directory"], "train", DELTA, s["directory"].parent / "executor")
-    data = ArtefactSource(s["directory"], DELTA, "full", {code: s["roster"]}, "all").sentences("train", code)
+    data = ArtefactSource(s["directory"], DELTA, "full", "all").sentences("train", code)
     return Context(s["directory"], s["directory"].parent / "executor", s["reference"], CPU, s["words"], DELTA, s["base"],
-                   {"base": "the fixture's"}, s["geometries"], {code: s["roster"]}, s["finals"],
+                   {"base": "the fixture's"}, s["geometries"], s["finals"],
                    {"train": train, "select": train}, data)
 
 
@@ -96,7 +97,7 @@ def test_the_context_holds_the_base_on_its_device(monkeypatch, tmp_path):
     base = torch.nn.Linear(2, 2).train()
     base.config = SimpleNamespace(variant="full")
     prior = SimpleNamespace(checkpoint=SimpleNamespace(model=base, identity={}), interval_s=4.0, geometries={},
-                            landings={}, selection="landed")
+                            selection="landed")
     monkeypatch.setattr(post_train, "open_prior", lambda *a, **k: prior)
     monkeypatch.setattr(post_train, "load_spec", lambda instructions: None)
     monkeypatch.setattr(post_train, "Words", lambda spec: None)
@@ -115,8 +116,8 @@ def test_a_context_starts_its_loops_executor_on_its_executor_device(monkeypatch)
     window = SimpleNamespace(signal_index=0, signal_indices=[0], join_steps=lambda: [0], joined=[])
     monkeypatch.setattr(post_train, "start_move_of", lambda window: None)
     context = post_train.Context(instructions=None, executor=None, edges_reference=None, device=torch.device("meta"),
-                                 words=None, interval_s=4.0, base=None, base_identity={}, geometries={}, rosters={},
-                                 finals={}, splits={"train": {"sentences": {0: None}, "start": start}}, data=[])
+                                 words=None, interval_s=4.0, base=None, base_identity={}, geometries={}, finals={},
+                                 splits={"train": {"sentences": {0: None}, "start": start}}, data=[])
     context.start_loop("train", [window])([0])
     replace(context, executor_device=torch.device("cpu")).start_loop("train", [window])([0])
     assert [d.type for d in seen] == ["meta", "cpu"]
@@ -179,10 +180,35 @@ def test_the_pass_reads_the_groups_file_by_file_a_few_at_a_time(setup, tmp_path)
     empty = tmp_path / "empty"
     empty.mkdir()
     assert train_pass(model, context, optimizer, empty, settings, np.random.default_rng(0), part_width=0) == {
-        "updates": 0, "passes": [{"updates": 0}]}
+        "updates": 0, "passes": [{"updates": 0}], "update_rows": [[]]}
+    (rows,) = passed["update_rows"]                                # D219 (4): a row an update
+    assert len(rows) == 3 and sum(r["words"] for r in rows) == passed["words"]
+    assert all(r["grad_norm"] > 0 and r["ratio_max"] > 0 and r["dual_clipped"] == 0 for r in rows)
     twice = train_pass(model, context, optimizer, directory, settings, np.random.default_rng(0), part_width=0, epochs=2)
     assert twice["updates"] == 6 and [p["updates"] for p in twice["passes"]] == [3, 3]      # D169: each pass's means
     assert twice["loss"] == pytest.approx(np.mean([p["loss"] for p in twice["passes"]]))
+
+
+def test_d220_the_pass_reads_a_search_unit_as_one_item_of_an_update(tmp_path, monkeypatch):
+    """D220: a groups file of stage D's search units (`post.branches.Valued`) gives updates of `update_groups` units,
+    each unit one piece of its first sentence and its group's continuations, as `samples` makes it."""
+    from ts_transformer.post.branches import Group, Valued, samples
+    from ts_transformer.tests.test_post_branches import _three_sentences
+
+    first_step, length, sentence = _three_sentences()
+    group = Group(0, first_step + 7, sentence(0, 1.0), (sentence(1, 2.0), sentence(2, 0.0)))
+    units = [Valued(w, 0, sentence(0, 1.0), (first_step, first_step + 7), (0.25, 0.5), (group,)) for w in range(3)]
+    directory = tmp_path / "round"
+    directory.mkdir()
+    torch.save(units, directory / "groups_0.pt")
+    monkeypatch.setattr(post_train, "collate", lambda sentences, device: None)
+    updates = list(update_pairs(directory, [0], _settings(update_groups=2), np.random.default_rng(0), CPU,
+                                part_width=0))
+    assert [len(pieces) for pieces, _ in updates] == [2, 1]
+    for pieces, _ in updates:
+        for piece in pieces:
+            assert piece.advantage.shape == (3, length)
+            assert torch.equal(piece.advantage, samples([units[0]], CPU).advantage)
 
 
 def test_the_pass_shuffles_each_file_s_groups_by_the_round_s_numbers(tmp_path, monkeypatch):
@@ -194,7 +220,7 @@ def test_the_pass_shuffles_each_file_s_groups_by_the_round_s_numbers(tmp_path, m
     torch.save(list(range(10, 15)), directory / "groups_1.pt")
     segments = []
     monkeypatch.setattr(post_train, "samples", lambda groups, device, part_width, segment_rows, scale: (
-        segments.append(segment_rows), list(groups))[1])
+        segments.append(segment_rows), SimpleNamespace(pieces=lambda: [list(groups)]))[1])   # samples alone: one piece
     monkeypatch.setattr(post_train, "collate", lambda sentences, device: None)
     settings = _settings(update_groups=3)
 
@@ -1043,6 +1069,9 @@ def test_a_campaign_round_end_to_end(setup, tmp_path, monkeypatch):
     assert record["speaking"]["windows"] == 1 and sum(record["speaking"]["outcomes"].values()) == 1
     readout = record["selection_readout"][s["geometry"].code]
     assert readout["windows"] == 1 and sum(readout["outcomes"].values()) == 1
+    turns = record["turns_readout"]                       # D214: the same ends' turns, beside the readout
+    assert set(turns) == {s["geometry"].code, "all"} and turns["all"]["aircraft"] == 1
+    assert turns["all"] == turns[s["geometry"].code] and turns["all"]["spoken_s"] > 0
     identity = torch.load(out / "round_0" / "checkpoint.pt", weights_only=False)["identity"]
     assert identity["schema"] == post_train.POST_CHECKPOINT_SCHEMA and identity["base"] == {"base": "the fixture's"}
     assert identity["rounds"] == [record["windows"]]
@@ -1484,7 +1513,7 @@ def test_the_minority_side_weight_scales_each_group_by_its_side_over_the_round_s
     assert post_train.minority_mean(tmp_path) is None
     scales = []
     monkeypatch.setattr(post_train, "samples", lambda groups, device, part_width, segment_rows, scale: (
-        scales.append((groups[0].minority, scale)), None)[1])
+        scales.append((groups[0].minority, scale)), SimpleNamespace(pieces=lambda: [None]))[1])
     monkeypatch.setattr(post_train, "collate", lambda sentences, device: None)
     settings = _settings(update_groups=3)
     for mean in (2.0, None):
@@ -1504,8 +1533,8 @@ def test_the_minority_side_weight_scales_each_group_by_its_side_over_the_round_s
 
 def test_stage_c_s_pass_clips_and_passes_as_its_settings_say(monkeypatch):
     """D168, D169: stage C's pass (`STAGE_C`, `STAGE_C_LANDED`) hands `Settings.clip_norm` to `post.loss.passes` and
-    makes `Settings.epochs` passes, each with its own numbers (`pass_orders`); stage D's (its settings name neither,
-    only the data weight) clips nothing and makes one pass."""
+    makes `Settings.epochs` passes, each with its own numbers (`pass_orders`); stage D's (its settings name neither)
+    clips nothing and makes one pass, here without segment credit (its own: test_multi_train)."""
     from ts_transformer.experiments.multi_train import stage_d
 
     seen, numbers = [], []
@@ -1524,12 +1553,13 @@ def test_stage_c_s_pass_clips_and_passes_as_its_settings_say(monkeypatch):
         here = replace(settings, method=post_train.LANDED_SENTENCES, segment_only=False,
                        branch_every_s=120.0) if landed else settings
         assert stage.train(None, context, None, None, here, rng, part_width=0, round_=0, companion=None) == {
-            "updates": 0, "passes": [{"updates": 0}, {"updates": 0}]}
+            "updates": 0, "passes": [{"updates": 0}, {"updates": 0}],
+            **({} if landed else {"update_rows": [[], []]})}                   # D219 (4): a branch pass's rows
         assert numbers[-2] is rng and numbers[-1] is not rng
-    stage_d().train(None, context, None, None, SimpleNamespace(data_weight=1.0, group_weight=EQUAL),
-                    np.random.default_rng(0),
-                    part_width=0, round_=0, companion=None)
-    assert seen == [(0.5, 2), (0.5, 2), (None, 1)]
+    stage_d().train(None, context, None, None, SimpleNamespace(data_weight=1.0, group_weight=EQUAL, segment_only=False,
+                                                               branch_every_s=120.0, clip_norm=2.0, dual_clip=None),
+                    np.random.default_rng(0), part_width=0, round_=0, companion=None)
+    assert seen == [(0.5, 2), (0.5, 2), (2.0, 1)]                        # stage D's clip: its own setting (D219 (1))
     assert segments == [15, 15, None]          # D170: 60 s in 4 s rows, stage C's branch pass only; stage D's none
 
 
@@ -1544,7 +1574,7 @@ def test_stage_c_speaks_at_its_branch_interval(monkeypatch):
 
     monkeypatch.setattr(post_train, "branch_round", branch_round)
     context = SimpleNamespace(splits={"train": {"sentences": None, "flights": None, "faults": None}},
-                              start_loop=lambda split, batch: None, geometries=None, rosters=None, finals=None,
+                              start_loop=lambda split, batch: None, geometries=None, finals=None,
                               words=None, interval_s=4.0, variant="full", edges_reference=None, device=CPU)
     loop = SimpleNamespace(speaking=SimpleNamespace(start=8), end_step=lambda b: 40)
     for every, points in ((60.0, [8, 23, 38]), (120.0, [8, 38])):          # 120 s: D37's, the default
@@ -1646,7 +1676,7 @@ def test_a_formal_context_refuses_a_fold_or_a_smoke_prior(monkeypatch, tmp_path)
         base.config = SimpleNamespace(variant="full")
         return SimpleNamespace(directory=tmp_path / "run", config={"run": {"held_out": held_out}},
                                checkpoint=SimpleNamespace(model=base, identity={}, run={"sample": sample}),
-                               interval_s=4.0, geometries={}, landings={}, selection="landed")
+                               interval_s=4.0, geometries={}, selection="landed")
 
     monkeypatch.setattr(post_train, "load_spec", lambda instructions: None)
     monkeypatch.setattr(post_train, "Words", lambda spec: None)
@@ -1906,4 +1936,93 @@ def test_a_pass_gives_its_data_weight_to_each_update(monkeypatch):
     post_train.train_pass(None, SimpleNamespace(base=None, data=None, device=None), None, None, None,
                           np.random.default_rng(0), part_width=0, data_weight=0.25)
     taken["step"](1, 2, 3, 4, 5)
-    assert given == {"data_weight": 0.25}
+    assert given == {"data_weight": 0.25, "dual_clip": None}
+    post_train.train_pass(None, SimpleNamespace(base=None, data=None, device=None), None, None, None,  # D219 (2)
+                          np.random.default_rng(0), part_width=0, dual_clip=1.5)
+    taken["step"](1, 2, 3, 4, 5)
+    assert given == {"data_weight": DATA_WEIGHT, "dual_clip": 1.5}
+
+
+def test_d221_stage_cs_grpo_takes_at_least_two_draws_and_no_branch_setting():
+    """D221: GRPO is a method of stage C's (its stage stage C's own: `speak_batch` reads the method), with at least two
+    draws a window and no branch setting off its default."""
+    assert _settings(method=post_train.GRPO).method == post_train.GRPO
+    assert post_train.STAGES_C[post_train.GRPO] is post_train.STAGE_C
+    with pytest.raises(ValueError, match="at least 2"):
+        _settings(method=post_train.GRPO, continuations=1)
+    with pytest.raises(ValueError, match="branch training's"):
+        _settings(method=post_train.GRPO, segment_only=True)
+
+
+def test_d221_a_grpo_round_of_stage_c_end_to_end(setup, tmp_path, monkeypatch):
+    """D221: one round of stage C by GRPO (`short_round`'s window, three draws): its speaking's record (one group, the
+    window spoken again, draw 0's outcomes, the outcomes of every draw) and the round's end (its checkpoint)."""
+    s = setup
+    short_round(monkeypatch, s)
+    settings = _settings(rounds=1, continuations=3, method=post_train.GRPO)
+    out = tmp_path / "campaign"
+    open_campaign(out, {"settings": asdict(settings)}, {"head": "x", "dirty": False}, {})
+    run_campaign(out, settings, _context(s))
+    assert done_rounds(out) == 1
+    speaking = json.loads((out / "round_0" / "round.json").read_text())["speaking"]
+    assert speaking["groups"] == 1 and speaking["spoken_again"] == 1 and speaking["differed"] == []
+    assert sum(speaking["outcomes"].values()) == 1 and sum(speaking["draw_outcomes"].values()) == 3
+
+
+def test_d221_a_rounds_record_sums_each_count_of_outcomes_by_name(tmp_path, monkeypatch):
+    """D221: the round's record sums each batch's counts of outcomes by name (the outcomes, GRPO's outcomes over its
+    draws), the other counts as before."""
+    windows = [SimpleNamespace(span_s=0.0)] * 2
+    stage = SimpleNamespace(batches=lambda windows, settings: [[0], [1]], record=lambda window: {})
+
+    def spoken(stage, model, context, windows, places, settings, round_, directory, k, launch):
+        return {"groups": 1, "outcomes": {"landed": 1}, "draw_outcomes": {"landed": 2, "lost_separation": k}}
+
+    monkeypatch.setattr(post_train, "spoken_batch", spoken)
+    record = speak_round(None, SimpleNamespace(device=CPU), windows, _settings(), 0, tmp_path, stage=stage,
+                         launch={"utc": "", "commit": "", "dirty": False})
+    assert record["groups"] == 2 and record["outcomes"] == {"landed": 2}
+    assert record["draw_outcomes"] == {"landed": 4, "lost_separation": 1}
+
+
+def test_d221_with_the_spread_each_group_of_an_update_is_divided_by_its_rewards_standard_deviation(tmp_path,
+                                                                                                    monkeypatch):
+    """D221 (`post.branches.SPREAD`): a group's advantages divided by the standard deviation of its rewards (GRPO's
+    normalised reward), each group by its own; refused beside the minority side's weight; a setting of stage C's
+    methods with groups."""
+    from ts_transformer.post.branches import MINORITY_SIDE, SPREAD, Group, samples
+    from ts_transformer.tests.test_post_branches import _three_sentences
+
+    first_step, _, sentence = _three_sentences()
+    groups = [Group(0, first_step, sentence(0, 1.0), (sentence(1, 0.0), sentence(2, 0.0))),
+              Group(1, first_step, sentence(0, 2.0), (sentence(1, 0.0), sentence(2, 1.0)))]
+    assert np.isclose(groups[0].spread, np.std([1.0, 0.0, 0.0])) and np.isclose(groups[1].spread, np.std([2.0, 0.0, 1.0]))
+    directory = tmp_path / "round"
+    directory.mkdir()
+    torch.save(groups, directory / "groups_0.pt")
+    monkeypatch.setattr(post_train, "collate", lambda sentences, device: None)
+    rng = np.random.default_rng(0)
+    order = [int(i) for i in np.random.default_rng(0).permutation(2)]
+    updates = list(update_pairs(directory, [0], _settings(update_groups=1), rng, CPU, part_width=0, spread=True))
+    for (pieces, _), g in zip(updates, order):
+        (piece,) = pieces
+        expected = samples([groups[g]], CPU).advantage / groups[g].spread
+        assert torch.allclose(piece.advantage, expected) and not torch.equal(piece.advantage, expected * groups[g].spread)
+    with pytest.raises(ValueError, match="one group weight"):
+        list(update_pairs(directory, [0], _settings(), rng, CPU, part_width=0, minority_mean=1.0, spread=True))
+    assert _settings(method=post_train.GRPO, group_weight=SPREAD).group_weight == SPREAD
+    for wrong in ({"method": post_train.LANDED_SENTENCES, "group_weight": SPREAD}, {"group_weight": MINORITY_SIDE}):
+        with pytest.raises(ValueError, match="group_weight"):
+            _settings(**wrong)
+    given, weights = [], []
+    monkeypatch.setattr(post_train, "update_pairs", lambda *args, **kwargs: given.append(kwargs["spread"]) or [])
+    monkeypatch.setattr(post_train, "passes", lambda model, base, optimizer, each, step, clip_norm: [list(p) for p in each])
+    context = SimpleNamespace(base=None, data=None, device=CPU, interval_s=4.0)
+    for weight in (post_train.EQUAL, SPREAD):
+        post_train.STAGE_C.train(None, context, None, directory, _settings(method=post_train.GRPO, group_weight=weight),
+                                 np.random.default_rng(0), part_width=0, round_=0, companion=None)
+    assert given == [False, True]
+    monkeypatch.setattr(post_train, "train_pass", lambda *args, **kwargs: weights.append(kwargs["group_weight"]) or {})
+    post_train.STAGE_C.train(None, context, None, directory, _settings(group_weight=SPREAD), None, part_width=0,
+                             round_=0, companion=None)
+    assert weights == [SPREAD]

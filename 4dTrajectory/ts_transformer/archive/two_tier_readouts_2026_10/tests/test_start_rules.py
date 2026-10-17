@@ -13,7 +13,7 @@ import torch
 from ts_transformer.autopilot import closed_loop, replay
 from ts_transformer.autopilot.flights import FlightInputs
 from ts_transformer.autopilot.params import START_RULES, ExecutorParams
-from ts_transformer.autopilot.speed import approach_speed_ias_mps
+from ts_transformer.autopilot.speed import approach_speeds
 from ts_transformer.experiments import start_rules
 from ts_transformer.experiments.executor_spec import ROLL_RATE_DEG_S
 from ts_transformer.instructions.labeller.read import read_flight
@@ -112,7 +112,8 @@ def _read(monkeypatch, tmp_path, parts, name):
     monkeypatch.setattr(replay, "open_executor", lambda executor, instructions: (
         params, {"sha256": "s", "checks": {"labeller": "stand-in"}}, words))
     monkeypatch.setattr(replay, "draw_readings", draw)
-    monkeypatch.setattr(replay, "flight_approach_ias_mps", lambda series, group: approach_speed_ias_mps("A320", 62000.0))
+    monkeypatch.setattr(replay, "flight_approach_speeds", lambda series: approach_speeds("A320"))
+    monkeypatch.setattr(replay, "flown_typecode", lambda series: "A320")
     monkeypatch.setattr(closed_loop, "start_inputs", inputs)
     out = tmp_path / name
     assert start_rules.main(["--instructions", str(tmp_path / "artefact"), "--executor", str(tmp_path / "spec"),

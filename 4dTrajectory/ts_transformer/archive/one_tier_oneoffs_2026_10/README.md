@@ -38,3 +38,7 @@ Asked for and NOT moved, with the reason: `experiments/eta_calibration.py` (the 
 live `predict --cta-from-quantiles` reads, and `cli/predict.py` tells the user to run it; its stub is also used by a live test
 of `test_two_head_duration`) and `experiments/chain_sensitivity.py` (its tests are the only ones pinning `inference/receding.py`,
 which the live no-token lockstep imports; `test_publish_ts_experiment_trajectories` imports its `RECORDS_BLOCK`).
+
+Since 2026-10-13 `data/runway_features.py` and `outputs/control/latent.displacement_verdict` are deleted from the live
+code (the user's order): `runway_intent_r0`, `runway_intent_r11` and `latent_probe` here do not import any more; the
+deleted code is at two-tier2 `b8426ff5`.

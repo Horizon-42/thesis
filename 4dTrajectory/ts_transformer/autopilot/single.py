@@ -39,6 +39,7 @@ from aerodynamic_model.torch_dynamics import (
     ISA_DENSITY_EXPONENT, ISA_LAPSE_K_PER_M, ISA_RHO0_KG_M3, ISA_T0_K,
 )
 from aerodynamic_model.torch_scaled_transport_chart_dynamics import SCALED_TRANSPORT_CHART_REFERENCE_UNITS
+from evaluation.speed_gate import MIN_BOUND_LOAD_FACTOR, SPEED_GATE_UPPER_ADDITIVE_MS
 from geokit import METRES_PER_DEG_LAT, WGS84_A, WGS84_E2
 from ts_transformer.autopilot import ends
 from ts_transformer.autopilot.ends import runway_lateral_limit_m
@@ -416,8 +417,8 @@ class Vertical:
 class Speed:
     """`speed.Speed`, one flight."""
 
-    def __init__(self, approach_ias_mps: float, params: ExecutorParams, words: Words) -> None:
-        self.approach_ias_mps = approach_ias_mps
+    def __init__(self, approach_speeds: Sequence[float], params: ExecutorParams, words: Words) -> None:
+        self.low_mps, self.high_mps, self.malw_kg = approach_speeds
         self.cycle_s, self.lead_s = params.cycle_s, words.spec.speed_lead_s
         self.held_mps = math.nan
         self.issued, self.heard_s = -1, 0.0
@@ -428,7 +429,7 @@ class Speed:
     def rate(self, state: Kin, force: WordsNow, time_s: float, load: float,
              aero: Sequence[float]) -> tuple[float, float, dict[str, bool]]:
         go_around = force.go_around
-        if force.unspecified and not go_around and self.approach_ias_mps != self.approach_ias_mps:
+        if force.unspecified and not go_around and any(v != v for v in (self.low_mps, self.high_mps, self.malw_kg)):
             raise ValueError("\"unspecified\" in force for a flight whose type publishes no approach speed")
         issued = force.issued_step[SPEED]
         if issued != self.issued:
@@ -438,7 +439,10 @@ class Speed:
         density = _isa_density(state.height_m)
         floor = math.sqrt(2.0 * load * state.mass_kg * GRAVITY_MPS2 / (density * aero[0] * aero[1]))
         if force.unspecified:
-            own = self.approach_ias_mps * math.sqrt(_clamp(load, 1.0)) * math.sqrt(ISA_RHO0_KG_M3 / density)
+            scale = math.sqrt(state.mass_kg / self.malw_kg)                       # `speed.unspecified_ias_mps`
+            lower = self.low_mps * scale * math.sqrt(_clamp(load, MIN_BOUND_LOAD_FACTOR))
+            upper = self.high_mps * scale + SPEED_GATE_UPPER_ADDITIVE_MS
+            own = (lower + upper) / 2.0 * math.sqrt(ISA_RHO0_KG_M3 / density)
             wanted = self.held_mps if go_around else own
         else:
             wanted = force.speed_mps / math.cos(state.gamma_rad)
@@ -452,8 +456,8 @@ class SingleExecutor:
     """`executor.Executor` for one flight, one cycle at a time: ``cycle`` flies the words given, ``done`` says the
     flight is over, ``flown`` hands the record over as the batch's `Flown` (a batch of one) for the judge."""
 
-    def __init__(self, inputs: FlightInputs, geometry: AirportGeometry, approach_ias_mps: float, params: ExecutorParams,
-                 words: Words, *, step_s: float, time_limit_s: float, reserve_s: float) -> None:
+    def __init__(self, inputs: FlightInputs, geometry: AirportGeometry, approach_speeds: Sequence[float],
+                 params: ExecutorParams, words: Words, *, step_s: float, time_limit_s: float, reserve_s: float) -> None:
         """``inputs``: the flight's physical context as the batch's executor takes it (`flights.flight_inputs`, a batch
         of one), read into floats; ``step_s`` the sentence's row interval; ``reserve_s`` the time its go-arounds may
         add."""
@@ -469,7 +473,7 @@ class SingleExecutor:
         self.max_thrust_n = float(inputs.max_thrust_n[0])
         self.plant = Plant(self.aero, inputs.frame_params[0].tolist(), self.max_thrust_n, params.time_constants_s)
         self.lateral, self.vertical = Lateral(params, words), Vertical(params, words)
-        self.speed = Speed(approach_ias_mps, params, words)
+        self.speed = Speed(approach_speeds, params, words)
         #: `inverse.decays`
         self.decay = tuple(math.exp(-params.cycle_s / tau) for tau in params.time_constants_s)
         self.cycles = int(math.ceil(self.most_s / params.cycle_s))
@@ -617,7 +621,7 @@ class SingleExecutor:
                      cycle_s=self.params.cycle_s)
 
 
-def fly(inputs: FlightInputs, geometry: AirportGeometry, approach_ias_mps: float, grid: np.ndarray,
+def fly(inputs: FlightInputs, geometry: AirportGeometry, approach_speeds: Sequence[float], grid: np.ndarray,
         params: ExecutorParams, words: Words, *, step_s: float, time_limit_s: float, reserve_s: float,
         stop_cycle: int | None = None, superseded: Callable[[], bool] = lambda: False) -> tuple[Flown, bool]:
     """One flight's sentence ``grid`` (rows ``step_s`` apart) flown alone, a row's words heard on the cycle that starts
@@ -625,7 +629,7 @@ def fly(inputs: FlightInputs, geometry: AirportGeometry, approach_ias_mps: float
     flown) and whether the stop ended it. ``superseded`` is asked before each cycle; when it says so, `InterruptedError`.
     The one single-flight loop: the executor's check (`conformance.fly_single`) and the live executor
     (`experiments.training_flights.fly_single`) drive it."""
-    executor = SingleExecutor(inputs, geometry, approach_ias_mps, params, words, step_s=step_s,
+    executor = SingleExecutor(inputs, geometry, approach_speeds, params, words, step_s=step_s,
                               time_limit_s=time_limit_s, reserve_s=reserve_s)
     sentence = Sentence(grid, words, step_s=step_s)
     stopped = False

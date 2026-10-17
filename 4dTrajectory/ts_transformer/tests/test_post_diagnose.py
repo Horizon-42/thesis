@@ -41,7 +41,7 @@ INTENT = {"G2": "off below on by < 2 points with the interval holding 0: the tra
 @pytest.fixture
 def campaign(setup, tmp_path, monkeypatch):  # noqa: F811
     """A campaign of one round (as `test_post_ceiling`'s) and the runner's world: the checks stubbed, the context the
-    fixture's, the intent written."""
+    fixture's, the roster landings the fixture's (the runner reads them itself, D175), the intent written."""
     s = setup
     context = _context(s)
     settings = _settings(rounds=1, per_kind={**dict.fromkeys(KINDS, 0), REAL: 1})
@@ -64,9 +64,11 @@ def campaign(setup, tmp_path, monkeypatch):  # noqa: F811
     monkeypatch.setattr(diagnose, "checked_edges", lambda path: None)
     monkeypatch.setattr(diagnose, "open_context",
                         lambda *a, **k: (opened.append((k["splits"], k["formal"], k["data"])), context)[1])
+    rosters = {s["geometry"].code: s["roster"]}
+    monkeypatch.setattr(diagnose, "airport_landings", lambda geometries, days: rosters)
     intent = tmp_path / "intent.json"
     intent.write_text(json.dumps(INTENT))
-    return SimpleNamespace(out=out, opened=opened, context=context, settings=settings, intent=intent)
+    return SimpleNamespace(out=out, opened=opened, context=context, rosters=rosters, settings=settings, intent=intent)
 
 
 def _argv(c, out, *more):
@@ -247,8 +249,8 @@ def test_the_fields_of_a_loss_read_in_the_loop(campaign):
     assert result.outcome == LOST_SEPARATION and result.other == window.moved[0][0]
     code = window.scene.geometry.code
     separation = c.context.separations[code]
-    fields = diagnose.loss_fields(window, result, separation, c.context.finals[code],
-                                  window_landings(window, c.context.rosters[code]), STEP, True)
+    fields = diagnose.loss_fields(window, 0, result, separation, c.context.finals[code],
+                                  window_landings(window, c.rosters[code]), STEP, True)
     runway = diagnose.runway_at_loss(result)
     candidates = window.scene.geometry.candidates
     assert np.diff(window.commanded.e_m[:3]).max() < 0.0 and candidates[runway].course_deg == 90.0
@@ -319,7 +321,9 @@ def test_field_4_judges_the_straight_line_only_up_to_the_loss_or_120_s():
 
     def lost(gap, steps_):
         other = _record("other", -40_000.0 + gap - 50.0 * 16.0, 50.0)       # ``gap`` ahead at the first predicted step
-        return diagnose.straight_line_loss(_window(other), other.key, 0, at, velocity, steps_, SEPARATION, FINALS, STEP)
+        window = _window(other)
+        return diagnose.straight_line_loss(window, window.commanded, other.key, 0, at, velocity, steps_, SEPARATION,
+                                           FINALS, STEP)
 
     assert lost(8_000.0, steps) and not lost(20_000.0, steps)
     assert lost(20_000.0, 4 * steps)                                    # the cap alone keeps the 20 km loss out
@@ -350,7 +354,7 @@ def test_the_paired_difference_and_the_failures_counts():
              {"airport": "KB", "outcome": LOST_SEPARATION, "fields": {"other_class": diagnose.FOLLOWER,
                                                                       "start_conflict": False}},
              {"airport": "KB", "outcome": LANDED}]
-    counted = diagnose.failures(lines)
+    counted = diagnose.failures(lines, diagnose.OTHER_CLASSES)
     assert counted["all"]["lost"] == 2 and counted["all"]["other_class"][diagnose.LEADER] == {"count": 1, "share": 0.5}
     assert counted["all"]["start_conflict"]["true"]["count"] == 1 and "lost_every_draw" not in counted["all"]
     assert counted["airports"]["KB"]["other_class"][diagnose.FOLLOWER]["share"] == 1.0

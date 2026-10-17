@@ -1,5 +1,311 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-15 — B21 done: the prior without the landings input, under the stop of D205
+
+- `4dTrajectory/outputs/POOLED/prior/prior_b21_20261014` (read-only, `SHA256SUMS`), from `run-b21` at `f1f2a21a`,
+  12 h. Held-out landed: A s1337 92.0 %, C 89.8 %, A s2024 88.4 % (B19 84.6 / 83.8 / 80.3 %). Scores A 1.407,
+  A s2024 1.428, C 1.434, seed scale 0.021: configuration A.
+- The base (epoch 141, best 126) lands 97.2 % of the val days (B19's base 93.0 %), teacher-forced val loss 1.038
+  (1.160). Report `4dTrajectory/ts_transformer/docs/two_tier/readouts/2026-10-15_b21_prior.zh.md`.
+- The D200 comparison starts from this base (01:21 UTC); its chain script's profile log name was fixed first (the
+  name was read after `shift 3`).
+
+### 2026-10-14 — a prior's checkpoint opens on the meaning and the day split (prior D209)
+
+- Why: after D63 the user asked for a proposal on the identity's other entries, then chose: the spec sha, the
+  candidate table, Δ and the day split must match; the sha256 of the sentence and signal files become description;
+  the selection's counts become description, and the val readers still count val after their claim.
+- `source.OPENED`, `opened_entries`, `opening_identity`: `load_checkpoint` compares the opened entries of the stored
+  and the given identity (OPENED and the selection's rule) and nothing else; `open_prior` builds them without reading
+  a sentence or a file's sha256 (about 19 s less per open on `v19_20261014`). `artefact_identity` loses `counted`;
+  `load_checkpoint` loses `counted`; `checkpoint.NOT_COMPARED` (D63) is gone: the landings are not an opened entry.
+- The training run writes the identity as before (same entries, same format, v10); every checkpoint written before
+  opens as before. `require_selection_of` is unchanged: only the val readers call it, after their claim; a reader
+  of train or select reads today's selection, not checked against the stored counts.
+- Docs: prior D209 (new), D63, D118 (2) (5), §8 item 1, code index; outline index, next free number D210;
+  `superseded_decisions.md` entries 152–154 and the user's decision 20.
+
+### 2026-10-14 — the identity of a prior's data holds no landings (prior D63)
+
+- Why: no input (prior D206) and no loop (post-training D208) reads the landings, but the identity still held their
+  digest, read from the live tracks rosters outside the artefact: every prior open read about 150 MB of rosters
+  (0.6 s, +200 MB), and a new download, merge or reclassification would have refused every prior. The user chose
+  "Drop it: not written, not compared" (2026-10-14).
+- `artefact_identity` takes no landings and writes none; `LandingIndex.digest` is deleted; `open_prior` and
+  `prior_train` read no tracks roster; `OpenedPrior.landings` and `Context.rosters` are deleted.
+- A checkpoint written before (B21's base and folds) holds the entry; `load_checkpoint` keeps it as written and does
+  not compare it (`checkpoint.NOT_COMPARED`, the one rule for it). Every other entry is compared as before. The
+  checkpoint format keeps its name (v10): the stored files do not change.
+- The diagnostic readout (`post_diagnose`, post-training D175) keeps the window's landings (the user: "Keep") and reads
+  each airport's roster itself (`prior.source.airport_landings`).
+- Docs: prior D63, §2, §8 item 1, code index; post-training D208, O26 (closed), §3; outline index and plan;
+  `superseded_decisions.md` entries 141–151 and the user's decision 19.
+
+### 2026-10-14 — the loops keep no landings (post-training D208)
+
+- Why: since prior D206 no input reads the landings, and since post-training D207 no reward does; the user chose to
+  delete them now (post-training O26: "现在就删").
+- Deleted, with their tests: `SpeakingLoop`'s `landings` argument, `landings(flight)` and `add_landing`;
+  `speak_and_fly`'s and `WindowLoop`'s landings / rosters arguments and the rosters that `branch_round`,
+  `backward_round` and the runners passed; a landed commanded aircraft's landing added to the others' (multi-aircraft
+  control D147, deleted; D186 (1), D189 (0)); `post.landings.commanded_landings`; `LandingIndex.counts_before`,
+  `with_landing`, `LANDINGS_WINDOW_S`.
+- Kept, for the user to confirm (open item O26): the landings' digest in the identity of a prior's data (prior D63) —
+  without it every prior checkpoint written before is refused, B21's base too; and the window's landings
+  (`window_landings`, post-training D105), which the diagnostic readout's field 1 reads (D175).
+- No word, state, outcome, reward or record changes: free generation, stage C ≡ free generation and the compressed
+  window tests stay as they were; the behaviour records of `prior_behaviour` and `window_behaviour` hold no landings.
+- Docs: post-training D208, O26 (rewritten), D31, D105, §3, §9 items 2 and 8; multi-aircraft control D147 (deleted),
+  D150, D166 (6), D186 (1), D189 (0), §1, §2.6, §3, §6.1–§6.3, §9.3; prior D63, D105, D206, §2, §7 items 2 and 7, §9,
+  §11; vocabulary O23 (closed); outline index and plan; `superseded_decisions.md` entries 111–140; the tutorial (also
+  the inputs of D204 and D206, which it had not followed).
+
+### 2026-10-14 — the runway of a landing does not change the reward (post-training D207)
+
+- Why: the user, 2026-10-14, asked what the condition "landed on a runway of the airport's present landing direction"
+  rests on ("降落方向 不对没用奖励的根据是什么？"), then chose "直接去掉". D30 names no direction; the condition came with
+  the earlier design's reward (`archive/two_tier_v3_2026_10/docs/post_training_design.zh.md` §2, "在用，未逐项确认"),
+  and how often it changed a reward was never measured. At KRDU it could not stop runway 32: 32 is within 90° of
+  both 23 and 05.
+- The code: `post/reward.py` `reward(outcome, go_arounds, lost_separation)`; `present_runways` and
+  `PRESENT_DIRECTION_DEG` deleted; the window loop no longer reads the landings for the reward.
+- The window's landings (post-training D105; multi-aircraft control D147, D189 (0)) are now read by nothing: open item
+  post-training O26, the user's decision. The rewards of stage C's and stage D's campaigns before D207 were made with
+  the condition; their records are not changed.
+- Docs: post-training D207 (D112 deleted), §2 item 2, §3, §5, §9; multi-aircraft control D140, D147, §2.1; prior §2 and
+  D206; vocabulary O23; outline index and plan; `superseded_decisions.md` entries 99–110.
+
+### 2026-10-14 — the prior reads no landings (prior D206)
+
+- Why: the user, 2026-10-14: "这样 你先做个试验，直接把这个输入去掉 … 理论上为了增加泛化能力，最好能去掉它", then, after the
+  trial, "直接采用，重跑整个活动". The input (the landings on each candidate in the 30 min before the step) counted every
+  landing of the roster, light aircraft too: B20's fold without KRDU said KRDU's light-aircraft runway 32 first in 60 of
+  400 sentences (B19's: 17), and few of them landed.
+- The trial (`outputs/POOLED/prior/trial_no_landings_20261014`, read-only; branch `trial-no-landings` at `54dc46aa`),
+  configuration A seed 1337 against B20: KRDU landed 84.8 → 90.8 % of its held-out sentences, 32 first in 19; KMSY
+  92.0 → 91.5 %.
+- The code: `prior/batch.py` `CANDIDATE_FEATURES` without `landings_30min`; `state_inputs`, `sentence_rows`, `LoopRows`
+  and `ArtefactSource` lose their landings arguments; `SpeakingLoop` keeps each flight's `LandingIndex` for its caller
+  (`landings(flight)`, `add_landing`), which the post-training's reward reads. The data identity still binds the
+  landings' digest (D63). `ts-prior-checkpoint-v10`: every earlier prior is refused by name, so every stage C/D model
+  trained from one is too.
+- Stale: B20 (`prior_b20_20261014`, paused after three folds) is superseded by B21, B20's campaign without the input.
+  The D200 chain (`multi/compare_20261014.run`) waits for B21's base.
+
+### 2026-10-14 — the prior's training stops after 15 epochs without a better select loss, at most 150 (prior D205)
+
+- Why: the user, 2026-10-14: "改成连续8轮不变小；或者你建议一个更合理的数字；另外评估一下，当前base训练是不是停早了", then the
+  choices "15 轮，上限 150" and "新规则重跑整个活动".
+- The measurement: configuration A on every airport for 100 epochs without a stop
+  (`outputs/POOLED/prior/prior_b19_base100_20261014`, read-only): the best select loss at epoch 91 (1.152; epoch 30
+  1.259), flat over epochs 80–100, the longest gap between two new bests 12 epochs; the select days landed 96.2 % (the
+  30-epoch base 92.3 %, the 13-epoch base 87.6 %). With a constant learning rate the select loss moves 0.012–0.018 from
+  epoch to epoch; a stop after 3 epochs ends on noise (B19: the base at epoch 13, 8 of configuration A's 10 folds at
+  18–27, configuration C's 5 folds at 30).
+- `prior/train.py` `TrainConfig`: `patience` 3 → 15, `max_epochs` 30 → 150 (150 is a limit of time). Every finished run
+  keeps its own recorded values. B20, B19's campaign under the new stop, runs next; D200 starts from its base.
+
+### 2026-10-14 — B19: the prior's campaign on the labels of D203 with D204; the base lands 93.0 % of the val days
+
+- Why: the user, 2026-10-14: "再跑一遍CV，如果确认效果更好了，那么就在新的标注数据上跑base模型的正式训练".
+- `outputs/POOLED/prior/prior_b19_20261014` (read-only): B15's campaign on `v19_20261014` / `v24_20261014`, from
+  `run-b19` at `1bac2c38`. Held-out airports landed: configuration A seed 1337 84.6 % (the trial on v18 80.2 %, B16
+  47.0 %), C 83.8 % (B15 62.8 %), A seed 2024 80.3 % (B15 54.5 %); configuration A chosen.
+- The campaign's base stopped at epoch 13 by patience 3 (best 10) and read val: 87.2 %. A run of A on every airport for
+  30 epochs (`prior_b19_base30_20261014`, best epoch 30) landed 92.3 % of the select days against 87.6 %; the user chose
+  it, and it read val (B19's second val read): **93.0 %** landed (straight-in 95.9 %, vectored 88.0 %; B15's base
+  90.3 / 93.7 / 84.2 %), the evaluation's lateral gate failures 89 → 10. Readout
+  `4dTrajectory/ts_transformer/docs/two_tier/readouts/2026-10-14_b19_prior.zh.md`.
+
+### 2026-10-14 — the prior's offset right of a final goes in on the glidepath's 100 m scale (prior D204); v19 / v24 built
+
+- Why: on asinh(d / 1 km), 20 m off the centreline was the input 0.02, and B16's configuration A folds (on v18) crossed
+  the threshold a median 9–30 m off the centreline at their held-out airports. The user: "should algin lateral and
+  vertical input, since they have similar accuracy requirement" (2026-10-13), "/100 是定了的" (2026-10-14).
+- `prior/inputs.py`: `right_of_final` is asinh(d / `PATH_OFFSET_SCALE_M`) = asinh(d / 100 m), the constant of
+  `height_above_glidepath` (was `GLIDEPATH_HEIGHT_SCALE_M`); the distance before the threshold stays on 1 km. Checkpoint
+  format `ts-prior-checkpoint-v9` (a v8 checkpoint is refused by name).
+- The trial on B16's configuration A folds (`outputs/POOLED/prior/prior_lateral100_20261013`): landed 47.0 → 80.2 % of
+  the held-out sentences, every airport better; lateral gate failures 857 → 101, vertical 70 → 128.
+- Tests: the synthetic prior says other words, so five pinned digests are written again (join ticks, stage C's three,
+  the value campaign) and two scenarios move their joins (`test_multi_backward` (0, 60, 90); the silent aircraft 9
+  steps behind); the early-end tests compare steps only (rows count ended flights held to the loop's next rebuild).
+  The frontend fixtures are not regenerated (the user: "先不动").
+- The labels of D203 built: `instruction_language/v19_20261014` / `executor/v24_20261014` from `d7153f16` (read-only,
+  `SHA256SUMS`). Closed loop at Δ = 4 s landed train / select / val 99.52 / 99.23 / 99.48 % (v18 98.69 / 98.05 /
+  98.59 %); the replays' crossing above the glidepath, airport medians +2.9 to +3.6 m (v18 −0.7 to +7.3 m); spec,
+  signals and open-loop sentences byte for byte v18's. Next: B19, the prior's campaign on v19 with D204.
+
+### 2026-10-14 — the labels on the final aim at the glidepath, and their corrections go on to the threshold (vocabulary D203)
+
+- Why: B16's held-out folds failed the vertical gate only by crossing too high, and the labels themselves crossed the
+  threshold high: on the final they followed the observed paths, which lie above the published glidepath (at 1 km,
+  median −0.2 to +3.7 m an airport, KMSY +6.7 m; KMSY's runways 11 and 02 are flown at 3.12° and 3.18° against the
+  published 3.00°), and past the end of the observed path (212–532 m before the threshold) they said no correction.
+- `autopilot/closed_loop.py`: on the final (D201's condition, `Corrector.final_runway`, was `lateral_reference`) e_h is
+  the flown height above the runway's published glidepath and ė_h its rate (`final_errors`, was `centreline_error`);
+  the centreline and the glidepath go on past the end of the observed path, so there, on the final, the errors are
+  measured and the corrections go on to the threshold (`Corrector.row(unmeasured=…)`, was `past_end`). Off the final
+  D44 holds. Closed-loop format `ts-instruction-closed-loop-v11`.
+- In memory on 5,000 train flights of v18 (Δ = 4 s): landed 98.92 → 99.62 % (35 fixed, 0 broken), the crossing above
+  the glidepath p10–p90 −3.8…+10.2 → −0.3…+6.6 m, angle words 25.4 → 16.5 a sentence
+  (`outputs/POOLED/analyses/final_glidepath_labels_20261014`; readout
+  `docs/two_tier/readouts/2026-10-14_glidepath_labels.zh.md`).
+
+### 2026-10-13 — the prior campaign starts a fold's next steps early (prior D202)
+
+- `prior_campaign` starts the next two steps after the running one with `--gate` when they are a fold's steps (its
+  free generation, the next fold's training run): their checks and data are made on the CPU while the GPU trains, and
+  each waits for its turn (`io_utils.wait_for_turn`) before it uses the GPU, reads an earlier step's output or writes a
+  file. One step on the GPU at a time, in the plan's order; the base's steps and the val readers start at their turn.
+- `prior_train --gate` waits after its data; `prior_free_generation --gate` makes its checks before it reads the prior
+  run (the option checks and the checks moved ahead of the val lock; the order of the lock and the claim is unchanged).
+- `campaign.json` and the settings keep their format: B16 resumes on this code. Expected saving: about 3 min a training
+  run and 1.5 min a free generation (B15's timings).
+
+### 2026-10-13 — the labels on the final aim at the centreline: v18 / v23 built; the two-tier design docs brought up to date
+
+- `instruction_language/v18_20261013` + `executor/v23_20261013` (D201, from `b8426ff5`, read-only): closed loop at
+  Δ = 4 s landed train 97.62 → 98.69 %, val 97.55 → 98.59 % against v17; the evaluation's failures halve (887 → 453);
+  heading words at Δ = 4 s 48.3 → 43.0 a sentence. Readout `docs/two_tier/readouts/2026-10-13_d201_labels.zh.md`.
+  The superseded v13–v16 / executors v18–v21 are deleted (the user's word; their `.run` logs kept).
+- The design docs' status tables and plans are rewritten to the state of 2026-10-13; the outline's rules 1, 8, 10 and
+  11 now say the user's two rules: one branch, `two-tier2`, every other temporary; the frontend and the backend change
+  last, with the user's permission. The replaced rule texts are entries 60–72 of `design/superseded_decisions.md`.
+
+### 2026-10-13 — the Training results route on a v4 prior campaign and a stage D start from the base; orphans deleted
+
+The user's order (2026-10-13): finish the backend, delete the orphan modules (on two-tier2 only).
+
+- `aeroviz_backend/training_results.py`: stage B's `choice` answers the configuration choice only (the design has no
+  variant step since B15; a v3 campaign's variant choice is not answered, no branch on the version); the mirror
+  `CHOICE_VARIANTS` is gone. Stage D's `rounds.start` of a campaign from the base (D200) answers why it has no readout
+  instead of failing. The frontend reader `trainingSetResults.ts` no longer reads `choice.variant` (the user's
+  permission); the results fixture written again.
+- Deleted with no live caller (their archived readers no longer import; the code is at `b8426ff5`):
+  `data/runway_features.py`, `data/runway_context.py` (its only reader) and both tests, `inference/arm_readout.py` and
+  its test, `inference/export.copy_record_subset` with `metrics_from_row`, `repo_layout.EXPERIMENTS_MAIN`,
+  `outputs/control/latent.displacement_verdict` with `DEAD_MEAN_DISPLACEMENT_SIGMA`, and `multi_train.selection_readout`'s
+  `window_ends`. Trap T4 now names `data/day_split.operational_day`.
+
+### 2026-10-13 — on the final the labels' lateral corrections aim at the centreline (D201)
+
+B15's folds failed the evaluation's lateral gate at the airports they did not train on: they flew a line 20–40 m off
+the centreline to the threshold (readout `2026-10-13_b15_prior.zh.md`). The labels' final corrections aimed at the
+observed path, which scatters about the centreline inside Y_final (15 m), so against the centreline they turned back only
+34–38 % net at 15–25 m off. The user (2026-10-13) chose to change the labels and train B again on them (v18, B16).
+
+- `autopilot/closed_loop.py`: `Corrector.lateral_reference` — while "no level-off" is in force and the observed heading
+  word in force says the course of the runway in force, the next row's e_y and ė_y are read from that runway's extended
+  centreline (`centreline_error`); elsewhere from the observed path as before. Past the end of the observed path no
+  correction is said, as before.
+  The stored `lateral_m` is the e_y the corrections read.
+- `instructions/artefact.py`: `ts-instruction-closed-loop-v10`; the v17 artefact's closed-loop files are refused by the
+  new code (B15 and the windows census of 2026-10-13 stay on disk, read-only).
+- Measured in memory on 5,000 train flights of v17 at Δ = 4 s (`outputs/POOLED/analyses/final_centreline_labels_20261013`):
+  landed 97.66 → 98.92 %, heading words 48.5 → 43.1 a sentence, rows 15–25 m off the centreline turned back 98 % net.
+  The condition "lined up" is needed: from "no level-off" alone the turn onto the final is pulled toward the centreline.
+- Design: vocabulary D201, §4.9; contract C38. Stale: every v17-based closed-loop reading (a new artefact v18 is built
+  from this commit).
+
+### 2026-10-13 — stage D starts from the base; per-segment credit on stage D's grid (D200)
+
+The user (2026-10-13) asked for one method of branch training for stages C and D, chosen by a comparison of D143's
+grid every 120 s (credit to the event), the grid every 60 s with credit only up to the next branch point (stage C's
+P55) and `majority` (D192), all three in stage D's windows from the new base (multi-aircraft control D200). Two campaign
+settings of `multi_train` make it possible, each default the behaviour before it:
+
+- A start from the base (`MultiSettings.start` None; no `--start-campaign`): `post_train.traffic_model` (the base with
+  D29's zero-output traffic modules, now shared with stage C's `start_model`) of `--traffic-hidden`/`--traffic-heads`,
+  the token part at zero; the checkpoints name `{base, traffic}` as their start (`multi_train.start_identity`).
+- `--branch-every-s` and `--segment-only` (the grid only). A group now carries its varied aircraft's next branch point
+  (`post.branches.Group.next_branch`, set by `post_branches.branch_round`), and segment credit ends there too: stage D's
+  later aircraft has its first point off the window's grid. Stage C's points are a segment apart, so its credit is the
+  same as before.
+
+Forced later (the last stage, needs the user's permission): `aeroviz_backend/training_results.py` `multi_rounds` reads
+the start as a round of stage C and fails on a campaign from the base.
+
+### 2026-10-13 — ts runners archived: settled readouts, plan v3's no-token line, unused one-tier runners
+
+The user's decision (2026-10-13), after a census of `experiments/` against the formal two-tier chain (labelling A,
+prior B, post-training C, multi-aircraft D, the Training exports): four groups that the formal chain does not use moved
+to `4dTrajectory/ts_transformer/archive/` with their tests ("archive的同时，把测试也带过去 而且archive代码一律不做测试").
+Each campaign has a README (file → what it was; what stayed live and why).
+
+- `archive/two_tier_readouts_2026_10/`: `executor_turns`, `final_descent_tolerance`, `start_rules`, `lead_ablation`,
+  `multi_windows`, `pass_gradients` (each measured for a choice that is made: D47, D66, D77, V12/D9, D146, log §22) and
+  `multi_val_evaluation` (a second grading path beside the judge; stage D's landing now reads the judge only).
+- `archive/manoeuvre_lockstep_2026_10/`: the `manoeuvre/` package (lockstep, gates, failure modes) and its six runners
+  (`plan_cohort`, `manoeuvre_lockstep`, `executor_failure_modes`, `executor_grid_gate`, `executor_relative_gate`,
+  `two_tier_grid_queue`) — plan v3's no-token closed loop.
+- `archive/one_tier_runners_2026_10/`: 20 one-tier runners with no live importer (`cv`, `plot_results`,
+  `coordinate_ablation`, `history_ablation`, `predictability_report`, `latent_readout`, `lead_time_error`,
+  `quantile_fan_readout`, `runway_hypotheses`, `runway_intent_r1` (+ readout), four `compare_*`, `score_control_arms`,
+  `specific_force_teacher_distribution`, two residual readouts, `trace_architecture`).
+- Tests: whole files moved unchanged; nine mixed files split (an excerpt to the archive, the live file keeps the rest).
+  Archived tests do not run (`pyproject.toml` `norecursedirs`). `test_architecture.py` lost the runner pins of the
+  archived runners; `test_closed_loop.py`'s val-refusal test no longer names `final_descent_tolerance`.
+- Docs: runners.md entries R3, R8, R9, R51, R52, R55, R70, R71, R74 moved to each campaign's
+  `docs/reference/entries.md` (a heading line each stays; R8 keeps `frame_ablation --only`); the package README's CV,
+  history, coordinate and predictability passages moved to `one_tier_runners_2026_10/docs/cut_sections.md`; the ts
+  CLAUDE.md index lines of these runners were removed. Live comments that named a runner now name its archive path;
+  `predict` no longer tells the user to run `quantile_fan_readout`.
+- Left live with no live caller (the user decides): `data/runway_features.py`, `inference/arm_readout.py`,
+  `inference/export.copy_record_subset`, `multi_train.selection_readout(window_ends=)`.
+
+### 2026-10-12 — Two-tier labeller: the closed loop's corrections read the errors ahead (the lead)
+
+The user's choice (2026-10-12, "按1"), after v14 (Y_final 15 m, H_final 7.5 m) landed 95.1 % at Δ 2 s but 89.0 % at
+Δ 4 s and 76.5 % at Δ 8 s (train): the corrector read the error NOW, while a word it says has its full effect one lead
+later (L = 4 s) and the next row comes Δ later — at Δ 8 s one 5° class moves the aircraft about 50 m across the path
+before the next row, more than the 15 m band. The labeller's observed words already say what the track will be a lead
+later; the corrections now do the same.
+
+- `closed_loop.ObservedPath.rates`: ė_y, the flown velocity across the matched segment; ė_h, the flown vertical rate
+  minus the segment's height slope times the flown velocity along it.
+- `Corrector.row(..., rates_mps=)` (required): a correction starts on e + ė (Δ/2 + L) and ends on e + ė (Δ/2 + L/2),
+  L the column's lead (`heading_lead_s`, `angle_lead_s`). At ė = 0 the corrections are the ones before. The tolerances,
+  the overshoot (D53) and the ends at a new observed word are unchanged.
+- The rule of D50 (`outside_rows`, `without_a_correction_toward_the_path`) is a record now: a row outside the tolerance
+  whose error closes fast gets no correction.
+- No format changes; the closed loop's conformance sample refuses an artefact read with the corrector before.
+- Design text to amend with the user's numbered decision: vocabulary §4.9 (D32), D50, D53 (the rule of D50 "on every
+  row"), and Y_final / H_final 7.5 m (D66).
+
+### 2026-10-12 — Two-tier labeller: the closed loop's lateral tolerance in the final descent, Y_final
+
+- The user's decision (2026-10-12), after the rebuilt v13 labels flown in closed loop landed 85.5 % (train, Δ 2 s) by the
+  evaluation's verdict, most failures 23–30 m off the centreline at the threshold (the evaluation's bound: half the
+  runway's width, 22.86 m; the closed loop's lateral tolerance Y: 30 m in every phase): while "no level-off" is in force
+  (the final descent) the closed loop's tolerances are half of the others — Y_final = 15 m (new spec field
+  `closed_loop_final_lateral_m`, `instruction_spec --closed-loop-final-lateral-m`, one definition
+  `closed_loop.lateral_tolerance_m`) and H_final = 7.5 m (`--closed-loop-final-vertical-m 7.5`; was 10 m, D66). A
+  correction ends under half of the tolerance in force, as before.
+- The spec gains a required field, `ts-instruction-spec-v9`: every spec written before is refused by name. The reading
+  rule's name stays `instruction-v8` (the frontend mirrors it; D66 moved it to instruction-v6 — renaming it is the
+  user's call, with the frontend's last stage).
+
+### 2026-10-12 — Two-tier judge: a landing is the evaluation package's verdict
+
+- The user's order (2026-10-12): one landing judgement, the evaluation's. Where a flight ends is unchanged
+  (`autopilot/ends.py`: an approach crossing of R, another runway, ground contact, a dynamics failure, the time limit). At
+  an approach crossing the judge asks `evaluation.metrics.evaluate_record` (`judge.landing_verdict`: the flown state at
+  the interpolated crossing as the terminal state, the candidate's assessment context, the flown airframe's type for the
+  speed gate) → `landed` / `landing_failed`. The outcomes `unstable_at_minimums`, `crossed_too_high`,
+  `crossed_off_runway` are deleted. The judge's decision-altitude check (D38) stays unchanged as a record on every
+  approach crossing (the user, 2026-10-12: "保留，只做记录"); it decides no outcome. `final_descent_tolerance` (R52) reads
+  it as before (readout v3: `da_not_passed` in place of `unstable_at_minimums`). The Training view draws the DA point,
+  chip and label as before; the evaluation's verdict is added as text only.
+- Formats: `ts-instruction-candidates-v5` (each candidate carries the evaluation's assessment context of its runway end),
+  `ts-instruction-closed-loop-v9`, `ts-executor-replay-v10`; the Training samples (stage A v13, prior v6, window v7) and
+  the live segments (autopilot v11, prior v2, window v4) carry `crossing.evaluation` beside `crossing.decision`.
+  Every instruction artefact, executor spec and Training set made before is unreadable by this code.
+- Not measured: in a stage D window a commanded aircraft adds its landing to the others' landing context only when the
+  judge says `landed` (`post_window_loop._landed`); the evaluation's lateral gate (half the runway's width) passes fewer
+  crossings than the old runway limit (106.7 m), so the other aircraft can be given other inputs and fly other tracks.
+  `window_behaviour --against` (R68) on a stage D campaign measures it.
+
 ### 2026-10-12 — Learning view: the slider plays, stage D's slider is the window scene's, label switches
 
 - The user's four requests for the Learning (Training) task, on branch `dev-learning-view`: (1) stages C and D: "Other

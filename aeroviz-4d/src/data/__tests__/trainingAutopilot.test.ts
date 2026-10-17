@@ -31,14 +31,14 @@ describe("the answer", () => {
     const parsed = parseTrainingAutopilot(raw, requestOf(raw), selection);
     if (!parsed.ok) throw new Error(parsed.problem);
     const { segment, track, crossing, stored } = parsed.value;
-    expect(segment).toMatchObject({ column: "heading", row: 52, word: 35, correction: false, startCycle: 104, stopCycle: 112,
-      end: TRAINING_AUTOPILOT_SEGMENT_END, endCycle: 112 });
+    expect(segment).toMatchObject({ column: "heading", row: 52, word: 35, correction: false, startCycle: 104, stopCycle: 114,
+      end: TRAINING_AUTOPILOT_SEGMENT_END, endCycle: 114 });
     expect(crossing).toBeNull();
     expect(stored.horizontalM).toBe(0);
     // cycle c counts 1 s from the first predicted step: flight time is the closed loop's start plus c
     const closed = trainingReadingOf(selection.flight, selection.vocabulary.stepS, 2).closed!;
     expect(track.tS[0]).toBe(closed.startS + 104);
-    expect(track.tS[track.tS.length - 1]).toBe(closed.startS + 112);
+    expect(track.tS[track.tS.length - 1]).toBe(closed.startS + 114);
     expect(track.thrustFraction).toHaveLength(track.tS.length - 1);
     expect(track.attitude.headingDeg).toHaveLength(track.tS.length);
     // heights: the live answer gives the ellipsoid height directly
@@ -46,13 +46,14 @@ describe("the answer", () => {
     expect(autopilotColour(parsed.value)).toBe(TRAINING_AUTOPILOT_COLOR);
   });
 
-  it("reads the last word flown to its outcome: the crossing and the DA check come back with it", () => {
+  it("reads the last word flown to its outcome: the crossing, the DA check and the evaluation's verdict come back with it", () => {
     const [, raw] = stageAAnswers();
     const parsed = parseTrainingAutopilot(raw, requestOf(raw), selection);
     if (!parsed.ok) throw new Error(parsed.problem);
-    expect(parsed.value.segment).toMatchObject({ row: 126, correction: true, stopCycle: null, end: "unstable_at_minimums" });
+    expect(parsed.value.segment).toMatchObject({ row: 117, correction: false, stopCycle: null, end: "landing_failed" });
     expect(parsed.value.crossing!.decision!.passed).toBe(false);
     expect(parsed.value.crossing!.decision!.verticalOk).toBe(false);
+    expect(parsed.value.crossing!.evaluation).toMatchObject({ passed: false, violations: ["vertical"] });
     expect(autopilotColour(parsed.value)).toBe(TRAINING_FAILURE_COLOR);
   });
 
@@ -102,17 +103,17 @@ describe("the answer", () => {
 describe("where a flown flight's track ends", () => {
   it("is the judge's outcome row, and one before it for a dynamics failure, whose failed state is left out", () => {
     const [, final] = stageAAnswers();
-    // flown on to a dynamics failure: the judge's row is 496, the last state kept 495
+    // flown on to a dynamics failure: the judge's row is 485, the last state kept 484
     const failure = { ...final, segment: { ...final.segment, end: "dynamics_failure", endCycle: final.segment.endCycle + 1 } };
     const parsed = parseTrainingAutopilot(failure, requestOf(final), selection);
     if (!parsed.ok) throw new Error(parsed.problem);
     expect(parsed.value.segment.end).toBe("dynamics_failure");
-    expect(lastStateCycle("dynamics_failure", 496)).toBe(495);
-    expect(lastStateCycle("landed", 495)).toBe(495);
+    expect(lastStateCycle("dynamics_failure", 485)).toBe(484);
+    expect(lastStateCycle("landed", 484)).toBe(484);
     // any other outcome must end its track at the outcome row itself
     const wrong = parseTrainingAutopilot({ ...final, segment: { ...final.segment, endCycle: final.segment.endCycle + 1 } }, requestOf(final), selection);
     expect(wrong.ok).toBe(false);
-    if (!wrong.ok) expect(wrong.problem).toContain("a segment that ended at cycle 496 (unstable_at_minimums) ends at 496");
+    if (!wrong.ok) expect(wrong.problem).toContain("a segment that ended at cycle 485 (landing_failed) ends at 485");
     const unmoved = parseTrainingAutopilot({ ...final, segment: { ...final.segment, end: "dynamics_failure" } }, requestOf(final), selection);
     expect(unmoved.ok).toBe(false);
   });
@@ -155,9 +156,9 @@ describe("the pick and the view", () => {
     if (!parsed.ok) throw new Error(parsed.problem);
     const { track } = parsed.value;
     expect(autopilotPlaybackS(track, 1000, 1000)).toBe(0);
-    // 8 s simulated at the least speed-up of 8: half a second of the page's time is 4 s flown, and 2 s is all of it
+    // 10 s simulated at the least speed-up of 8: half a second of the page's time is 4 s flown, and 2 s is all of it
     expect(autopilotPlaybackS(track, 1000, 1000 + 500)).toBe(4);
-    expect(autopilotPlaybackS(track, 1000, 1000 + 2000)).toBe(8);
+    expect(autopilotPlaybackS(track, 1000, 1000 + 2000)).toBe(10);
     expect(autopilotFlownAt(track, 0)).toEqual({ index: 0, fraction: 0 });
     expect(autopilotFlownAt(track, 1000).index).toBe(track.tS.length - 1);
     expect(autopilotFlownAt(track, 2.5)).toEqual({ index: 2, fraction: 0.5 });

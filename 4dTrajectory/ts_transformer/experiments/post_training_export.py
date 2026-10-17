@@ -239,7 +239,7 @@ def fly_round(model: Prior, context: Context, split: str, windows: Sequence[Wind
         batch = [windows[p] for p in places]
         loop, order, observed = context.start_loop(split, batch)(sorted(i for w in batch for i in w.signal_indices))
         flown = WindowLoop(model, loop, order, batch, data["sentences"], data["flights"], context.geometries,
-                           context.rosters, context.finals, context.words, interval_s=context.interval_s,
+                           context.finals, context.words, interval_s=context.interval_s,
                            variant=context.variant, edges_reference=context.edges_reference, faults=data["faults"],
                            observed=observed, device=context.device, **flying.options)
         results = flown.run([flying.numbers(places[int(flown.window_of[b])], int(flown.member_of[b]))

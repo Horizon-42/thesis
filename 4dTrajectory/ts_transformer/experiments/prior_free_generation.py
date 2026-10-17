@@ -3,8 +3,8 @@
 `speak_and_fly` flies a batch of flights started at their first predicted step through the start of a closed loop
 (vocabulary §6 item 5, D67: `autopilot.start`) in the step of a speaker's closed loop (`prior_speaking_loop`, §7 item 7,
 D106: the observed rows, then at each Δ row the inputs from the flown states, the speaker under its masks and the bound
-of D68, the executor's step), with each flight's own random numbers (`flight_numbers`, D96) and its airport's roster
-landings (D105), to the end of every flight; its outcome is the judge's (`Loop.outcome`, item 6). The runner imports
+of D68, the executor's step), with each flight's own random numbers (`flight_numbers`, D96), to the end of every
+flight; its outcome is the judge's (`Loop.outcome`, item 6). The runner imports
 nothing else of `autopilot/` (`tests/test_architecture.py`, D69).
 """
 
@@ -27,12 +27,11 @@ from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import ClosedLoopSentence, closed_loop_sentences, load_spec, signals_flights
 from ts_transformer.instructions.faults import faulty_flights
 from ts_transformer.instructions.words import COLUMNS, UNCHANGED, Words
-from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
+from ts_transformer.io_utils import file_sha256, utc_now, wait_for_turn, write_json_atomic
 from ts_transformer.prior.checkpoint import (CLAIM_SPENT_BY, claim_validation_read, lock_val_read, open_prior,
                                              readable_identity, settle_written_claim, spend_validation_claim)
 from ts_transformer.prior.source import require_selection_of
 from ts_transformer.prior.training_files import CLAIM_READER
-from ts_transformer.prior.landings import LandingIndex
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.procedure import PROCEDURE_MASKS, Final, ProcedureMasks, airport_finals
 from ts_transformer.prior.selection import SIDES, side
@@ -96,21 +95,19 @@ def read_sentences(out: Path) -> tuple[dict[str, Any], list[Stored]]:
 
 def speak_and_fly(model: Prior, loop: Loop, order: Sequence[int], sentences: Mapping[int, ClosedLoopSentence],
                   observed: Mapping[int, np.ndarray], flights: Mapping[int, Mapping[str, Any]], geometries: Mapping[str, AirportGeometry],
-                  landings: Mapping[str, LandingIndex], finals: Mapping[str, Sequence[Final]], words: Words, *,
+                  finals: Mapping[str, Sequence[Final]], words: Words, *,
                   interval_s: float, variant: str, numbers: Sequence[np.random.Generator],
                   device: torch.device, temperature: float = 1.0) -> list[Generated]:
     """The closed loop of the flights ``order`` of ``loop`` (`autopilot.start.start_moved`; module docstring):
     ``sentences``, ``observed`` (the start's observed rows) and ``flights`` (their records in the split's signals) by
-    their place in the signals; ``landings`` each airport's
-    roster landings (each flight is given its airport's, D105); ``numbers`` each flight's source of random numbers, in
-    ``order`` (`flight_numbers`: five a row said, D96)."""
+    their place in the signals; ``numbers`` each flight's source of random numbers, in ``order`` (`flight_numbers`: five
+    a row said, D96)."""
     if len(numbers) != len(order):
         raise ValueError(f"{len(numbers)} sources of random numbers for {len(order)} flights")
     if loop.most_go_arounds != MOST_GO_AROUNDS:
         raise ValueError(f"the loop was started for {loop.most_go_arounds} go-arounds a flight, the bound is "
                          f"{MOST_GO_AROUNDS} (D68)")
-    speaking = SpeakingLoop(model, loop, order, sentences, observed, flights, geometries,
-                            [landings[flights[i]["airport"]] for i in order], finals, words,
+    speaking = SpeakingLoop(model, loop, order, sentences, observed, flights, geometries, finals, words,
                             interval_s=interval_s, variant=variant, device=device, temperature=temperature)
     while speaking.observing:
         speaking.observe()
@@ -169,7 +166,10 @@ def main(argv: list[str] | None = None) -> int:
     ``--smoke``): ``config.json``, ``sentences.jsonl`` (one row a sentence: its flight, sample, outcome, crossing, the
     go-arounds), ``sentences.npz`` (the words, the states, the probability and permission of "go-around" and the rows on
     the final, each sentence's by its offsets) and ``readout.json`` (`readout`, all samples together, the flights the
-    prior's selection keeps and those it leaves out for each reason apart: `selection.SIDES`, D75, D111)."""
+    prior's selection keeps and those it leaves out for each reason apart: `selection.SIDES`, D75, D111).
+
+    ``--gate`` (a campaign's step started early, `prior_campaign`): the options and the checks first, then the step waits
+    for its turn (`io_utils.wait_for_turn`) before it reads the prior run, the val read's lock or the output."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--prior", type=Path, required=True, help="a prior_train run's directory")
     parser.add_argument("--instructions", type=Path, required=True)
@@ -184,20 +184,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--out", type=Path, required=True, help="a new directory")
     parser.add_argument("--smoke", action="store_true", help="SMOKE: allowed from a tree with changes; recorded")
+    parser.add_argument("--gate", action="store_true",
+                        help="wait for a line `go` on stdin before the prior run is read (a campaign's step started early)")
     args = parser.parse_args(argv)
     absolute = [p if p.is_absolute() else REPO_ROOT / p for p in (args.prior, args.instructions, args.executor, args.out)]
     prior_dir, instructions, executor_dir, out = absolute
-    # the val read's lock, before the output is looked at, kept to the end (D128)
-    if not (prior_dir / "config.json").is_file():
-        parser.error(f"{prior_dir} is no prior_train run (no config.json)")
-    held = lock_val_read(prior_dir, CLAIM_READER) if args.split == "val" else None  # noqa: F841
-    if out.exists() and args.split == "val":
-        settle_written_claim(prior_dir, CLAIM_READER, out)                # a kill after its readout (D128)
-    if out.exists() and not (out / CLAIM_SPENT_BY).exists():
-        parser.error(f"{out} exists without its {CLAIM_SPENT_BY}: a run that stopped; move it aside "
-                     f"({out.name}.aborted-<UTC>, outline E8) and run again to the same output")
-    if out.exists():
-        parser.error(f"{out} exists; a readout is never overwritten")
     small = [name for name in ("per_airport", "samples", "chunk") if getattr(args, name) < 1]
     if small:                                   # options are checked before the val read is claimed (D119, D128)
         parser.error(f"--{small[0].replace('_', '-')} is at least 1")
@@ -209,10 +200,22 @@ def main(argv: list[str] | None = None) -> int:
     if git["dirty"] and not args.smoke:
         parser.error("a readout that is not a smoke needs a clean tree")
     _, opened, _ = require_conforming_closed_loop(instructions, executor_dir)   # D69: the checks run here (D73)
+    wait_for_turn(args.gate)
+    # the val read's lock, before the output is looked at, kept to the end (D128)
+    if not (prior_dir / "config.json").is_file():
+        parser.error(f"{prior_dir} is no prior_train run (no config.json)")
+    held = lock_val_read(prior_dir, CLAIM_READER) if args.split == "val" else None  # noqa: F841
+    if out.exists() and args.split == "val":
+        settle_written_claim(prior_dir, CLAIM_READER, out)                # a kill after its readout (D128)
+    if out.exists() and not (out / CLAIM_SPENT_BY).exists():
+        parser.error(f"{out} exists without its {CLAIM_SPENT_BY}: a run that stopped; move it aside "
+                     f"({out.name}.aborted-<UTC>, outline E8) and run again to the same output")
+    if out.exists():
+        parser.error(f"{out} exists; a readout is never overwritten")
     device = torch.device(args.device)
 
     prior = open_prior(prior_dir, instructions)        # its record, checkpoint and procedure masks (§7 item 1, D106)
-    geometries, landings, interval_s = prior.geometries, prior.landings, prior.interval_s
+    geometries, interval_s = prior.geometries, prior.interval_s
     selection, checkpoint = prior.selection, prior.checkpoint           # the prior's own rule (D75)
     model = checkpoint.model.to(device)
     finals = {code: airport_finals(geometry) for code, geometry in geometries.items()}
@@ -246,7 +249,7 @@ def main(argv: list[str] | None = None) -> int:
                                                 executor_dir, {i: NO_MOVE for i in chunk},
                                                 most_go_arounds=MOST_GO_AROUNDS, device=device)
             generated += [(sample, g) for g in speak_and_fly(
-                model, loop, order, sentences, observed, dict(enumerate(flights)), geometries, landings, finals, loop.words,
+                model, loop, order, sentences, observed, dict(enumerate(flights)), geometries, finals, loop.words,
                 interval_s=interval_s, variant=model.config.variant,
                 numbers=[flight_numbers(args.seed, sample, i) for i in order], device=device,
                 temperature=TEMPERATURE)]

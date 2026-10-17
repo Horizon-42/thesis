@@ -112,13 +112,13 @@ describe("TrainingPanel", () => {
       render(<TrainingPanel hidden={false} />);
       const tag = (await screen.findAllByText(/landed/)).find((node) => node.classList.contains("training-flight-executor"))!;
       expect(tag.textContent).toBe("0/3 landed");
-      expect(tag.title).toContain("Δ 2 s: unstable at minimums");
+      expect(tag.title).toContain("Δ 2 s: landing failed");
     });
 
     it("says the flown flight at the tab's Δ in one line, and follows the bar's tab", async () => {
       render(<TrainingPanel hidden={false} />);
       const line = await screen.findByRole("button", { name: /^Flown flight[^s]/ });
-      expect(line.textContent).toContain("Δ 2 s: unstable at minimums at 511 s · DA ✗");
+      expect(line.textContent).toContain("Δ 2 s: landing failed at 500 s · DA ✗");
       act(() => chooseTrainingTab("interval-8"));
       await waitFor(() => expect(screen.getByRole("button", { name: /^Flown flight[^s]/ }).textContent).toContain("Δ 8 s"));
       expect(setTrainingIntervalS).toHaveBeenLastCalledWith(8);

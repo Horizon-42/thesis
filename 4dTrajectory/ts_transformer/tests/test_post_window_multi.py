@@ -20,10 +20,8 @@ from ts_transformer.experiments.post_window_loop import LOST_SEPARATION, WindowL
 from ts_transformer.experiments.prior_speaking_loop import flight_numbers
 from ts_transformer.instructions.words import COLUMNS, UNCHANGED
 from ts_transformer.post.edges import TOKEN_FEATURES
-from ts_transformer.post.landings import roster_key
 from ts_transformer.post.reward import LANDED
 from ts_transformer.post.scene import Joined
-from ts_transformer.prior.landings import Landing, LandingIndex
 from ts_transformer.prior.model import CACHE_STEP_ROWS, COPIED, MERGED
 from ts_transformer.prior.speaker import ABSENT, MOST_GO_AROUNDS, SAID
 from ts_transformer.tests import test_start
@@ -42,8 +40,8 @@ def _utc_text(time_s):
 def _multi(s, joins=JOINS, shifts=None):
     """A window of ``len(joins)`` commanded aircraft (the anchor and copies joining ``joins`` steps after it; with
     ``shifts``, copy k recorded ``joins[k] − shifts[k]`` steps after the anchor and moved ``shifts[k]`` steps earlier, a
-    compressed window's), its flights, sentences, observed rows and roster (each one's own landing in it), and
-    ``loop_of(model, **options)``: its window loop."""
+    compressed window's), its flights, sentences and observed rows, and ``loop_of(model, **options)``: its window
+    loop."""
     shifts = [0] * len(joins) if shifts is None else list(shifts)
     (window,) = s["windows"]
     anchor = window.commanded
@@ -60,12 +58,6 @@ def _multi(s, joins=JOINS, shifts=None):
             joined.append(Joined(record, k, shift_s=shifts[k] * DELTA))
     multi = replace(window, joined=tuple(joined))
     code = s["geometry"].code
-    idents = s["roster"].runways
-    landing = next(x for x in s["roster"].landings if x.flight_key == s["key"])
-    landings = list(s["roster"].landings) + [Landing(landing.time_s + (step - shifts[k]) * DELTA, landing.runway,
-                                                     roster_key(flights[k]["dataset_id"], code))
-                                             for k, step in enumerate(joins) if k]
-    roster = LandingIndex(idents, tuple(sorted(landings, key=lambda x: (x.time_s, x.flight_key))), 0, s["roster"].days)
     one, _, _ = s["moved_loop"](NO_MOVE)
     inputs, limit = one.executor.inputs, float(one.executor.time_limit_s[0])
 
@@ -75,18 +67,18 @@ def _multi(s, joins=JOINS, shifts=None):
         count = len(chosen)
         many = FlightInputs(**{f.name: getattr(inputs, f.name).expand(count, *getattr(inputs, f.name).shape[1:]).clone()
                                for f in fields(FlightInputs)})
-        loop = Loop(many, [s["geometry"]] * count, [test_start.A320_IAS] * count, [limit] * count, test_start._params(),
-                    s["words"], interval_s=DELTA, most_go_arounds=MOST_GO_AROUNDS, device=CPU,
+        loop = Loop(many, [s["geometry"]] * count, [test_start.A320_SPEEDS] * count, ["A320"] * count, [limit] * count,
+                    test_start._params(), s["words"], interval_s=DELTA, most_go_arounds=MOST_GO_AROUNDS, device=CPU,
                     join_ticks=np.array([joins[i] for i in chosen]))
         return loop, list(chosen), {i: observed[i] for i in chosen}
 
     def loop_of(model, **options):
         loop, order, seen = start(list(range(len(joins))))
-        return WindowLoop(model, loop, order, [multi], sentences, flights, s["geometries"], {code: roster},
-                          s["finals"], s["words"], interval_s=DELTA, variant="full", edges_reference=s["reference"],
+        return WindowLoop(model, loop, order, [multi], sentences, flights, s["geometries"], s["finals"], s["words"],
+                          interval_s=DELTA, variant="full", edges_reference=s["reference"],
                           faults={code: {}}, observed=seen, device=CPU, **options)
 
-    loop_of.parts = dict(start=start, sentences=sentences, flights=flights, rosters={code: roster})
+    loop_of.parts = dict(start=start, sentences=sentences, flights=flights)
     return multi, loop_of
 
 
@@ -162,25 +154,18 @@ def test_each_aircraft_reads_the_others_of_its_window_once_they_have_joined(setu
         assert (first[:, len(TOKEN_FEATURES):] == float(b)).all()
 
 
-def test_a_landing_in_the_loop_counts_for_the_other_aircraft_of_its_window_from_its_crossing(setup, monkeypatch):
-    """D147 item 2: a commanded aircraft that the executor ends `landed` adds its landing, on its landed runway at its
-    crossing time, to the other commanded aircraft's landings of its window (not its own), and not when it is silent."""
+def test_the_rows_the_executor_ends_landed_go_to_the_judge(setup, monkeypatch):
+    """Multi-aircraft control D147, stage D's requests item 7: a commanded aircraft that the executor ends `landed` in a
+    window of other commanded aircraft goes to the judge at its threshold (`_judged`), a silent one too; one that ends
+    otherwise does not."""
     s = setup
     _, loop_of = _multi(s)
     loop = loop_of(_with_module(s["base"]))
     crossing = {"at_row": 37.5, "runway_index": 0, "cross_m": 0.0, "height_m": 15.0}
     monkeypatch.setattr(loop.speaking.loop, "outcome", lambda b: SimpleNamespace(outcome=LANDED, crossing=crossing))
-    before = [loop.speaking.landings(b).digest() for b in range(len(loop.order))]
-    assert loop._landed(np.array([True, False, False])) == [0]           # the rows judged landed, for the judge
-    time_s = loop.records[0].first_step_s + 37.5 * loop.speaking.loop.params.cycle_s
-    for b in (1, 2):
-        added = [x for x in loop.speaking.landings(b).landings if x.flight_key == loop.keys[0]]
-        assert added == [Landing(time_s, s["geometry"].candidates[0].ident, loop.keys[0])]
-    assert loop.speaking.landings(0).digest() == before[0]
+    assert loop._landed(np.array([True, False, False])) == [0]
     loop.silent[1] = True
-    after = [loop.speaking.landings(b).digest() for b in range(len(loop.order))]
-    assert loop._landed(np.array([False, True, False])) == [1]    # a silent aircraft's landing adds nothing, but is judged
-    assert [loop.speaking.landings(b).digest() for b in range(len(loop.order))] == after
+    assert loop._landed(np.array([False, True, False])) == [1]
     monkeypatch.setattr(loop.speaking.loop, "outcome", lambda b: SimpleNamespace(outcome="timeout", crossing=None))
     assert loop._landed(np.array([False, False, True])) == []
 
@@ -343,24 +328,19 @@ def _start_wrong(s, multi):
     one, order, observed = s["moved_loop"](NO_MOVE)
     loop = one.copy([0, 0, 0])                                     # every join tick 0
     return WindowLoop(s["base"], loop, [0, 1, 2], [multi], {k: s["stored"] for k in range(3)}, {}, s["geometries"],
-                      {}, s["finals"], s["words"], interval_s=DELTA, variant="full", edges_reference=s["reference"],
+                      s["finals"], s["words"], interval_s=DELTA, variant="full", edges_reference=s["reference"],
                       faults={}, observed={}, device=CPU)
 
 
 def test_a_compressed_windows_moved_aircraft_reads_its_inputs_at_its_moved_time(setup):
     """Multi-aircraft control D146, §6.3 item 2: in a compressed window a commanded aircraft moved earlier by its shift
-    joins at its moved row 0 and reads its landings at its moved time (its entry time moved), its own landing at its
-    moved time too; its states and words are those of the window without the move, joined at the same tick."""
+    joins at its moved row 0; its states and words are those of the window without the move, joined at the same
+    tick."""
     s = setup
     shift = -4                                                      # recorded 4 steps later, moved 4 steps earlier
     _, plain_of = _multi(s)
     _, moved_of = _multi(s, shifts=(0, shift, 0))
     plain, moved = plain_of(_with_module(s["base"])), moved_of(_with_module(s["base"]))
-    entry = moved.speaking.rows_of.entry_utc_s
-    assert entry[1] == plain.speaking.rows_of.entry_utc_s[1]        # its moved entry: where the plain copy enters
-    own = [x for x in moved.speaking.landings(1).landings if x.flight_key == moved.keys[1]]
-    plain_own = [x for x in plain.speaking.landings(1).landings if x.flight_key == plain.keys[1]]
-    assert len(own) == 1 and own[0].time_s == plain_own[0].time_s   # its own landing at its moved time
     a, b = plain.run(_numbers(len(JOINS))), moved.run(_numbers(len(JOINS)))
     for x, y in zip(a, b):
         assert np.array_equal(x.words, y.words) and np.array_equal(x.states, y.states) and x.outcome == y.outcome
@@ -405,7 +385,7 @@ def _round_of(s, model, rules, continuations=2):
     multi, loop_of = _multi(s)
     parts = loop_of.parts
     return branch_round(model, parts["start"], [multi], [5], parts["sentences"], parts["flights"], s["geometries"],
-                        parts["rosters"], s["finals"], s["words"], interval_s=DELTA, variant="full",
+                        s["finals"], s["words"], interval_s=DELTA, variant="full",
                         edges_reference=s["reference"], faults={s["geometry"].code: {}}, device=CPU, seed=1337,
                         round_=0, split="train", continuations=continuations, rules=rules)
 
@@ -415,7 +395,8 @@ def _rules(continuation, varied_points):
 
     return Rules(first=lambda place, member: np.random.default_rng([1, place, member]), continuation=continuation,
                  reward=lambda results: float(sum(r.reward for r in results)),
-                 again=lambda results: sum(r.reward for r in results) < len(results), varied=varied_points)
+                 again=lambda results: sum(r.reward for r in results) < len(results), varied=varied_points,
+                 draw=lambda place, member, d: np.random.default_rng([1, place, member, 1 << 30, d]))
 
 
 def test_a_continuation_of_a_varied_aircraft_on_its_own_numbers_repeats_the_first_sentence(setup):
@@ -516,7 +497,7 @@ def test_the_check_of_the_second_pass_reads_an_aircraft_ended_before_the_point_a
         multi, loop_of = _multi(s, joins=joins)
         parts = loop_of.parts
         return branch_round(_with_module(s["base"]), parts["start"], [multi], [5], parts["sentences"],
-                            parts["flights"], s["geometries"], parts["rosters"], s["finals"], s["words"],
+                            parts["flights"], s["geometries"], s["finals"], s["words"],
                             interval_s=DELTA, variant="full", edges_reference=s["reference"],
                             faults={s["geometry"].code: {}}, device=CPU, seed=1337, round_=0, split="train",
                             continuations=2, rules=rules)
@@ -691,42 +672,3 @@ def test_each_rows_view_is_its_window_reordered_and_reads_as_the_scene_functions
             assert np.array_equal(together[k], tokens(tick.owns[k], other, g, separation, loop.step_s))
             checked += 1
     assert checked >= 6
-
-
-def test_every_count_a_loop_reads_lies_where_its_landings_were_cut(setup, monkeypatch):
-    """D189 (0): flown to its end, every time at which a loop counts an aircraft's landings (its rows' inputs, the
-    reward's present direction) lies in the span its landings were cut to (`post.landings.commanded_landings`: from one
-    Δ before its window's row 0 to the loop's last row, ``reach``; the 30 min before the first kept too), so every
-    count is the roster's."""
-    from ts_transformer.prior.landings import LandingIndex
-
-    spans, reads = {}, []
-    real_commanded, real_with, real_counts = (post_window_loop.commanded_landings, LandingIndex.with_landing,
-                                              LandingIndex.counts_before)
-
-    def commanded(window, roster, until_s):
-        out = real_commanded(window, roster, until_s)
-        for index in out:                                            # the index kept: its id is not taken again
-            spans[id(index)] = (window.row0_s - window.scene.interval_s, until_s, index)
-        return out
-
-    def with_landing(self, landing):
-        out = real_with(self, landing)
-        spans[id(out)] = (*spans[id(self)][:2], out)
-        return out
-
-    def counts_before(self, time_s, *, without):
-        reads.append((id(self), np.array(time_s, dtype=np.float64)))
-        return real_counts(self, time_s, without=without)
-
-    monkeypatch.setattr(post_window_loop, "commanded_landings", commanded)
-    monkeypatch.setattr(LandingIndex, "with_landing", with_landing)
-    monkeypatch.setattr(LandingIndex, "counts_before", counts_before)
-    s = setup
-    _, loop_of = _multi(s, joins=(0, 30, 60))
-    loop = loop_of(_with_module(s["base"]))
-    loop.run(_numbers(3))
-    assert reads and {key for key, _ in reads} <= set(spans)
-    for key, times in reads:
-        first, end, _ = spans[key]
-        assert ((times >= first) & (times < end)).all(), (first, end, times.min(), times.max())

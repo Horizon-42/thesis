@@ -67,9 +67,9 @@ def test_a_continuation_avoids_its_event():
     assert not avoids(end, answered="B", partner_answered_v=False, ended=None, go_around=False)    # its loss, still flown
 
 
-def _searched(candidates, judged, majority=None):
+def _searched(candidates, judged, majority=None, fine=FINE):
     """`search`'s steps on ``candidates``, a point tried answered by ``judged(point)``; its requests in order."""
-    calls, steps, answer = [], search(candidates, FINE, majority), None
+    calls, steps, answer = [], search(candidates, fine, majority), None
     while True:
         try:
             kind, p = steps.send(answer)
@@ -147,6 +147,21 @@ def test_a_decision_point_where_5_of_8_avoid_is_the_majority_point_and_one_group
     assert found.tried == (92, 84, 88) and [c for c in calls if c[0] == "chosen"] == [("chosen", 84)]
 
 
+def test_d217_the_search_takes_its_points_its_judged_span_and_the_fine_point_as_settings():
+    """D217: at most ``count`` candidate points (10: back to 320 s), continuations judged at the event + 64 s, and with
+    no fine point the search goes from the decision point straight on back to the majority point."""
+    long = Event(400, END, outcome="timeout")
+    assert points(long, 10, DELTA, 10) == [400 - STEP * j for j in range(1, 11)]
+    assert backward.judged_until(long, DELTA, 64.0) == 416
+    candidates = [100 - STEP * j for j in range(1, 11)]              # 92, 84, …, 20
+    counts = {92: 0, 84: 0, 76: 1, 68: 4, 60: 4, 52: 4, 44: 4, 36: 4, 28: 4, 20: 5}
+    found, calls = _searched(candidates, lambda p: _avoiding(counts[p]), majority=5, fine=None)
+    assert (found.decision, found.fine, found.majority) == (76, None, 20)
+    assert found.groups == (76, 20) and found.kinds == (backward.DECISION, backward.MAJORITY_POINT)
+    assert found.tried == (92, 84, 76, 68, 60, 52, 44, 36, 28, 20)          # the 9th and 10th points back
+    assert [c for c in calls if c[0] == "chosen"] == [("chosen", 76), ("chosen", 20)]
+
+
 def test_no_majority_point_within_the_bound_leaves_the_decision_points_groups():
     candidates = [100 - STEP * j for j in range(1, 9)]
     found, _ = _searched(candidates, lambda p: _avoiding(4 if p <= 88 else 0), majority=5)
@@ -154,13 +169,13 @@ def test_no_majority_point_within_the_bound_leaves_the_decision_points_groups():
     assert found.tried == (92, 84, 88, 76, 68, 60, 52, 44, 36)               # every point back, not past the bound
 
 
-def _backward(s, model, rules, continuations=2, majority=None):
+def _backward(s, model, rules, continuations=2, majority=None, **searched):
     (window,) = s["windows"]
     return backward_round(model, lambda flights: s["moved_loop"](start_move_of(window)), [window], [0],
-                          {0: s["stored"]}, s["flights"], s["geometries"], {s["geometry"].code: s["roster"]}, s["finals"],
+                          {0: s["stored"]}, s["flights"], s["geometries"], s["finals"],
                           s["words"], interval_s=DELTA, variant="full", edges_reference=s["reference"],
                           faults={s["geometry"].code: {}}, device=CPU, split="train", continuations=continuations,
-                          rules=rules, majority=majority)
+                          rules=rules, majority=majority, **searched)
 
 
 def test_a_round_found_backward_on_a_window_whose_first_avoiding_point_is_known(setup, monkeypatch):
@@ -201,6 +216,79 @@ def test_a_round_found_backward_on_a_window_whose_first_avoiding_point_is_known(
     *_, ends = finished                                                # the decision point's continuations, to the end
     assert [c.reward for c in group.continuations] == [credit.window_reward([r.reward]) for r in ends]
     assert all(not np.isnan(c.reward) for c in group.continuations)
+
+
+def test_d217_a_round_without_the_fine_point_judges_at_64_s_and_cuts_every_sentence_at_the_judged_tick(setup,
+                                                                                                       monkeypatch):
+    """D217 on the synthetic window with the judgement replaced (as above): no fine point is tried, every point tried is
+    flown to the event + 64 s at most, and with ``common_cut`` every sentence of the group — the first one and each
+    continuation — is counted up to the judged tick in its own rows (each sentence's own bound made later than it here,
+    so that the cut binds); without it each keeps its own bound."""
+    s = setup
+    model = _with_module(s["base"])
+    rules = Rules(**credit.rules(1337, 0, DELTA))
+    reached, events = [], {}
+
+    def judged(loop, own, v, happened, point):
+        events["event"] = happened
+        reached.append((point, int(loop.speaking.t - loop.origins[own[0]])))
+        return [Trial(point <= happened.tick - 3 * STEP, False) for _ in own]
+
+    monkeypatch.setattr(post_branches, "_trials", judged)
+    monkeypatch.setattr(post_branches, "_until", lambda loop, b, joined: 10_000)       # its own bound: past the cut
+    searched = dict(search_points=10, judged_after_s=64.0, fine_point=False)
+    found = _backward(s, model, rules, **searched, common_cut=True)
+    happened = events["event"]
+    until = backward.judged_until(happened, DELTA, 64.0)
+    decision = happened.tick - 3 * STEP
+    assert [p for p, _ in reached] == [happened.tick - STEP, happened.tick - 2 * STEP, decision]   # no fine point
+    assert all(t <= until for _, t in reached)
+    (group,) = found.groups
+    assert group.branch == decision                                    # the window's join tick is 0
+    assert [sentence.until for sentence in group.sentences] == [until] * 3
+    (alone,) = _backward(s, model, rules, **searched).groups
+    assert [sentence.until for sentence in alone.sentences] == [10_000] * 3
+
+
+def test_d220_every_point_tried_is_flown_to_its_end_and_valued_and_the_search_gives_one_unit(setup, monkeypatch):
+    """D220 on the synthetic window with the judgement replaced (the continuations avoid from the third point back on):
+    with ``point_values`` the search tries and chooses the points it chooses without it and makes the same group; every
+    point tried is flown to its window's end (counted so) and valued, the decision point by its group's continuations;
+    the search gives one unit: its first sentence (the group's, with the window's W), the points tried in its own rows,
+    increasing, their values and the group. Without it no unit is made. A fine point is refused by name."""
+    s = setup
+    model = _with_module(s["base"])
+    rules = Rules(**credit.rules(1337, 0, DELTA))
+    reached, events = [], {}
+
+    def judged(loop, own, v, happened, point):
+        events["event"] = happened
+        reached.append(point)
+        return [Trial(point <= happened.tick - 3 * STEP, False) for _ in own]
+
+    monkeypatch.setattr(post_branches, "_trials", judged)
+    searched = dict(search_points=10, judged_after_s=64.0, fine_point=False)
+    plain = _backward(s, model, rules, **searched)
+    tried_plain, reached = reached, []
+    found = _backward(s, model, rules, **searched, point_values=True)
+    happened = events["event"]
+    decision = happened.tick - 3 * STEP
+    assert reached == tried_plain == [happened.tick - STEP, happened.tick - 2 * STEP, decision]
+    assert plain.valued == plain.values == []
+    (group,), (alone,) = found.groups, plain.groups
+    assert (group.branch, group.varied) == (alone.branch, alone.varied) == (decision, 0)
+    assert [c.reward for c in group.continuations] == [c.reward for c in alone.continuations]
+    assert (found.to_event, found.to_end) == (0, 3 * 2) and (plain.to_event, plain.to_end) == (2 * 2, 2)
+    (unit,) = found.valued
+    assert unit.points == (decision, happened.tick - 2 * STEP, happened.tick - STEP)     # the window's join tick is 0
+    assert unit.groups == (group,) and unit.first.reward == group.first.reward and unit.varied == 0
+    assert unit.values[0] == np.mean([c.reward for c in group.continuations])
+    assert all(0.0 <= v <= 1.0 for v in unit.values)                 # one aircraft: W in [0, 1]
+    (values, reward), = found.values
+    assert [depth for depth, _ in values] == [32.0, 64.0, 96.0] and [v for _, v in values] == list(unit.values[::-1])
+    assert reward == unit.first.reward
+    with pytest.raises(ValueError, match="no fine point"):
+        _backward(s, model, rules, search_points=10, point_values=True)
 
 
 def test_a_round_found_backward_judges_its_continuations_by_what_they_did(setup):
@@ -254,7 +342,9 @@ def test_a_majority_point_out_of_reach_ends_its_continuations_early_and_finds_th
     assert (early.searches, early.found, early.to_event, early.to_end) == \
         (full.searches, full.found, full.to_event, full.to_end)
     assert early_reached[behind] == [behind] and reached[behind][0] > behind      # judged at its first step, not later
-    assert early.search_steps <= full.search_steps and early.search_rows < full.search_rows
+    # fewer steps; the rows are not compared: a step counts the rows its loop holds, a flight that ended held to the
+    # loop's next rebuild (S6), and an earlier end moves the rebuilds
+    assert early.search_steps < full.search_steps
 
 
 def test_a_point_whose_continuations_all_failed_ends_them_early_and_finds_the_same(setup, monkeypatch):
@@ -297,7 +387,9 @@ def test_a_point_whose_continuations_all_failed_ends_them_early_and_finds_the_sa
     fine = decision + FINE
     assert early_reached[fine] == [fine] and reached[fine][0] > fine
     assert early_reached[decision] == reached[decision]                # the decision point flown to the judged tick
-    assert early.search_steps <= full.search_steps and early.search_rows < full.search_rows
+    # fewer steps; the rows are not compared: a step counts the rows its loop holds, a flight that ended held to the
+    # loop's next rebuild (S6), and an earlier end moves the rebuilds
+    assert early.search_steps < full.search_steps
 
 
 @pytest.mark.parametrize("kind", [LOSS, END, GO_AROUND])
@@ -360,7 +452,7 @@ def _round_trip_on_the_gpu(directory: str) -> None:
     (window,) = s["windows"]
     window_loop, sources = _batch_loops(model, lambda flights: s["moved_loop"](start_move_of(window)), [window], [0],
                                         {0: s["stored"]}, s["flights"], s["geometries"],
-                                        {s["geometry"].code: s["roster"]}, s["finals"], s["words"], interval_s=DELTA,
+                                        s["finals"], s["words"], interval_s=DELTA,
                                         variant="full", edges_reference=s["reference"],
                                         faults={s["geometry"].code: {}}, device=CPU,
                                         rules=Rules(**credit.rules(1337, 0, DELTA)), loop_options=None)
@@ -419,7 +511,7 @@ def _executor_kept_on_the_cpu(directory: str) -> None:
     def flown(executor: torch.device):
         window_loop, sources = _batch_loops(model, lambda flights: s["moved_loop"](start_move_of(window), executor),
                                             [window], [0], {0: s["stored"]}, s["flights"], s["geometries"],
-                                            {s["geometry"].code: s["roster"]}, s["finals"], s["words"],
+                                            s["finals"], s["words"],
                                             interval_s=DELTA, variant="full", edges_reference=s["reference"],
                                             faults={s["geometry"].code: {}}, device=gpu,
                                             rules=Rules(**credit.rules(1337, 0, DELTA)),
@@ -543,6 +635,42 @@ def test_stage_ds_batch_record_holds_the_searches_found_backward_only(setup, tmp
     assert post_branches.branch_round is multi_train.branch_round and multi_train.backward_round is backward_round
 
 
+def test_d220_a_batch_with_the_points_values_writes_its_units_and_records_each_searchs_values(setup, tmp_path,
+                                                                                               monkeypatch):
+    """D220: a batch of stage D with ``point_values`` writes its informative units (`post.branches.Valued`) in place of
+    its groups, and records besides the backward search's keys the units written and each search's values (its span,
+    each point tried the latest first as [depth s, value], the first sentence's W), those of the round's units."""
+    from dataclasses import replace
+
+    from ts_transformer.experiments import multi_train, window_behaviour
+    from ts_transformer.multi.windows import REAL_KIND
+    from ts_transformer.tests.test_multi_train import _multi_settings, _stage_c
+    from ts_transformer.tests.test_post_train import _context, short_round
+
+    s = setup
+    short_round(monkeypatch, s)
+    context = _context(s)
+    settings = _multi_settings(start=_stage_c(s, tmp_path, context), continuations=2, branching=backward.MAJORITY,
+                               search_points=10, judged_after_s=64.0, fine_point=False, point_values=True)
+    (window,) = s["windows"]
+    window = replace(window, span_s=1.0)
+    monkeypatch.setattr(multi_train, "draw_windows", lambda context, settings, rng: ([window], {"drawn": {REAL_KIND: 1}}))
+    stage = multi_train.stage_d()
+    model = stage.start(context, settings)[0].eval()
+    windows, _ = stage.draw(context, settings, 0)
+    with window_behaviour.captured_rounds() as found:
+        record = stage.speak_batch(model, context, windows, [0], settings, 0, tmp_path, 0)
+    (spoken,) = found
+    (unit,) = spoken.valued
+    written = torch.load(tmp_path / "groups_0.pt", weights_only=False)
+    assert [(u.points, u.values) for u in written] == [(unit.points, unit.values)] * unit.informative
+    assert record["valued_units"] == len(written) and record["searches"] == len(record["point_values"]) == 1
+    ((span, values, reward),) = record["point_values"]
+    assert span == 1.0 and [v for _, v in values] == list(unit.values[::-1]) and reward == unit.first.reward
+    assert [depth for depth, _ in values] == [32.0 * (j + 1) for j in range(len(values))]       # the latest first
+    assert record["continuations_to_event"] == 0 and record["continuations_to_end"] == 2 * len(values)
+
+
 def test_the_searches_of_a_batch_step_together_and_find_what_each_finds_alone(setup, monkeypatch):
     """D188: on the window of three commanded aircraft (`test_post_window_multi._multi`), the searches of its varied
     aircraft stepped together in one loop find what each finds searched alone (its aircraft the only one varied): the
@@ -552,7 +680,9 @@ def test_the_searches_of_a_batch_step_together_and_find_what_each_finds_alone(se
     from ts_transformer.tests.test_post_window_multi import _multi
 
     s = setup
-    multi, loop_of = _multi(s, joins=(0, 30, 60))
+    # every aircraft searched and varied in a group (ts-executor-spec-v11: with joins (0, 30, 60) the third lost
+    # separation at its first step and had no branch point; prior D204: with (0, 40, 80) the second is not searched)
+    multi, loop_of = _multi(s, joins=(0, 60, 90))
     parts = loop_of.parts
     model = _with_module(s["base"])
     rules = Rules(**credit.rules(1337, 0, DELTA))
@@ -569,7 +699,7 @@ def test_the_searches_of_a_batch_step_together_and_find_what_each_finds_alone(se
 
     def round_of(varied):
         return backward_round(model, parts["start"], [multi], [5], parts["sentences"], parts["flights"],
-                              s["geometries"], parts["rosters"], s["finals"], s["words"], interval_s=DELTA,
+                              s["geometries"], s["finals"], s["words"], interval_s=DELTA,
                               variant="full", edges_reference=s["reference"], faults={s["geometry"].code: {}},
                               device=CPU, split="train", continuations=2, rules=replace(rules, varied=varied))
 
@@ -628,7 +758,7 @@ def test_a_joint_loops_cache_has_room_for_the_steps_to_its_next_rebuild(setup, m
     monkeypatch.setattr(WindowLoop, "step", step)
     monkeypatch.setattr(Past, "grown", grown)
     backward_round(_with_module(s["base"]), parts["start"], [multi], [5], parts["sentences"], parts["flights"],
-                   s["geometries"], parts["rosters"], s["finals"], s["words"], interval_s=DELTA, variant="full",
+                   s["geometries"], s["finals"], s["words"], interval_s=DELTA, variant="full",
                    edges_reference=s["reference"], faults={s["geometry"].code: {}}, device=CPU, split="train",
                    continuations=2, rules=rules)
     assert len(built) > 1
@@ -651,7 +781,9 @@ def test_a_row_no_longer_flown_leaves_a_joint_loop_and_keeps_its_end(setup):
     from ts_transformer.tests.test_post_window_multi import _multi, _numbers
 
     s = setup
-    _, loop_of = _multi(s, joins=(0, 10, 20))                 # its second row ends first, at a loss
+    # its second row ends first, while the others fly (prior D206: with joins (0, 10, 60) the three rows ended at one
+    # tick)
+    _, loop_of = _multi(s, joins=(0, 20, 60))
     loop = loop_of(_with_module(s["base"]))
     numbers = _numbers(3)
     while loop.speaking.alive.all():                     # flown until a row ends while the others fly
@@ -689,7 +821,9 @@ def test_a_join_of_loops_with_rows_that_left_keeps_their_records(setup):
     from ts_transformer.tests.test_post_window_multi import _multi, _numbers
 
     s = setup
-    _, loop_of = _multi(s, joins=(0, 10, 20))                 # its second row ends first, at a loss
+    # its second row ends first, while the others fly (prior D206: with joins (0, 10, 60) the three rows ended at one
+    # tick)
+    _, loop_of = _multi(s, joins=(0, 20, 60))
     loop = loop_of(_with_module(s["base"]))
     numbers = _numbers(3)
     while loop.speaking.alive.all():

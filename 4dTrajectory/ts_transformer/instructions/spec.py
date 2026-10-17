@@ -30,8 +30,10 @@ from geokit import FT_M, KT_MS, NM_M
 #: speed L_v later, as a heading word says the track L later; since instruction-v8 the last angle word of the last descent
 #: reads the final straight-in line's angle (`labeller.vertical` module docstring; executor design Q4, D10).
 READING_RULE = "instruction-v8"
-#: The spec file's format: v8 (A29, D73) records no digest of the labeller's code beside the spec.
-SPEC_SCHEMA = "ts-instruction-spec-v8"
+#: The spec file's format: v8 (A29, D73) records no digest of the labeller's code beside the spec; v9 (the user,
+#: 2026-10-12) the closed loop's lateral tolerance in the final descent, `closed_loop_final_lateral_m`; v10 (the user,
+#: 2026-10-13) the level angle `level_angle_deg` and the closed loop's `closed_loop_two_class_factor`.
+SPEC_SCHEMA = "ts-instruction-spec-v10"
 
 #: FAA JO 7110.65BB 5-9-2 TBL 5-9-1: the largest final-approach interception angle 2 NM or
 #: more outside the approach gate — the judge's "lined up" (vocabulary §5.8).
@@ -96,9 +98,11 @@ class VocabularySpec:
     #: its segment's step plus this (`Words.altitude_tolerance_m`).
     altitude_fit_tolerance_m: float
     #: A piece is level when it lasts at least `level_min_s` and every row lies within `level_band_m` of the piece's
-    #: own median (a physical test, not the grid's, §4.4).
+    #: own median, or its path angle is within `level_angle_deg` of level (a physical test, not the grid's, §4.4; the
+    #: angle: the user, 2026-10-13).
     level_min_s: float
     level_band_m: float
+    level_angle_deg: float
     # --- descent angle (positive = descending), classes by their edges
     #: K + 1 ascending edges of the K descent classes; the first edge is slightly negative so
     #: a nearly flat stretch inside a descent keeps a descent class.
@@ -150,13 +154,18 @@ class VocabularySpec:
     #: A point past the threshold and at most this high is on the runway (a touch-and-go): not a go-around.
     go_around_on_runway_height_m: float
     # --- the closed-loop reading (vocabulary §4.9, D32; `autopilot.closed_loop`)
-    #: A heading correction starts when the flown path is more than `closed_loop_lateral_m` off the observed one, an
-    #: angle correction when it is more than the vertical tolerance in force above or below it; each ends under half of
-    #: it. The vertical tolerance in force is `closed_loop_final_vertical_m` (H_final) while "no level-off" is in force
-    #: (the final descent) and `closed_loop_vertical_m` (H) elsewhere (D66).
+    #: A heading correction starts when the flown path is more than the lateral tolerance in force off the observed one,
+    #: an angle correction when it is more than the vertical tolerance in force above or below it (`autopilot.closed_loop`:
+    #: the errors ahead by the lead, and where each ends). While "no level-off" is in force (the final descent) the
+    #: tolerances in force are `closed_loop_final_lateral_m` (Y_final; the user, 2026-10-12) and
+    #: `closed_loop_final_vertical_m` (H_final, D66); elsewhere `closed_loop_lateral_m` (Y) and `closed_loop_vertical_m`
+    #: (H). An angle correction moves two classes while the error ahead is more than `closed_loop_two_class_factor`
+    #: vertical tolerances in force (the user, 2026-10-13).
     closed_loop_lateral_m: float
+    closed_loop_final_lateral_m: float
     closed_loop_vertical_m: float
     closed_loop_final_vertical_m: float
+    closed_loop_two_class_factor: float
     reading_rule: str = READING_RULE
 
     def __post_init__(self) -> None:
@@ -171,14 +180,14 @@ class VocabularySpec:
             "heading_tolerance_deg", "turn_onset_rate_deg_s", "turn_rate_max_deg_s",
             "turn_rate_min_from_deg", "turn_bank_max_deg", "lined_up_deg",
             "corridor_half_width_m", "corridor_course_tolerance_deg", "landing_cross_limit_m", "landing_max_height_m",
-            "parallel_course_delta_deg", "altitude_fit_tolerance_m", "level_min_s", "level_band_m",
+            "parallel_course_delta_deg", "altitude_fit_tolerance_m", "level_min_s", "level_band_m", "level_angle_deg",
             "climb_angle_max_deg", "climb_angle_centre_deg", "ground_speed_floor_mps", "ground_speed_ceiling_mps",
             "speed_step_mps", "speed_min_mps", "speed_max_mps", "speed_tolerance_mps",
             "speed_fit_tolerance_mps", "speed_flat_accel_mps2", "speed_min_hold_s", "speed_accel_max_mps2",
             "unspecified_plateau_s", "unspecified_distance_m", "go_around_max_cross_m", "go_around_max_height_m",
             "go_around_min_progress_m", "go_around_hold_s", "go_around_min_drop_m", "go_around_min_climb_m",
-            "go_around_on_runway_height_m", "closed_loop_lateral_m", "closed_loop_vertical_m",
-            "closed_loop_final_vertical_m",
+            "go_around_on_runway_height_m", "closed_loop_lateral_m", "closed_loop_final_lateral_m",
+            "closed_loop_vertical_m", "closed_loop_final_vertical_m", "closed_loop_two_class_factor",
         )
         for name in positive:
             if getattr(self, name) <= 0:
@@ -225,9 +234,15 @@ class VocabularySpec:
             raise ValueError("each descent centre must lie inside its class")
         if self.climb_angle_centre_deg > self.climb_angle_max_deg:
             raise ValueError("the climb centre lies beyond the climb range")
+        if self.closed_loop_final_lateral_m > self.closed_loop_lateral_m:
+            raise ValueError("closed_loop_final_lateral_m above closed_loop_lateral_m: the final descent's tolerance "
+                             "is the smaller one")
         if self.closed_loop_final_vertical_m > self.closed_loop_vertical_m:
             raise ValueError("closed_loop_final_vertical_m above closed_loop_vertical_m: the final descent's tolerance "
                              "is the smaller one (D66)")
+        if self.closed_loop_two_class_factor <= 1.0:
+            raise ValueError("closed_loop_two_class_factor at or below 1: every angle correction would start two "
+                             "classes from the observed class")
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)

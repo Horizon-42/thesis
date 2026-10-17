@@ -42,7 +42,8 @@ are the arm's own properties, which is why the artifact names each checkpoint's 
 
 ``--write-records`` also writes the one-shot and the chain as predict-shaped directories
 (``records/<label>/oneshot/`` and ``records/<label>/chain_<Δ>s/``) — `python -m evaluation`,
-`run_ts.py lead_time_error` and the publisher read them unchanged; each summary carries a
+`archive/one_tier_runners_2026_10/experiments/lead_time_error.py` (archived) and the publisher read them unchanged; each
+summary carries a
 ``chain`` block naming what it is.
 """
 

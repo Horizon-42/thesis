@@ -217,7 +217,7 @@ FIXTURE_SET = "fixture_set"
 
 def stage_a_fixture() -> tuple[dict, dict]:
     """A set of one synthetic flight (`support.closed_loop_flight`: a downwind, base and final that ends unstable at the
-    DA) and its index, written by the export's own functions: the observed track, the open-loop sentence and the
+    DA, and whose crossing the evaluation fails, high) and its index, written by the export's own functions: the observed track, the open-loop sentence and the
     closed-loop sentence at Δ = 2, 4, 8 s, each flown again and judged. The observed attitude is the no-airframe one
     (heading and path angle; a synthetic flight has no data-plane series)."""
     import torch
@@ -267,7 +267,9 @@ def test_the_frontend_fixtures_are_what_the_export_writes():
     flight = sample["flights"][0]
     assert sorted(flight["closedLoop"]) == ["2", "4", "8"]
     replayed = flight["closedLoop"]["2"]["replay"]
-    assert replayed["outcome"] == "unstable_at_minimums" and replayed["crossing"]["decision"]["passed"] is False
+    graded = replayed["crossing"]["evaluation"]
+    assert replayed["outcome"] == "landing_failed" and graded["verdict"] == "fail" and graded["violations"] == ["vertical"]
+    assert replayed["crossing"]["decision"]["passed"] is False
     assert any(event["correction"] for event in flight["closedLoop"]["2"]["events"])
 
 
@@ -452,19 +454,21 @@ def test_a_flight_is_drawn_to_its_outcome_s_state_but_a_dynamics_failure_s_state
 #: The blocks of the flown sentences in the three stages' fixtures before D135 (outline §6.2 item 8), by the sha256 of
 #: their canonical JSON (`_digest`), the envelopes apart: stage A's as written then (its track rounded), B's and C's
 #: (their tracks unrounded, D127), and stage A's envelopes. Written from the fixtures of 65314499 before they were
-#: written again.
+#: written again. Written again on 2026-10-13 from the fixtures of two-tier2-eval-landing: the outcome is the
+#: evaluation's landing verdict, "unspecified" flies the middle of the speed window, and the corrections follow
+#: D197–D199, so each fixture flight flies and ends otherwise.
 EARLIER_BLOCKS = {
-    "A": {"2": "d3087166338e03edccfbdc2a93055f0330a0e55b396d2865f00c19578a18294c",
-          "4": "9635a26b7071eccc0d275f92f0f0fd575fa3e60aaec77441b64d1d3b8469d454",
-          "8": "6027c3b98b1189e7183a4c0f90423a1fdff9482c40655e788a2d4864dcc377ac"},
-    "A envelopes": {"2": "d84f98d6382bc916c477b5872c7e532c469056fadcbc3758ca25f203fabf6011",
-                    "4": "51a58e8dbf25305aadbbf4c0a38f37276c10f682c424baad0a7c2a7d62b5aca8",
-                    "8": "f84eb5558825b1fb33c4119f6aba096e1de2ca257b34a0cfc40af92ca6d0f777"},
-    "B": ["55455e7bdbafab588ca2481bc04a57e5f401e76a76e8bbb23f080fb58b101a9e",
-          "607a9c3b2b5006efa28b981ee5d9b30a5b6a83527c1cc8cea54547b7a05bb618"],
-    "C": ["ed2dffb65df1eb4b2cba44fda92087bb9f171b8992e92821003ad5f503c4a2a4",
-          "527b569e4c8b6e8dbca057bc4a40dfc1ad078009172fbb1ede07fea518d7760e",
-          "f400c0a43aca8a05fc1727d838142e82660195dbf26eee435919b55981962e7e"],
+    "A": {"2": "36478f6b44628f29294344753fdb3e1cbbcc98e5ea36fc0e7bca21e6fcfaa7a6",
+          "4": "1ab41066718801d11085d0808bed1f78aecda53675adbfafa56d8af1f4c69263",
+          "8": "1a4137d9fcde6ba1169fae96498fd7bcef2d8255af28346756a0ecd02aba8183"},
+    "A envelopes": {"2": "1d54fe6d75c483aa880f915860afe2b9948895f47b97522bfe653e5866ff8b29",
+                    "4": "907f28b63c1768f9a50cf3e77c39a7283e89e377fe9e02d35457f5cba92f7e71",
+                    "8": "eabaa094bb6c84aed267e5c565476171025dcc7569d9c1a8b5029d3632c16774"},
+    "B": ["04e65ab68f747115f33eeff638716d5c550e4e2c5b0748f023c08e172b41c175",
+          "fc3c35c13660d39e8c96380e1c874486dd6ea2fc8a810e9b880cc542b7347620"],
+    "C": ["581984f983f84a7d5bbe8fa651f6ab9e61db6e13d6d2c6fc3630477e6169d075",
+          "a949cd669fd13ed67dce57dad9b517fecf1c90aa084d39b186fe919be9c7c7da",
+          "2becc543b82a650bb76c03d40d4c15bc1b1eccf18ac4a7c5c7e05e164ee89f72"],
 }
 #: The digits stage A's track was written to before D135 (`files.rounded`).
 EARLIER_TRACK_DIGITS = {"eM": 1, "nM": 1, "latDeg": 7, "lonDeg": 7, "heightMslM": 1, "trackDeg": 2, "groundSpeedMps": 2,

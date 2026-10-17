@@ -86,19 +86,7 @@ rebased — same rule, new IDs.
   (which `evaluate-fit` / `freeze-test` compare for equality) — and carries its own cohort
   (`airports`, `limit`, `smoke_test`) plus the half rule.
 
-### R3 · `run_ts.py quantile_fan_readout` — B3
-
-- `run_ts.py quantile_fan_readout` — **B3**: `--arm <pred_dir>` of a `--cta-from-quantiles`
-  run; it reads the five `qNN` leaves only (the calibrated endpoints are `predict
-  --interval-endpoints`, off by default and not part of any gate). Per stratum: the share of
-  flights whose truth duration falls in `[q10, q90]` and in the calibrated interval, the
-  median widths (the veto reads the vectored one against 120 s), and the truth path's
-  chamfer to the NEAREST of the five decodes against its chamfer to q50 — gate 3.4-3, read
-  on the in-fan subset with the whole cohort beside it. **That geometric column is a
-  readout, not a coverage guarantee** (§六 6): five trajectories are not a distribution over
-  trajectories. **Its `cal.hit` column is IN-SAMPLE on a val arm** — the flights it scores
-  are the ones the δ was fitted on — and is marked `cal.hit*`; the gate's coverage is the
-  calibration readout's DEPLOYED block.
+### R3 · `run_ts.py quantile_fan_readout` — B3 — archived 2026-10-13 → `archive/one_tier_runners_2026_10/` (`docs/reference/entries.md` there)
 
 ### R4 · `run_ts.py eta_error_readout` — B0 — archived 2026-10-04 → `archive/one_tier_oneoffs_2026_10/` (`docs/reference/entries.md` there)
 
@@ -118,29 +106,11 @@ rebased — same rule, new IDs.
 - `manoeuvre_gates --gate T|X|P-open-loop|P-discrete-vs-continuous|E|S …` — every gate over written artefacts, keyed by seed, refusing one seed; X needs `--guidance-established` (the rule guidance's share along the truth segments, measured).
 - `manoeuvre_code_atlas --executor <ckpt> --codebook <dir> --out <dir> [--flights 8]` — plan §2.4's "码怎么看": every code flown from a few typical val states (half straight-in, half vectored), the K paths and end points in each state's start frame beside the truth's segment and code; the end-point spread over codes is what says whether the executor is conditioned on z at all.
 
-### R8 · two-tier v3 stage A (`run_ts.py plan_cohort --arms`, `frame_ablation --only`, `manoeuvre_lockstep` (protocol `none`), `executor_failure_modes`, `executor_grid_gate`, `two_tier_grid_queue`; 2026-09-18)
+### R8 · `frame_ablation --only` (two-tier v3 stage A's runners — `plan_cohort --arms`, `manoeuvre_lockstep`, `executor_failure_modes`, `executor_grid_gate`, `two_tier_grid_queue` — and this entry in full — archived 2026-10-13 → `archive/manoeuvre_lockstep_2026_10/` (`docs/reference/entries.md` there))
 
-The no-token executor's own axes — lookback L × segment Δ, `docs/experiments/two_tier_v3_grid_arms.json` (40 arms, `L<L>_D<Δ>_s<seed>`, plan `docs/history/2026-09_two_tier_v3/2026-09-18_two_tier_plan_v3.zh.md` §5–§8, decisions D1–D11; the development notes `docs/history/2026-09_two_tier_v3/2026-09-18_two_tier_v3_stage_a_notes.md`). Nothing here launches before the user's sign-off (M-A0′).
-
-- **One development cohort per cell** (D1): every arm names its own `"development_cohort"` (an arm-level path wins over the file's; arms of one cell share it), and `plan_cohort --arms <declaration> --airport KRDU --name <campaign> --output-dir <campaign>` writes all of them from ONE data load (the build under the shortest lookback keeps every flight any cell keeps), plus `cohorts.json` (per-cell counts) and `data_selection.json`. A cell's usable set = the flights with one window at L−1 and Δ of truth after it on BOTH sides of the split (`train.usable_series`), minus the train flights the random-anchor window set (the control path's airborne rule) gives no anchor — the flight the trainer would otherwise refuse the run over. The split is the per-flight hash on the pinned `split_seed` (1337), so it is the same set-independent split in every cell and both seeds; `--arms` refuses a declaration whose split seed is not pinned, or whose arms share a cohort path but differ beyond `seed`. KRDU, written 2026-09-18: train 6798–6857 / val 1392–1405 per cell (3956 of the locked split's 12218 are the aircraft filter's, cell-independent).
 - **`frame_ablation --only KEY …`** runs a subset of the arms (the queue trains one cell, reads it, moves on); resume is unchanged (an arm skips on its `history.json`) — and an arm that names a `development_cohort` resumes only when its training recorded that cohort with the same train / val flights (`data_selection.development_cohort`); `plan_cohort` rewrites the file in place, so the path alone proves nothing (2026-09-23).
-- **The first prediction is at L−1** (D2): the declaration pins `anchor_floor_index 0` and `random_train_anchor_l1_share 0` (D7), `tests/test_two_tier_v3_grid.py` pins every decision the file carries (a silently changed lookback is what the 09-18 campaign was built on).
-- **`manoeuvre_lockstep` (protocol `none`) takes NO codebook** (before 2026-09-18 evening a same-segment codebook labelled the rows; the stage A arms have none): the row carries no code columns, the payload no codebook; schema `ts-manoeuvre-lockstep-v2` adds `first_prediction` and per-row `first_prediction_row` and names the round counts `predictions` / `held_predictions` and the per-round record `rounds` (v1: `asks`, `held_asks`, `asks_e`). **`--anchor-remaining-km X`** (X in `anchor_strata.DEFAULT_ANCHOR_GRID_KM`; the plan's 12 / 8 / 6) is §3.1's second reading: `lockstep.from_remaining_path` cuts each flight (`dataset.series_from_row`: the rows before are dropped, the clock kept, the supervision cut alike) so that the row `anchor_grid.bin_anchor` places at the bin — the sample nearest X km of path left, with a complete lookback before it and Δ of truth after — becomes the executor's fixed anchor; a flight with no admissible row is counted (`first_prediction.flights_without_a_row`), never flown from elsewhere. The strata are re-read at that row (at 12 km the vectored group is thin: report n per group).
-- **`manoeuvre_lockstep … --first-prediction-row N`** (reading (c), added 2026-09-19 after M-A1): every flight cut so that row N of the whole flight becomes the executor's fixed anchor (`lockstep.from_row`, the same cut as the bin reading; N at or after the executor's own first row, a flight without the executor's horizon of truth after N is counted, not flown; `first_prediction.common_row`). Reading (a) confounds lookback with starting point (an L = 120 s executor starts 120 s in and flies a shorter, later segment than an L = 60 s one); at a common row every cell flies the SAME segment and differs only in what it saw. The queue names it `row<N>` (`--readings row59`), the gate reads it with `--reading row59`.
-- **`executor_relative_gate --baseline SEED=DIR SEED=DIR --candidate SEED=DIR SEED=DIR (--seed-line-from <grid_gate.json> | --seed-line EST_ALL EST_VEC ADE_M) --out <dir>`** (§3.3 rows A3 and B, D45, 2026-09-19): a candidate closed-loop reading (a changed executor, or a token protocol) against its protocol-none baseline on the SAME flights — per seed the two payloads' rows are intersected and both readings recomputed there (`stratum_table` + `gates.cell_reading`), the two sides must start their closed loops by the same rule, and the four readings must share the lookback (`anchor`), the seconds flown per round (`executed_s`) and the split, with no `--limit` prefix (2026-09-23; the SEGMENT may differ — A3-a flew a 60 s forecast 20 s at a time against a 20 s baseline), the seed line is the grid gate's p75 lines or three numbers named on the command line (the output states the source). `gates.gate_relative`: improvement = candidate − baseline for the established shares, baseline − candidate for the vectored ADE; row A3 = on a primary both seeds improve and one beyond the line, the other primary not worse, fully flyable ≥ floor; row B = every metric not worse on both seeds, one metric beyond the line on both seeds, fully flyable ≥ floor. Writes `relative_gate.json/.txt`; never overwrites.
-- **`executor_failure_modes --lockstep <dir> --out <dir> [--stratum vectored] [--per-mode 3]`** (A2, §5.2; NOT a gate): over a lockstep directory written with `--write-records`, every non-established flight of the stratum is read in the runway's course frame (`manoeuvre/failure_modes.py`: to-go along the final approach course, cross-track positive right, heading error, the package's established rule per row, the onsets of heading alignment; the turn delay = the flown path's last onset minus the truth's) and given one of six modes in order — `established-short`, `overshoot` (crossed the extended centreline AHEAD of the threshold, never established), `no-turn` (no alignment onset after the first row, unaligned at the end), `passed-abeam`, `parallel-offset`, `other`; the row also carries each side's first heading-aligned time and the to-go at the first prediction (a downwind abeam is already past the threshold plane). Two meanings of "established" meet here: the lockstep row's `reference.established` (crossed the threshold on the final) selects the flights; the mode names use the centreline rule. `failure_modes.json/.txt` hold the rows and the per-mode p50s (with `ever_established_share` and `to_go_start_p50_m`), and `records_<mode>/` the first N flights of each mode as a record directory (`inference/export.copy_record_subset`: the three files per flight copied, the roster filtered, the subset's OWN `accuracy` block recomputed off the retained rows — `metrics_from_row`, which needs the `cross_track_p95_m` / `altitude_p95_m` row columns `write_batch` writes since 2026-09-18 — and `subset` naming the source) with a `failure_modes` summary block, registered in the publisher's `VARIANT_RECORD_BLOCKS` so it publishes only under `--category-variant`.
-- **`executor_grid_gate --campaign <dir> --arms <declaration> --out <dir> [--reading L-1]`** (A1's verdict, §3.3): reads `<campaign>/lockstep/<arm>/<reading>/manoeuvre_lockstep.json` for every arm, tabulates every cell per seed (`gates.cell_reading`: n, established all / vectored / straight-in, fully flyable, vectored ADE mean, FDE p50), and — once every cell has both seeds — `gates.gate_grid` (exactly two seeds shared by every cell): the seed line is the grid's own p75 of |seed a − seed b| over the cells (p50 recorded beside it; D9), a cell is eligible when fully flyable ≥ 0.95 on both seeds, a "leader" on a primary (established over all flights; over the vectored group) is within the seed line of EACH seed's best, the winners are the leaders on both primaries or — when the two disagree — on all flights, and the tie goes to the shorter segment then the shorter lookback; `decisive` is false only when every eligible cell is a leader on BOTH primaries (L and Δ are not the deciding variables in this range; the shortest cell is taken for A2). A missing reading lists as pending and leaves the verdict absent, so the queue can call it after every cell; a reading of another schema, another split, a `--limit` prefix or a segment that is not the cell's is refused by name (`reading_problem`, 2026-09-23 — so the 2026-09-18 campaign's v2 payloads are not re-judged by this code). The plan's verdict is the `L-1` reading's.
-- **`two_tier_grid_queue --arms … --campaign … --airport KRDU [--readings L-1 12km 8km 6km | row<N>] [--cells …] [--dry-run]`** (§8): per cell in declaration order (Δ ascending, then L ascending) — `frame_ablation --only` its two arms, then `manoeuvre_lockstep` (protocol `none`) per arm × reading into `<campaign>/lockstep/<arm>/<reading>/` (skipped when its artefact exists; no records — 40 × 4 would be ~6 GB; the winner's readings are re-flown with `--write-records` after M-A1), then the grid gate into `<campaign>/gate/after_<cell>/`; timestamped lines, `CELL <cell> complete` for a watcher, the first failed step stops the chain with its exit code (D11; a step that died after creating its output directory leaves one the runners refuse to overwrite — move it aside as `<dir>.aborted-<UTC>`, rerun), ≥ 3 GB free checked per cell, the PID in `<campaign>/two_tier_grid_queue.pid` for the run's duration (removed at exit; a second queue refuses to start while it is alive; a file that does not hold one positive PID is refused by name — an empty one used to read as PID 0, which `os.kill` treats as the process group). The cells are the gate's (`grid_cells` off each arm's config), so `--cells` names what the table prints. Run detached from the runs worktree at the committed SHA.
 
-### R9 · two-tier v3 stage B (`manoeuvre_lockstep --cohort`, the held token, `executor_relative_gate` gate B1, `two_tier_b_queue`; 2026-09-19)
-
-**ARCHIVED 2026-09-20** — code under `archive/manoeuvre_codes_2026_09/` (its README says what moved and why; plan v3 §10's audit). The text below describes the archived code and is kept as its record. **Live now**: `manoeuvre_lockstep` flies the no-token closed loop only — no `--codebook`, `--protocol`, `--prior` or `--prior-landing-ends-flight` — and its payload schema is `ts-manoeuvre-lockstep-v4` (the v3 token / prior keys and `e_plan` gone). `executor_relative_gate`, `executor_failure_modes`, `executor_grid_gate` and `two_tier_grid_queue` read that payload unchanged; the relative gate's row B1 stays as the upper-bound row. The second layer's relative gate on the stage A executor L60_D20 — `archive/manoeuvre_codes_2026_09/docs/experiments/two_tier_v3_b_arms.json` (12 arms `<configuration>_<tokenizer>_s<seed>`: S20 / S60held / S60h60 × K16 / cv × 1337 / 2024; plan `docs/history/2026-09_two_tier_v3/2026-09-18_two_tier_plan_v3.zh.md` §5.2, decisions D30–D47; the development notes' §7). Every arm shares ONE cohort, the grid's L60_D60 `development_cohort.json` (D47: records ≥ 120 s, train 6853 / val 1404). Nothing launches before the user's "跑" (M-B0′).
-
-- **`manoeuvre_lockstep … --cohort <development_cohort.json>`** (B0, D33): flies only that cohort's roster of `--split`, in the checkpoint's order (`cohort_keys`; a cohort flight the checkpoint's split lacks refuses), the payload's `cohort` block being the package's `development_cohort_audit` plus the path and the flown count. **The baselines are the queue's own step 0** (`baseline_steps`, the declaration's `stage_b.baselines`, only those the selected groups are judged against): the grid's L60_D20 re-read with records on the B cohort (`<campaign>/baseline/L60_D20_s<seed>/L-1/`; the baseline of S20 and S60-held) and L60_D60 flown 20 s at a time (`--execute-s 20`, A3-a re-flown by this code; `baseline/L60_D60_exec20_s<seed>/L-1/`; S60-h60's), each with `executor_failure_modes` into `failure_modes/<name>_s<seed>_none/`. A gate never reads another campaign's payload: `executor_relative_gate` and `executor_failure_modes` refuse a payload whose schema is not this code's `LOCKSTEP_SCHEMA` by name, and `gates.cell_reading` reads `executed_s` strictly (no compatibility — the repo rule of 2026-09-19; the stage A readings on disk are v2, their gates and failure-mode tables stand as written and are not re-run).
-- **The held token in `lockstep.fly`** (D31 / D38 in `defaults.md`): a coded protocol's round flies `round_step_s` = the config's `token_step_s` (`--execute-s` stays a protocol-none option), one token for `token_hold` rounds; payload schema `ts-manoeuvre-lockstep-v3` (`token_span_s` / `token_step_s` / `token_hold` / `prior_landing_ends_flight`; per row `token_refreshes`, `prior_landed_at_s`, `prior_landed_error_s`; per round `token_index`, `phase`; strata `token_refreshes_p50`, `prior_landed_share`, `prior_landed_error_p50_s`). `--prior-landing-ends-flight` (A / A-truth only) restores the 09-18 rule; off (D37) the landing is recorded.
-- **`executor_relative_gate`** writes a third verdict row, **gate B1** (§5.2.2: the truth-token upper bound — beyond the seed line on ≥ 1 of the three metrics on both seeds, fully flyable ≥ the floor, WITHOUT row B's not-worse clause: a truth token that buys one thing at another's price still carries information the prior is worth training for; row B, read on the prior's token, is where the price counts).
-- **`two_tier_b_queue --arms … --campaign … --airport KRDU [--groups …] [--device auto] [--dry-run]`** (§8.2): step 0 the baselines (above); then one group = one configuration × vocabulary, both seeds (`groups_of`); per group, in declaration order (K16: S20, S60-h60, S60-held; then cv): `frame_ablation --only` its two arms → per arm `manoeuvre_codebook` (into the declaration's `stage_b.codebook_dir`, `4dTrajectory/outputs/codebooks/two_tier_v3_b_20260919_<arm>/`), `manoeuvre_lockstep --protocol C --write-records` (`<campaign>/lockstep/<arm>/C/`), `executor_failure_modes` (`failure_modes/<arm>_C/`), `manoeuvre_code_atlas` (`atlas/<arm>/`; under a held token the K paths are the horizon long and the truth's segment the span long, both named) → `executor_relative_gate` against the configuration's baseline (`stage_b.configurations[<c>].baseline` names a `stage_b.baselines` entry; the seed line from `stage_b.seed_line_from`, the grid's `gate/after_L120_D120/grid_gate.json` — a verdict, not a reading) into `gate/b1_<group>/` → ONLY when `verdicts.b1.pass` (read at run time): per arm `manoeuvre_prior --seed <the arm's>` (`priors/<arm>/`), lockstep A (records) and A-truth, failure modes on A → the relative gate on the A readings into `gate/b_<group>/`. A step whose artefact exists is skipped; the first failure stops the chain (D42); `GROUP <g> complete` / `GATE B1 PASS|FAIL` / `STOP:` for a watcher; the free disk (≥ 3 GB) checked per group; PID `<campaign>/two_tier_b_queue.pid`; the baseline checkpoints, the cohort file and a seed line carrying every metric's p75 must exist before the queue starts (checked at plan time); `--groups` narrows the arm groups and step 0 to the baselines they need.
-
+### R9 · two-tier v3 stage B (`manoeuvre_lockstep --cohort`, the held token, `executor_relative_gate` gate B1, `two_tier_b_queue`; 2026-09-19) — archived 2026-10-13 → `archive/manoeuvre_lockstep_2026_10/` (`docs/reference/entries.md` there)
 
 ### R10 · the instruction labeller: `instruction_signals` → `instruction_spec` → `instruction_labels` → `instruction_conformance`; `instruction_figures`
 
@@ -176,7 +146,8 @@ val: the val days are read once, in the stage's validation readout, D85; A41). E
 refuses to write over an existing file.
 
     python run_ts.py instruction_signals --out <artefact> --limit 80     # a smoke build; no --limit for the formal one
-    python run_ts.py instruction_spec --dir <artefact> --candidate 0.25 --grid <the user's choice>
+    python run_ts.py instruction_spec --dir <artefact> --candidate 0.25 --grid <the user's choice> \
+        --closed-loop-final-lateral-m <Y_final> --closed-loop-final-vertical-m <H_final> --angle-lead-s <s> --speed-lead-s <s>
     python run_ts.py instruction_labels --dir <artefact>
     python run_ts.py instruction_conformance --dir <artefact>
 
@@ -1414,56 +1385,9 @@ them (D42, A10), at the nearest Δ row (D45, A12); a sentence has the flown rows
     python run_ts.py executor_replay --closed-loop --split train --per-airport 30 --row-interval-s 2 \
         --instructions <artefact> --executor <spec> --out <new dir>
 
-### R51 · `run_ts.py executor_turns` — the turn of the executor measured: how much of the offset after a turn is the heading law's, how much the words' (vocabulary §12.1 A13)
+### R51 · `run_ts.py executor_turns` — the turn of the executor measured: how much of the offset after a turn is the heading law's, how much the words' (vocabulary §12.1 A13) — archived 2026-10-13 → `archive/two_tier_readouts_2026_10/` (`docs/reference/entries.md` there)
 
-2026-10-04 (vocabulary §5.4, §4.3, §9.6, §12.1 A13; `experiments/executor_turns.py`). `executor_turns --instructions
-<artefact> --executor <spec dir> --split train [--per-airport N] [--seed 1337] [--chunk 500] --out <new dir>` (`--split` train
-or select — val refused by name, D85, A41; select from a clean tree): the replay's flights (`replay.draw`), their open-loop sentences at Δ = 2 s, flown from the first
-row, said on their own rows, in three ways — `executor` (the executor at the observed ground speed: the airspeed set at each
-cycle's start so that the ground speed is the observed one, and moved within the cycle to the observed one at its end in
-place of the speed law), `executor_no_stopping` (the same, without the stopping-rate limit of §5.4) and `exact_words` (each
-heading word's track reached 4 s after the word, linearly, at the observed ground speed, from the observed position at row
-0), with a CONTROL `observed_track` (the observed track integrated the same way: what integration and the data's own
-track-against-position agreement leave). The settings of the first two live in the runner (subclasses of `Executor`,
-`Lateral`, `Speed`); the executor's laws do not change. For each observed turn (runs of the labeller's smoothed track
-faster than 0.2°/s, `turn_runs`) and way: the change of e_y (the closed loop's matched point) from the turn's start row to
-30 s after its end row (A13 as written; it holds what earlier turns left — a 90° turn makes an along-track lead lateral),
-and the turn's OWN part (the change of the flown-minus-observed displacement at the same time over those rows, on the
-right of the observed track at the later row; Claude's reading), each also toward the outside of the turn, and the way's
-e_y at the turn's start, and whether the next turn starts before the read row (`overlaps_next`, counted per cell); not measured
-where the later row lies past the observed flight or the way's flight. `turns.json`
-(`ts-executor-turns-readout-v1`) holds every turn (with its group) and the table by stratum × ground-speed band (0–70,
-70–85, 85–100, ≥ 100 m/s): per way, |change| and |own| p50 / p90 / mean and their outward parts; and over the turns
-measured in every way, the same and the paired differences of the own outward part — executor ways minus exact words (the
-heading law), exact words minus the control (the words). On the test fixture the control itself leaves 99 m per 90° turn:
-the fixture's track leads its positions by 1 s. Information for the user's decision on the heading law (D7).
-
-    python run_ts.py executor_turns --split train \
-        --instructions 4dTrajectory/outputs/POOLED/instruction_language/<artefact> \
-        --executor 4dTrajectory/outputs/POOLED/executor/<name> --out <new dir>
-
-### R52 · `run_ts.py final_descent_tolerance` — the closed loop's vertical tolerance in the final descent, H_final, measured for the user's choice (vocabulary §12.1 A24, D66)
-
-2026-10-04 (vocabulary §4.9, D34, D38, D55, D66, §12.1 A24; `experiments/final_descent_tolerance.py`). `final_descent_tolerance
---instructions <artefact> --executor <spec dir> --split train|select [--per-airport N] [--seed 1337] --row-interval-s 2 4 8
-[--chunk 2048] [--device cpu] --out <new dir>` (select from a clean tree; val is refused): one artefact built as the formal
-one in everything but the spec's `closed_loop_final_vertical_m`, with its executor spec. The flights of the split (train:
-`--per-airport` of each airport, D34's seeded sample; select: every labelled flight; own dynamics or a stand-in's), each read
-in closed loop at each Δ IN MEMORY (`closed_loop.read_chunked`, nothing written into the artefact), its sentence flown again
-as the replay flies it (every flight must fly its stored states again) and judged (`judge.outcome_of`). `readout.json`
-(`ts-final-descent-tolerance-readout-v1`): per Δ the split's closed-loop numbers (`instruction_closed_loop.summarise`, D34
-readings 1–3 with the tolerance in force at each row) and, per airport and pooled, the outcomes and landed share, the
-`unstable_at_minimums` flights by why (no DA point / high / low / lateral only), the height above the glidepath at the DA
-point p10 / p50 / p90, the DA check of the OBSERVED track (the judge's `decision_check` on the raw observed rows of the
-landing approach, from its last runway word, on its labelled runway — check A15–A22 §7.3's reading, which it reproduces:
-select 97.97 %, −6.4 / +1.0 / +8.7 m) against the replay's, and the angle correction words per final descent (runs of rows
-with "no level-off" in force) and per flight; every flight's row. `--table DIR ... --out <new dir>` puts readouts side by
-side (refused unless their specs differ only in H_final and a split's readouts drew the same flights at the same Δ):
-`table.json` (`ts-final-descent-tolerance-table-v1`) and `table.md`. No criterion is read (D7): the user chooses (D55).
-
-    python run_ts.py final_descent_tolerance --split train --per-airport 400 --row-interval-s 2 4 8 \
-        --instructions <scratch artefact at one H_final> --executor <its executor spec> --out <new dir>
-    python run_ts.py final_descent_tolerance --table <readout dir> ... --out <new dir>
+### R52 · `run_ts.py final_descent_tolerance` — the closed loop's vertical tolerance in the final descent, H_final, measured for the user's choice (vocabulary §12.1 A24, D66) — archived 2026-10-13 → `archive/two_tier_readouts_2026_10/` (`docs/reference/entries.md` there)
 
 ### R53 · `run_ts.py closed_loop_start_check` — stored closed-loop sentences said through the start of a closed loop give back their states (vocabulary §12.1 A26, §12.2 item 7, D67)
 
@@ -1513,25 +1437,7 @@ Measured on `v9_20261004` / `v14_20261004` into a scratch root (nothing publishe
 D66): 5 airports × 40 flights in ~2 min CPU, ~5 MB a sample; on KRDU's 4-flight trial 781 live segments 0 m from the
 stored states, crossings equal to the export's.
 
-### R55 · `run_ts.py start_rules` — the start rules of D77 measured for the user's choice (vocabulary §12.1 A33, D55, D77)
-
-2026-10-05 (`experiments/start_rules.py`). `start_rules --instructions <artefact> --executor <spec dir> --row-interval-s 4
-[--rules …] [--workers N --parts P] [--chunk 2048] [--device cpu] --out <new dir>`: every labelled TRAIN flight (train only,
-D85; own dynamics or a stand-in's) read in closed loop at one Δ in memory (`instruction_closed_loop.read_interval`, nothing
-written into the artefact) once for each start rule (`autopilot.params.START_RULES`; `centred-fit-15s` — the data plane's
-centred fit, no rule of a formal spec — for the comparison only), the spec's executor parameters with that rule in place of
-its own. Per rule (`readout.json`, `ts-start-rules-readout-v1`): the closed loop's numbers (`instruction_closed_loop.summarise`:
-the readings of D34 1–3 and the outcomes, D74), the outcomes and landed share by airport, and the start track at the first
-predicted step: on the flights that turn there (more than 5° between the observed directions of the 8 s before and after,
-in metres on the ground, `flights.ground_scale`) the distance of the rule's start track (`flights.start_velocity`) from the
-direction of the 8 s after (a readout of the future, never an input), pooled and by airport. Train is drawn in `--parts`
-consecutive blocks of its one seeded permutation, each drawn once and read at every rule in its own process (up to
-`--workers`), put together in order (`merge_tallies`): the readout is the same whatever N and P up to float rounding (a
-part flies its flights in other chunks; a rounding can move a discrete step). No criterion is read (D7):
-the user chooses (D55). Tests: `tests/test_start_rules.py`.
-
-    python run_ts.py start_rules --row-interval-s 4 --workers 4 --parts 8 \
-        --instructions <scratch artefact> --executor <its executor spec> --out <new dir>
+### R55 · `run_ts.py start_rules` — the start rules of D77 measured for the user's choice (vocabulary §12.1 A33, D55, D77) — archived 2026-10-13 → `archive/two_tier_readouts_2026_10/` (`docs/reference/entries.md` there)
 
 ### R56 · `run_ts.py prior_train` — the prior of stage B: one run on every airport, or one fold (prior design §12 B3, B8; D39–D41, D75)
 
@@ -1581,33 +1487,34 @@ its options: the split and the device); `--split select --smoke` reads the selec
 val). Writes a new `--out`: `config.json`, then `readout.json` (`ts-prior-validation-v3`). 161 s for the base of B5.
 Tests: `tests/test_prior_validation.py`.
 
-### R59 · `run_ts.py prior_select` — the choices of the cross-validation (prior design §5; D39, D40)
+### R59 · `run_ts.py prior_select` — the choice of the cross-validation (prior design §5; D39, D40)
 
-2026-10-05. `--step configuration` after steps 1 and 2: the score of an arm is the mean held-out loss of its five folds;
-the seed scale the difference of configuration A's two seeds; among the configurations within twice the seed scale of the
-best, the fewest parameters, a tie of parameters to the lower score (the user, 2026-10-05). `--step variant` after step
-3: `constants` only if better than `full` by more than twice the seed scale. A fold is read only complete and of its arm
-(every shape and training value, the seed, the selection `landed`, one data identity) and with a finite score. Writes
-`choice_<step>.json` once (`ts-prior-choice-v1`). The campaign runs it; its rules are part of the behaviour check.
-Tests: `tests/test_prior_campaign.py`.
+2026-10-05; B15 2026-10-13. After steps 1 and 2: the score of an arm is the mean held-out loss of its five folds; the
+seed scale the difference of configuration A's two seeds; among the configurations (A and C) within twice the seed
+scale of the best, the fewest parameters. The variant is `full` (`prior_select.VARIANT`, D39). A fold is read only
+complete and of its arm (every shape and training value, the seed, the selection `landed`, one data identity) and with
+a finite score. Writes `choice_configuration.json` once (`ts-prior-choice-v1`). The campaign runs it; its rule is part
+of the behaviour check. B5 (2026-10-05, `ts-prior-campaign-v3`) also compared B and D and chose the variant
+(`choice_variant.json`). Tests: `tests/test_prior_campaign.py`.
 
-### R60 · `run_ts.py prior_campaign` — B5 as one campaign: 31 training runs, the choices, the base and its val readout (prior design §5, §12 B5; D108)
+### R60 · `run_ts.py prior_campaign` — the cross-validation and the base as one campaign: 15 fold runs, the choice, the base and its val readout (prior design §5, §12 B5, B15; D108)
 
-2026-10-05. Steps, one at a time on the GPU, each a runner in its own process with its log: configurations A, B, C, D
-(variant `full`, seed 1337) and A again (seed 2024) on the five folds, each fold's free generation at its held-out
-airport (select, 200 flights × 2); `prior_select --step configuration`; the chosen configuration's `constants` folds;
-`prior_select --step variant`; the base on every airport, `prior_validation` and `prior_free_generation --split val`.
-Every training run reads `landed`. Before each step: a clean tree (unless a smoke) and the behaviour check
-(`prior_behaviour`, R61) giving the start's answer bit for bit — its settings (seeds, selection, configurations, free
-generation, temperature, D68's bound) are the code on the disk's; a difference stops the campaign by name; each step's
+2026-10-05; B15 2026-10-13. Steps, one at a time on the GPU, each a runner in its own process with its log:
+configurations A and C (variant `full`, seed 1337) and A again (seed 2024) on the five folds, each fold's free
+generation at its held-out airport (select, 200 flights × 2); `prior_select`; the base on every airport,
+`prior_validation` and `prior_free_generation --split val`. Every training run reads `landed`. Before each step: a
+clean tree (unless a smoke) and the behaviour check (`prior_behaviour`, R61) giving the start's answer bit for bit — its
+settings (seeds, selection, variant, configurations, free generation, temperature, D68's bound) are the code on the
+disk's; a difference stops the campaign by name; each step's
 commit is recorded as information only. Resumable: a step is done when its last file exists; a step a kill left is moved
 aside as `<dir>.aborted-<UTC>` and run again; a done val step's claim is marked spent if a kill left it unmarked. `--smoke
-N` runs every step small. Writes `campaign.json` (`ts-prior-campaign-v3`), the steps' directories, `logs/`. B5
-(`prior_base_20261006`, 2026-10-05 22:40 → 10-06 07:12 UTC, 65 steps): configuration C, variant `full`; the readout
-`docs/two_tier/readouts/2026-10-06_b5_campaign.zh.md`. Tests: `tests/test_prior_campaign.py`.
+N` runs every step small. Writes `campaign.json` (`ts-prior-campaign-v4`), the steps' directories, `logs/`. B5
+(`prior_base_20261006`, v3 with B, D and the variant step: 2026-10-05 22:40 → 10-06 07:12 UTC, 65 steps): configuration
+C, variant `full`; the readout `docs/two_tier/readouts/2026-10-06_b5_campaign.zh.md`. Tests:
+`tests/test_prior_campaign.py`.
 
-    python run_ts.py prior_campaign --instructions 4dTrajectory/outputs/POOLED/instruction_language/v12_20261005 \
-        --executor 4dTrajectory/outputs/POOLED/executor/v17_20261005 --row-interval-s 4 \
+    python run_ts.py prior_campaign --instructions 4dTrajectory/outputs/POOLED/instruction_language/v17_20261013 \
+        --executor 4dTrajectory/outputs/POOLED/executor/v22_20261013 --row-interval-s 4 \
         --out 4dTrajectory/outputs/POOLED/prior/<campaign id>
 
 ### R61 · `run_ts.py prior_behaviour` — the behaviour check of the prior's code on fixed inputs (prior design §12 B10, B12, B13; D108)
@@ -1742,7 +1649,18 @@ checkpoint.
   `post_ceiling` (R64) and `post_diagnose` (R66) read any campaign on the speak device alone, as its readout was read.
 - Stage D's `multi_train` takes `--front-attention`, `--cpu-workers`, `--cpu-batches` and `--cpu-period` alike; its
   workers are sized from `--profile` (`multi_profile`) and, with CPU workers, `--cpu-profile` (a `multi_profile
-  --speak-device cpu` of the same inputs and settings).
+  --speak-device cpu` of the same inputs and settings). D200: without `--start-campaign`/`--start-round` it starts
+  from the base, its traffic shape `--traffic-hidden`/`--traffic-heads`; `--branch-every-s` and `--segment-only`
+  (the grid only) as stage C's P55, a group's credit ending at the varied aircraft's next branch point. D217 (with
+  `--branching backward`/`majority` only; each default D182's): `--search-points` (candidate points at most),
+  `--judged-after-s`, `--fine-point`/`--no-fine-point`, `--common-cut` (every sentence of a group counted up to the
+  event + the judged span). D218: `--start-campaign` may name a campaign of stage D; its round starts the new one as
+  trained (a new seed, the same `--joint-heads`). D219 (each default the behaviour before it): `--clip-norm` (each
+  update's gradient norm), `--dual-clip` (c > 1, the surrogate's dual clip), `--select-seed` (the readout's windows and
+  numbers, so that campaigns of other seeds read the same windows); each update's row in `round.json`'s
+  `pass.update_rows`. D220: `--point-values` (with `--branching backward`/`majority`, `--no-fine-point` and
+  `--group-weight equal` only; profiled): every point tried flown to its window's end, the first sentence credited by
+  the points' values, one unit a search in `groups_<k>.pt`; a batch's record adds `valued_units` and `point_values`.
 - A clean tree unless `--smoke`; formal runs from a detached run worktree (D163).
 - Writes `campaign.json` (`ts-post-train-v1`) and, for each round, `round.json` and `checkpoint.pt`
   (`ts-post-checkpoint-v1`).
@@ -1787,7 +1705,7 @@ under the same select seed and windows an airport), refused by name otherwise; a
 `campaign.json` beside it. Writes, into a new directory, `list.json` (stage C; the select windows only, none moved out
 of the split; each window's place, airport and identity — flight, `row0_s`, kind — and, as information no reader acts
 on, each read's outcome and D175's fields; the reads by path and sha256) and `SHA256SUMS`; read-only. The Training
-export takes a list (`--windows`, D176 (3), frontend F5). Stage D's reads: `--multi DIR` (R71). Tests: `tests/test_window_lists.py`.
+export takes a list (`--windows`, D176 (3), frontend F5). Stage D's reads: `--multi DIR` (R73). Tests: `tests/test_window_lists.py`.
 
     python run_ts.py window_list --diagnose 4dTrajectory/outputs/POOLED/post/<diagnose id> on \
         --ceiling 4dTrajectory/outputs/POOLED/post/<ceiling id> start --outcomes lost_separation \
@@ -1835,41 +1753,53 @@ MC7's start alone (a one-off before this runner) took 22 min on 3 GPU workers be
     python run_ts.py multi_compare --campaign 4dTrajectory/outputs/POOLED/multi/<campaign> [--start <its dir>] \
         --out <a new file>.json
 
-### R70 · `run_ts.py pass_gradients` — which part of the loss sets a round's pass, stages C and D
+### R70 · `run_ts.py pass_gradients` — which part of the loss sets a round's pass, stages C and D — archived 2026-10-13 → `archive/two_tier_readouts_2026_10/` (`docs/reference/entries.md` there)
 
-2026-10-10 (the user: is a flat reward the learning rate's or the reward's?). A round whose groups are still on disk (a
-round left half done; a round's groups are deleted after its pass), read at the model that spoke it (the round before's
-checkpoint, or the start), its pass's updates in the pass's own order (`update_pairs` with the round's numbers), every
-`--every`-th, no step taken (every ratio 1). Of each update, by parameter group (the prior's own, the traffic modules')
-and over all: the gradient of the surrogate (the advantages), of the pull to the base (× 0.04) and of the data term (×
-1) — `post.loss.update_gradients`, whose three parts add up to `update_step`'s gradient — each part's norm, its share
-⟨g_part, g⟩ / |g|² of the update's direction (the shares add up to 1) and the cosine of each pair; the means over the
-updates read. Under AdamW a parameter's step is about its learning rate whatever its gradient's size: the shares say
-which part points the update, the learning rate how far. On the CPU by default (`--device`, `--threads`); the data
-term's dropout masks are the pass's in distribution only (another device's generator, or updates left out by `--every`);
-of a campaign of several passes a round (D169), the first pass's order. And whether the updates read point one way
-(after a 3× learning rate did worse, 2026-10-10), for the surrogate, the data term (a reference) and the whole, by group
-and over all: the mean pairwise cosine of the updates' gradients, the cosine of the sums of the even and odd updates,
-the coherence |Σ g_i| / Σ |g_i| (1 aligned, about 1/√n independent). Writes `ts-pass-gradients-v2`; a clean tree unless
-`--smoke`, the checks first. Tests: `tests/test_pass_gradients.py`, `tests/test_post_loss.py`.
+### R71 · `run_ts.py lead_ablation` — the words' leads measured one column at a time, for the user's choice (executor design V12, §17, D7, D8) — archived 2026-10-13 → `archive/two_tier_readouts_2026_10/` (`docs/reference/entries.md` there)
 
-    python run_ts.py pass_gradients --campaign 4dTrajectory/outputs/POOLED/multi/<campaign> --round <r> \
-        --out <a new file>.json [--every K] [--device cpu] [--threads T]
+### R73 · `run_ts.py multi_window_read` — a stage D round read again on its select windows, a line a window (post-training D176 (2))
 
-### R71 · `run_ts.py lead_ablation` — the words' leads measured one column at a time, for the user's choice (executor design V12, §17, D7, D8)
+2026-10-12 (the user: a Training set of the windows a stage D model did not land). Round `--round`'s model read on its
+campaign's select windows by its own selection readout (`multi_train.selection_readout` with `lines`: the windows and
+random numbers of every round's readout), here or by `--speak-workers` workers on `--device` (default `cuda`; the rule
+of the CPU's batches left off, D191). The summed readout must be the round's own (`round.json`'s `selection_readout`),
+or the run stops and writes nothing: the behaviour check on fixed inputs, on the device and code of this read. Writes,
+into a new directory, `config.json` (`ts-multi-window-read-v1`: the campaign, the round, its inputs, the commit, the
+checks, the device and workers, the selection as the Training export's `StageExport.selection_fields`, the count),
+`per_window.jsonl` (`multi_train.window_line`: place, airport, identity, span, kind, each commanded aircraft's key,
+outcome, reward and go-arounds, the steps of loss by pair) and `SHA256SUMS`, read-only. A clean tree unless `--smoke`,
+the checks first; a smoke campaign only with `--smoke`. `window_list --multi DIR` reads it (R67): a stage D window is
+chosen when an outcome of any of its commanded aircraft is one of `--outcomes`. Tests: `tests/test_multi_window_read.py`.
 
-2026-10-12 (`experiments/lead_ablation.py`). `lead_ablation --instructions <artefact> --executor <spec dir> --column
-heading|angle|speed --leads-s 0 2 4 6 8 --per-airport N [--seed 1337] --row-interval-s 2 4 [--chunk 2048] [--device cpu]
---out <new dir>` (train only; no split option, so val and select are never read). ONE lead changed — the heading words'
-`heading_lead_s`, the angle words' `angle_lead_s` or the speed words' `speed_lead_s` — to each value, every other value of
-the artefact's spec kept (`spec_with_lead`; a lead off the 2 s steps is refused by the spec before any flight). The train
-flights drawn as the replay draws them (`replay.draw_flights`, D34's seeded sample, own dynamics or a stand-in's) are READ
-AGAIN by the labeller under each value, in memory (no stored sentence is read: those are the artefact's lead's; refusals
-counted by reason), and read in closed loop at each Δ in memory by the executor of this code, which reads the leads from
-the vocabulary. Per value and Δ (`readout.json`, `ts-lead-ablation-readout-v1`; `lead_<value>s.json` as each ends;
-`table.md`): the labeller's flights read / refused and the column's envelopes on the observed tracks (heading rows inside
-their bands; tubes or speed spans contained); the closed loop's split numbers (`instruction_closed_loop.summarise`), the
-column's correction words per sentence and the landed share (the judge's, D74, a readout); and the error of the flown path
-around each OBSERVED word of the column that changes its value, at the said rows −1…+4 from it (e_y for heading, e_h for
-angle, flown − observed ground speed at the matched point for speed): p10 / p50 / p90 and the share beyond Y, H or δv.
-No criterion is read (D7). Needs an `instruction-v7` artefact and an executor spec of this code (`ts-executor-spec-v11`).
+    python run_ts.py multi_window_read --campaign 4dTrajectory/outputs/POOLED/multi/<campaign> --round <r> \
+        --out 4dTrajectory/outputs/POOLED/multi/<read id> [--speak-workers N] [--device cuda]
+    python run_ts.py window_list --multi 4dTrajectory/outputs/POOLED/multi/<read id> --outcomes lost_separation … \
+        --out 4dTrajectory/outputs/POOLED/multi/<list id>
+
+### R74 · `run_ts.py multi_val_evaluation` — a stage D round's val windows flown again and graded by the evaluation package — archived 2026-10-13 → `archive/two_tier_readouts_2026_10/` (`docs/reference/entries.md` there)
+
+
+### R75 · `run_ts.py multi_diagnose` — a stage D round read with its traffic on and off and from its start, and the fields of each loss of separation (multi-aircraft control D211)
+
+2026-10-15 (the user, after D200: the losses of separation fell in none of its arms; the cause first). Stage C's
+diagnostic readout (R66, D175) on a stage D campaign: round `--round` reads the campaign's select windows with the
+readout's numbers three times in one process — `on` (the round's model; its summed readout must be `round.json`'s
+`selection_readout`, or the run stops by name), `off` (the same model, the output layer of every traffic module at
+zero, `post_diagnose.traffic_off`), `start` (the campaign's start, `Stage.start`: from the base, the base with
+zero-output traffic modules; from a round of stage C, that round). A version 2 campaign (D212) is read four times
+(D216): `on`, `joint_off` (the output layer of every joint module at zero, `multi.joint.joint_off`), `off` (the traffic
+modules' too), `start` (its joint modules at zero); its summary adds on − joint_off. For each commanded aircraft that lost separation,
+D175's fields on its own rows (`post_diagnose.loss_fields` with its place in the window): the other aircraft
+(`commanded` when it is commanded too; else `no_landing`, `leader`, `follower`, `other_runway`), the distance to its
+threshold, the time from its own first predicted step, and, against a recorded aircraft only, in conflict at its first
+predicted step; no field 5. Writes, into a new directory: `intent.json` (`--intent`, before the reads), `config.json`,
+`per_window.jsonl` (`multi_train.window_line`, its read, its lost aircraft with their fields), `summary.json` (each
+read: landed, lost separation, mean reward, outcomes of the commanded aircraft, in all, by airport and by span; on −
+off, on − start, off − start with a 95 % interval from 2,000 resamples of the windows), `failures.json` (the fields'
+counts and shares, in all, by airport, by span), `log.jsonl`, `SHA256SUMS` (schema `ts-multi-diagnose-v1`); read-only
+at the end. No criterion is applied. Select days only; the checks first; a clean tree unless `--smoke`; every batch on
+`--device` (`--speak-workers`). Tests: `tests/test_multi_diagnose.py`.
+
+    python run_ts.py multi_diagnose --campaign 4dTrajectory/outputs/POOLED/multi/<campaign id> --round 3 \
+        --intent <intent.json> --out 4dTrajectory/outputs/POOLED/multi/diagnose_<campaign>_r<round>_<date> \
+        [--speak-workers 3] [--device cuda]

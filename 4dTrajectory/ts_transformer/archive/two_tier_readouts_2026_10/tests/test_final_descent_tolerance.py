@@ -11,7 +11,7 @@ import pytest
 import torch
 
 from ts_transformer.autopilot import closed_loop, replay
-from ts_transformer.autopilot.speed import approach_speed_ias_mps
+from ts_transformer.autopilot.speed import approach_speeds
 from ts_transformer.experiments import final_descent_tolerance as readout
 from ts_transformer.instructions.airport import published_glidepath_height_m
 from ts_transformer.instructions.labeller.read import read_flight
@@ -67,7 +67,7 @@ def test_the_kinds_of_unstable_and_the_table_by_airport():
     base = {"final_descents": 1, "final_descent_rows": 30, "angle_corrections": 3}
     rows = [{**base, "airport": "KAAA", "outcome": "landed", "decision": passed, "observed_decision": passed,
              "final_descent_angle_corrections": 2},
-            {**base, "airport": "KAAA", "outcome": "unstable_at_minimums", "decision": high, "observed_decision": passed,
+            {**base, "airport": "KAAA", "outcome": "landing_failed", "decision": high, "observed_decision": passed,
              "final_descent_angle_corrections": 4},
             {**base, "airport": "KBBB", "outcome": "ground_contact", "decision": None, "observed_decision": None,
              "final_descents": 2, "final_descent_angle_corrections": 0}]
@@ -75,7 +75,7 @@ def test_the_kinds_of_unstable_and_the_table_by_airport():
     assert list(cells) == ["KAAA", "KBBB", "all"]
     pooled = cells["all"]
     assert pooled["flights"] == 3 and pooled["landed"] == pytest.approx(1 / 3)
-    assert pooled["unstable_at_minimums"] == {"no DA point": 0, "high": 1, "low": 0, "lateral only": 0}
+    assert pooled["da_not_passed"] == {"no DA point": 0, "high": 1, "low": 0, "lateral only": 0}
     assert pooled["above_glidepath_at_da_m"]["n"] == 2 and pooled["above_glidepath_at_da_m"]["p50"] == pytest.approx(15.0)
     assert pooled["da_check_observed_vs_replay"] == {"both pass": 1, "observed passes, replay does not": 1,
                                                       "replay passes, observed does not": 0, "neither": 1}
@@ -92,7 +92,8 @@ def _flown(monkeypatch, final_vertical_m, interval_s):
     reading = read_flight(flight, geometry, one, words)
     drawn = replay.Drawn(indices=[5], signals=[flight], series=[None], groups=[replay.OWN],
                          geometries={flight.airport: geometry}, description={"excluded": {}}, excluded_seen=Counter())
-    monkeypatch.setattr(replay, "flight_approach_ias_mps", lambda series, group: approach_speed_ias_mps("A320", 62000.0))
+    monkeypatch.setattr(replay, "flight_approach_speeds", lambda series: approach_speeds("A320"))
+    monkeypatch.setattr(replay, "flown_typecode", lambda series: "A320")
     sentence = replay.sentence_on_interval(reading, flight, interval_s, geometry, words)
     start = sentence.first_row + closed_loop.start_row(interval_s) * int(round(interval_s / one.step_s))
     inputs = executor_inputs(flight, geometry, start)

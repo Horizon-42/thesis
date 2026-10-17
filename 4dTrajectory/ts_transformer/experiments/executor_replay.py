@@ -12,7 +12,7 @@ observed records (`observed_verdicts`: the harvest's record files linked read-on
 
 The readout (`readout_table`), per group, airport (and pooled), stratum (`instructions.readout`: straight-in / vectored)
 and kind of sentence (with a go-around or not): each outcome, the words inside their envelopes per column with the
-envelopes' widths, the decision-altitude checks, and of the flights whose observed track passes evaluation the share
+envelopes' widths, the decision-altitude checks, the evaluation's verdicts on the approach crossings, and of the flights whose observed track passes evaluation the share
 whose replay passes too. NO CRITERION IS READ (design D7): the user sets them after the design is settled.
 
 With ``--closed-loop`` it flies the artefact's CLOSED-LOOP sentences instead (vocabulary §4.9, D32; written by
@@ -81,7 +81,10 @@ HORIZON = "sentence"
 #: v9 (executor design draft 5): the first-principles executor's parameters; a record's controls are the actuators flown,
 #: at each cycle's start (the commands that produced the states are the record's ``commands``; the controls, held per
 #: cycle, do not re-roll the track under the point-mass model).
-REPLAY_SCHEMA = "ts-executor-replay-v9"
+#: v10 (the user, 2026-10-12): a landing is the evaluation's verdict on the approach crossing (`judge.landing_verdict`;
+#: outcomes ``landed`` / ``landing_failed``); ``landing_evaluations`` beside the decision-altitude checks (a record, on
+#: every approach crossing).
+REPLAY_SCHEMA = "ts-executor-replay-v10"
 #: A closed-loop flight that goes farther than this from its observed path, laterally, LEFT the path: a reading of the
 #: A9 smoke build (vocabulary §9.7) that A10 compares against (§12.1 A10), not a criterion (D7).
 LEFT_THE_PATH_M = 300.0
@@ -126,7 +129,7 @@ def _share(passed: int, total: int) -> float | None:
 
 def readout_table(rows: list[dict[str, Any]], *, closed_loop_rows: bool) -> dict[str, Any]:
     """Per group, airport (and "all"), stratum (and "all") and kind of sentence (and "all"): the outcomes, the words inside
-    their envelopes per column, the decision-altitude checks and the evaluation pairing (module docstring); of
+    their envelopes per column, the decision-altitude checks, the evaluation's verdicts on the approach crossings and the evaluation pairing (module docstring); of
     closed-loop sentences (``closed_loop_rows``: the rows carry `closed_loop_columns`) also the flights that left the
     observed path (`LEFT_THE_PATH_M`) and the correction words for each sentence, per column."""
     table: dict[str, Any] = {}
@@ -152,6 +155,7 @@ def readout_table(rows: list[dict[str, Any]], *, closed_loop_rows: bool) -> dict
             "flights_with_unjudged_words": sum(r["words"] is None for r in members),
             "decision_checks": {"n": len(decisions), "no_da_point": sum(d is None for d in decisions),
                                 "passed": sum(d is not None and d["passed"] for d in decisions)},
+            "landing_evaluations": replay.landing_evaluations([r["crossing"] for r in members]),
             "observed_passes": len(paired),
             "replay_passes_where_observed_passes": _share(sum(r["replay_verdict"] == "pass" for r in paired), len(paired)),
         }

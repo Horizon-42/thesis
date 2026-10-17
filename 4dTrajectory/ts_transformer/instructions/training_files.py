@@ -43,10 +43,12 @@ from ts_transformer.io_utils import utc_now
 #: is the one block of every stage (`experiments.training_export.flown_sentence`), its track unrounded; the sets are
 #: listed in a new index beside v2's, which the view before D135 reads until the old sets are deleted. Sample v12 (executor
 #: design D7, D8): the vocabulary's ``angleLeadS`` and ``speedLeadS``, a tube and a speed span from their ``firstRow``
-#: (where the word arrives).
+#: (where the word arrives). Sample v13 (the user, 2026-10-12: a crossing's ``evaluation`` (the evaluation's verdict on an approach crossing,
+#: `judge.landing_verdict`) beside its ``decision`` (the decision-altitude check, a record); the outcomes ``landed`` /
+#: ``landing_failed``.
 INDEX_SCHEMA = "aeroviz-training-index-v3"
 INDEX_FILE = "index_v5.json"
-SAMPLE_SCHEMA = "aeroviz-training-sample-v12"
+SAMPLE_SCHEMA = "aeroviz-training-sample-v13"
 SAMPLE_FILE = "sample.json"
 SET_KIND = "closed-loop-readback"
 #: The splits a set draws from (outline §6 item 4, D85): the splits a readout reads.

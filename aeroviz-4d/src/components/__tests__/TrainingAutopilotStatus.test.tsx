@@ -25,7 +25,7 @@ describe("the sentence bar's line", () => {
     const { view } = ready(0);
     const { container, unmount } = render(<TrainingAutopilotStatus selection={selection} view={view} named={false} />);
     const line = container.firstChild as HTMLElement;
-    expect(line.textContent).toBe("Autopilot · flown to the next word · 8.00 s flown · computed 0 ms");
+    expect(line.textContent).toBe("Autopilot · flown to the next word · 10.0 s flown · computed 0 ms");
     expect(line.title).toContain("the flight reached the point where the next heading word is said");
     expect(line.title).toContain("0.000 m horizontally and 0.000 m vertically from the exported flown states");
     unmount();
@@ -35,10 +35,15 @@ describe("the sentence bar's line", () => {
 
   it("tags a word flown on to the flight's outcome with the judge's outcome, and names a correction", () => {
     const { view } = ready(1);
-    const { container } = render(<TrainingAutopilotStatus selection={selection} view={view} named={false} />);
-    expect(container.textContent).toContain("unstable at minimums");
-    expect((container.firstChild as HTMLElement).title).toContain("(a correction)");
-    expect((container.firstChild as HTMLElement).title).toContain("15.5 m right of the centreline, 41.8 m above the threshold");
+    const { container, unmount } = render(<TrainingAutopilotStatus selection={selection} view={view} named={false} />);
+    expect(container.textContent).toContain("landing failed");
+    expect((container.firstChild as HTMLElement).title).not.toContain("(a correction)");
+    expect((container.firstChild as HTMLElement).title).toContain("19.3 m left of the centreline, 45.0 m above the threshold");
+    unmount();
+    // the fixture's last heading word is not a correction: the same answer with the mark set is named one
+    const corrected = { ...view, segment: { ...view.segment, segment: { ...view.segment.segment, correction: true } } };
+    const { container: named } = render(<TrainingAutopilotStatus selection={selection} view={corrected} named={false} />);
+    expect((named.firstChild as HTMLElement).title).toContain("(a correction)");
   });
 
   it("says flying, and gives a refusal's reason in the tooltip", () => {

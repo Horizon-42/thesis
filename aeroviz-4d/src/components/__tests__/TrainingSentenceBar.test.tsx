@@ -133,14 +133,14 @@ describe("TrainingSentenceBar", () => {
   it("marks a correction word three ways: dashed, orange and with a mark; the labelled sentence has none", () => {
     const { container, unmount } = open(2);
     const corrections = [...container.querySelectorAll("g.training-sentence-band.correction")];
-    expect(corrections.length).toBe(9);
+    expect(corrections.length).toBe(21);
     const first = corrections[0];
     expect(first.getAttribute("aria-label")).toContain("a CORRECTION: added by the closed-loop reading");
     const fill = first.querySelector("rect.training-sentence-band-fill")!;
     expect(fill.getAttribute("stroke-dasharray")).toBe("3 2");
     expect(fill.getAttribute("fill")).toBe(TRAINING_CORRECTION_COLOR);
     expect(first.querySelector("polygon.training-sentence-correction-mark")).toBeTruthy();
-    expect(screen.getByText("9 corrections")).toBeTruthy();
+    expect(screen.getByText("21 corrections")).toBeTruthy();
     // an ordinary word is none of the three
     const ordinary = band(container, "heading", 0);
     expect(ordinary.classList.contains("correction")).toBe(false);
@@ -153,28 +153,29 @@ describe("TrainingSentenceBar", () => {
 
   it("says how the flown flight ended and its DA check, with the values in the tooltips", () => {
     open(2);
-    const outcome = screen.getByText("unstable at minimums");
-    expect(outcome.title).toContain("15.5 m right of the centreline, 41.8 m above the threshold");
+    const outcome = screen.getByText("landing failed");
+    expect(outcome.title).toContain("19.3 m left of the centreline, 45.0 m above the threshold");
+    expect(outcome.title).toContain("evaluation failed");
     const da = screen.getByText(/DA failed/);
-    expect(da.title).toBe("DA check failed · 15.5 m right of the centreline (cone half width 116.3 m) ✓ · 26.8 m above the glidepath ✗");
+    expect(da.title).toBe("DA check failed · 19.3 m left of the centreline (cone half width 115.9 m) ✓ · 30.0 m above the glidepath ✗");
     expect(screen.getByText("runway 09")).toBeTruthy();
   });
 
   it("shades the rows before the first predicted step as observed only, and ends the axis at the flown flight", () => {
     const { container } = open(4);
     expect(container.querySelector("g.training-sentence-observed title")!.textContent).toContain("observed only");
-    // the axis ends where the sentence does (16 s + 124 rows of 4 s); the flown flight ended at cycle 494 of the executor's 1 s
+    // the axis ends where the sentence does (16 s + 122 rows of 4 s); the flown flight ended at cycle 485 of the executor's 1 s
     const ticks = [...container.querySelectorAll("text.training-sentence-tick")].map((node) => node.textContent);
-    expect(ticks[ticks.length - 1]).toBe("512 s");
+    expect(ticks[ticks.length - 1]).toBe("504 s");
     const end = [...container.querySelectorAll("g[aria-label^='the flown flight ended']")];
     expect(end).toHaveLength(1);
-    expect(end[0].getAttribute("aria-label")).toContain("ended at 510 s: ");
+    expect(end[0].getAttribute("aria-label")).toContain("ended at 501 s: ");
     expect(end[0].querySelector("line.training-sentence-marker")).toBeTruthy();
-    // and its x is the flown end's place on the axis: 510 of 512 s
+    // and its x is the flown end's place on the axis: 501 of 504 s
     const x = (node: Element, attr: string) => Number(node.getAttribute(attr));
     const axis = container.querySelector("line.training-sentence-axis")!;
     const atEnd = (x(end[0].querySelector("line")!, "x1") - x(axis, "x1")) / (x(axis, "x2") - x(axis, "x1"));
-    expect(atEnd).toBeCloseTo(510 / 512, 4);
+    expect(atEnd).toBeCloseTo(501 / 504, 4);
     const { container: labelled } = open(null);
     expect(labelled.querySelectorAll("g.training-sentence-observed")).toHaveLength(0);
   });

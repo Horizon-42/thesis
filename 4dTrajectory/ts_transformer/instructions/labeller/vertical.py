@@ -5,9 +5,10 @@ and a level word's ``level_m`` is its level T above E. The pieces, the level tes
 constant offset.
 
 The smoothed height is fitted against horizontal distance by straight pieces. A piece that lasts the minimum level
-time with every row within `level_band_m` of its own median is a LEVEL — a physical test that does not use the grid
-(§4.4: the grid's 60–450 m steps would miss a level between two of its levels or swallow a descent) — and its word is
-the grid level nearest that median; consecutive level pieces with the same word merge. Every other piece is a MOVE with
+time with every row within `level_band_m` of its own median, or with its path angle within `level_angle_deg` of level
+(the user, 2026-10-13: a near-level piece is not read as a shallow descent), is a LEVEL — a physical test that does not
+use the grid (§4.4: the grid's 60–450 m steps would miss a level between two of its levels or swallow a descent) — and
+its word is the grid level nearest that median; consecutive level pieces with the same word merge. Every other piece is a MOVE with
 a path angle. Consecutive moves in one direction form a run; a run's altitude word is the next level's word (the
 turning altitude's when the direction reverses without a level; "no level-off" when the last run descends to the end),
 issued where the run begins. An angle word is issued wherever a move's class differs from the class in force. A run
@@ -92,7 +93,9 @@ def vertical_pieces(distance: np.ndarray, altitude: np.ndarray, spec: Vocabulary
     for piece in fit_pieces(distance, altitude, spec.altitude_fit_tolerance_m):
         rows = altitude[piece.start: piece.stop]
         median = float(np.median(rows))
-        if piece.rows >= minimum and bool(envelope.level_band(rows, median, spec.level_band_m).all()):
+        angle_deg = math.degrees(math.atan(-piece.slope))
+        if piece.rows >= minimum and (bool(envelope.level_band(rows, median, spec.level_band_m).all())
+                                      or abs(angle_deg) <= spec.level_angle_deg):
             try:
                 index = words.altitude_index(median)
             except ValueError as error:
@@ -103,14 +106,14 @@ def vertical_pieces(distance: np.ndarray, altitude: np.ndarray, spec: Vocabulary
             else:
                 pieces.append(VerticalPiece(piece.start, piece.stop, LEVEL, target_index=index, median_m=median))
         else:
-            pieces.append(VerticalPiece(piece.start, piece.stop, MOVE, angle_deg=math.degrees(math.atan(-piece.slope))))
+            pieces.append(VerticalPiece(piece.start, piece.stop, MOVE, angle_deg=angle_deg))
     return pieces
 
 
 def held_height(pieces: list[VerticalPiece], height: np.ndarray) -> np.ndarray:
     """The height above E the aircraft holds at each row, as the reading has it: a level piece's rows at the height the
-    level is held at (its median; a level's rows wander up to `level_band_m` about it), every other row at its own
-    height — what the grammar reads a row's words at (`labeller.sentence.check_grammar`)."""
+    level is held at (its median; a level's rows wander up to `level_band_m` about it, or as far as its angle takes them),
+    every other row at its own height — what the grammar reads a row's words at (`labeller.sentence.check_grammar`)."""
     held = np.array(height, dtype=np.float64)
     for piece in pieces:
         if piece.kind == LEVEL:

@@ -307,13 +307,28 @@ def test_a_level_between_two_grid_levels_is_found_and_named_by_the_nearest():
 
 
 def test_a_slow_descent_inside_one_450_m_step_is_not_a_level():
-    """A 0.5° descent from 3,350 m to 3,150 m stays inside the band of the 3,150 m level (ε 235 m) all the way: it is
+    """A 0.6° descent from 3,350 m to 3,120 m stays inside the band of the 3,150 m level (ε 235 m) all the way: it is
     still a move — the level test reads the piece, not the grid."""
     one, words = spec(), Words(spec())
     distance = np.arange(150) * 150.0
-    altitude = 3350.0 - distance * np.tan(np.radians(0.5))
+    altitude = 3350.0 - distance * np.tan(np.radians(0.6))
     pieces = vertical_pieces(distance, altitude, one, words)
     assert {piece.kind for piece in pieces} == {MOVE}
+
+
+def test_a_piece_flatter_than_the_level_angle_is_a_level_beyond_the_band():
+    """§4.4 (the user, 2026-10-13): a 0.4° piece of 60 s drops 63 m, beyond the band about its median, and is a level all
+    the same, named by the grid level nearest its median; at 0.6° it is a move."""
+    one, words = spec(), Words(spec())
+    assert one.level_angle_deg == 0.5
+    distance = np.arange(30) * 300.0
+    for angle_deg, kind in ((0.4, LEVEL), (0.6, MOVE)):
+        altitude = 900.0 - distance * np.tan(np.radians(angle_deg))
+        assert altitude[0] - altitude[-1] > 2 * one.level_band_m
+        (piece,) = vertical_pieces(distance, altitude, one, words)
+        assert piece.kind == kind
+    (piece,) = vertical_pieces(distance, 900.0 - distance * np.tan(np.radians(0.4)), one, words)
+    assert piece.target_index == words.altitude_index(float(np.median(900.0 - distance * np.tan(np.radians(0.4)))))
 
 
 def test_a_move_between_two_heights_of_one_level_says_nothing():

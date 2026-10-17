@@ -22,7 +22,6 @@ casadi-free, which is why importing it into the torch env works.
 from __future__ import annotations
 
 import json
-import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -561,55 +560,6 @@ def write_batch(
         json.dumps(summary, indent=2, allow_nan=False), encoding="utf-8"
     )
     return written
-
-
-def metrics_from_row(row: dict[str, Any]) -> dict[str, Any]:
-    """A summary row read back as the per-flight metrics dict `accuracy_block` takes — the
-    inverse of the row `write_batch` writes (``metric_steps`` → ``n_steps``, the JSON nulls of
-    the raw kinematics → NaN, the flattened difficulty covariates → ``difficulty``). A row
-    written before 2026-09-18 lacks the two p95 columns and is refused."""
-    if "cross_track_p95_m" not in row:
-        raise ValueError("the results rows predate the p95 columns (2026-09-18); re-write the batch to read its accuracy back")
-    return {
-        **{key: row[key] for key in ("ade_m", "fde_m", "arrival_endpoint_error_m", "cross_track_p95_m", "altitude_p95_m",
-                                     "final_time_error_s", "true_final_time_s")},
-        "n_steps": row["metric_steps"],
-        "raw_kinematics": {role: {key: (float("nan") if value is None else value) for key, value in metrics.items()}
-                           for role, metrics in row["raw_kinematics"].items()},
-        "difficulty": {key: row[key] for key in ("route_tortuosity", "remaining_path_m", "established_at_anchor")},
-    }
-
-
-def copy_record_subset(source: Path, out: Path, stems: Sequence[str], *, extra_summary: dict[str, Any]) -> Path:
-    """A record directory holding only ``stems`` of ``source``'s batch (the states, eval and
-    reference files copied byte for byte, the roster filtered) — a few flights of one class
-    for the picker. Its ``accuracy`` block is the subset's own (`accuracy_block` over the
-    retained rows, `metrics_from_row`), ``subset`` names the source, and ``extra_summary``
-    adds the caller's keys as `write_batch` does. Refuses an existing ``out``."""
-    if out.exists():
-        raise FileExistsError(f"{out} exists; a record directory is never overwritten")
-    summary = json.loads((source / "summary.json").read_text(encoding="utf-8"))
-    wanted = set(stems)
-    rows = [row for row in summary["results"] if row["states_file"].removesuffix(STATES_SUFFIX) in wanted]
-    found = {row["states_file"].removesuffix(STATES_SUFFIX) for row in rows}
-    if found != wanted:
-        raise ValueError(f"{source} does not hold {sorted(wanted - found)[:3]} …")
-    accuracy = accuracy_block([metrics_from_row(row) for row in rows])
-    accuracy["raw_kinematics"] = _json_optional_metrics(accuracy["raw_kinematics"])
-    (out / REFERENCES_DIR).mkdir(parents=True)
-    for row in rows:
-        stem = row["states_file"].removesuffix(STATES_SUFFIX)
-        for name in (row["states_file"], row["eval_file"]):
-            shutil.copy2(source / name, out / name)
-        shutil.copy2(source / REFERENCES_DIR / f"{stem}{REFERENCE_EVAL_SUFFIX}", out / REFERENCES_DIR / f"{stem}{REFERENCE_EVAL_SUFFIX}")
-    subset = {**summary, "total": len(rows), "solved": len(rows), "accuracy": accuracy, "results": rows,
-              "subset": {"of": str(source), "of_total": summary["total"], "stems": sorted(wanted)}}
-    collisions = sorted(set(extra_summary) & set(subset))
-    if collisions:
-        raise ValueError(f"extra_summary would overwrite the subset summary's own key(s): {collisions}")
-    subset.update(extra_summary)
-    (out / "summary.json").write_text(json.dumps(subset, indent=2, allow_nan=False), encoding="utf-8")
-    return out
 
 
 def _cta_mode_suffix(source: dict[str, Any]) -> str:

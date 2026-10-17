@@ -17,7 +17,7 @@ import torch
 import aeroviz_backend.autopilot_segment  # noqa: F401 — puts `ts_transformer` (under 4dTrajectory/) on the path
 from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.conformance import STATE_BOUND_M
-from ts_transformer.autopilot.judge import OUTCOMES, flown_track
+from ts_transformer.autopilot.judge import LANDING_GATES, OUTCOMES, flown_track
 from ts_transformer.experiments import training_export as export
 from ts_transformer.instructions import artefact, training_files
 from ts_transformer.instructions.spec import READING_RULE
@@ -123,7 +123,7 @@ class PayloadTest(unittest.TestCase):
         self.assertEqual(len(track["attitude"]["headingDeg"]), len(track["cycle"]))
         self.assertTrue(np.allclose(np.subtract(track["altitudeHaeM"], track["altitudeMslM"]), -33.0, atol=0.02))
 
-    def test_the_last_word_is_drawn_to_its_outcome_with_its_crossing_and_decision_altitude_check(self):
+    def test_the_last_word_is_drawn_to_its_outcome_with_its_crossing_decision_altitude_check_and_the_evaluations_verdict(self):
         one = flight(2.0)
         row = max(r for r, c in words_said(one.sentence) if c == HEADING)
         result, answer = self.answer(HEADING, row)
@@ -132,6 +132,9 @@ class PayloadTest(unittest.TestCase):
         self.assertEqual(answer["track"]["cycle"][-1], result.verdict.end_row)
         decision = answer["crossing"]["decision"]
         self.assertEqual(decision["passed"], decision["lateralOk"] and decision["verticalOk"])
+        graded = answer["crossing"]["evaluation"]
+        self.assertEqual(graded["verdict"] == "pass", result.verdict.outcome == "landed")
+        self.assertEqual(graded["verdict"] == "pass", graded["violations"] == [])
 
 
 # ---- the service
@@ -758,6 +761,7 @@ class MirrorTest(unittest.TestCase):
         self.assertEqual(ts_constant(sample, "TRAINING_SET_KIND"), training_files.SET_KIND)
         self.assertEqual(ts_constant(sample, "TRAINING_READING_RULE"), READING_RULE)
         self.assertEqual(ts_strings(sample, "TRAINING_OUTCOMES"), list(OUTCOMES))
+        self.assertEqual(ts_strings(sample, "TRAINING_LANDING_GATES"), list(LANDING_GATES))
         self.assertEqual(ts_strings(sample, "TRAINING_SPLITS"), list(training_files.SPLITS))
         self.assertEqual(ts_strings(sample, "TRAINING_SET_SPLITS"), list(artefact.SPLITS))
         self.assertEqual(ts_strings(sample, "TRAINING_STRATA"), list(export.STRATA))

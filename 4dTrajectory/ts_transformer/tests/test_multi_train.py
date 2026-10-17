@@ -21,11 +21,11 @@ from ts_transformer.experiments.multi_train import (
 from ts_transformer.multi.separation import PAIRS
 from ts_transformer.multi.tokens import PART_FEATURES, TOKENS_SCHEMA
 from ts_transformer.multi.windows import COMPRESSED, REAL_KIND, left_out
-from ts_transformer.post.branches import EQUAL, GROUP_WEIGHTS, MINORITY_SIDE
+from ts_transformer.post.branches import EQUAL, GROUP_WEIGHTS, MINORITY_SIDE, SPREAD
 from ts_transformer.tests.support import INSTRUCTION_STEP_S
 from ts_transformer.tests.test_multi_windows import built  # noqa: F401
 from ts_transformer.tests.test_post_branches import _ahead
-from ts_transformer.tests.test_post_train import _context, _settings, short_round
+from ts_transformer.tests.test_post_train import _Spoken, _context, _settings, short_round
 from ts_transformer.tests.test_post_window_loop import setup  # noqa: F401
 
 
@@ -44,26 +44,30 @@ def _multi_settings(spans_s=(1.0,), **changed):
 @pytest.mark.parametrize("attention", ["copied", "merged"])
 def test_a_batch_is_spoken_with_its_campaigns_front_attention(monkeypatch, branching, attention):
     """D190 (2): stage D's batch gives its window loops its loop options and the campaign's
-    `MultiSettings.front_attention`, its branch points D143's or found backward."""
-    from ts_transformer.tests.test_post_train import _Spoken
-
+    `MultiSettings.front_attention`, its branch points D143's or found backward; version 1's loops without the window
+    input and its groups without whole windows (D212 (5))."""
     seen = {}
 
     def spoken(*args, **kwargs):
-        seen.update(kwargs["loop_options"])
+        seen.update(kwargs["loop_options"], whole_windows=kwargs["whole_windows"],
+                    **{key: kwargs[key] for key in ("search_points", "judged_after_s", "fine_point", "common_cut")
+                       if key in kwargs})
         raise _Spoken
 
     monkeypatch.setattr(multi_train, "branch_round", spoken)
     monkeypatch.setattr(multi_train, "backward_round", spoken)
-    monkeypatch.setattr(multi_train, "loop_options", lambda context: {"answering": "the stage's"})
+    monkeypatch.setattr(multi_train, "loop_options", lambda context, joint: {"answering": "the stage's", "joint": joint})
     context = SimpleNamespace(splits={"train": {"sentences": {}, "flights": {}, "faults": {}}},
-                              start_loop=lambda split, batch: None, geometries={}, rosters={}, finals={}, words=None,
+                              start_loop=lambda split, batch: None, geometries={}, finals={}, words=None,
                               interval_s=INSTRUCTION_STEP_S, variant="full", edges_reference=None,
                               device=torch.device("cpu"))
-    settings = _multi_settings(front_attention=attention, branching=branching)
+    searched = {"search_points": 10, "judged_after_s": 64.0, "fine_point": False, "common_cut": True}
+    settings = _multi_settings(front_attention=attention, branching=branching,
+                               **(searched if branching == "backward" else {}))
     with pytest.raises(_Spoken):
         multi_train.speak_batch(None, context, [], [], settings, 0, None, 0)
-    assert seen == {"answering": "the stage's", "attention": attention}
+    assert seen == {"answering": "the stage's", "attention": attention, "joint": False, "whole_windows": False,
+                    **(searched if branching == "backward" else {})}     # D217: the search's settings passed on
 
 
 def _stream_context(built):
@@ -99,9 +103,10 @@ def test_the_data_weight_defaults_to_the_code_before_it_and_reaches_the_pass(mon
         _multi_settings(data_weight=-0.5)
     seen = {}
     monkeypatch.setattr(multi_train, "train_pass", lambda *args, **kwargs: seen.update(kwargs) or {})
-    multi_train.stage_d().train("model", "context", "optimizer", "directory", _multi_settings(data_weight=0.25), "rng",
-                                part_width=7, round_=0, companion=None)
-    assert seen == {"part_width": 7, "data_weight": 0.25, "group_weight": EQUAL}
+    multi_train.stage_d().train("model", SimpleNamespace(interval_s=INSTRUCTION_STEP_S), "optimizer", "directory",
+                                _multi_settings(data_weight=0.25), "rng", part_width=7, round_=0, companion=None)
+    assert seen == {"part_width": 7, "clip_norm": None, "segment_rows": None, "data_weight": 0.25,
+                    "group_weight": EQUAL, "dual_clip": None}
 
 
 def test_the_batch_bounds_default_to_the_code_before_them_and_are_refused_out_of_range():
@@ -134,9 +139,185 @@ def test_the_group_weight_defaults_to_the_code_before_it_and_reaches_the_pass(mo
     assert tuple(option.choices) == GROUP_WEIGHTS
     seen = {}
     monkeypatch.setattr(multi_train, "train_pass", lambda *args, **kwargs: seen.update(kwargs) or {})
-    multi_train.stage_d().train("model", "context", "optimizer", "directory", _multi_settings(group_weight=MINORITY_SIDE),
-                                "rng", part_width=7, round_=0, companion=None)
+    multi_train.stage_d().train("model", SimpleNamespace(interval_s=INSTRUCTION_STEP_S), "optimizer", "directory",
+                                _multi_settings(group_weight=MINORITY_SIDE), "rng", part_width=7, round_=0,
+                                companion=None)
     assert seen["group_weight"] == MINORITY_SIDE
+
+
+def test_the_grids_interval_and_segment_credit_default_to_the_code_before_them_and_reach_the_round(monkeypatch):
+    """D200: `MultiSettings.branch_every_s` (D143's 120 s) and `segment_only` (False) default to the code before them (a
+    record without them reads so), are refused out of range and with branch points found backward, are read from
+    ``--branch-every-s`` and ``--segment-only``; the grid's rules take the interval and the pass the segment's rows."""
+    from ts_transformer.multi.backward import BACKWARD, MAJORITY
+    from ts_transformer.post.branches import BRANCH_EVERY_S, branch_rows
+
+    settings = _multi_settings()
+    assert (settings.branch_every_s, settings.segment_only) == (BRANCH_EVERY_S, False)
+    recorded = asdict(settings)
+    del recorded["branch_every_s"], recorded["segment_only"]
+    assert MultiSettings(**recorded) == settings
+    with pytest.raises(ValueError, match="branch_every_s"):
+        _multi_settings(branch_every_s=0.0)
+    for branching in (BACKWARD, MAJORITY):
+        _multi_settings(branching=branching)
+        for wrong in ({"segment_only": True}, {"branch_every_s": 60.0}):
+            with pytest.raises(ValueError, match="are the grid's"):
+                _multi_settings(branching=branching, **wrong)
+    parser = argparse.ArgumentParser()
+    multi_train.add_arguments(parser)
+    by_dest = {a.dest: a for a in parser._actions}
+    assert by_dest["branch_every_s"].default == BRANCH_EVERY_S and by_dest["segment_only"].default is False
+    seen = {}
+    monkeypatch.setattr(multi_train, "train_pass", lambda *args, **kwargs: seen.update(kwargs) or {})
+    segments = _multi_settings(branch_every_s=60.0, segment_only=True)
+    multi_train.stage_d().train("model", SimpleNamespace(interval_s=INSTRUCTION_STEP_S), "optimizer", "directory",
+                                segments, "rng", part_width=7, round_=0, companion=None)
+    assert seen["segment_rows"] == branch_rows(INSTRUCTION_STEP_S, 60.0) == 60.0 / INSTRUCTION_STEP_S
+    asked = []
+    monkeypatch.setattr(multi_train.credit, "rules", lambda *args: asked.append(args) or {})
+    monkeypatch.setattr(multi_train, "Rules", lambda **fields: fields)
+    def spoken(*args, **kwargs):
+        raise _Spoken
+
+    monkeypatch.setattr(multi_train, "branch_round", spoken)
+    monkeypatch.setattr(multi_train, "loop_options", lambda context, joint: {})
+    with pytest.raises(_Spoken):
+        multi_train.speak_batch(None, _speak_context(), [], [], segments, 3, None, 0)
+    assert asked == [(segments.seed, 3, INSTRUCTION_STEP_S, 60.0)]
+
+
+def _speak_context():
+    """What `multi_train.speak_batch` reads of a context before its loops."""
+    return SimpleNamespace(splits={"train": {"sentences": {}, "flights": {}, "faults": {}}},
+                           start_loop=lambda split, batch: None, geometries={}, finals={}, words=None,
+                           interval_s=INSTRUCTION_STEP_S, variant="full", edges_reference=None,
+                           device=torch.device("cpu"))
+
+
+def test_d219_the_pass_settings_and_the_readout_seed_default_to_the_code_before_them_and_parse(monkeypatch):
+    """D219: `MultiSettings.clip_norm`, `dual_clip` and `select_seed` default to None (a record without them reads so),
+    the readout's seed is then the seed; out of range they are refused; the runner's flags set them; stage D's pass
+    gives the clip and the dual clip to `post_train.train_pass`."""
+    settings = _multi_settings()
+    assert (settings.clip_norm, settings.dual_clip, settings.select_seed) == (None, None, None)
+    assert settings.readout_seed == settings.seed == 2024
+    assert replace(settings, select_seed=7).readout_seed == 7
+    recorded = asdict(settings)
+    for key in ("clip_norm", "dual_clip", "select_seed"):
+        del recorded[key]
+    assert MultiSettings(**recorded) == settings
+    for wrong, name in (({"clip_norm": 0.0}, "clip_norm"), ({"clip_norm": -1.0}, "clip_norm"),
+                        ({"dual_clip": 1.0}, "dual_clip"), ({"dual_clip": 0.5}, "dual_clip")):
+        with pytest.raises(ValueError, match=name):
+            _multi_settings(**wrong)
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    multi_train.add_arguments(parser)
+    required = ["--prior", "p", "--instructions", "i", "--executor", "e", "--windows", "w", "--rounds", "1",
+                "--windows-real", "1", "--windows-compressed", "0", "--spans-s", "1", "--c-min", "0.6",
+                "--batch-rows", "2", "--seed", "1", "--prior-lr", "1e-4", "--traffic-lr", "1e-3",
+                "--weight-decay", "0", "--update-groups", "1", "--data-sentences", "1", "--select-per-airport", "1"]
+    plain = multi_train.settings_from(parser.parse_args(required), settings.start)
+    assert (plain.clip_norm, plain.dual_clip, plain.select_seed, plain.readout_seed) == (None, None, None, 1)
+    given = multi_train.settings_from(parser.parse_args(required + ["--clip-norm", "20", "--dual-clip", "3",
+                                                                    "--select-seed", "2035"]), settings.start)
+    assert (given.clip_norm, given.dual_clip, given.select_seed, given.readout_seed) == (20.0, 3.0, 2035, 2035)
+    seen = {}
+    monkeypatch.setattr(multi_train, "train_pass", lambda *args, **kwargs: seen.update(kwargs) or {})
+    multi_train.stage_d().train("model", SimpleNamespace(interval_s=INSTRUCTION_STEP_S), "optimizer", "directory",
+                                _multi_settings(clip_norm=20.0, dual_clip=3.0), "rng", part_width=7, round_=0,
+                                companion=None)
+    assert (seen["clip_norm"], seen["dual_clip"]) == (20.0, 3.0)
+
+
+def test_d217_the_search_settings_default_to_d182_go_with_the_backward_search_and_parse():
+    """D217: `MultiSettings`' search settings default to D182's (a record without them reads so), go with a search
+    backward only (refused by name with the grid), are positive, are profiled, and the runner's flags set them."""
+    settings = _multi_settings(branching="majority")
+    assert (settings.search_points, settings.judged_after_s, settings.fine_point, settings.common_cut) == (
+        8, 60.0, True, False)
+    recorded = asdict(settings)
+    for key in ("search_points", "judged_after_s", "fine_point", "common_cut"):
+        del recorded[key]
+    assert MultiSettings(**recorded) == settings
+    for changed in ({"search_points": 10}, {"judged_after_s": 64.0}, {"fine_point": False}, {"common_cut": True}):
+        replace(settings, **changed)
+        with pytest.raises(ValueError, match=r"backward search's \(D217\), not the grid's"):
+            _multi_settings(**changed)
+    for wrong in ({"search_points": 0}, {"judged_after_s": 0.0}):
+        with pytest.raises(ValueError, match="positive"):
+            replace(settings, **wrong)
+    assert {"search_points", "judged_after_s", "fine_point"} <= set(multi_train.PROFILED_SETTINGS)
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    multi_train.add_arguments(parser)
+    required = ["--prior", "p", "--instructions", "i", "--executor", "e", "--windows", "w", "--rounds", "1",
+                "--windows-real", "1", "--windows-compressed", "0", "--spans-s", "1", "--c-min", "0.6",
+                "--batch-rows", "2", "--seed", "1", "--prior-lr", "1e-4", "--traffic-lr", "1e-3",
+                "--weight-decay", "0", "--update-groups", "1", "--data-sentences", "1", "--select-per-airport", "1",
+                "--branching", "majority"]
+    plain = multi_train.settings_from(parser.parse_args(required), settings.start)
+    assert (plain.search_points, plain.judged_after_s, plain.fine_point, plain.common_cut) == (8, 60.0, True, False)
+    given = multi_train.settings_from(parser.parse_args(required + ["--search-points", "10", "--judged-after-s", "64",
+                                                                    "--no-fine-point", "--common-cut"]),
+                                      settings.start)
+    assert (given.search_points, given.judged_after_s, given.fine_point, given.common_cut) == (10, 64.0, False, True)
+
+
+def test_d220_the_points_values_default_off_go_with_the_backward_search_alone_and_parse():
+    """D220: `MultiSettings.point_values` defaults to off (a record without it reads so), goes with a backward search
+    without the fine point and with equal group weights only (refused by name otherwise), is profiled, and the runner's
+    flag sets it."""
+    settings = _multi_settings(branching="majority", fine_point=False)
+    assert settings.point_values is False
+    recorded = asdict(settings)
+    del recorded["point_values"]
+    assert MultiSettings(**recorded) == settings
+    assert replace(settings, point_values=True).point_values
+    for wrong in ({"branching": "grid", "fine_point": True}, {"fine_point": True},
+                  {"group_weight": MINORITY_SIDE}):
+        with pytest.raises(ValueError, match=r"point_values \(D220\) goes with the backward search"):
+            replace(settings, point_values=True, **wrong)
+    assert "point_values" in multi_train.PROFILED_SETTINGS
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    multi_train.add_arguments(parser)
+    required = ["--prior", "p", "--instructions", "i", "--executor", "e", "--windows", "w", "--rounds", "1",
+                "--windows-real", "1", "--windows-compressed", "0", "--spans-s", "1", "--c-min", "0.6",
+                "--batch-rows", "2", "--seed", "1", "--prior-lr", "1e-4", "--traffic-lr", "1e-3",
+                "--weight-decay", "0", "--update-groups", "1", "--data-sentences", "1", "--select-per-airport", "1",
+                "--branching", "majority", "--no-fine-point"]
+    assert not multi_train.settings_from(parser.parse_args(required), settings.start).point_values
+    assert multi_train.settings_from(parser.parse_args(required + ["--point-values"]), settings.start).point_values
+
+
+def test_a_start_from_the_base_takes_its_own_traffic_shape_a_start_from_a_round_its_campaigns():
+    """D200: `MultiSettings.start` None (the base) goes with a positive traffic shape, a start from a round of stage C
+    with none (its campaign's shape, D164; a record without the fields reads so); the runner's `start_from` gives None
+    without ``--start-campaign``, and refuses by name a campaign without its round and a shape beside a round."""
+    settings = _multi_settings()
+    assert (settings.traffic_hidden, settings.traffic_heads) == (None, None)
+    recorded = asdict(settings)
+    del recorded["traffic_hidden"], recorded["traffic_heads"]
+    assert MultiSettings(**recorded) == settings
+    base = _multi_settings(start=None, traffic_hidden=16, traffic_heads=4)
+    assert base.start is None
+    for wrong in ({"start": None}, {"start": None, "traffic_hidden": 16}, {"start": None, "traffic_hidden": 0,
+                                                                            "traffic_heads": 4},
+                  {"traffic_hidden": 16, "traffic_heads": 4}, {"traffic_hidden": 16}):
+        with pytest.raises(ValueError, match="traffic shape"):
+            _multi_settings(**wrong)
+
+    def args(**given):
+        return SimpleNamespace(**{"start_campaign": None, "start_round": None, "traffic_hidden": None,
+                                  "traffic_heads": None, **given})
+
+    assert multi_train.start_from(args(traffic_hidden=16, traffic_heads=4), formal=True) is None
+    with pytest.raises(ValueError, match="go together"):
+        multi_train.start_from(args(start_round=3, traffic_hidden=16, traffic_heads=4), formal=False)
+    with pytest.raises(ValueError, match="go with a start from the base"):
+        multi_train.start_from(args(), formal=False)
+    for shape in ({"traffic_hidden": 16, "traffic_heads": 4}, {"traffic_heads": 4}):
+        with pytest.raises(ValueError, match="go with a start from the base"):
+            multi_train.start_from(args(start_campaign="c", start_round=0, **shape), formal=False)
 
 
 def test_each_kinds_count_is_split_equally_by_span():
@@ -249,6 +430,11 @@ def test_the_select_windows_are_drawn_once_per_airport_and_span_and_never_left_o
     assert all(kind_of(w) == REAL_KIND for w in first)
     assert [w.span_s for w in selection_windows(context, _multi_settings(spans_s=[130.0, 300.0],
                                                                          select_per_airport=10))] == [130.0] * 4 + [300.0] * 4
+    # D219 (3): the readout's seed draws them — another seed with the same select seed, the same windows
+    own = [window_record(w) for w in selection_windows(context, _multi_settings(spans_s=[130.0, 300.0], seed=7,
+                                                                                 select_per_airport=2))]
+    assert [window_record(w) for w in selection_windows(context, _multi_settings(
+        spans_s=[130.0, 300.0], seed=8, select_seed=7, select_per_airport=2))] == own
 
 
 def test_the_readout_sums_each_span_and_kind_with_their_all(built):
@@ -363,6 +549,111 @@ def test_a_round_of_stage_d_from_a_round_of_stage_c_end_to_end(setup, tmp_path, 
     assert resumed["start"] == identity_c and len(resumed["rounds"]) == 2      # a resumed stage reads the start again
     with pytest.raises(SystemExit, match="a ts-post-train-v1 campaign, not"):
         post_train.open_campaign(tmp_path / "stage_c", {"settings": {}}, {"head": "x", "dirty": False}, {}, **options)
+
+
+def test_a_round_of_stage_d_from_the_base_end_to_end(setup, tmp_path, monkeypatch):
+    """D200: stage D's start from the base is the base with zero-output traffic modules of the campaign's seed and shape
+    (`post_train.traffic_model`) and the token part at zero; its checkpoint's identity names the base and that shape as
+    its start; `round_model` opens the round and refuses another shape; a resume continues the campaign."""
+    from ts_transformer.post.traffic_attention import TrafficConfig
+
+    s = setup
+    short_round(monkeypatch, s)
+    context = _context(s)
+    window = replace(_ahead(s["windows"][0]), span_s=1.0)                  # of the campaign's span
+    monkeypatch.setattr(multi_train, "draw_windows",
+                        lambda context, settings, rng: ([window], {"drawn": {REAL_KIND: 1}}))
+    settings = _multi_settings(rounds=1, start=None, traffic_hidden=16, traffic_heads=4)
+    stage = stage_d()
+    model, _ = stage.start(context, settings)
+    plain = post_train.traffic_model(context, settings.seed, TrafficConfig(16, 4)).state_dict()
+    parts = model.state_dict()
+    assert {n for n in parts if ".part." in n} and all(not parts[n].any() for n in parts if ".part." in n)
+    assert set(parts) - set(plain) == {n for n in parts if ".part." in n}
+    assert all(torch.equal(parts[n], v) for n, v in plain.items())          # the base with D29's traffic modules
+    out = tmp_path / "stage_d"
+    options = dict(schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER, settings_type=MultiSettings)
+    paths = {key: str(tmp_path / "inputs" / key) for key in post_train.INPUT_PATHS}
+    post_train.open_campaign(out, {**paths, "settings": asdict(settings), "smoke": True}, {"head": "x", "dirty": False},
+                             {}, **options)
+    post_train.run_campaign(out, settings, context, stage=stage)
+    identity = torch.load(out / "round_0" / "checkpoint.pt", weights_only=False)["identity"]
+    assert identity["start"] == {"base": context.base_identity, "traffic": TrafficConfig(16, 4).to_dict()}
+    record = json.loads((out / "round_0" / "round.json").read_text())
+    turns, readout = record["turns_readout"], record["selection_readout"]       # D214: every commanded aircraft's
+    assert turns["all"]["aircraft"] == sum(readout[code]["all"]["all"]["aircraft"] for code in readout)
+    assert not multi_train.round_model(context, settings, out, 0).training
+    with pytest.raises(ValueError, match="another start, base"):
+        multi_train.round_model(context, replace(settings, traffic_hidden=8), out, 0)
+    raised = replace(settings, rounds=2)
+    post_train.open_campaign(out, {**paths, "settings": asdict(raised), "smoke": True}, {"head": "y", "dirty": False},
+                             {}, **options)
+    post_train.run_campaign(out, raised, context, stage=stage_d())
+    resumed = torch.load(out / "round_1" / "checkpoint.pt", weights_only=False)["identity"]
+    assert resumed["start"] == identity["start"] and len(resumed["rounds"]) == 2
+
+
+def test_a_campaign_of_stage_d_starts_from_a_round_of_stage_d(setup, tmp_path, monkeypatch):
+    """D218: a campaign of stage D from round 0 of another campaign of stage D (from the base here) starts with that
+    round's weights as trained, its checkpoints' start that round's identity, and `round_model` reads the base through
+    it; the runner's `start_from` names the round (`multi_start_of`); the stage refuses by name other bytes, the
+    source's seed, another version (joint_heads) and a smoke source under a formal campaign; `require_finished` counts a
+    source of stage D's rounds."""
+    from ts_transformer.io_utils import file_sha256
+
+    s = setup
+    short_round(monkeypatch, s)
+    context = _context(s)
+    window = replace(_ahead(s["windows"][0]), span_s=1.0)                  # of the campaign's span
+    monkeypatch.setattr(multi_train, "draw_windows",
+                        lambda context, settings, rng: ([window], {"drawn": {REAL_KIND: 1}}))
+    options = dict(schema=MULTI_CAMPAIGN_SCHEMA, reader=MULTI_CLAIM_READER, settings_type=MultiSettings)
+    paths = {key: str(tmp_path / "inputs" / key) for key in post_train.INPUT_PATHS}
+
+    def campaign(out, settings, smoke=False, run=None):
+        post_train.open_campaign(out, {**paths, "settings": asdict(settings), "smoke": smoke},
+                                 {"head": "x", "dirty": False}, {}, **options)
+        post_train.run_campaign(out, run or settings, context, stage=stage_d())
+
+    source = tmp_path / "stage_d"
+    first = _multi_settings(rounds=1, start=None, traffic_hidden=16, traffic_heads=4)
+    campaign(source, first)
+    checkpoint = source / "round_0" / "checkpoint.pt"
+    start = {"campaign": source.as_posix(), "round": 0, "checkpoint_sha256": file_sha256(checkpoint)}
+    given = SimpleNamespace(start_campaign=source, start_round=0, traffic_hidden=None, traffic_heads=None)
+    assert multi_train.start_from(given, formal=True) == multi_train.multi_start_of(source, 0, formal=True) == start
+    settings = _multi_settings(rounds=1, start=start, seed=2025)
+    stage = stage_d()
+    model, _ = stage.start(context, settings)
+    trained = multi_train.round_model(context, first, source, 0).state_dict()
+    started = model.state_dict()
+    assert started.keys() == trained.keys() and all(torch.equal(started[n], v) for n, v in trained.items())
+    later = tmp_path / "later"
+    campaign(later, settings)
+    identity = torch.load(later / "round_0" / "checkpoint.pt", weights_only=False)["identity"]
+    assert identity["start"] == torch.load(checkpoint, weights_only=False)["identity"]
+    assert multi_train.start_base(identity["start"]) == context.base_identity
+    assert not multi_train.round_model(context, settings, later, 0).training
+    with pytest.raises(ValueError, match="not the checkpoint the campaign started from"):
+        stage.start(context, replace(settings, start={**start, "checkpoint_sha256": "0" * 64}))
+    with pytest.raises(ValueError, match=r"takes another seed.*\(D162\)"):
+        stage.start(context, replace(settings, seed=first.seed))
+    with pytest.raises(ValueError, match=r"keeps its version, D218"):
+        stage.start(context, replace(settings, joint_heads=2))
+    with pytest.raises(ValueError, match="holds the checkpoints of rounds 0–0, not 1"):
+        multi_train.multi_start_of(source, 1, formal=False)
+    smoke = tmp_path / "stage_d_smoke"
+    campaign(smoke, first, smoke=True)
+    with pytest.raises(ValueError, match="is a smoke campaign: a formal campaign does not start from it"):
+        multi_train.multi_start_of(smoke, 0, formal=True)
+    with pytest.raises(ValueError, match="is a smoke campaign: a formal campaign does not start from it"):
+        stage.start(replace(context, formal=True),
+                    replace(settings, start=multi_train.multi_start_of(smoke, 0, formal=False)))
+    require_finished(source)
+    unfinished = tmp_path / "unfinished"                           # D166 item 19: one of its two rounds done
+    campaign(unfinished, replace(first, rounds=2), run=first)
+    with pytest.raises(ValueError, match=r"has done 1 of its 2 rounds.*\(D166 item 19\)"):
+        require_finished(unfinished)
 
 
 def test_stage_ds_start_is_refused_by_name_through_the_one_function(setup, tmp_path, monkeypatch):
@@ -595,17 +886,20 @@ def test_a_landed_aircraft_counts_in_the_readout_only_where_the_loop_judges_it(b
 def test_the_runner_records_stage_ds_campaign_and_opens_its_context_formal_or_smoke(tmp_path, monkeypatch):
     """§7 row 4 (the review of MC4, S2-4 b): `multi_train.main` opens its context formal unless ``--smoke`` (D132,
     D164), checks the start before its campaign record, records `MULTI_CAMPAIGN_SCHEMA` with stage D's claim reader,
-    and runs stage D's stage."""
+    and runs stage D's stage; D200: from the base without a source to check, and a grid interval that is not a whole
+    number of rows refused by name before the start and the campaign record."""
     from dataclasses import dataclass
 
     @dataclass
     class FakeContext:                                             # what main replaces: its device and its base
         device: torch.device
         base: torch.nn.Module
+        interval_s: float = INSTRUCTION_STEP_S
 
     calls = []
     start = {"campaign": "c", "round": 0, "checkpoint_sha256": "0" * 64}
     fake_stage = SimpleNamespace(start=lambda context, settings: calls.append(("start", settings.start)))
+    monkeypatch.setattr(multi_train, "of_stage_d", lambda source: False)       # a source of stage C
     monkeypatch.setattr(multi_train, "start_of", lambda source, round_, formal: (calls.append(("start_of", formal)),
                                                                                     start)[1])
     monkeypatch.setattr(multi_train, "require_finished", lambda source: calls.append(("finished", source)))
@@ -631,13 +925,23 @@ def test_the_runner_records_stage_ds_campaign_and_opens_its_context_formal_or_sm
     for extra, formal in (([], True), (["--smoke"], False)):
         calls.clear()
         assert multi_train.main(argv + extra) == 0
-        assert calls == [("start_of", formal)] + [("finished", tmp_path / "c")] * formal + [
+        assert calls == [("start_of", formal)] + [("finished", multi_train.REPO_ROOT / "c")] * formal + [
             ("spans", [300.0, 600.0]), ("context", formal), ("start", start),
             ("campaign", {"schema": MULTI_CAMPAIGN_SCHEMA, "reader": MULTI_CLAIM_READER,
                           "settings_type": MultiSettings, "restart_round": False}), ("run", True)]
     calls.clear()
     assert multi_train.main(argv + ["--smoke", "--restart-round"]) == 0                   # D185
     assert [k["restart_round"] for name, k in calls if name == "campaign"] == [True]
+    base = argv[:argv.index("--start-campaign")] + argv[argv.index("--start-round") + 2:] + [
+        "--traffic-hidden", "16", "--traffic-heads", "4"]
+    calls.clear()
+    assert multi_train.main(base) == 0                                                    # D200: from the base
+    assert [name for name, _ in calls] == ["spans", "context", "start", "campaign", "run"]
+    assert ("start", None) in calls
+    calls.clear()
+    with pytest.raises(SystemExit):
+        multi_train.main(base + ["--branch-every-s", "5"])                    # not a whole number of rows
+    assert [name for name, _ in calls] == ["spans", "context"]
 
 
 def test_the_time_the_aircraft_take(built):
@@ -681,25 +985,6 @@ def test_the_time_the_aircraft_take(built):
     far = windows[3]                                   # alone, 2 h after c: no neighbour from outside its own time
     assert multi_train.window_timing(far, [SimpleNamespace(crossing=None, outcome="timeout")], cycle_s)[
         "record_spacing_s"] == []
-
-
-def test_the_loops_crossing_time_is_the_timing_readouts(setup, monkeypatch):
-    """The review of MC4's timing (S3): the time of a loop landing that `multi.timing.landed` reads is the one the window
-    loop adds to the other aircraft's landings (`WindowLoop._landed`, D147)."""
-    from ts_transformer.experiments.post_window_loop import LANDED
-    from ts_transformer.multi import timing
-    from ts_transformer.tests.test_post_window_loop import _with_module
-    from ts_transformer.tests.test_post_window_multi import _multi
-
-    s = setup
-    _, loop_of = _multi(s)
-    loop = loop_of(_with_module(s["base"]))
-    crossing = {"at_row": 37.5, "runway_index": 0, "cross_m": 0.0, "height_m": 15.0}
-    monkeypatch.setattr(loop.speaking.loop, "outcome", lambda b: SimpleNamespace(outcome=LANDED, crossing=crossing))
-    loop._landed(np.array([True, False, False]))
-    (added,) = [x for x in loop.speaking.landings(1).landings if x.flight_key == loop.keys[0]]
-    (item,) = timing.landed(loop.records[:1], [crossing], loop.speaking.loop.params.cycle_s)
-    assert item.loop_s == added.time_s
 
 
 def test_a_round_of_stage_d_is_refused_unless_its_identity_is_the_campaigns(setup, tmp_path, monkeypatch):
@@ -963,10 +1248,12 @@ def test_the_runner_sizes_its_workers_from_the_profile_before_any_process_uses_t
     class FakeContext:
         device: torch.device
         base: SimpleNamespace
+        interval_s: float = INSTRUCTION_STEP_S
 
     base = SimpleNamespace(to=lambda device: base, eval=lambda: base)    # no CUDA touched
     calls = []
     start = {"campaign": "c", "round": 0, "checkpoint_sha256": "0" * 64}
+    monkeypatch.setattr(multi_train, "of_stage_d", lambda source: False)       # a source of stage C
     monkeypatch.setattr(multi_train, "start_of", lambda source, round_, formal: start)
     monkeypatch.setattr(multi_train, "git_state", lambda: {"head": "x", "dirty": False})
     monkeypatch.setattr(multi_train, "require_conforming_closed_loop", lambda i, e: (None, {"checks": {}}, None))
@@ -1030,3 +1317,53 @@ def test_a_worker_caps_its_gpu_once_at_its_first_task_and_only_with_a_budget(mon
             assert context.device.type == "cuda"
         assert capped == expected
 
+
+
+def test_d221_stage_ds_method_defaults_to_branch_and_grpo_keeps_the_branch_settings_at_their_defaults(monkeypatch):
+    """D221: `MultiSettings.method` defaults to branch training (a record without it reads so) and is profiled; GRPO
+    refuses a branch setting off its default and fewer than two draws, by name; the group weight `SPREAD` reaches the
+    pass."""
+    assert _multi_settings().method == post_train.BRANCH and "method" in multi_train.PROFILED_SETTINGS
+    record = {"schema": multi_train.MULTI_CAMPAIGN_SCHEMA, "inputs": {"settings": asdict(_multi_settings())}}
+    del record["inputs"]["settings"]["method"]
+    assert multi_train.multi_settings_of(record).method == post_train.BRANCH
+    assert _multi_settings(method=post_train.GRPO).method == post_train.GRPO
+    for changed in ({"branching": "majority"}, {"segment_only": True}, {"branch_every_s": 60.0}, {"continuations": 1}):
+        with pytest.raises(ValueError, match="no branch point"):
+            _multi_settings(method=post_train.GRPO, **changed)
+    with pytest.raises(ValueError, match="none of"):
+        _multi_settings(method=post_train.LANDED_SENTENCES)
+    seen = {}
+    monkeypatch.setattr(multi_train, "train_pass", lambda *args, **kwargs: seen.update(kwargs) or {})
+    multi_train.stage_d().train("model", SimpleNamespace(interval_s=INSTRUCTION_STEP_S), "optimizer", "directory",
+                                _multi_settings(method=post_train.GRPO, group_weight=SPREAD), "rng", part_width=7,
+                                round_=0, companion=None)
+    assert seen["group_weight"] == SPREAD
+
+
+def test_d221_a_grpo_batch_of_stage_d_writes_its_informative_groups_and_records_the_draws_outcomes(setup, tmp_path,
+                                                                                                    monkeypatch):
+    """D221 through stage D's batch speaker: its draws (`post_branches.sampled_round`, with stage D's rules and loop),
+    its informative groups written, and its record: the first pass's ends draw 0's, every window spoken again, the
+    outcomes over all draws, none of the search's keys."""
+    from ts_transformer.experiments import window_behaviour
+
+    s = setup
+    short_round(monkeypatch, s)
+    context = _context(s)
+    settings = _multi_settings(start=_stage_c(s, tmp_path, context), continuations=3, method=post_train.GRPO)
+    window = replace(s["windows"][0], span_s=1.0)
+    monkeypatch.setattr(multi_train, "draw_windows", lambda context, settings, rng: ([window], {"drawn": {REAL_KIND: 1}}))
+    stage = multi_train.stage_d()
+    model = stage.start(context, settings)[0].eval()
+    windows, _ = stage.draw(context, settings, 0)
+    with window_behaviour.captured_rounds() as found:
+        record = stage.speak_batch(model, context, windows, [0], settings, 0, tmp_path, 0)
+    (spoken,) = found
+    assert type(spoken).__name__ == "SampledRound" and len(spoken.groups) == 1
+    (group,) = spoken.groups
+    written = torch.load(tmp_path / "groups_0.pt", weights_only=False)
+    assert [len(g.sentences) for g in written] == [3] * group.informative
+    assert record["groups"] == 1 and record["informative_groups"] == len(written) and record["spoken_again"] == 1
+    assert sum(record["draw_outcomes"].values()) == 3 and sum(record["outcomes"].values()) == 1
+    assert not {"searches", "group_depths_s", "point_values"} & set(record)

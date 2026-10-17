@@ -24,7 +24,8 @@ import type { TrainingSelection } from "./trainingSample";
 
 /** MIRROR of `aeroviz_backend/autopilot_segment/prior.py` `SCHEMA`: the backend's answer; anything else is refused by name.
  *  A name changes with the payload's shape, on both sides, in one change. */
-export const TRAINING_PRIOR_AUTOPILOT_SCHEMA = "aeroviz-autopilot-prior-segment-v1";
+/** v2: the outcomes `landed` / `landing_failed` and the crossing's `evaluation` (the evaluation's landing verdict, the user 2026-10-12) beside its DA check. */
+export const TRAINING_PRIOR_AUTOPILOT_SCHEMA = "aeroviz-autopilot-prior-segment-v2";
 /** MIRROR of `prior.py` `CLOSED_LOOP`: the request's sentence that names the flight's closed-loop sentence. */
 export const TRAINING_PRIOR_CLOSED_LOOP = "closedLoop";
 export const TRAINING_PRIOR_AUTOPILOT_PATH = "/autopilot/prior-segment";

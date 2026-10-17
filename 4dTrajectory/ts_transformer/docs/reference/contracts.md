@@ -153,11 +153,11 @@ rebased — same rule, new IDs.
   FIXED 0.05-nat ruler, because `active_units` moves with the free-bits budget and made that
   gate unreadable across arms. **The three `component_*` numbers sum to
   `component_kl_nats_per_flight`, NOT to the charged `kl_nats_per_flight`** (free bits and
-  the mixture estimator separate the two). Read them with `run_ts.py latent_readout
-  --history <run>/history.json` (which needs no `--arm`: this is the epoch-1 reading), or off
-  a checkpoint with the archived `latent_probe` (`archive/one_tier_oneoffs_2026_10/`); the gate sentence is
-  `outputs.control.latent.displacement_verdict` and its ruler `DEAD_MEAN_DISPLACEMENT_SIGMA`, so no
-  surface restates either. A scalar auxiliary target concentrates the information in ONE
+  the mixture estimator separate the two). Read them with `latent_readout` (archived 2026-10-13, `archive/one_tier_runners_2026_10/`)
+  `--history <run>/history.json` (which needs no `--arm`: this is the epoch-1 reading), or off
+  a checkpoint with the archived `latent_probe` (`archive/one_tier_oneoffs_2026_10/`). The gate is a median
+  displacement above one prior sigma (L2.f); its sentence and ruler (`displacement_verdict`,
+  `DEAD_MEAN_DISPLACEMENT_SIGMA`) left the live code with their last readers on 2026-10-13 (at two-tier2 `b8426ff5`). A scalar auxiliary target concentrates the information in ONE
   dimension, so on such an arm the median displacement can miss what `component_kl_per_dim`
   shows — and that target is an INPUT of the posterior encoder, so a small `latent_aux`
   proves nothing on its own.
@@ -249,7 +249,7 @@ rebased — same rule, new IDs.
 
 - **The fixed anchor is ONE definition: `dataset.fixed_anchor_index(config, minimum_anchor_index)`,
   read off a window set as `FixedAnchorTrajectoryWindows.anchor` / `.anchor_indices`.** It is
-  `L-1` unless an experiment supplies a common floor (`run_ts.py history_ablation` trains every
+  `L-1` unless an experiment supplies a common floor (`history_ablation`, archived 2026-10-13 in `archive/one_tier_runners_2026_10/`, trained every
   candidate `seq_len` at `max(L) - 1`). Every fixed-anchor consumer — the common-grid truth, the
   cohort floor, the terminal-velocity weights, the report metrics — takes the anchor as a REQUIRED
   argument from the window set; none may restate `seq_len - 1`. Until 2026-09-09 three of them
@@ -384,8 +384,9 @@ digest. The arrival loader reads a non-current schema only when the bytes are a 
 generation's, so a frozen roster is read AS WRITTEN (the checkpoint's data is not converted).
 Users: `experiments/support.checkpoint_manifests`, `anytime_curve.load_arm` (and through it
 `chain_sensitivity`; the archived `latent_probe`),
-`predictability_report`, `control_basis_oracle` (teacher fit), `runway_hypotheses` (and the archived
-`control_capacity_ceiling`, `clock_attribution`: `archive/one_tier_oneoffs_2026_10/`).
+`control_basis_oracle` (teacher fit) (and the archived
+`control_capacity_ceiling`, `clock_attribution`: `archive/one_tier_oneoffs_2026_10/`; `predictability_report`,
+`runway_hypotheses`: `archive/one_tier_runners_2026_10/`).
 `predict` / `evaluate-fit` take `--data` explicitly — pass the frozen root's manifests there.
 New training always reads the live root (`repo_layout.HARVEST_ROOT`, the one definition; the
 four runners that restated it import it).
@@ -408,14 +409,16 @@ nothing reads the CIFP after the first runner — and every runway end the harve
 E is `reference.elevation_m`), `spec.json` + `measurements.json`,
 `sentences_{train,select,val}.npz` + `labels.json` + `readout.{json,md}`, `conformance/` (below) and, once an executor spec
 flies them, `closed_loop/` (C38). Every file code reads back carries its format's name (`SIGNALS_SCHEMA`,
-`CANDIDATES_SCHEMA`, `SPEC_SCHEMA` `ts-instruction-spec-v8`, `SENTENCES_SCHEMA` `ts-instruction-sentences-v6` (v8 / v6 since A29, D73: no digest of
-code in either): since A27 (D70) each sentence's stratum by its name, `readout.stratum`
+`CANDIDATES_SCHEMA`, `SPEC_SCHEMA` `ts-instruction-spec-v10`, `SENTENCES_SCHEMA` `ts-instruction-sentences-v6` (v8 / v6 since A29, D73: no digest of
+code in either; spec v9 since 2026-10-12: `closed_loop_final_lateral_m`; v10 since 2026-10-13: `level_angle_deg`,
+`closed_loop_two_class_factor`): since A27 (D70) each sentence's stratum by its name, `readout.stratum`
 of its reading — for readouts and strata, never an input) and is
 refused under any other; **a name changes with its file's shape**, in the same change (2026-09-24, the user's rule). The
 spec's sha covers every word, grid, class, tolerance and the reading rule (`instructions.spec.READING_RULE`,
 `instruction-v6`: the level words above E, read from the smoothed MSL height minus E, E = `candidates.json`
 `reference.elevation_m`, `AirportGeometry.elevation_m`; since A24 (D66) the closed loop's vertical tolerance in the final
-descent, `closed_loop_final_vertical_m`, chosen by the user, `instruction_spec --closed-loop-final-vertical-m`); `load_sentences` refuses a sentences file read with another sha, `VocabularySpec.from_dict` refuses a
+descent, `closed_loop_final_vertical_m`, chosen by the user, `instruction_spec --closed-loop-final-vertical-m`; since
+2026-10-12 the lateral one, `closed_loop_final_lateral_m`, `--closed-loop-final-lateral-m`, the user: half of Y); `load_sentences` refuses a sentences file read with another sha, `VocabularySpec.from_dict` refuses a
 missing or extra key and another reading rule — no compatibility.
 
 **The labeller is identified by what it reads, never by its source** (design D21, 2026-10-03; until v3 `spec.json`
@@ -461,6 +464,12 @@ of a flight's stored track no aircraft flies — a 2 s step more than `JUMP_RATI
 by their place in the signals. Read when the artefact is read; the artefact is not changed. On A34's artefact at Δ = 4 s:
 train 498 of 40,530 closed-loop sentences marked (469 landed), select 177 of 6,199 (157 landed); held positions are most
 of them. Stage B's selection `landed` leaves them out (prior D111, B11).
+
+**2026-10-12 (the user: one landing judgement, the evaluation package's)**: `candidates.json` is
+`ts-instruction-candidates-v5` — each candidate also carries ``evaluation``, the evaluation's assessment context of its runway
+end (`evaluation.context.assessment_for_runway`, built by the first runner from the same harvest `Runway` as the
+candidate), which the judge's landing verdict reads (C33). The vertical path stays: the judge's decision-altitude check
+(a record), the prior's inputs, the procedure masks and the Training view read it.
 
 ### C31 · the aircraft filter: drop a flight only where dynamics are used
 
@@ -555,6 +564,17 @@ log; `replay.open_spec` opens it without, for the check itself and for the backe
 everything with nothing run beforehand, and no spec, training or readout is redone; one that leaves them needs a new
 spec.** No passed record, no digest of code (until A29 a `passed-<code12>.json` named by the logic of every `autopilot/`
 module stood in for the check), no clean-checkout rule for a check; `executor_conformance` runs it as information.
+
+**2026-10-12 (the user: one landing judgement, the evaluation package's)**: the outcomes `unstable_at_minimums`,
+`crossed_too_high` and `crossed_off_runway` are deleted. The decision-altitude check (D38, `judge.decision_check`) stays,
+unchanged, as a record on every approach crossing (`decision`, beside `evaluation`); it decides no outcome (the user,
+2026-10-12).
+Where a flight ends is unchanged (`autopilot/ends.py`: an approach crossing of R, another runway, ground contact, a
+dynamics failure, the time limit). At an approach crossing the judge asks the evaluation (`judge.landing_verdict`:
+`evaluation.metrics.evaluate_record` on the flown state at the interpolated crossing, against the candidate's assessment
+context, the flown airframe's type for the speed gate) and names the outcome `landed` (pass) or `landing_failed` (fail, with
+the gates failed). The input digests of the reference tracks include the assessment contexts. A spec written before
+cannot be opened by this code: its reference outcomes carry the old names.
 
 ### C34 · a prior checkpoint belongs to one sentence artefact
 
@@ -657,7 +677,8 @@ the share is D34's third reading — and of those the rows after which no correc
 (`without_a_correction_toward_the_path`, `closed_loop.outside_rows`, read from the stored sentence and its open-loop
 reading: the heading word in force on the path's side of the observed word's track, the angle class steeper when too
 high): the rule of D50 that §14.6 checks; since A16 an overshoot — the error changing its sign beyond the tolerance —
-takes the opposite correction in its own row (D53), so the reading keeps the rule on every row), the rows past the end and the lateness of the observed heading words. The reading says each
+takes the opposite correction in its own row (D53); since 2026-10-12 the corrections read the errors ahead (below), so
+a row outside the tolerance whose error closes fast gets none and the count is a record, not zero by construction), the rows past the end and the lateness of the observed heading words. The reading says each
 observed word at the PLACE where the observed aircraft heard it, not at its time (D42): the words of the 2 s open-loop
 reading (not the Δ grid), each said at the first Δ row whose matched observed time is less than Δ/2 before the word's
 2 s time (D45: the nearest row; of several, each column's last word), so the words wait while the flown aircraft is
@@ -669,10 +690,16 @@ last segment's line, there is no e_h, no correction is said (one in force ends: 
 rows without correction. The flight runs until
 the executor is done or reaches the replay's time limit (`replay.time_limits_s`: the remaining observed time from the
 sentence's first row × 1.5, plus 900 s a go-around), so a sentence has the flown rows and its replay the same limit. It adds one-class heading
-corrections beyond 30 m and one-class angle corrections beyond the vertical tolerance in force under a descent class (the
-spec's `closed_loop_lateral_m`; vertically `closed_loop_final_vertical_m`, H_final, while "no level-off" is in force and
-`closed_loop_vertical_m`, 15 m, elsewhere — one definition, `closed_loop.vertical_tolerance_m`, which the rule of D50 and
-the readings of D34 read at each row, D66), ending under half of it, at a sign change or at a new observed word;
+corrections beyond the lateral tolerance in force and one-class angle corrections beyond the vertical tolerance in
+force under a descent class (while "no level-off" is in force `closed_loop_final_lateral_m`, Y_final — the user,
+2026-10-12: half of Y — and `closed_loop_final_vertical_m`, H_final; elsewhere `closed_loop_lateral_m`, 30 m, and
+`closed_loop_vertical_m`, 15 m — one definition each, `closed_loop.lateral_tolerance_m` and
+`closed_loop.vertical_tolerance_m`, which the corrections, the rule of D50 and the readings of D34 read at each row,
+D66), ending under half of it, at a sign change or at a new observed word. The corrections read each error AHEAD at
+the rate it changes now (the user's choice, 2026-10-12; `ObservedPath.rates`, from the flown track, ground speed and
+vertical rate): a correction starts on e + ė (Δ/2 + L) and ends on e + ė (Δ/2 + L/2), L the column's lead
+(`heading_lead_s`, `angle_lead_s`) — a word said now has its full effect L later, the next row comes Δ later, and a
+turn back over L moves the aircraft half as far; at ė = 0 these are the errors now;
 a level hold is the executor's capture of the level in force (Claude's reading). `conformance/` holds a reference sample
 (train, seed 1337, 10 flights an airport, every row interval written), written with the sentences; every process that
 reads closed-loop sentences or flies them again first calls `require_conforming_closed_loop(artefact, executor_dir)` (D69,
@@ -707,3 +734,17 @@ speed follows the frame's ground scale at the moved rows, D87), the moved rows c
 flight's own (the user, 2026-10-05); `NO_MOVE` is `start` bit for bit. The closed-loop reading
 builds its `Loop` from the same pieces, so its sentences said through `start` give back their stored states and the
 replay's outcome (`tests/test_start.py`). The artefact's formats do not change.
+
+**2026-10-12**: `ts-instruction-closed-loop-v9` — the outcomes are the judge's of C33 (2026-10-12): `landed` /
+`landing_failed` for an approach crossing, by the evaluation's verdict.
+
+**2026-10-13**: `ts-instruction-closed-loop-v10` — on the final, while "no level-off" is in force and the observed
+heading word in force says the course of the runway in force, e_y (and the stored `lateral_m`) is the distance from that
+runway's extended centreline, and the heading corrections aim there (vocabulary D201; `Corrector.lateral_reference`,
+`centreline_error`).
+
+**2026-10-14**: `ts-instruction-closed-loop-v11` — on the final (the condition of v10), e_h (and the stored
+`vertical_m`) is the flown height above that runway's published glidepath, and the angle corrections aim there; the
+centreline and the glidepath go on past the end of the observed path, so on the final the corrections go on to the
+threshold and `vertical_m` is a number there (vocabulary D203; `Corrector.final_runway`, `final_errors`). Off the final,
+past the end, v10's rule (D44).

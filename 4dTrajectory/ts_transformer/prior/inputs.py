@@ -2,8 +2,10 @@
 the Δ rows of one aircraft.
 
 **Scales** (D41): every input is a physical value divided by a constant in SI units, never a statistic of the data.
-The distances along and across a candidate go in as asinh(d / `DISTANCE_SCALE_M`): linear within a few hundred metres
-of a final, logarithmic out to the 25 km of the slice.
+The distance along a candidate goes in as asinh(d / `DISTANCE_SCALE_M`): linear within a few hundred metres of the
+threshold, logarithmic out to the 25 km of the slice. The two offsets from a final's path, across (right of the
+centreline) and in height (above the glidepath), go in on one finer scale, asinh(d / `PATH_OFFSET_SCALE_M`): the
+landing asks for the same accuracy in both (D204).
 
 **Motion** (D25, D60): the ground speed, the vertical rate and the direction of motion of a row come from the
 displacement between the 2 s row before it and the row, at every Δ — only positions and heights, never the stored
@@ -25,20 +27,17 @@ from ts_transformer.instructions.grammar import InForce, apply
 from ts_transformer.instructions.labeller.interval import interval_rows, on_interval_rows
 from ts_transformer.instructions.words import COLUMNS, HEADING, RUNWAY, UNCHANGED, Words
 from ts_transformer.prior.batch import IN_FORCE_WORDS, OWN_FEATURES, SentenceRows, variant_features
-from ts_transformer.prior.landings import LandingIndex, utc_s
 
 #: Fixed scales of the inputs (D41), SI.
 DISTANCE_SCALE_M = 1_000.0
 HEIGHT_SCALE_M = 1_000.0
-#: The height above a glidepath goes in as asinh(h / `GLIDEPATH_HEIGHT_SCALE_M`): linear near the glidepath, compressed
-#: far from it (D65).
-GLIDEPATH_HEIGHT_SCALE_M = 100.0
+#: The offsets from a final's path, right of the centreline and above the glidepath, go in as asinh(d /
+#: `PATH_OFFSET_SCALE_M`): linear near the path, compressed far from it (D65, D204).
+PATH_OFFSET_SCALE_M = 100.0
 SPEED_SCALE_MPS = 100.0
 VERTICAL_RATE_SCALE_MPS = 10.0
 #: The runway length of the variant ``constants`` (D39).
 LENGTH_SCALE_M = 1_000.0
-#: The landings on a candidate in 30 min, divided by this count.
-LANDINGS_SCALE = 10.0
 #: The time since a word (D17): log(1 + t / `SINCE_TIME_S`) / `SINCE_DIVISOR`.
 SINCE_TIME_S = 2.0
 SINCE_DIVISOR = 5.0
@@ -83,8 +82,8 @@ def direction_inputs(track_deg: np.ndarray, course_deg: float, known: np.ndarray
     return np.where(known, np.sin(angle), 0.0), np.where(known, np.cos(angle), 0.0)
 
 
-def state_inputs(at: np.ndarray, before: np.ndarray, known: np.ndarray, landings: np.ndarray, geometry: AirportGeometry,
-                 variant: str, step_s: float) -> tuple[np.ndarray, np.ndarray]:
+def state_inputs(at: np.ndarray, before: np.ndarray, known: np.ndarray, geometry: AirportGeometry, variant: str,
+                 step_s: float) -> tuple[np.ndarray, np.ndarray]:
     """The inputs of rows that come from the aircraft's states (§2; D13, D23–D25, D58, D60).
 
     The one function of §7 item 2 for the states: the training sentences call it on every row at once, a loop on its
@@ -95,15 +94,13 @@ def state_inputs(at: np.ndarray, before: np.ndarray, known: np.ndarray, landings
         before: the state of the row ``step_s`` earlier, same layout and frame as ``at``.
         known: ``[rows]`` bool, whether that earlier row exists (``motion`` reads speed, track and vertical rate off
             the pair, so a row without one has no motion).
-        landings: ``[rows, K]``, the landings on each candidate in the 30 min before each row, in the order of
-            ``geometry.candidates``.
         geometry: the airport — its candidate runway ends (K of them) and its elevation.
         variant: which candidate-feature set to build (D39); ``batch.VARIANTS``, any other name raises. It fixes the
             columns of ``candidates`` and so F; ``own`` does not depend on it.
-            ``"full"``: the 7 ``CANDIDATE_FEATURES`` (position and height in the candidate's runway frame, heading
-            minus course as sine/cosine, height above the glidepath, landings in the last 30 min).
+            ``"full"``: the 6 ``CANDIDATE_FEATURES`` (position and height in the candidate's runway frame, heading
+            minus course as sine/cosine, height above the glidepath; no landings, D206).
             ``"constants"``: ``"full"`` plus the 2 ``RUNWAY_CONSTANT_FEATURES`` (``length``, ``threshold_elevation``),
-            9 in all — a control arm of D39, testing whether fixed runway properties help at a held-out airport.
+            8 in all — a control arm of D39, testing whether fixed runway properties help at a held-out airport.
             Not chosen: in B5 it scored worse than ``"full"`` (1.3731 vs 1.3601), so the live prior is ``"full"``.
         step_s: seconds between ``before`` and ``at`` (the 2 s row spacing); the divisor of the speeds.
 
@@ -129,12 +126,11 @@ def state_inputs(at: np.ndarray, before: np.ndarray, known: np.ndarray, landings
         sine, cosine = direction_inputs(move.track_deg, candidate.course_deg, move.known)
         glidepath = published_glidepath_height_m(geometry, k, relative.before_threshold_m)
         values = {"before_threshold": scaled_distance(relative.before_threshold_m),
-                  "right_of_final": scaled_distance(relative.right_of_course_m),
+                  "right_of_final": np.arcsinh(relative.right_of_course_m / PATH_OFFSET_SCALE_M),
                   "height_above_threshold": relative.height_above_threshold_m / HEIGHT_SCALE_M,
                   "motion_minus_course_sin": sine, "motion_minus_course_cos": cosine,
                   "height_above_glidepath": np.arcsinh((relative.height_above_threshold_m - glidepath)
-                                                       / GLIDEPATH_HEIGHT_SCALE_M),
-                  "landings_30min": landings[:, k] / LANDINGS_SCALE,
+                                                       / PATH_OFFSET_SCALE_M),
                   "length": np.full(count, candidate.length_m / LENGTH_SCALE_M),
                   "threshold_elevation": np.full(count, candidate.elevation_m / HEIGHT_SCALE_M)}
         candidates[:, k] = np.stack([values[name] for name in features], axis=-1)
@@ -190,8 +186,8 @@ class Heard:
         return self.geometry.candidates[self.state.runway].course_deg
 
 
-def sentence_rows(sentence: ClosedLoopRows, flight: Mapping[str, Any], geometry: AirportGeometry,
-                  landings: LandingIndex, words: Words, *, interval_s: float, split: str, variant: str) -> SentenceRows:
+def sentence_rows(sentence: ClosedLoopRows, flight: Mapping[str, Any], geometry: AirportGeometry, words: Words, *,
+                  interval_s: float, split: str, variant: str) -> SentenceRows:
     """The inputs and targets of one closed-loop sentence on its Δ rows (§2, §7 item 2).
 
     Rows before the first predicted step are observed; rows from it are flown (the artefact's states, D32). The state
@@ -199,10 +195,8 @@ def sentence_rows(sentence: ClosedLoopRows, flight: Mapping[str, Any], geometry:
 
     Args:
         sentence: the sentence's rows alone — what a model may read, never the withheld fields (vocabulary D82).
-        flight: its record in the split's signals (`instructions.artefact.signals_flights`); gives the entry time (the
-            UTC clock of the rows) and the key by which its own landing is left out of ``landings``.
+        flight: its record in the split's signals (`instructions.artefact.signals_flights`); gives its key.
         geometry: the flight's airport (candidate runways, elevation).
-        landings: the airport's landing index, for the 30 min landing counts.
         words: the vocabulary's encoder / decoder (see `Heard`), also the 2 s row step.
         interval_s: seconds between Δ rows; the sentence's rows must be every such row of the 2 s data.
         split: the split's name, carried into the result.
@@ -217,12 +211,8 @@ def sentence_rows(sentence: ClosedLoopRows, flight: Mapping[str, Any], geometry:
     positions = sentence.states[:, [STATE_COLUMNS.index(name) for name in ("e_m", "n_m", "height_m")]]
     rows = np.flatnonzero(sentence.on_interval)
     count, start = len(rows), sentence.start
-    # the UTC time of each Δ row: signals row 0 at the flight's entry, 2 s rows
-    utc = utc_s(flight["entry_time_utc"]) + (sentence.first_row + rows) * words.spec.step_s
-    counts = landings.counts_before(utc, without=own_flight_key(flight))
-    own, candidates = state_inputs(positions[rows], positions[np.maximum(rows - 1, 0)], rows > 0,
-                                   counts[:, [landings.runways.index(c.ident) for c in geometry.candidates]], geometry,
-                                   variant, words.spec.step_s)
+    own, candidates = state_inputs(positions[rows], positions[np.maximum(rows - 1, 0)], rows > 0, geometry, variant,
+                                   words.spec.step_s)
     targets = np.full((count, len(COLUMNS)), UNCHANGED, dtype=np.int64)
     targets[start:] = sentence.grid
     runway = np.full(count, -1, dtype=np.int64)

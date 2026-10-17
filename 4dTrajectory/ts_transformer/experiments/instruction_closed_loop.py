@@ -158,7 +158,8 @@ def summarise(counted: Tally, excluded: dict[str, int]) -> dict[str, Any]:
             "uncorrected_vertical_m": _percentiles(counted.uncorrected_vertical_m),
             "last_row_lateral_m": _percentiles(counted.last_row_lateral_m),
             # D34 reading 3 and the rule of D50: the correctable rows, those outside the tolerance, and of those the
-            # rows after which no correction toward the path is in force
+            # rows after which no correction toward the path is in force (a record: the corrections read the errors
+            # ahead, `closed_loop` THE LEAD)
             "outside_the_tolerance": {name: {"correctable_rows": int(c[0]), "outside": int(c[1]),
                                              "share": float(c[1] / c[0]) if c[0] else None,
                                              "without_a_correction_toward_the_path": int(c[2])}

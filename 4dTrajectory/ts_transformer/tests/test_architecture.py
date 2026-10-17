@@ -294,40 +294,6 @@ def test_the_guidance_layer_never_imports_the_control_path():
         )
 
 
-MANOEUVRE = TS_DIR / "manoeuvre"
-
-
-def test_only_the_runners_reach_the_manoeuvre_package():
-    """Every `manoeuvre` module imports the control path, the guidance layer, the data plane and
-    the inference helpers (plan §4.2), and nothing imports it back: only the runners under
-    `experiments/` consume this package (the control path's edge to it went with the intent-code
-    archive, 2026-09-20). A new edge from `outputs/` is a layering decision, not an import."""
-    for path in _module_files():
-        if path.is_relative_to(MANOEUVRE):
-            continue
-        imported = {
-            ".".join(name.split(".")[:2])   # the module, not the name imported from it
-            for name in _imported_names(path) if name.split(".")[0] == "manoeuvre"
-        }
-        imported.discard("manoeuvre")       # `from ts_transformer.manoeuvre import lockstep`
-        if not imported:
-            continue
-        rel = path.relative_to(TS_DIR).as_posix()
-        assert rel.startswith("experiments/"), (
-            f"{rel} imports {sorted(imported)}; only the runners consume the manoeuvre package"
-        )
-
-
-def test_the_manoeuvre_package_is_not_a_runner_and_imports_none():
-    """`manoeuvre/` is package code: runners under `experiments/` and the CLI call it, never
-    the reverse (layout rule L3)."""
-    for path in MANOEUVRE.rglob("*.py"):
-        if "__pycache__" in path.parts:
-            continue
-        offending = {name for name in _imported_names(path) if name.split(".")[0] in {"experiments", "cli"}}
-        assert not offending, f"{path.relative_to(TS_DIR)} imports {sorted(offending)}"
-
-
 def test_nothing_under_outputs_imports_the_training_loop():
     """outputs/ is imported BY the loop, the replay, the export and the CLI — never the
     other way round. A strategy that imported `train` would make its path unusable outside
@@ -1102,7 +1068,7 @@ POST_INTERFACE = {
     "post.scene": {"Recorded", "AircraftAt", "Scene", "MovedScene", "Window", "StartMove", "real_windows",
                    "inserted_window", "leader_moved_window", "moved_start_window", "census", "Joined", "REAL",
                    "airport_scenes"},
-    "post.landings": {"window_landings", "commanded_landings"},
+    "post.landings": {"window_landings"},
     "post.traffic": {"traffic", "commanded_loss", "loss_at_first_step", "opens_inside_loss", "joined", "scene_aircraft",
                      "step_losses", "answered_loss"},
     "post.established": {"established"},
@@ -1110,11 +1076,14 @@ POST_INTERFACE = {
     "post.edges": {"tokens", "TOKEN_FEATURES"},
     "post.conformance": {"require_conforming_edges"},
     "post.speed_mask": {"speed_check", "along_course_speeds"},
-    "post.reward": {"reward", "present_runways"},
+    "post.reward": {"reward"},
     "post.traffic_attention": {"TrafficConfig", "Traffic", "traffic_of", "TrafficTokens", "TrafficAttention",
-                               "add_traffic_attention", "parameter_groups", "TokenPart", "add_token_part"},
+                               "add_traffic_attention", "parameter_groups", "TokenPart", "add_token_part",
+                               "add_beside"},                               # D212: version 2's module
+
     "post.branches": {"first_numbers", "continuation_numbers", "branch_points", "Group", "Sentence", "samples",
-                      "BRANCH_EVERY_S", "CONTINUATIONS", "EQUAL", "MINORITY_SIDE", "GROUP_WEIGHTS"},   # D195
+                      "BRANCH_EVERY_S", "CONTINUATIONS", "EQUAL", "MINORITY_SIDE", "GROUP_WEIGHTS",    # D195
+                      "branch_rows"},                                  # D200: stage D refuses --branch-every-s with it
     "post.loss": {"Samples", "surrogate", "pull_to_base", "data_term", "update_step", "update_loss", "one_pass",
                   "passes", "DATA_WEIGHT"},                                    # D194 (1): `update_step`'s default
     "post.window_lists": {"identity_of"},                     # §9 item 13 (frontend D178 (6)): a window's identity
@@ -1194,3 +1163,52 @@ def test_the_stage_d_runners_take_only_the_names_of_the_interfaces():
             assert not refused, f"{path.name}: {refused}"
     assert _experiments_imports_refused("from ts_transformer.experiments.multi_train import stage_d\n") == [
         "from experiments.multi_train import stage_d"]                   # stage C's runners do not reach stage D's
+
+
+# ---- the two-tier line reads the day split only (the user, 2026-10-12)
+#: The two-tier line's packages and runners: stages A–D and their Training exports.
+TWO_TIER_PACKAGES = ("instructions", "autopilot", "prior", "post", "multi")
+TWO_TIER_RUNNER_PREFIXES = ("prior_", "post_", "multi_", "executor_", "instruction_", "window_")
+TWO_TIER_RUNNERS = {"model_speed", "closed_loop_start_check", "training_flights", "training_attitude",
+                    "training_export"}
+#: The imports of the line that may reach the flight split, each deals no flight by it: the artefact's build counts the
+#: sealed days' flights that the flight split also holds out (`signals.json`'s ``test_days``), and takes its length
+#: filter (`usable_series`) from the old training loop.
+FLIGHT_SPLIT_EDGES = {("experiments.instruction_signals", "data.splits"),
+                      ("experiments.instruction_signals", "training.train")}
+
+
+def _module_name(path: Path) -> str:
+    return ".".join(path.relative_to(TS_DIR).with_suffix("").parts).removesuffix(".__init__")
+
+
+def _two_tier_roots() -> list[str]:
+    roots = []
+    for path in _module_files():
+        name = _module_name(path)
+        top, _, rest = name.partition(".")
+        if top in TWO_TIER_PACKAGES or (top == "experiments" and (
+                rest.startswith(TWO_TIER_RUNNER_PREFIXES) or rest in TWO_TIER_RUNNERS)):
+            roots.append(name)
+    return sorted(roots)
+
+
+def test_the_two_tier_line_never_reaches_the_flight_split():
+    """No module the two-tier line runs imports `data.splits` (the old ts line's split by flight), directly or
+    through the modules it imports, except along `FLIGHT_SPLIT_EDGES`: the line deals flights by day only
+    (`data.day_split`)."""
+    files = {_module_name(path): path for path in _module_files()}
+    roots = _two_tier_roots()
+    assert "experiments.multi_train" in roots and "post.scene" in roots       # the roots are found
+    seen, stack, reached = set(roots), list(roots), []
+    while stack:
+        name = stack.pop()
+        for imported in _imported_names(files[name]):
+            if (name, imported) in FLIGHT_SPLIT_EDGES:
+                continue
+            if imported == "data.splits":
+                reached.append(name)
+            if imported in files and imported not in seen:
+                seen.add(imported)
+                stack.append(imported)
+    assert reached == [], f"the two-tier line reaches the flight split through {sorted(reached)}"

@@ -16,7 +16,9 @@ groups gives a sample in each.
 **A group's weight** (D195, the user, 2026-10-11; `GROUP_WEIGHTS`): `EQUAL`, every group's advantages as they are (the
 behaviour before it), or `MINORITY_SIDE`, each group's advantages times its minority side (`Group.minority`: the count
 of its sentences on the smaller side of its mean) divided by the round's mean minority side. A group of one sentence
-against eight then pushes a quarter of a group of four against five; the mean weight of a round's groups is 1.
+against eight then pushes a quarter of a group of four against five; the mean weight of a round's groups is 1. Or
+`SPREAD` (multi-aircraft control D221, the user, 2026-10-17): each group's advantages divided by the standard deviation
+of its rewards (`Group.spread`), GRPO's normalised reward (DeepSeekMath §4.1.2).
 
 **A window of several commanded aircraft** (multi-aircraft control D142, D143, D149; post-training §9 item 9): a group
 names the aircraft it varies (``Group.varied``, its place among the window's commanded aircraft; stage C's: 0, its one
@@ -24,10 +26,25 @@ aircraft), its sentences are that aircraft's, its rewards the window's (the call
 its rows only from the branch point up to the aircraft's event (``Sentence.until``: the row of its end or of its loss,
 from which it is silent, D144); stage C's sentences end at their event (no bound). The numbers of each aircraft are the
 caller's rule (`experiments.post_branches.branch_round`); stage C's are D94's, below.
+
+**A window sample** (multi-aircraft control D153, D212; post-training §9 item 9). A sentence may hold the other commanded
+aircraft of its window (``Sentence.window``: each one's sentence placed at its join tick on the window's ticks, `Placed`;
+``Sentence.join``: its own). `samples` then gives each such sentence as a window sample: every sentence of the window on
+the window's ticks (`prior.batch.collate`'s ``starts``), the window input of the traffic module's input (each window's
+rows; its rows of sentences as keys), and only its own rows counted, as a sentence alone counts them. A sentence without
+``window`` is a sample alone, as before.
+
+**A search's unit with the points' values** (multi-aircraft control D220; `Valued`). Stage D's backward search may give
+each point it tries a value, the mean reward of its K continuations flown to their window's end. The varied aircraft's
+first sentence then takes, on its rows between two points tried, the later point's value less the earlier one's, and on
+its rows from the latest point on its own reward less that point's value; no row before the earliest point counts. The
+search's groups go with it, their continuations with the group's advantage, their first sentence (this one) only in
+the group's mean. A unit is one item of an update, as a group is.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Sequence
 
@@ -50,7 +67,8 @@ STATE_BOUND_M = 1e-6
 #: D195: the weights of a group (module docstring)
 EQUAL = "equal"
 MINORITY_SIDE = "minority-side"
-GROUP_WEIGHTS = (EQUAL, MINORITY_SIDE)
+SPREAD = "spread"
+GROUP_WEIGHTS = (EQUAL, MINORITY_SIDE, SPREAD)
 #: a reward closer to its group's mean than this is on neither side of it (`Group.minority`)
 SIDE_TOLERANCE = 1e-9
 
@@ -90,6 +108,17 @@ def branch_points(start: int, end_step: int, interval_s: float, every_s: float =
 
 
 @dataclass(frozen=True)
+class Placed:
+    """A commanded aircraft's sentence placed on its window's ticks (module docstring, D212): its rows with the words
+    said as targets, the speaker's records of them, its tokens at each row and its join tick."""
+
+    rows: Any
+    permitted: Permitted
+    tokens: list[np.ndarray]
+    join: int
+
+
+@dataclass(frozen=True)
 class Sentence:
     """One sentence of a group: its rows with the words said as targets (`prior.batch.SentenceRows`), the speaker's
     records of them, its tokens at each row and its reward."""
@@ -101,6 +130,11 @@ class Sentence:
     #: the row of its event (its end, or the row from which it is silent), after which no row is counted; None: its rows
     #: end there (stage C's)
     until: int | None = None
+    #: D212: the other commanded aircraft of its window, in their order among its commanded aircraft (module docstring);
+    #: empty: a sample alone (stage C's, version 1's)
+    window: tuple[Placed, ...] = ()
+    #: D212: its own join tick on its window's ticks (read with ``window``)
+    join: int = 0
 
 
 @dataclass(frozen=True)
@@ -114,6 +148,10 @@ class Group:
     continuations: tuple[Sentence, ...]
     #: the aircraft it varies: its place among the window's commanded aircraft (module docstring)
     varied: int = 0
+    #: that aircraft's next branch point (a Δ row, as ``branch``; None: after its last, or not given): segment credit
+    #: (`samples`' ``segment_rows``) ends there too (D200: stage D's later aircraft has its first point off the window's
+    #: grid, so its next point comes before ``segment_rows`` rows)
+    next_branch: int | None = None
 
     @property
     def sentences(self) -> tuple[Sentence, ...]:
@@ -131,6 +169,12 @@ class Group:
         return max(rewards) > min(rewards)
 
     @property
+    def spread(self) -> float:
+        """The standard deviation of its rewards (D221, `SPREAD`: the population's, over its sentences; 0 for a group
+        whose rewards are all the same)."""
+        return float(np.std([s.reward for s in self.sentences]))
+
+    @property
     def minority(self) -> int:
         """Its minority side (D195): the count of its sentences above the group's mean reward or of those below it,
         whichever is smaller (a sentence at the mean is on neither side). 0 for a group whose rewards are all the same."""
@@ -138,34 +182,143 @@ class Group:
         return int(min((advantages > SIDE_TOLERANCE).sum(), (advantages < -SIDE_TOLERANCE).sum()))
 
 
-def samples(groups: Sequence[Group], device: torch.device, part_width: int = 0, segment_rows: int | None = None,
-            scale: float = 1.0) -> Samples:
+@dataclass(frozen=True)
+class Valued:
+    """A search's unit with the points' values (module docstring; multi-aircraft control D220): the window, the varied
+    aircraft, its first sentence, the points tried and their values, and the search's groups (their first sentence is
+    this one, counted only here)."""
+
+    window: int
+    varied: int
+    first: Sentence
+    #: the points tried, as Δ rows of the first sentence's own (as `Group.branch`), increasing
+    points: tuple[int, ...]
+    #: each point's value: the mean reward of its continuations, in the order of ``points``
+    values: tuple[float, ...]
+    groups: tuple[Group, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.points or len(self.values) != len(self.points) or list(self.points) != sorted(set(self.points)):
+            raise ValueError(f"points tried, increasing, with a value each, not {self.points} and {self.values}")
+
+    @property
+    def sentences(self) -> tuple[Sentence, ...]:
+        """The sentences its samples hold (`samples`): its first sentence and its informative groups' continuations (a
+        pass's measure of a unit's size reads them, `experiments.post_profile.group_size`)."""
+        return (self.first, *(c for g in self.groups if g.informative for c in g.continuations))
+
+    def advantages(self, length: int) -> np.ndarray:
+        """The first sentence's advantage on each of its first ``length`` rows: 0 before the earliest point, the next
+        point's value less this one's from a point to the next, its reward less the latest point's value from it on."""
+        out = np.zeros(length, dtype=np.float64)
+        for start, end, value, later in zip(self.points, (*self.points[1:], max(length, self.points[-1])), self.values,
+                                            (*self.values[1:], self.first.reward)):
+            out[start:end] = later - value
+        return out
+
+    @property
+    def informative(self) -> bool:
+        """Whether it gives a sample: an informative group, or an advantage other than 0 on a row of the first sentence
+        from its earliest point to its bound (``Sentence.until``)."""
+        bound = math.inf if self.first.until is None else self.first.until
+        return any(g.informative for g in self.groups) or any(
+            start < bound and later != value
+            for start, value, later in zip(self.points, self.values, (*self.values[1:], self.first.reward)))
+
+
+def samples(groups: Sequence[Group | Valued], device: torch.device, part_width: int = 0,
+            segment_rows: int | None = None, scale: float = 1.0) -> Samples:
     """The loss's batch of the samples of ``groups`` (`post.loss.Samples`): every sentence of every informative group,
     its advantage on the rows from its group's branch point on up to its event (``Sentence.until``; and only there) —
-    or, with ``segment_rows`` (P55), only up to ``segment_rows`` rows after the branch point (the next branch point; the
-    later words left to the later groups) —, the speaker's records joined and the tokens padded to the longest sentence
-    (with a caller's token part of ``part_width``, `traffic_attention.traffic_of`). Each advantage times ``scale`` (a
-    group's weight, D195)."""
-    items = [(sentence, advantage, group.branch) for group in groups if group.informative
-             for sentence, advantage in zip(group.sentences, group.advantages())]
+    or, with ``segment_rows`` (P55), only up to ``segment_rows`` rows after the branch point or up to the varied aircraft's
+    next branch point (``Group.next_branch``, D200), whichever is earlier (the later words left to the later groups) —,
+    the speaker's records joined and the tokens padded to the longest sentence
+    (with a caller's token part of ``part_width``, `traffic_attention.traffic_of`). A `Valued` unit (D220) gives its
+    first sentence with its advantage row by row, from its earliest point on, and its informative groups'
+    continuations. Each advantage times ``scale`` (a group's weight, D195)."""
+    items = [item for unit in groups for item in _items(unit, segment_rows)]
     if not items:
         raise ValueError("no informative group: no sample")
-    rows = collate([s.rows for s, _, _ in items], device)
+    if any(s.window for s, _, _, _ in items):
+        return _window_samples(items, device, part_width, scale)
+    rows = collate([s.rows for s, _, _, _ in items], device)
     length = rows.asked.shape[1]
     empty = np.zeros((0, items[0][0].tokens[0].shape[1]), dtype=np.float32)
-    tokens = [s.tokens + [empty] * (length - len(s.tokens)) for s, _, _ in items]
+    tokens = [s.tokens + [empty] * (length - len(s.tokens)) for s, _, _, _ in items]
     steps = torch.arange(length, device=device)[None, :]
-    after = steps >= torch.tensor([b for _, _, b in items], device=device)[:, None]
+    after = steps >= torch.tensor([b for _, _, b, _ in items], device=device)[:, None]
     counted = rows.asked & after
-    if any(s.until is not None for s, _, _ in items):
-        until = torch.tensor([length if s.until is None else s.until for s, _, _ in items], device=device)[:, None]
+    if any(s.until is not None for s, _, _, _ in items):
+        until = torch.tensor([length if s.until is None else s.until for s, _, _, _ in items], device=device)[:, None]
         counted = counted & (steps < until)
     if segment_rows is not None:
-        branch = torch.tensor([b for _, _, b in items], device=device)[:, None]
-        counted = counted & (steps < branch + segment_rows)
-    advantage = torch.tensor([a * scale for _, a, _ in items], dtype=torch.float32, device=device)[:, None] * counted
-    return Samples(rows, Permitted.join([s.permitted for s, _, _ in items]), traffic_of(tokens, device, part_width),
+        counted = counted & (steps < torch.tensor([end for _, _, _, end in items], device=device)[:, None])
+    advantage = torch.as_tensor(np.stack([_row_advantages(a, 0, length, scale) for _, a, _, _ in items]),
+                                device=device) * counted
+    return Samples(rows, Permitted.join([s.permitted for s, _, _, _ in items]), traffic_of(tokens, device, part_width),
                    advantage, counted)
+
+
+def _items(unit: Group | Valued, segment_rows: int | None) -> list[tuple[Sentence, float | Valued, int, int | None]]:
+    """The samples of one unit (`samples`), each its sentence, its advantage (a group's number, or the `Valued` unit for
+    its first sentence, `Valued.advantages`), its first counted row and its segment's end (None without
+    ``segment_rows``); none of a unit that is not informative."""
+    if isinstance(unit, Valued):
+        if segment_rows is not None:
+            raise ValueError("a unit with the points' values (D220) has no segment (P55's segment_rows)")
+        if not unit.informative:
+            return []
+        return [(unit.first, unit, unit.points[0], None)] + [
+            (sentence, advantage, group.branch, None) for group in unit.groups if group.informative
+            for sentence, advantage in zip(group.continuations, group.advantages()[1:])]
+    if not unit.informative:
+        return []
+    end = (None if segment_rows is None else unit.branch + segment_rows if unit.next_branch is None
+           else min(unit.branch + segment_rows, unit.next_branch))
+    return [(sentence, advantage, unit.branch, end) for sentence, advantage in zip(unit.sentences, unit.advantages())]
+
+
+def _row_advantages(advantage: float | Valued, join: int, length: int, scale: float) -> np.ndarray:
+    """An item's advantage times ``scale`` on each of ``length`` steps (float32), its own rows from step ``join`` on: a
+    group's number on every step, or a `Valued` first sentence's row by row (0 before ``join``)."""
+    if isinstance(advantage, Valued):
+        out = np.zeros(length, dtype=np.float32)
+        out[join:] = advantage.advantages(length - join) * scale
+        return out
+    return np.full(length, advantage * scale, dtype=np.float32)
+
+
+def _window_samples(items: Sequence[tuple[Sentence, float | Valued, int, int | None]], device: torch.device,
+                    part_width: int, scale: float) -> Samples:
+    """`samples` of sentences with their windows (module docstring): each item's sentence and the other sentences of its
+    window, each from its join tick, its window's rows one window of the window input, its rows of sentences the keys;
+    only each item's own rows counted, from its first counted row up to its event (``Sentence.until``) and its
+    segment's end (None: none), each in its own rows moved to the window's ticks by its join tick."""
+    placed: list[Placed] = []
+    windows: list[list[int]] = []
+    owners: list[int] = []
+    for sentence, _, _, _ in items:
+        here = [Placed(sentence.rows, sentence.permitted, sentence.tokens, sentence.join), *sentence.window]
+        owners.append(len(placed))
+        windows.append(list(range(len(placed), len(placed) + len(here))))
+        placed += here
+    rows = collate([p.rows for p in placed], device, [p.join for p in placed])
+    length = rows.asked.shape[1]
+    empty = np.zeros((0, items[0][0].tokens[0].shape[1]), dtype=np.float32)
+    tokens = [[empty] * p.join + p.tokens + [empty] * (length - p.join - len(p.tokens)) for p in placed]
+    begin, until = np.full(len(placed), length), np.full(len(placed), length)
+    advantage = np.zeros((len(placed), length), dtype=np.float32)
+    for (sentence, a, branch, end), b in zip(items, owners):
+        j = sentence.join
+        begin[b] = j + branch
+        until[b] = min(length if sentence.until is None else j + sentence.until, length if end is None else j + end)
+        advantage[b] = _row_advantages(a, j, length, scale)
+    steps = torch.arange(length, device=device)[None, :]
+    counted = (rows.asked & (steps >= torch.as_tensor(begin, device=device)[:, None])
+               & (steps < torch.as_tensor(until, device=device)[:, None]))
+    return Samples(rows, Permitted.join([p.permitted for p in placed]),
+                   traffic_of(tokens, device, part_width, windows, rows.present),
+                   torch.as_tensor(advantage, device=device) * counted, counted)
 
 
 @dataclass(frozen=True)

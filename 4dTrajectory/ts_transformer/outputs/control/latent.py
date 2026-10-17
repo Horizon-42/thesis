@@ -59,12 +59,6 @@ LATENT_AUX_COMPONENT = "latent_aux"
 # nothing; with no budget, above this floor (nats). Read with the budget in mind: the count
 # says "dimensions the objective is paying for", which is the collapse signal.
 ACTIVE_UNIT_KL_NATS = 0.05
-#: The ruler for the posterior mean's displacement, in prior sigmas: the L2.f gate
-#: ("the information is in the MEAN") is a median above one sigma. It is a GATE, not the
-#: observed value — the three collapsed L2.e' arms measured 0.05-0.2. Read by every surface
-#: that prints the displacement (`experiments/latent_readout.py`, `experiments/latent_probe.py`), so
-#: the number a reader is judged against is written once.
-DEAD_MEAN_DISPLACEMENT_SIGMA = 1.0
 #: The per-dimension component KL reaches the epoch record as one summed diagnostic per
 #: dimension (a batch diagnostic is a scalar the loop adds up); ``latent_epoch_record``
 #: reassembles the vector, so the index format lives here and nowhere else.
@@ -156,20 +150,6 @@ class PriorNetwork(nn.Module):
         rest = raw[:, self.components :].reshape(-1, self.components, 2 * self.latent_dim)
         mean, logvar = rest.chunk(2, dim=-1)
         return logits, mean, logvar.clamp(-LOGVAR_BOUND, LOGVAR_BOUND)
-
-
-def displacement_verdict(median_sigma: float) -> str:
-    """The one sentence every surface prints about a posterior mean's displacement.
-
-    Beside the ruler it reads, so the readout and the probe cannot disagree about what
-    counts as a live latent.
-    """
-    if median_sigma > DEAD_MEAN_DISPLACEMENT_SIGMA:
-        return (f"displacement median {median_sigma:.3f} sigma > "
-                f"{DEAD_MEAN_DISPLACEMENT_SIGMA:g}: z carries per-flight information")
-    return (f"displacement median {median_sigma:.3f} sigma is NOT above "
-            f"{DEAD_MEAN_DISPLACEMENT_SIGMA:g}: the posterior mean sits on the prior mean, "
-            "so z is a constant however large the KL is")
 
 
 def sigma_from_logvar(logvar: torch.Tensor) -> torch.Tensor:
@@ -573,8 +553,8 @@ def latent_epoch_record(
             for index in range(config.latent_dim)
         ],
         # |μ_q − μ_p| / σ_p, median over flights and dimensions (flight-weighted mean of
-        # the per-batch medians): below DEAD_MEAN_DISPLACEMENT_SIGMA the posterior mean
-        # sits on the prior mean and z is a constant, whatever the KL says.
+        # the per-batch medians): at or below one prior sigma (the L2.f gate) the posterior
+        # mean sits on the prior mean and z is a constant, whatever the KL says.
         "mean_displacement_sigma": per_flight("latent_mean_displacement_sigma"),
         "active_units": per_flight("latent_active_units"),
         "active_units_0p05": per_flight("latent_active_units_0p05"),

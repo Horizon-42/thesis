@@ -3,13 +3,16 @@ cross-validation (D39) with ``--held-out``, stopped on the select days of its tr
 
 Reads the sentence artefact through the vocabulary's public interface at one row interval (``--row-interval-s``), only
 after the closed-loop check with the artefact's executor spec (``--executor``) passes in this process
-(`autopilot.closed_loop.require_conforming_closed_loop`, D69, D73), and each
-airport's landings from its tracks roster (D63). Never reads the validation days. Before training it checks the memory
+(`autopilot.closed_loop.require_conforming_closed_loop`, D69, D73). Never reads the validation days.
+Before training it checks the memory
 at the formal size: the largest batches, one forward and backward pass each on the device, and refuses
 a run that would not fit (``memory.json``).
 
 ``--memory-check-only`` stops after the check (it writes ``config.json`` and ``memory.json``): the check at the formal
 size before a formal run, from any tree.
+
+``--gate`` (a campaign's step started early, `prior_campaign`): the checks and the data of the run are made, then the
+run waits for its turn (`io_utils.wait_for_turn`) before it uses the device or writes a file.
 
 Writes into ``--out`` (a new directory, never over an existing one; a clean tree unless ``--sample``, a SMOKE option
 that trains on a random sample of N sentences of each airport and split, seed 1337, D55, and says so in
@@ -35,15 +38,15 @@ import torch
 
 from flight_scenarios.procedure_final import DEFAULT_PROCEDURE_ROOT
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
-from ts_transformer.instructions.artefact import load_candidates, load_day_split
-from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
+from ts_transformer.instructions.artefact import load_candidates
+from ts_transformer.io_utils import file_sha256, utc_now, wait_for_turn, write_json_atomic
 from ts_transformer.prior.batch import VARIANTS
 from ts_transformer.prior.checkpoint import CHECKPOINT_SCHEMA, save_checkpoint
 from ts_transformer.prior.model import Prior, PriorConfig
 from ts_transformer.prior.procedure import PROCEDURE_MASKS, procedure_digests
 from ts_transformer.prior.runs import SAMPLE_SEED, Run, held_out_sentences, run_data, sampled_run_data
 from ts_transformer.prior.selection import RULES, selection_totals
-from ts_transformer.prior.source import ArtefactSource, airport_landings, artefact_identity
+from ts_transformer.prior.source import ArtefactSource, artefact_identity
 from ts_transformer.prior.train import TrainConfig, evaluate, first_step_runway, largest_batch_memory, train
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
@@ -84,6 +87,8 @@ def main(argv: list[str] | None = None) -> int:
                              "training (§12 B3: the check at the formal size before a formal run)")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--procedure-root", type=Path, default=DEFAULT_PROCEDURE_ROOT)
+    parser.add_argument("--gate", action="store_true",
+                        help="wait for a line `go` on stdin before the device is used (a campaign's step started early)")
     shape = {item.name: item.default for item in fields(PriorConfig) if item.name in SHAPE}
     for name, default in shape.items():
         parser.add_argument(f"--{name.replace('_', '-')}", type=type(default), default=default)
@@ -100,16 +105,16 @@ def main(argv: list[str] | None = None) -> int:
     device = torch.device(args.device)
 
     geometries = load_candidates(instructions)
-    landings = airport_landings(geometries, load_day_split(instructions))
-    source = ArtefactSource(instructions, args.row_interval_s, args.variant, landings, args.selection)
+    source = ArtefactSource(instructions, args.row_interval_s, args.variant, args.selection)
     run = Run(tuple(sorted(geometries)), args.held_out)
     data = run_data(source, run) if args.sample is None else sampled_run_data(source, run, args.sample)
-    identity = artefact_identity(instructions, args.row_interval_s, landings, args.selection)
+    identity = artefact_identity(instructions, args.row_interval_s, args.selection)
     # the artefact's sentences that the rule keeps and leaves out in train and select, every airport (the run's own:
     # "sentences"); the identity keeps every split, but nothing shows a reading of the val days before the base's one
     # validation readout (D85)
     totals = selection_totals(identity["selection"])
     print(json.dumps({"artefact_selection": {split: totals[split] for split in ("train", "select")}}), flush=True)
+    wait_for_turn(args.gate)
     config = TrainConfig(**{item.name: getattr(args, item.name) for item in fields(TrainConfig)})
     torch.manual_seed(config.seed)
     model = Prior(PriorConfig.from_words(source.words, args.variant,

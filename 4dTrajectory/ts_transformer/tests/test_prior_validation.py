@@ -16,7 +16,7 @@ from ts_transformer.instructions.artefact import load_signals
 from ts_transformer.instructions.words import ALTITUDE, ANGLE, Words
 from ts_transformer.prior.procedure import Final
 from ts_transformer.tests.support import (
-    fixture_days, instruction_spec, parallel_airport, prior_artefact, prior_closed_loop_sentence,
+    instruction_spec, parallel_airport, prior_artefact, prior_closed_loop_sentence,
 )
 
 CPU = torch.device("cpu")
@@ -65,23 +65,20 @@ def base_prior(tmp_path, monkeypatch, *, held_out=None):
     `prior_train` writes one, every live root of the runner replaced. Returns ``(artefact, prior directory)``."""
     from ts_transformer.prior import checkpoint as opening
     from ts_transformer.prior.checkpoint import CHECKPOINT_SCHEMA, save_checkpoint
-    from ts_transformer.prior.landings import roster_landings
     from ts_transformer.prior.model import Prior, PriorConfig
     from ts_transformer.prior.procedure import PROCEDURE_MASKS
     from ts_transformer.prior.source import artefact_identity
     from ts_transformer.io_utils import file_sha256
 
     artefact = tmp_path / "artefact"
-    words, records = prior_artefact(artefact, interval_s=2.0, outcomes=("landed", "crossed_too_high"))
-    landings = {"KXXX": roster_landings(records["KXXX"], ("09", "09L"), fixture_days())}
+    words, _ = prior_artefact(artefact, interval_s=2.0, outcomes=("landed", "landing_failed"))
     digests = {"KXXX": {"09": "0" * 64, "09L": "0" * 64}}
     monkeypatch.setattr(runner, "require_conforming_closed_loop", lambda *given: (None, {"checks": {"stub": True}}, None))
     # the prior opens through `checkpoint.open_prior`: its live roots replaced there
-    monkeypatch.setattr(opening, "airport_landings", lambda geometries, days: landings)
     monkeypatch.setattr(opening, "procedure_digests", lambda geometries, root: digests)
     monkeypatch.setattr(runner, "airport_finals", lambda geometry, root: finals_of(geometry))
     monkeypatch.setattr(runner, "git_state", lambda: {"head": "fixture", "dirty": False})
-    identity = artefact_identity(artefact, 2.0, landings, "landed")
+    identity = artefact_identity(artefact, 2.0, "landed")
     torch.manual_seed(0)
     model = Prior(PriorConfig.from_words(words, "full", d_model=32, layers=1, heads=4, feedforward=64))
     prior = tmp_path / "prior"
@@ -229,9 +226,9 @@ def test_a_smoke_reads_the_select_days_never_the_val_days(tmp_path, monkeypatch)
 
 
 def test_a_smoke_reads_no_outcome_of_a_val_sentence(tmp_path, monkeypatch):
-    """D85: before the base's one validation readout, nothing reads the val days' sentences — not their stored outcomes
-    for the identity either (`checkpoint.open_prior` compares the val counts by the val file's sha256): every read of
-    val's closed-loop sentences fails here, and the smoke runs."""
+    """D85: before the base's one validation readout, nothing reads the val days' sentences, and opening the prior reads
+    no sentence at all (`checkpoint.open_prior`, D209): every read of val's closed-loop sentences fails here, the smoke
+    runs, and the only split read is the one the readout reads."""
     from ts_transformer.instructions import artefact as artefact_module
     from ts_transformer.prior import source as source_module
 
@@ -250,7 +247,7 @@ def test_a_smoke_reads_no_outcome_of_a_val_sentence(tmp_path, monkeypatch):
     argv = ["--prior", str(prior), "--instructions", str(artefact), "--executor", str(tmp_path / "executor"),
             "--device", "cpu", "--split", "select", "--smoke", "--out", str(tmp_path / "c")]
     assert runner.main(argv) == 0
-    assert set(opened) == {"train", "select"}
+    assert set(opened) == {"select"}
 
 
 def test_the_readout_is_the_base_s_alone(tmp_path, monkeypatch):
@@ -267,7 +264,7 @@ def test_the_masks_readout_gives_a_flight_with_a_faulty_track_apart(tmp_path):
     from ts_transformer.instructions.artefact import closed_loop_sentences, load_spec, signals_flights
 
     artefact = tmp_path / "artefact"
-    words, _ = prior_artefact(artefact, interval_s=2.0, outcomes=("landed", "crossed_too_high"))
+    words, _ = prior_artefact(artefact, interval_s=2.0, outcomes=("landed", "landing_failed"))
     sentences = closed_loop_sentences(artefact, "val", 2.0, load_spec(artefact))
     finals = {"KXXX": finals_of(parallel_airport())}
     args = (sentences, signals_flights(artefact, "val"), finals, words, 2.0, "landed")

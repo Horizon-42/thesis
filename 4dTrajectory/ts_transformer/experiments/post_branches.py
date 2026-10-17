@@ -23,12 +23,25 @@ aircraft goes on drawing from its own first-sentence stream from where it was at
 v's sentences with the window's rewards, each counted up to v's event (`post.branches.Sentence.until`). The check of
 D94 holds for every aircraft of a window spoken again. `stage_c_rules` are stage C's: its one aircraft, D94's numbers,
 its reward, spoken again below 1, its branch points from its first predicted step to its event.
+
+**Whole windows** (multi-aircraft control D153, D212; ``whole_windows``): each sentence of a group holds the other
+commanded aircraft of its window, each one's sentence and join tick read from the same loop (`post.branches.Placed`,
+``Sentence.window``), for the loss's window samples. Without it (the default) only the varied aircraft's sentences are
+read (D181 (58)).
+
+**Standard GRPO** (multi-aircraft control D221; `sampled_round`): no first and second pass, no branch point. Every
+window of the batch is spoken ``draws`` times from its start, each commanded aircraft of each draw with numbers of its
+own (`Rules.draw`; draw 0 its first sentence's, so draw 0 is the first pass above). Each commanded aircraft of a window
+gives one group: its sentences of the draws, each with its draw's reward of the window (`Rules.reward`), counted from
+its first predicted step up to its event (`post.branches.Sentence.until`); its advantage is the reward less the
+group's mean. A draw in which the aircraft says no row (it ended at its first predicted step) gives it no sentence.
 """
 
 from __future__ import annotations
 
 import copy as copying
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Generator, Mapping, Sequence
@@ -43,11 +56,11 @@ from ts_transformer.instructions.artefact import ClosedLoopSentence
 from ts_transformer.instructions.words import COLUMNS, RUNWAY, RUNWAY_GO_AROUND, Words
 from ts_transformer.multi import backward, credit
 from ts_transformer.post.branches import (
-    BRANCH_EVERY_S, CONTINUATIONS, STATE_BOUND_M, Group, Sentence, branch_points, continuation_numbers, first_numbers,
+    BRANCH_EVERY_S, CONTINUATIONS, STATE_BOUND_M, Group, Placed, Sentence, Valued, branch_points,
+    continuation_numbers, first_numbers, landed_numbers,
 )
 from ts_transformer.post.reward import LANDED
 from ts_transformer.post.scene import Window
-from ts_transformer.prior.landings import LandingIndex
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.procedure import Final
 
@@ -65,6 +78,14 @@ class BranchRound:
 
 
 @dataclass(frozen=True)
+class SampledRound(BranchRound):
+    """One batch of a round by standard GRPO (`sampled_round`, D221): `BranchRound`'s parts (the first pass's ends are
+    draw 0's; every window spoken again, none differed) and the outcomes of every commanded aircraft over all draws."""
+
+    draw_outcomes: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class Rules:
     """A caller's rules of branch training (module docstring), for a window at its place in the round:
 
@@ -76,18 +97,22 @@ class Rules:
     - ``again(results)``: whether the window is spoken again;
     - ``varied(window, loop, rows, results)``: the aircraft it varies (places among its commanded aircraft) and each
       one's branch points (ticks of the window's grid), from the first pass's ``loop``, the window's ``rows`` in it and
-      their ends ``results``."""
+      their ends ``results``;
+    - ``draw(place, member, d)``: the numbers of a commanded aircraft's sentence in draw ``d`` of its window (standard
+      GRPO, D221, `sampled_round`); draw 0's are ``first``'s."""
 
     first: Callable[[int, int], np.random.Generator]
     continuation: Callable[[int, int, int, int, int], np.random.Generator]
     reward: Callable[[Sequence[WindowResult]], float]
     again: Callable[[Sequence[WindowResult]], bool]
     varied: Callable[[Window, WindowLoop, Sequence[int], Sequence[WindowResult]], list[tuple[int, list[int]]]]
+    draw: Callable[[int, int, int], np.random.Generator]
 
 
 def stage_c_rules(seed: int, round_: int, interval_s: float, every_s: float = BRANCH_EVERY_S) -> Rules:
     """Stage C's rules (module docstring; D37, D94): one aircraft, its reward, spoken again below 1, its branch points from
-    its first predicted step to its event, every ``every_s`` (D37's, or the campaign's `Settings.branch_every_s`, P55)."""
+    its first predicted step to its event, every ``every_s`` (D37's, or the campaign's `Settings.branch_every_s`, P55);
+    a draw's numbers those of P49's draws (`landed_numbers`, D221)."""
     def varied(window: Window, loop: WindowLoop, rows: Sequence[int], results: Sequence[WindowResult]
                ) -> list[tuple[int, list[int]]]:
         (b,) = rows
@@ -96,7 +121,7 @@ def stage_c_rules(seed: int, round_: int, interval_s: float, every_s: float = BR
     return Rules(first=lambda place, member: first_numbers(seed, round_, place),
                  continuation=lambda place, member, v, tick, k: continuation_numbers(seed, round_, place, tick, k),
                  reward=lambda results: results[0].reward, again=lambda results: results[0].reward < 1.0,
-                 varied=varied)
+                 varied=varied, draw=lambda place, member, d: landed_numbers(seed, round_, place, d))
 
 
 def same_prefix(a: np.ndarray, b: np.ndarray, rows: int, bound_m: float) -> bool:
@@ -117,20 +142,21 @@ def _draws(loop: WindowLoop, numbers: Sequence[np.random.Generator]) -> np.ndarr
 def branch_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop, list[int], dict[int, np.ndarray]]],
                  windows: Sequence[Window],
                  places: Sequence[int], sentences: Mapping[int, ClosedLoopSentence], flights: Mapping[int, Mapping[str, Any]],
-                 geometries: Mapping[str, AirportGeometry], rosters: Mapping[str, LandingIndex],
-                 finals: Mapping[str, Sequence[Final]], words: Words, *, interval_s: float, variant: str,
+                 geometries: Mapping[str, AirportGeometry], finals: Mapping[str, Sequence[Final]], words: Words, *,
+                 interval_s: float, variant: str,
                  edges_reference: Path, faults: Mapping[str, Mapping[str, frozenset[int]]], device: torch.device,
                  seed: int, round_: int, split: str,
                  continuations: int = CONTINUATIONS, rules: Rules | None = None,
-                 loop_options: Mapping[str, Any] | None = None) -> BranchRound:
+                 loop_options: Mapping[str, Any] | None = None, whole_windows: bool = False) -> BranchRound:
     """One batch ``windows`` of a round (module docstring), ``places`` their places in the round (the key of their random
     numbers); ``start_loop`` starts the closed loop of given flights (their places in the split's signals) with their
     windows' moves and join steps (`autopilot.start.Start.moved`, `post_window_loop.start_move_of`) and returns it with
     its order and the observed rows it gave back; ``rules`` the caller's (`stage_c_rules` when not given);
-    ``loop_options`` the window loop's options (its rule of who answers, its token part)."""
+    ``loop_options`` the window loop's options (its rule of who answers, its token part); ``whole_windows``: each
+    sentence with its window (module docstring)."""
     rules = stage_c_rules(seed, round_, interval_s) if rules is None else rules
-    window_loop, sources = _batch_loops(model, start_loop, windows, places, sentences, flights, geometries, rosters,
-                                        finals, words, interval_s=interval_s, variant=variant,
+    window_loop, sources = _batch_loops(model, start_loop, windows, places, sentences, flights, geometries, finals,
+                                        words, interval_s=interval_s, variant=variant,
                                         edges_reference=edges_reference, faults=faults, device=device, rules=rules,
                                         loop_options=loop_options)
     everything = list(range(len(windows)))
@@ -143,7 +169,8 @@ def branch_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop,
     #: each window spoken again (its place in ``again``): its varied aircraft and their branch points (ticks)
     varied = {k: rules.varied(windows[w], first, first.members[w], ends[w]) for k, w in enumerate(again)}
     read = sorted({first.members[again[k]][v] for k in varied for v, points in varied[k] if points})
-    first_samples = dict(zip(read, first.samples(split, read)))       # the varied aircraft's only (D181 (58))
+    # the varied aircraft's only (D181 (58)); with ``whole_windows`` every member of their windows (D212 (3))
+    first_samples = _read(first, read, split, whole_windows)
     second = window_loop(again)
     numbers = sources(second, again)
     while second.speaking.observing:
@@ -165,7 +192,7 @@ def branch_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop,
                                      else copying.deepcopy(numbers[b]))
             ends_k = copies.finish(drawn)
             read = [copies.members[i * continuations + j][v] for i, (_, v) in enumerate(due) for j in range(continuations)]
-            made = dict(zip(read, copies.samples(split, read)))
+            made = _read(copies, read, split, whole_windows)
             for i, (k, v) in enumerate(due):
                 w = again[k]
                 b_first = first.members[w][v]
@@ -176,11 +203,16 @@ def branch_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop,
                     members = copies.members[window]
                     reward = rules.reward([ends_k[b] for b in members])
                     b_copy = members[v]
-                    kept.append(Sentence(*made[b_copy], reward, _until(copies, b_copy, len(windows[w].joined))))
+                    kept.append(Sentence(*made[b_copy], reward, _until(copies, b_copy, len(windows[w].joined)),
+                                         **_placed(copies, b_copy, made, whole_windows)))
                 join = int(second.speaking.join_ticks[second.members[k][v]])
+                following = next((p for p in dict(varied[k])[v] if p > t), None)       # D200: its next branch point
                 groups.append((k, Group(places[w], t - join, Sentence(rows, permitted, tokens, rules.reward(ends[w]),
-                                                                       _until(first, b_first, len(windows[w].joined))),
-                                        tuple(kept), varied=v)))
+                                                                       _until(first, b_first, len(windows[w].joined)),
+                                                                       **_placed(first, b_first, first_samples,
+                                                                                 whole_windows)),
+                                        tuple(kept), varied=v,
+                                        next_branch=None if following is None else following - join)))
             del copies, drawn, ends_k, made     # released before the next point's copies (D183 (4)): one set alive
             done = np.zeros(len(second.order), dtype=bool)
             for k in range(len(again)):
@@ -196,11 +228,57 @@ def branch_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop,
                        differed)
 
 
+def sampled_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop, list[int], dict[int, np.ndarray]]],
+                  windows: Sequence[Window], places: Sequence[int], sentences: Mapping[int, ClosedLoopSentence],
+                  flights: Mapping[int, Mapping[str, Any]], geometries: Mapping[str, AirportGeometry],
+                  finals: Mapping[str, Sequence[Final]], words: Words, *, interval_s: float, variant: str,
+                  edges_reference: Path, faults: Mapping[str, Mapping[str, frozenset[int]]], device: torch.device,
+                  split: str, draws: int, rules: Rules, loop_options: Mapping[str, Any] | None = None,
+                  whole_windows: bool = False) -> SampledRound:
+    """One batch ``windows`` of a round by standard GRPO (module docstring; multi-aircraft control D221), the arguments
+    as `branch_round`'s: the batch spoken ``draws`` times, one loop a draw (a draw's memory is the first pass's), each
+    row on its numbers of the draw (`Rules.draw`); after each draw its sentences read (`WindowLoop.samples`; with
+    ``whole_windows``, each with its window) and its loop freed. The groups are in the order of the windows, then of
+    their commanded aircraft (`Group.varied`; `Group.branch` the first predicted step, `Group.first` the earliest draw
+    with a sentence); an aircraft with fewer than two sentences gives no group."""
+    if draws < 2:
+        raise ValueError(f"{draws} draws: a group of at least two")
+    window_loop, _ = _batch_loops(model, start_loop, windows, places, sentences, flights, geometries, finals, words,
+                                  interval_s=interval_s, variant=variant, edges_reference=edges_reference,
+                                  faults=faults, device=device, rules=rules, loop_options=loop_options)
+    everything = list(range(len(windows)))
+    #: each window's commanded aircraft, each its sentences of the draws in which it said a row
+    said: list[list[list[Sentence]]] = [[[] for _ in w.signal_indices] for w in windows]
+    first: list[WindowResult] = []
+    outcomes: Counter = Counter()
+    start = 0
+    for d in range(draws):
+        loop = window_loop(everything)
+        ends = loop.run([rules.draw(places[int(loop.window_of[b])], int(loop.member_of[b]), d)
+                         for b in range(len(loop.order))])
+        start = int(loop.speaking.start)
+        rows = {b for b in range(len(loop.order)) if loop.end_step(b) > start}        # a row said from its first step
+        made = _read(loop, sorted(rows), split, whole_windows)
+        for w, members in enumerate(loop.members):
+            reward = rules.reward([ends[b] for b in members])
+            for m, b in enumerate(members):
+                if b in rows:
+                    said[w][m].append(Sentence(*made[b], reward, _until(loop, b, len(windows[w].joined)),
+                                               **_placed(loop, b, made, whole_windows)))
+        outcomes.update(end.outcome for end in ends)
+        if d == 0:
+            first = ends
+        del loop, made                          # released before the next draw: one draw's loop alive
+    groups = [Group(places[w], start, own[0], tuple(own[1:]), varied=m)
+              for w in everything for m, own in enumerate(said[w]) if len(own) >= 2]
+    return SampledRound(first, groups, [places[w] for w in everything], [], dict(outcomes))
+
+
 def _batch_loops(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop, list[int], dict[int, np.ndarray]]],
                  windows: Sequence[Window], places: Sequence[int], sentences: Mapping[int, ClosedLoopSentence],
                  flights: Mapping[int, Mapping[str, Any]], geometries: Mapping[str, AirportGeometry],
-                 rosters: Mapping[str, LandingIndex], finals: Mapping[str, Sequence[Final]], words: Words, *,
-                 interval_s: float, variant: str, edges_reference: Path,
+                 finals: Mapping[str, Sequence[Final]], words: Words, *, interval_s: float, variant: str,
+                 edges_reference: Path,
                  faults: Mapping[str, Mapping[str, frozenset[int]]], device: torch.device, rules: Rules,
                  loop_options: Mapping[str, Any] | None
                  ) -> tuple[Callable[[Sequence[int]], WindowLoop],
@@ -218,8 +296,8 @@ def _batch_loops(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop,
 
     def window_loop(batch: Sequence[int]) -> WindowLoop:
         loop, started, observed = start_loop(sorted(i for b in batch for i in windows[b].signal_indices))
-        return WindowLoop(model, loop, started, [windows[b] for b in batch], sentences, flights, geometries, rosters,
-                          finals, words, interval_s=interval_s, variant=variant, edges_reference=edges_reference,
+        return WindowLoop(model, loop, started, [windows[b] for b in batch], sentences, flights, geometries, finals,
+                          words, interval_s=interval_s, variant=variant, edges_reference=edges_reference,
                           faults=faults, observed=observed, device=device, **options)
 
     def sources(loop: WindowLoop, batch: Sequence[int]) -> list[np.random.Generator]:
@@ -256,6 +334,25 @@ def _differed(first: WindowLoop, second: WindowLoop, again: Sequence[int], last:
     return differed
 
 
+def _read(loop: WindowLoop, rows: Sequence[int], split: str, whole: bool) -> dict[int, tuple[Any, Any, list[np.ndarray]]]:
+    """The sentences of ``rows`` of ``loop`` for the loss (`WindowLoop.samples`), by row; with ``whole`` (module
+    docstring), of every row of their windows too."""
+    if whole:
+        rows = sorted({c for b in rows for c in loop.members[int(loop.window_of[b])]})
+    return dict(zip(rows, loop.samples(split, rows)))
+
+
+def _placed(loop: WindowLoop, b: int, made: Mapping[int, tuple[Any, Any, list[np.ndarray]]], whole: bool
+            ) -> dict[str, Any]:
+    """Row ``b``'s window for its `Sentence` (module docstring): the other rows of its window, each placed at its join
+    tick on the window's ticks (`WindowLoop.joins`; ``made`` their sentences, `_read`), and its own join tick; nothing
+    without ``whole``."""
+    if not whole:
+        return {}
+    others = [c for c in loop.members[int(loop.window_of[b])] if c != b]
+    return {"window": tuple(Placed(*made[c], int(loop.joins[c])) for c in others), "join": int(loop.joins[b])}
+
+
 def _until(loop: WindowLoop, b: int, joined: int) -> int | None:
     """Row ``b``'s event in its own rows (`WindowLoop.end_step`) as a sentence's bound; None for a stage C window (its
     rows end there)."""
@@ -267,11 +364,12 @@ class BackwardRound(BranchRound):
     """A batch of a round whose branch points are found backward (`backward_round`; multi-aircraft control D182): the
     branch round's parts, and each group's depth (the seconds from its point to its event, in the groups' order), the
     searches made (one a varied aircraft with a candidate point) and those that found a decision point, the
-    continuations flown only to the event + 60 s and those flown to their window's end; and, as information on what
+    continuations flown only to the judged tick and those flown to their window's end; and, as information on what
     the search costs (its points stepped together in one loop, D188): its seconds, the loop's steps and the rows they
     flew (each step's rows held in the loop, summed: S6); each group's kind (`multi.backward.Found.kinds`, in the
     groups' order), and the depth of each majority point found (D192; one a search that found one, in the searches'
-    order)."""
+    order). With the points' values (D220): each search's unit (`post.branches.Valued`, in the searches' order) and its
+    values, each point tried (the latest first) as its depth and value, with the first sentence's reward."""
 
     depths_s: list[float]
     searches: int
@@ -283,6 +381,8 @@ class BackwardRound(BranchRound):
     search_rows: int
     kinds: list[str]
     majority_depths_s: list[float]
+    valued: list[Valued] = field(default_factory=list)
+    values: list[tuple[list[tuple[float, float]], float]] = field(default_factory=list)
 
 
 @dataclass
@@ -303,6 +403,8 @@ class _Search:
     found: backward.Found | None = None
     #: the decision point once chosen (the search's first point chosen)
     decision: int | None = None
+    #: D220: each point tried (a tick) with its value once its continuations ended
+    values: dict[int, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -322,42 +424,56 @@ class _Part:
     #: behind the decision point in a search for the majority point, else 1); the part ends once that is out of reach
     #: (`multi.backward.out_of_reach`). None: the decision point's copy (``base``)
     need: int | None = None
+    #: D220: a point tried and judged, not chosen, flown on to its window's end for its value
+    judged: bool = False
 
 
 def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop, list[int], dict[int, np.ndarray]]],
                    windows: Sequence[Window], places: Sequence[int], sentences: Mapping[int, ClosedLoopSentence],
                    flights: Mapping[int, Mapping[str, Any]], geometries: Mapping[str, AirportGeometry],
-                   rosters: Mapping[str, LandingIndex], finals: Mapping[str, Sequence[Final]], words: Words, *,
-                   interval_s: float, variant: str, edges_reference: Path,
+                   finals: Mapping[str, Sequence[Final]], words: Words, *, interval_s: float, variant: str,
+                   edges_reference: Path,
                    faults: Mapping[str, Mapping[str, frozenset[int]]], device: torch.device, split: str,
                    continuations: int, rules: Rules, loop_options: Mapping[str, Any] | None = None,
-                   host: torch.device = torch.device("cpu"), majority: int | None = None) -> BackwardRound:
+                   host: torch.device = torch.device("cpu"), majority: int | None = None,
+                   whole_windows: bool = False, search_points: int = backward.POINTS,
+                   judged_after_s: float = backward.AFTER_S, fine_point: bool = True,
+                   common_cut: bool = False, point_values: bool = False) -> BackwardRound:
     """One batch ``windows`` of a round of stage D with its branch points found backward (multi-aircraft control D182;
     `multi.backward`): the first pass and the windows spoken again as `branch_round`'s (``rules``: stage D's,
     `multi.credit.rules`); each varied aircraft's event and candidate points (`multi.backward.event`, `points`); the
     second pass copies each window spoken again at its candidate points and holds the copies on ``host`` (D94's check as
     `branch_round`'s, up to each window's latest point). Then every varied aircraft of a window that did not differ is
     searched (`multi.backward.search`; ``majority``: its majority point in place of point B, D192), the searches
-    stepped together on ``device`` (D188):
+    stepped together on ``device`` (D188). D217 (`MultiSettings`): ``search_points`` candidate points at most,
+    continuations judged ``judged_after_s`` after the event, the fine point only with ``fine_point``, and with
+    ``common_cut`` every sentence of a group counted only up to the judged tick (each sentence's own bound
+    otherwise, `_until`). D220 (``point_values``; refused with a fine point): every point tried is flown to its window's
+    end, its value the mean W of its continuations, and each search gives one unit (`post.branches.Valued`: its first
+    sentence credited by the values, its groups):
 
     - **One loop.** The joint loop holds every search's current point: its ``continuations`` copies of the point's held
       window, v on numbers of its own, the other aircraft on their first-sentence numbers from the point. A step says
       and flies one row of every window in it, each window at its own tick (`WindowLoop.together`).
-    - **When a continuation stops.** A point's continuations are flown to the event + 60 s (or their end, if earlier),
+    - **When a continuation stops.** A point's continuations are flown to the judged tick (or their end, if earlier),
       then judged (`_trials`) and the search sent their trials; a point not chosen leaves the loop there. A point is
       judged as soon as too few of its continuations are left to choose it (D194 (3), `_failed`): every one failed,
       or, behind the decision point in a search for the majority point, the majority out of reach. The search's
       answer is the same.
     - **A point chosen** goes on in the same loop to its window's end, beside the points then tried, and its group is
-      made when its windows end (D142: its W of D141, v's rows from the point).
+      made when its windows end (D142: its W of D141, v's rows from the point). With ``point_values`` a point not
+      chosen goes on too once judged, and its value is taken when its windows end.
     - **Joining.** Before a step, the parts that ended leave and the searches' next points join: a point from its held
       copy; the fine point from the decision point's copy, flown first in the loop for 16 s on every aircraft's
       first-sentence numbers, its continuations then copied from it.
 
     The groups are in the order of the searches (the windows', then their varied aircraft's) and, within a search, of
-    their points chosen; a window's held copies are freed once its searches are done."""
-    window_loop, sources = _batch_loops(model, start_loop, windows, places, sentences, flights, geometries, rosters,
-                                        finals, words, interval_s=interval_s, variant=variant,
+    their points chosen; a window's held copies are freed once its searches are done. ``whole_windows``: each sentence
+    with its window (module docstring)."""
+    if point_values and fine_point:
+        raise ValueError("the points' values (D220) are taken on the 32 s points only: no fine point")
+    window_loop, sources = _batch_loops(model, start_loop, windows, places, sentences, flights, geometries, finals,
+                                        words, interval_s=interval_s, variant=variant,
                                         edges_reference=edges_reference, faults=faults, device=device, rules=rules,
                                         loop_options=loop_options)
     everything = list(range(len(windows)))
@@ -379,7 +495,7 @@ def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loo
             first_go_around = (aircraft[v].first_step + int(go_arounds[0])
                                if end.outcome == LANDED and len(go_arounds) else None)
             happened = backward.event(aircraft, v, end.outcome, first_go_around)
-            plans[k].append((v, happened, backward.points(happened, aircraft[v].first_step, interval_s)))
+            plans[k].append((v, happened, backward.points(happened, aircraft[v].first_step, interval_s, search_points)))
     needed = {k: sorted({p for _, _, points in plan for p in points}) for k, plan in plans.items()}
     second = window_loop(again)
     numbers = sources(second, again)
@@ -406,9 +522,9 @@ def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loo
     differed = _differed(first, second, again, last, places)
     del second
     read = sorted({first.members[again[k]][v] for k, plan in plans.items() for v, _, points in plan if points})
-    first_samples = dict(zip(read, first.samples(split, read)))
-    fine_ticks = backward.ticks_of(backward.FINE_S, interval_s)
-    searches = [_Search(k, w, v, happened, backward.judged_until(happened, interval_s),
+    first_samples = _read(first, read, split, whole_windows)
+    fine_ticks = backward.ticks_of(backward.FINE_S, interval_s) if fine_point else None
+    searches = [_Search(k, w, v, happened, backward.judged_until(happened, interval_s, judged_after_s),
                         backward.search(points, fine_ticks, majority))
                 for k, w in enumerate(again) if places[w] not in differed
                 for v, happened, points in plans[k] if points]
@@ -461,6 +577,23 @@ def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loo
                 joining.append((s.trying, state, [0]))
             return
 
+    def until(s: _Search, loop: WindowLoop, b: int) -> int | None:
+        """Row ``b``'s bound (`_until`) in search ``s``, cut at its judged tick in its own rows with ``common_cut``
+        (D217)."""
+        bound = _until(loop, b, len(windows[s.w].joined))
+        if not common_cut:
+            return bound
+        cut = loop.own_row(b, s.until)
+        return cut if bound is None else min(bound, cut)
+
+    def first_sentence(s: _Search) -> tuple[Sentence, int]:
+        """Search ``s``'s first sentence (v's of the first pass, with the window's W) and v's join tick."""
+        b_first = first.members[s.w][s.v]
+        sentence, permitted, tokens = first_samples[b_first]
+        return (Sentence(sentence, permitted, tokens, rules.reward(ends[s.w]), until(s, first, b_first),
+                         **_placed(first, b_first, first_samples, whole_windows)),
+                int(first.speaking.join_ticks[b_first]))
+
     def group(part: _Part, joint: WindowLoop, own: Sequence[int]) -> tuple[Group, float]:
         """The group of a point chosen whose windows ``own`` (in the joint loop) have ended, and its depth: read from
         the joint loop, each row's end and sentence its own (`WindowLoop.results`, `samples`; S6)."""
@@ -469,15 +602,21 @@ def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loo
         rows = [b for rows_w in members for b in rows_w]
         ended = dict(zip(rows, joint.results(rows)))
         rows_v = [rows_w[s.v] for rows_w in members]
-        made = dict(zip(rows_v, joint.samples(split, rows_v)))
-        kept = tuple(Sentence(*made[b], rules.reward([ended[c] for c in rows_w]),
-                              _until(joint, b, len(windows[s.w].joined))) for rows_w, b in zip(members, rows_v))
-        b_first = first.members[s.w][s.v]
-        join = int(first.speaking.join_ticks[b_first])
-        sentence, permitted, tokens = first_samples[b_first]
-        return (Group(places[s.w], part.point - join, Sentence(sentence, permitted, tokens, rules.reward(ends[s.w]),
-                                                               _until(first, b_first, len(windows[s.w].joined))),
-                      kept, varied=s.v), (s.happened.tick - part.point) * interval_s)
+        made = _read(joint, rows_v, split, whole_windows)
+        kept = tuple(Sentence(*made[b], rules.reward([ended[c] for c in rows_w]), until(s, joint, b),
+                              **_placed(joint, b, made, whole_windows))
+                     for rows_w, b in zip(members, rows_v))
+        sentence, join = first_sentence(s)
+        return (Group(places[s.w], part.point - join, sentence, kept, varied=s.v),
+                (s.happened.tick - part.point) * interval_s)
+
+    def value(joint: WindowLoop, own: Sequence[int]) -> float:
+        """The value of a point not chosen whose windows ``own`` (in the joint loop) have ended (D220): the mean W of
+        its continuations."""
+        members = [joint.members[w] for w in own]
+        rows = [b for rows_w in members for b in rows_w]
+        ended = dict(zip(rows, joint.results(rows)))
+        return float(np.mean([rules.reward([ended[c] for c in rows_w]) for rows_w in members]))
 
     def settled(joint: WindowLoop | None, flying: Sequence[_Part]) -> list[tuple[_Part, range]]:
         """The parts of the joint loop still flown, each with its windows in it: a part at its end is judged (a point
@@ -495,18 +634,26 @@ def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loo
                 else:
                     tried(s, part.point, part.streams, joint, own[0])
                 continue
-            if part.chosen is None:
+            if part.chosen is None and not part.judged:
                 hopeless = backward.out_of_reach(_failed(joint, own, part), continuations, part.need)
                 if alive and tick < s.until and not hopeless:
                     out.append((part, own))
                     continue
                 ask(s, _trials(joint, own, s.v, s.happened, part.point))
-                if part.chosen is None:                   # not chosen: its continuations end here
-                    continue
+                if part.chosen is None:
+                    if not point_values:                  # not chosen: its continuations end here
+                        continue
+                    part.judged = True                    # D220: flown on to its window's end for its value
+                    counted["to_event"] -= continuations
+                    counted["to_end"] += continuations
             if alive:
                 out.append((part, own))
+            elif part.chosen is None:
+                s.values[part.point] = value(joint, own)
             else:
                 s.groups[part.chosen] = group(part, joint, own)
+                if point_values:
+                    s.values[part.point] = float(np.mean([c.reward for c in s.groups[part.chosen][0].continuations]))
         return out
 
     def scheduled(part: _Part, loop: WindowLoop, window: int) -> int | None:
@@ -516,7 +663,7 @@ def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loo
         tick = loop.speaking.t - int(loop.origins[window])
         if part.base:
             return part.point - tick
-        return part.search.until - tick if part.chosen is None else None
+        return part.search.until - tick if part.chosen is None and not part.judged else None
 
     began = time.perf_counter()
     for s in searches:
@@ -553,10 +700,19 @@ def backward_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loo
     del held
     groups = [g for s in searches for g in s.groups]
     majorities = [(s.happened.tick - s.found.majority) * interval_s for s in searches if s.found.majority is not None]
+    valued, values = [], []
+    if point_values:                                       # D220: a unit a search, its first sentence and its groups
+        for s in searches:
+            sentence, join = first_sentence(s)
+            tried = sorted(s.values)
+            valued.append(Valued(places[s.w], s.v, sentence, tuple(p - join for p in tried),
+                                 tuple(s.values[p] for p in tried), tuple(g for g, _ in s.groups)))
+            values.append(([((s.happened.tick - p) * interval_s, s.values[p]) for p in reversed(tried)],
+                           sentence.reward))
     return BackwardRound(results, [g for g, _ in groups], [places[w] for w in again], differed,
                          [depth for _, depth in groups], len(searches), counted["found"], counted["to_event"],
                          counted["to_end"], search_s, counted["steps"], counted["rows"],
-                         [kind for s in searches for kind in s.found.kinds], majorities)
+                         [kind for s in searches for kind in s.found.kinds], majorities, valued, values)
 
 
 def _failed(loop: WindowLoop, own: Sequence[int], part: _Part) -> int:
@@ -583,7 +739,7 @@ def _failed(loop: WindowLoop, own: Sequence[int], part: _Part) -> int:
 
 def _trials(loop: WindowLoop, own: Sequence[int], v: int, happened: backward.Event, point: int) -> list[backward.Trial]:
     """Each continuation of a point (``own``: its windows in ``loop``, v the varied aircraft's place among each one's
-    aircraft) judged at the event + 60 s or its end (`multi.backward.avoids`): the loss v answered for, whether the
+    aircraft) judged at the judged tick or its end (`multi.backward.avoids`): the loss v answered for, whether the
     event's partner answered for one with v, v's outcome if it ended, and whether v said a go-around from ``point``
     on."""
     out = []

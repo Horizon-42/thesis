@@ -332,7 +332,16 @@ def _weights(model) -> str:
 #: A value campaign of 2 rounds (warm-up then training, two passes, a clip) on the fixture's short round, as the code
 #: before D173 made it (2026-10-08, dev-two-tier-v4-post c288ad77): its models' and V's weights and the old keys of
 #: V's record. D173's defaults must give it bit for bit.
-VALUE_BEFORE_D173 = "e38ec0f923c83eed37d97172616d3c09676fe8d4f946d73d1842f26503cd2efb"
+#: Written again on 2026-10-13 (two-tier2-eval-landing): the executor of `ts-executor-spec-v11` (223f1e30) and the
+#: closed-loop sentences of vocabulary D197–D199 (after 04378395, by 0ac795e5) moved it; the judge of D196 and the
+#: merge of dev-two-tier did not. Since then it pins this code itself.
+#: Written again on 2026-10-14 (two-tier2-glidepath): the closed-loop sentences of vocabulary D203 moved it (the
+#: fixture's observed final runs up to 31 m above the published glidepath; its angle corrections now aim at the glidepath).
+#: Written again on 2026-10-14 (two-tier2-glidepath, prior D204): the offset right of the centreline goes into the
+#: prior on the glidepath's 100 m scale, so the synthetic prior says other words; it moved.
+#: Written again on 2026-10-14 (two-tier2-glidepath, prior D206): the prior reads no landings, so its candidate input is
+#: one feature narrower and the synthetic prior says other words; it moved.
+VALUE_BEFORE_D173 = "d4700b23d0a8aed604a4a345ef047f79b0b6e5ee322671cc00f2278151f3680b"
 
 
 def test_with_d173_s_defaults_a_value_campaign_is_the_code_s_before_bit_for_bit(setup, tmp_path, monkeypatch):

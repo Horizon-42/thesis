@@ -141,9 +141,11 @@ ANYTIME_RECORDS_SCHEMA = "ts-anytime-records-v1"
 #: categories keep it readable; `archive/two_tier_v2_2026_09/tracker_lockstep.py`), for the same
 #: reason the anytime schema above is one — and the manoeuvre-token readouts' blocks
 #: (``manoeuvre_readout``: `manoeuvre.readout.RECORDS_BLOCK`, protocol C at the fixed anchor;
-#: ``manoeuvre_lockstep``: `experiments.manoeuvre_lockstep.LOCKSTEP_RECORDS_BLOCK`, the
+#: ``manoeuvre_lockstep``: `LOCKSTEP_RECORDS_BLOCK` of
+#: `4dTrajectory/ts_transformer/archive/manoeuvre_lockstep_2026_10/experiments/manoeuvre_lockstep.py`, archived, the
 #: closed-loop protocols), registered 2026-09-18 when the first lockstep was published, and the
-#: stage A failure-mode subsets (``failure_modes``: `experiments.executor_failure_modes.FAILURE_MODES_BLOCK`,
+#: stage A failure-mode subsets (``failure_modes``: `FAILURE_MODES_BLOCK` of
+#: `4dTrajectory/ts_transformer/archive/manoeuvre_lockstep_2026_10/experiments/executor_failure_modes.py`, archived,
 #: a few flights of one failure class copied out of a lockstep's records). A directory carrying
 #: one is a VARIANT of that checkpoint's prediction and has no category of its own without
 #: ``--category-variant``: published bare, it would be filed as the checkpoint's L−1 prediction.
@@ -1521,7 +1523,7 @@ def run_publication(
 #: `PREDICTOR`, `HORIZON`; `autopilot.spec.EXECUTOR_SPEC_SCHEMA`) — not imported: those modules pull in torch and
 #: the executor, and this orchestrator stays importable without them. `test_the_executor_names_mirror_the_runners`
 #: pins them.
-EXECUTOR_REPLAY_SCHEMA = "ts-executor-replay-v9"
+EXECUTOR_REPLAY_SCHEMA = "ts-executor-replay-v10"
 EXECUTOR_SPEC_SCHEMA = "ts-executor-spec-v11"
 EXECUTOR_PREDICTOR = "executor"
 EXECUTOR_HORIZON = "sentence"

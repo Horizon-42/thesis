@@ -61,6 +61,9 @@ SUGGESTED: dict[str, Any] = {
     "level_min_s": 20.0,
     # §4.4: a level is a piece whose rows stay within this of its own median (the instruction-v3 band, 25 m)
     "level_band_m": 25.0,
+    # §4.4: or a piece whose path angle is within this of level (the user, 2026-10-13: option A of the in-memory readout
+    # `outputs/POOLED/analyses/landing_options_20261013`)
+    "level_angle_deg": 0.5,
     "climb_angle_max_deg": 15.0,
     "ground_speed_floor_mps": 15.0,
     "ground_speed_ceiling_mps": 350.0,
@@ -89,6 +92,9 @@ SUGGESTED: dict[str, Any] = {
     # the closed-loop reading's tolerances (vocabulary §4.9, D32: the user, 2026-10-03)
     "closed_loop_lateral_m": 30.0,
     "closed_loop_vertical_m": 15.0,
+    # §4.9: an angle correction moves two classes while the error ahead is more than this many vertical tolerances
+    # (the user, 2026-10-13: option C of the same readout)
+    "closed_loop_two_class_factor": 2.0,
 }
 SUGGESTED["heading_tolerance_deg"] = SUGGESTED["heading_step_deg"] / 2 + HEADING_WANDER_ALLOWANCE_DEG
 #: Descent classes: how many, and the outer edges (a slightly negative floor so a flat stretch
@@ -157,13 +163,16 @@ class MeasuredValues:
         return data
 
 
-def build_spec(measured: MeasuredValues, *, closed_loop_final_vertical_m: float, angle_lead_s: float,
-               speed_lead_s: float) -> VocabularySpec:
-    """The spec of the measured values, the values fixed by choice, the user's H_final (D66: measured by A24, not
-    here; `instruction_spec --closed-loop-final-vertical-m`) and the user's angle and speed leads L_γ and L_v (executor
-    design D7, D8, V12: measured by their own reading, not here; `instruction_spec --angle-lead-s --speed-lead-s`)."""
-    return VocabularySpec(**SUGGESTED, **asdict(measured), closed_loop_final_vertical_m=closed_loop_final_vertical_m,
-                          angle_lead_s=angle_lead_s, speed_lead_s=speed_lead_s)
+def build_spec(measured: MeasuredValues, *, closed_loop_final_lateral_m: float, closed_loop_final_vertical_m: float,
+               angle_lead_s: float, speed_lead_s: float) -> VocabularySpec:
+    """The spec of the measured values, the values fixed by choice, the user's Y_final and H_final (the final descent's
+    tolerances of the closed loop; H_final: D66, measured by A24; Y_final: the user, 2026-10-12; not measured here;
+    `instruction_spec --closed-loop-final-lateral-m --closed-loop-final-vertical-m`) and the user's angle and speed
+    leads L_γ and L_v (executor design D7, D8, V12: measured by their own reading, not here; `instruction_spec
+    --angle-lead-s --speed-lead-s`)."""
+    return VocabularySpec(**SUGGESTED, **asdict(measured), closed_loop_final_lateral_m=closed_loop_final_lateral_m,
+                          closed_loop_final_vertical_m=closed_loop_final_vertical_m, angle_lead_s=angle_lead_s,
+                          speed_lead_s=speed_lead_s)
 
 
 def provisional_spec() -> VocabularySpec:
@@ -178,7 +187,8 @@ def provisional_spec() -> VocabularySpec:
         descent_angle_edges_deg=(DESCENT_FLOOR_DEG, 2.0, 2.75, 3.5, DESCENT_CEILING_DEG),
         descent_angle_centres_deg=(1.5, 2.4, 3.1, 4.0),
         climb_angle_centre_deg=3.0, speed_accel_max_mps2=2.0, **D22_GRID,
-    ), closed_loop_final_vertical_m=SUGGESTED["closed_loop_vertical_m"],     # no closed loop reads it
+    ), closed_loop_final_lateral_m=SUGGESTED["closed_loop_lateral_m"],       # no closed loop reads them
+       closed_loop_final_vertical_m=SUGGESTED["closed_loop_vertical_m"],
        angle_lead_s=0.0, speed_lead_s=0.0)     # what the passes measure (pieces, angles, levels) does not move with a lead
 
 

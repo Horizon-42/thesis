@@ -161,7 +161,7 @@ def test_the_live_segment_is_refused_past_the_bound_or_at_another_outcome_or_end
         prior_segments.apart_from_exported(result, shifted(name, 0.5 * STATE_BOUND_M), told, 0, step)    # within
         with pytest.raises(ExecutorDiffers, match=rf"from the readout's flown states, past {STATE_BOUND_M:g} m"):
             prior_segments.apart_from_exported(result, shifted(name, 2.0 * STATE_BOUND_M), told, 0, step)
-    other = "landed" if said["outcome"] != "landed" else "crossed_too_high"
+    other = "landed" if said["outcome"] != "landed" else "landing_failed"
     for changed in ({"outcome": other}, {"endCycle": said["endCycle"] + 1}):
         with pytest.raises(ExecutorDiffers, match="ends .* at cycle"):
             prior_segments.apart_from_exported(result, {**said, **changed}, told, 0, step)

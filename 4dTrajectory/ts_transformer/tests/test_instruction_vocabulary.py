@@ -30,7 +30,8 @@ from ts_transformer.instructions.words import (
 )
 from ts_transformer.data.day_split import SealedDay
 from ts_transformer.tests.support import (
-    fixture_days, fly_legs, instruction_airport, instruction_flight, instruction_spec, landing_on,
+    TEST_HAE_MINUS_MSL_M, TEST_RUNWAY_WIDTH_M, fixture_days, fly_legs, instruction_airport, instruction_flight,
+    instruction_spec, landing_on,
 )
 
 
@@ -61,6 +62,27 @@ def test_the_final_descent_tolerance_is_at_most_the_vertical_tolerance():
         instruction_spec(closed_loop_final_vertical_m=15.5)
     with pytest.raises(ValueError, match="closed_loop_final_vertical_m must be positive"):
         instruction_spec(closed_loop_final_vertical_m=0.0)
+
+
+def test_the_two_class_factor_is_above_one():
+    """D199: an angle correction moves two classes only while its start error is more than the factor times the
+    tolerance; at 1 or below, every correction would start two classes away."""
+    assert instruction_spec().closed_loop_two_class_factor == 2.0
+    for factor in (1.0, 0.9):
+        with pytest.raises(ValueError, match="at or below 1"):
+            instruction_spec(closed_loop_two_class_factor=factor)
+
+
+def test_the_final_descent_lateral_tolerance_is_at_most_the_lateral_tolerance():
+    """Y_final (the user, 2026-10-12), the closed loop's lateral tolerance while "no level-off" is in force, is the
+    smaller one; equal to Y is the reading before it."""
+    assert (instruction_spec().closed_loop_final_lateral_m == instruction_spec().closed_loop_lateral_m == 30.0)
+    assert instruction_spec(closed_loop_final_lateral_m=15.0).closed_loop_final_lateral_m == 15.0
+    with pytest.raises(ValueError, match="closed_loop_final_lateral_m above closed_loop_lateral_m"):
+        instruction_spec(closed_loop_final_lateral_m=30.5)
+    with pytest.raises(ValueError, match="closed_loop_final_lateral_m must be positive"):
+        instruction_spec(closed_loop_final_lateral_m=0.0)
+    assert instruction_spec(closed_loop_final_lateral_m=15.0).sha256 != instruction_spec().sha256
 
 
 def test_from_dict_refuses_a_missing_or_an_extra_key_and_another_reading_rule():
@@ -177,10 +199,15 @@ def test_compass_and_math_headings_round_trip():
 
 # ---- airport
 def _guided(**fields):
-    """A harvest `Runway` stand-in that publishes a vertical path (TCH 15 m, 3°, DA 60 m above the threshold)."""
+    """A harvest `Runway` stand-in that publishes a vertical path (TCH 15 m, 3°, DA 60 m above the threshold), with the
+    fields the evaluation's assessment context reads (`evaluation.context.assessment_for_runway`: LPV, 45.72 m wide)."""
     published = {"threshold_crossing_height_m": 15.0, "published_glidepath_deg": 3.0,
                  "decision_height_above_threshold_m": 60.0, "elevation_msl_m": 124.7,
-                 "published_minima": SimpleNamespace(vertically_guided=True, note="LPV")}
+                 "published_minima": SimpleNamespace(vertically_guided=True, note="LPV"),
+                 "airport": "KRDU", "elevation_hae_m": 124.7 + TEST_HAE_MINUS_MSL_M, "hae_minus_msl_m": TEST_HAE_MINUS_MSL_M,
+                 "width_m": TEST_RUNWAY_WIDTH_M, "lpv_course_width_m": 106.68, "baro_vnav_minima": False,
+                 **{name: "test" for name in ("width_source", "runway_source_cycle", "procedure_source_cycle",
+                                              "position_source", "vertical_source", "course_source", "tch_source")}}
     return SimpleNamespace(**{**published, **fields})
 
 
@@ -801,31 +828,36 @@ def test_the_spec_takes_the_chosen_row_of_the_rounding_candidates_and_refuses_an
         measure.candidate_values(candidates, "0.2")
 
 
-def test_the_spec_runner_measures_only_with_a_candidate_a_grid_h_final_and_the_leads_and_keeps_a_spec_only_without(
+def test_the_spec_runner_measures_only_with_a_candidate_a_grid_the_final_tolerances_and_the_leads_and_keeps_a_spec_only_without(
         tmp_path, capsys):
-    """D15, D56, D58, D66, executor design D7: measuring needs the user's choices of the angles, the grid, H_final and
-    the angle lead; --spec-from keeps a spec and takes none — refused before any file is read; a name that is no row is
-    refused."""
+    """D15, D56, D58, D66, Y_final, executor design D7: measuring needs the user's choices of the angles, the grid,
+    Y_final, H_final and the leads; --spec-from keeps a spec and takes none — refused before any file is read; a name
+    that is no row is refused."""
     from ts_transformer.experiments import instruction_spec
 
-    h_final, lead = ["--closed-loop-final-vertical-m", "10"], ["--angle-lead-s", "4", "--speed-lead-s", "4"]
-    for argv in ([], ["--candidate", "0.25"], ["--grid", "fitted"], ["--candidate", "0.25", "--grid", "d22"], h_final,
-                 ["--candidate", "0.25", *h_final], ["--candidate", "0.25", "--grid", "d22", *h_final], lead,
-                 ["--candidate", "0.25", "--grid", "d22", *h_final, *lead, "--spec-from", str(tmp_path / "other")],
-                 [*h_final, "--spec-from", str(tmp_path / "other")]):
+    y_final, h_final = ["--closed-loop-final-lateral-m", "15"], ["--closed-loop-final-vertical-m", "10"]
+    finals, lead = [*y_final, *h_final], ["--angle-lead-s", "4", "--speed-lead-s", "4"]
+    for argv in ([], ["--candidate", "0.25"], ["--grid", "fitted"], ["--candidate", "0.25", "--grid", "d22"], finals,
+                 ["--candidate", "0.25", *finals], ["--candidate", "0.25", "--grid", "d22", *finals], lead,
+                 ["--candidate", "0.25", "--grid", "d22", *h_final, *lead],             # Y_final missing
+                 ["--candidate", "0.25", "--grid", "d22", *y_final, *lead],             # H_final missing
+                 ["--candidate", "0.25", "--grid", "d22", *finals, *lead, "--spec-from", str(tmp_path / "other")],
+                 [*finals, "--spec-from", str(tmp_path / "other")]):
         with pytest.raises(SystemExit):
             instruction_spec.main(["--dir", str(tmp_path / "new"), *argv])
-        assert ("measuring needs --candidate, --grid, --closed-loop-final-vertical-m, --angle-lead-s and --speed-lead-s"
-                in capsys.readouterr().err)
-    for value, angle_s, speed_s in (("15.5", "4", "4"), ("0", "4", "4"), ("nan", "4", "4"), ("10", "3", "4"),
-                                    ("10", "-2", "4"), ("10", "4", "3")):   # the spec's own rules
+        assert ("measuring needs --candidate, --grid, --closed-loop-final-lateral-m, --closed-loop-final-vertical-m, "
+                "--angle-lead-s and --speed-lead-s" in capsys.readouterr().err)
+    for lateral, value, angle_s, speed_s in (("15", "15.5", "4", "4"), ("15", "0", "4", "4"), ("15", "nan", "4", "4"),
+                                             ("30.5", "10", "4", "4"), ("0", "10", "4", "4"), ("15", "10", "3", "4"),
+                                             ("15", "10", "-2", "4"), ("15", "10", "4", "3")):   # the spec's own rules
         with pytest.raises(SystemExit):
             instruction_spec.main(["--dir", str(tmp_path / "new"), "--candidate", "0.25", "--grid", "d22",
-                                   "--closed-loop-final-vertical-m", value, "--angle-lead-s", angle_s,
-                                   "--speed-lead-s", speed_s])
-        assert "--closed-loop-final-vertical-m / --angle-lead-s / --speed-lead-s:" in capsys.readouterr().err
-    for argv in (["--candidate", "0.2", "--grid", "d22", *h_final, *lead],
-                 ["--candidate", "0.25", "--grid", "d21", *h_final, *lead]):
+                                   "--closed-loop-final-lateral-m", lateral, "--closed-loop-final-vertical-m", value,
+                                   "--angle-lead-s", angle_s, "--speed-lead-s", speed_s])
+        assert ("--closed-loop-final-lateral-m / --closed-loop-final-vertical-m / --angle-lead-s / --speed-lead-s:"
+                in capsys.readouterr().err)
+    for argv in (["--candidate", "0.2", "--grid", "d22", *finals, *lead],
+                 ["--candidate", "0.25", "--grid", "d21", *finals, *lead]):
         with pytest.raises(SystemExit):
             instruction_spec.main(["--dir", str(tmp_path / "new"), *argv])
         assert "invalid choice" in capsys.readouterr().err

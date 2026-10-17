@@ -3,7 +3,8 @@ shown to behave the same, by a check on fixed inputs; multi-aircraft control D18
 check before a resume on changed code keeps a round's done batches). No criterion but equality (D7): two records are the
 same behaviour when every digest is equal.
 
-WHAT IT READS: a campaign of stage C (``ts-post-train-v1``, its branch method) or of stage D (``ts-multi-train-v1``),
+WHAT IT READS: a campaign of stage C (``ts-post-train-v1``, its branch method or standard GRPO, multi-aircraft control
+D221) or of stage D (``ts-multi-train-v1``),
 ``--campaign``: its
 ``campaign.json``, settings and inputs (the checks of the closed loop and of the edges run first, D73, D104). In this
 process, the CPU, torch on one thread (a GPU's rounding is not this check's):
@@ -44,7 +45,7 @@ import torch
 
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
 from ts_transformer.experiments import multi_train, post_train
-from ts_transformer.experiments.post_branches import BackwardRound, BranchRound
+from ts_transformer.experiments.post_branches import BackwardRound, BranchRound, SampledRound
 from ts_transformer.experiments.post_window_loop import WindowResult, checked_edges
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.repo_layout import REPO_ROOT, git_state
@@ -124,18 +125,30 @@ def round_digests(found: BranchRound) -> dict[str, Any]:
         groups.append(digest.hash.hexdigest())
     out = {"first": [end_digest(r) for r in found.first], "groups": groups,
            "spoken_again": list(found.spoken_again), "differed": list(found.differed)}
+    if isinstance(found, SampledRound):           # D221: the outcomes over all draws
+        out["draw_outcomes"] = dict(sorted(found.draw_outcomes.items()))
     if isinstance(found, BackwardRound):          # its points found backward (D182): their depths and counts
         out["searched"] = [found.depths_s, found.searches, found.found, found.to_event, found.to_end]
+        if found.valued:                          # D220: each search's unit, its first sentence, points and values
+            units = []
+            for unit in found.valued:
+                digest = Digest()
+                digest.add(unit.window, unit.varied, unit.points, unit.values, len(unit.groups))
+                digest.sentence(unit.first.rows, unit.first.permitted, unit.first.tokens)
+                digest.add(unit.first.reward, unit.first.until)
+                units.append(digest.hash.hexdigest())
+            out["valued"] = units
     return out
 
 
 @contextmanager
 def captured_rounds() -> Iterator[list[BranchRound]]:
-    """The `branch_round` and `backward_round` results of the stages' batch speakers while open (`post_train.speak_batch`,
-    `multi_train.speak_batch` call them by their module's names), in the order spoken; taken off after."""
+    """The `branch_round`, `backward_round` and `sampled_round` (D221) results of the stages' batch speakers while open
+    (`post_train.speak_batch`, `multi_train.speak_batch` call them by their module's names), in the order spoken; taken
+    off after."""
     found: list[BranchRound] = []
-    real, real_backward = post_train.branch_round, multi_train.backward_round
-    if multi_train.branch_round is not real:
+    real, real_backward, real_sampled = post_train.branch_round, multi_train.backward_round, post_train.sampled_round
+    if multi_train.branch_round is not real or multi_train.sampled_round is not real_sampled:
         raise RuntimeError("the stages' batch speakers call different branch rounds")
 
     def capturing(round_: Callable[..., BranchRound]) -> Callable[..., BranchRound]:
@@ -146,22 +159,24 @@ def captured_rounds() -> Iterator[list[BranchRound]]:
         return call
 
     post_train.branch_round = multi_train.branch_round = capturing(real)
+    post_train.sampled_round = multi_train.sampled_round = capturing(real_sampled)
     multi_train.backward_round = capturing(real_backward)
     try:
         yield found
     finally:
         post_train.branch_round = multi_train.branch_round = real
+        post_train.sampled_round = multi_train.sampled_round = real_sampled
         multi_train.backward_round = real_backward
 
 
 def opened_campaign(record: dict[str, Any]) -> tuple[Any, post_train.Stage]:
-    """A campaign's settings and stage, by its schema; of stage C, its branch method only (the landed and value methods
-    speak no branch round), refused by name otherwise."""
+    """A campaign's settings and stage, by its schema; of stage C, its branch method and standard GRPO only (the landed
+    and value methods speak no group), refused by name otherwise."""
     if record["schema"] == multi_train.MULTI_CAMPAIGN_SCHEMA:
         return multi_train.multi_settings_of(record), multi_train.stage_d()
     if record["schema"] == post_train.CAMPAIGN_SCHEMA:
         settings = post_train.settings_of(record)
-        if settings.method != post_train.BRANCH:
+        if settings.method not in (post_train.BRANCH, post_train.GRPO):
             raise ValueError(f"window_behaviour digests branch rounds; stage C's method {settings.method!r} speaks none")
         return settings, post_train.STAGE_C
     raise ValueError(f"a {record['schema']} campaign: neither stage C's nor stage D's")

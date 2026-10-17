@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -11,8 +12,8 @@ import torch
 from ts_transformer.instructions.words import Words
 from ts_transformer.post.edges import TOKEN_FEATURES
 from ts_transformer.post.loss import (
-    CLIP, KL_WEIGHT, PassStart, Samples, data_term, one_pass, passes, pull_to_base, stacked, surrogate, update_gradients,
-    update_loss, update_step,
+    CLIP, KL_WEIGHT, Extremes, PassStart, Samples, _surrogate_words, data_term, one_pass, passes, pull_to_base, stacked,
+    surrogate, update_gradients, update_loss, update_row, update_step,
 )
 from ts_transformer.post.traffic_attention import (
     Traffic, TrafficConfig, add_traffic_attention, parameter_groups, traffic_modules, traffic_of,
@@ -142,6 +143,41 @@ def test_the_surrogate_clips_and_reads_only_the_counted_rows():
     assert (log_p.grad[~counted] == 0).all() and (log_p.grad[counted] != 0).all()
 
 
+def test_d219_the_dual_clip_holds_each_negative_word_above_c_and_no_other_word():
+    """D219 (2): with the dual clip c, a word of a negative advantage whose ratio is above c adds −c·A and no gradient;
+    a word below c, and every word of a positive advantage, is as without it (bit for bit where none is held)."""
+    log_start = torch.log(torch.full((2, 3, 5), 0.5))
+    counted = torch.tensor([[False, True, True], [True, False, False]])
+    advantage = torch.tensor([[9.0, 1.0, 1.0], [-1.0, 7.0, 7.0]])
+    moved = log_start + torch.log(torch.tensor(1.5))                       # every ratio 1.5: past the clip
+    plain = surrogate(moved, log_start, advantage, counted)[0]
+    assert torch.equal(surrogate(moved, log_start, advantage, counted, dual_clip=3.0)[0], plain)     # 1.5 < 3
+    # sample 1's row (A = −1, r = 1.5 > 1.4) adds −c·A = 1.4 a word in place of 1.5; sample 0's (A = 1) as before
+    held = surrogate(moved, log_start, advantage, counted, dual_clip=1.4)[0]
+    assert held.item() == pytest.approx((2 * -(1.0 + CLIP) * 5 + 1.4 * 5) / 3)
+    for dual_clip, flows in ((None, True), (1.4, False)):
+        log_p = moved.clone().requires_grad_(True)
+        surrogate(log_p, log_start, advantage, counted, dual_clip=dual_clip)[0].backward()
+        assert bool((log_p.grad[1, 0] != 0).all()) is flows
+        assert (log_p.grad[0, 1:] == 0).all()                              # A > 0 past 1 + ε: the clip holds it
+
+
+def test_d219_an_updates_extremes_are_read_on_its_counted_words():
+    """D219 (4): the largest ratio, the largest gradient weight r·|A| (0 where a clip holds the word) and the largest
+    |A| of the counted words, and the words the dual clip holds; an uncounted row adds nothing; two sets joined."""
+    log_start = torch.log(torch.full((2, 3, 5), 0.5))
+    counted = torch.tensor([[False, True, True], [True, False, False]])
+    advantage = torch.tensor([[9.0, 1.0, 1.0], [-1.0, 7.0, 7.0]])
+    ratio = torch.tensor([[5.0, 1.5, 1.1], [2.0, 5.0, 5.0]])               # 5: uncounted rows
+    log_p = log_start + torch.log(ratio)[..., None]
+    # (0, 1): A = 1, r = 1.5 past 1 + ε, clipped: weight 0; (0, 2): r = 1.1 inside: 1.1; (1, 0): A = −1, r = 2: 2
+    *_, plain = _surrogate_words(log_p, log_start, advantage, counted, CLIP)
+    assert plain == Extremes(pytest.approx(2.0), pytest.approx(2.0), 1.0, 0)
+    *_, held = _surrogate_words(log_p, log_start, advantage, counted, CLIP, dual_clip=1.4)
+    assert held == Extremes(pytest.approx(2.0), pytest.approx(1.1), 1.0, 5)  # (1, 0) held: its 5 words, weight 0
+    assert plain.joined(held) == Extremes(pytest.approx(2.0), pytest.approx(2.0), 1.0, 5)
+
+
 def test_the_pull_to_the_base_is_zero_at_the_base_and_grows_away_from_it():
     log_b = torch.log(torch.full((2, 3, 5), 0.25))
     counted = torch.ones(2, 3, dtype=torch.bool)
@@ -215,6 +251,32 @@ def test_an_update_in_pieces_is_the_whole_update():
     assert all((p.grad is None) == (g is None) and (g is None or torch.allclose(p.grad, g, atol=1e-6, rtol=1e-5))
                for p, g in zip(model.parameters(), expected))
     assert not model.training and first.traffic.embedded is None and second.traffic.embedded is None
+    # D219: with the dual clip too (c low enough to hold some words), and the pieces' extremes are the whole's
+    c = 1.02
+    model.zero_grad(set_to_none=True)
+    torch.manual_seed(3)
+    whole = update_loss(model, start, base, samples, data, dual_clip=c)
+    whole.loss.backward()
+    expected = [None if p.grad is None else p.grad.clone() for p in model.parameters()]
+    model.zero_grad(set_to_none=True)
+    torch.manual_seed(3)
+    pieces = update_step(model, start, base, [first, second], data, dual_clip=c)
+    for name in ("loss", "surrogate", "kl", "data"):
+        assert torch.allclose(getattr(pieces, name), getattr(whole, name).detach(), atol=1e-6, rtol=1e-6), name
+    assert all((p.grad is None) == (g is None) and (g is None or torch.allclose(p.grad, g, atol=1e-6, rtol=1e-5))
+               for p, g in zip(model.parameters(), expected))
+    model.zero_grad(set_to_none=True)
+    torch.manual_seed(3)
+    one = update_step(model, start, base, [samples], data, dual_clip=c)
+    assert pieces.extremes.dual_clipped == one.extremes.dual_clipped > 0 and whole.extremes is None
+    for name in ("ratio_max", "weight_max", "advantage_max"):
+        assert getattr(pieces.extremes, name) == pytest.approx(getattr(one.extremes, name), rel=1e-6), name
+    row = update_row(replace(pieces, grad_norm=torch.tensor(2.5)))
+    assert row == {"grad_norm": 2.5, "words": pieces.words, "surrogate": pytest.approx(float(pieces.surrogate)),
+                   "kl": pytest.approx(float(pieces.kl)), "ratio_max": pieces.extremes.ratio_max,
+                   "weight_max": pieces.extremes.weight_max, "advantage_max": pieces.extremes.advantage_max,
+                   "dual_clipped": pieces.extremes.dual_clipped}
+    model.zero_grad(set_to_none=True)
 
 
 def test_an_updates_gradient_by_part_adds_up_to_the_update():

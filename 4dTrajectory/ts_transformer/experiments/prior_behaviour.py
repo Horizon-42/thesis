@@ -2,16 +2,16 @@
 synthetic set, and the words and probabilities the speaker says with fixed numbers — on the CPU, with one thread, as
 JSON. With them: the configuration values a run reads from the code (`TrainConfig`'s and `PriorConfig`'s defaults:
 `prior_train`'s), the first-step runway readout of the trained model, the teacher-forced loss of the variant
-`constants`, the inputs of fixed rows (`inputs.state_inputs` of both variants with the landings counted by a
-`LandingIndex`, `inputs.Heard.inputs` after the words said), the inputs of a fixed sentence (`inputs.sentence_rows`,
-its flight key of the real format), the step of a speaker's closed loop (`prior_speaking_loop.SpeakingLoop`) on an
-executor that flies straight (`Straight`): its words, states and records; the selection (`selection.left_out`) over
-every rule, stored outcome and mark; `prior_select`'s rules on a fixed table of scores (`select_rules`: a tie of
-parameters, a score at exactly twice the seed scale, a seed scale of 0); and the campaign's settings
-(`prior_campaign.settings`: the seeds, the selection, the configurations, free generation, the temperature, D68's
-bound) as the code on the disk sets them (D108). `prior_campaign` runs it as its own process at its start and before
-each step, and stops when the answer differs: results of different code are compared once the code is shown to behave
-the same on fixed inputs, never by an equal commit (the user, 2026-10-02; no code fingerprint, 2026-10-04).
+`constants`, the inputs of fixed rows (`inputs.state_inputs` of both variants, `inputs.Heard.inputs` after the words
+said), the inputs of a fixed sentence (`inputs.sentence_rows`, its
+flight key of the real format), the step of a speaker's closed loop (`prior_speaking_loop.SpeakingLoop`) on an executor
+that flies straight (`Straight`): its words, states and records; the selection (`selection.left_out`) over every rule,
+stored outcome and mark; `prior_select`'s rule on fixed tables of scores (`select_rules`: a score at exactly twice the
+seed scale, a seed scale of 0); and the campaign's settings (`prior_campaign.settings`: the seeds, the selection, the
+variant, the configurations, free generation, the temperature, D68's bound) as the code on the disk sets them (D108).
+`prior_campaign` runs it as its own process at its start and before each step, and stops when the answer differs:
+results of different code are compared once the code is shown to behave the same on fixed inputs, never by an equal
+commit (the user, 2026-10-02; no code fingerprint, 2026-10-04).
 
 The fixed inputs: the artefact's vocabulary spec and its first airport's candidates and finals (the procedure masks
 the speaker speaks under), configuration A's shape (`PriorConfig`'s defaults) and training values (`TrainConfig`'s), a
@@ -46,7 +46,6 @@ from ts_transformer.prior.batch import (
     variant_features,
 )
 from ts_transformer.prior.inputs import Heard, sentence_rows, state_inputs
-from ts_transformer.prior.landings import Landing, LandingIndex
 from ts_transformer.prior.model import Prior, PriorConfig
 from ts_transformer.prior.procedure import Final, airport_finals
 from ts_transformer.prior.runs import Run, RunData
@@ -102,22 +101,15 @@ def hexed(values: Any) -> list:
     return np.vectorize(lambda v: float(v).hex(), otypes=[object])(np.asarray(values, dtype=np.float64)).tolist()
 
 
-def fixed_inputs(geometry: AirportGeometry, days: DaySplit) -> dict[str, Any]:
+def fixed_inputs(geometry: AirportGeometry) -> dict[str, Any]:
     """The inputs of fixed rows of ``geometry``'s airport (module docstring): the states of a descent along its first
-    candidate's extended course, the landings of fixed flights on a train day of ``days`` counted before each row."""
-    day = days.days["train"][0]
-    noon = float(np.datetime64(f"{day}T12:00:00", "s").astype(np.int64))
-    times = noon + 2.0 * np.arange(ROWS)
-    runways = tuple(c.ident for c in geometry.candidates)
-    index = LandingIndex(runways, tuple(Landing(noon - 600.0 + 30.0 * k, runways[k % len(runways)], f"L{k}")
-                                        for k in range(20)), 0, days)
-    counts = index.counts_before(times, without="L0")
+    candidate's extended course."""
     at = np.stack([-12_000.0 + 140.0 * np.arange(ROWS), 30.0 * np.sin(np.arange(ROWS)),
                    geometry.elevation_m + 900.0 - 7.0 * np.arange(ROWS)], axis=1)
     before = np.concatenate((at[:1], at[:-1]))
-    out = {"landings": counts.tolist()}
+    out = {}
     for variant in ("full", "constants"):
-        own, candidates = state_inputs(at, before, np.arange(ROWS) > 0, counts, geometry, variant, 2.0)
+        own, candidates = state_inputs(at, before, np.arange(ROWS) > 0, geometry, variant, 2.0)
         out[variant] = {"own": hexed(own), "candidates": hexed(candidates)}
     return out
 
@@ -154,7 +146,6 @@ def speaking(model: Prior, words: Words, finals: Sequence[Final], days: DaySplit
     """Three flights of ``finals``' airport in `SpeakingLoop` on `Straight` at Δ = 4 s (module docstring)."""
     geometry = finals[0].geometry
     count, every, start = 3, 2, 4
-    noon = float(np.datetime64(f"{days.days['train'][0]}T12:00:00", "s").astype(np.int64))
     states = np.zeros((count, start * every + 1, 6))
     states[:, :, 0] = -14_000.0 + 120.0 * np.arange(start * every + 1)[None] + 2_000.0 * np.arange(count)[:, None]
     states[:, :, 2] = geometry.elevation_m + 900.0 - 6.0 * np.arange(start * every + 1)[None]
@@ -162,16 +153,9 @@ def speaking(model: Prior, words: Words, finals: Sequence[Final], days: DaySplit
             for b in range(count)}
     flights = {b: {"airport": geometry.code, "entry_time_utc": f"{days.days['train'][0]}T11:50:00Z",
                    "dataset_id": f"{geometry.code}:L{b}"} for b in range(count)}
-    runways = tuple(c.ident for c in geometry.candidates)
-    # each aircraft its own landings (D105): the three flights' own landings after their rows (a scene's), and others
-    # in the 30 min before its rows, on each candidate, one more than the aircraft before it
-    landings = [LandingIndex(runways, tuple(sorted(
-        (*(Landing(noon - 1_500.0 + 60.0 * k, runways[k % len(runways)], f"O{b}{k}") for k in range(3 + b)),
-         *(Landing(noon + 10.0 * a, runways[0], f"L{a}") for a in range(count))), key=lambda landing: landing.time_s)),
-        0, days) for b in range(count)]
     observed = {b: states[b, : start * every] for b in range(count)}
     loop = SpeakingLoop(model, Straight(states[:, -1], every, 2), list(range(count)), rows, observed, flights,
-                        {geometry.code: geometry}, landings, {geometry.code: finals}, words, interval_s=4.0,
+                        {geometry.code: geometry}, {geometry.code: finals}, words, interval_s=4.0,
                         variant="full", device=torch.device("cpu"))
     while loop.observing:
         loop.observe()
@@ -187,10 +171,8 @@ def fixed_sentence(said: Sequence[Sequence[int]], geometry: AirportGeometry, wor
                    ) -> dict[str, Any]:
     """The inputs and targets of a fixed closed-loop sentence (`inputs.sentence_rows`, both variants) at Δ = 4 s: the
     words ``said`` from its first predicted step (`FIRST`) where the speaker said them (`behaviour`'s first aircraft:
-    the same heights, so the grammar takes them), a flight key of the real format
-    (``<airport>:<id>_<runway>_<icao24>_<landing time>``) whose own landing the landings hold between two of its rows on
-    the last candidate, with another landing at the same second on the first, others in the 30 min before its rows on
-    each candidate, one at a row's time and one exactly 30 min before a row (the window's two edges)."""
+    the same heights, so the grammar takes them) and a flight key of the real format
+    (``<airport>:<id>_<runway>_<icao24>_<landing time>``)."""
     every, rows = 2, (FIRST + len(said) - 1) * 2 + 1
     states = np.zeros((rows, len(STATE_COLUMNS)))
     states[:, STATE_COLUMNS.index("e_m")] = -15_000.0 + 200.0 * np.arange(rows)
@@ -199,20 +181,12 @@ def fixed_sentence(said: Sequence[Sequence[int]], geometry: AirportGeometry, wor
     runway = geometry.candidates[-1].ident
     flight = {"airport": geometry.code, "entry_time_utc": f"{day}T11:50:00Z",
               "dataset_id": f"{geometry.code}:BEH123_{runway}_abc123_{day.replace('-', '')}T115031Z"}
-    entry = float(np.datetime64(f"{day}T11:50:00", "s").astype(np.int64))
-    runways = tuple(c.ident for c in geometry.candidates)
-    own = entry + 31.0                # between two of its Δ rows (2 s row 3 at 11:50:06, a Δ row every 4 s from it)
-    landings = LandingIndex(runways, tuple(sorted(
-        (*(Landing(entry - 1_700.0 + 97.0 * k, runways[k % len(runways)], f"L{k}") for k in range(17)),
-         Landing(own, runway, flight["dataset_id"].partition(":")[2]), Landing(own, runways[0], "SAME_SECOND"),
-         Landing(entry + 14.0, runways[0], "AT_A_ROW"), Landing(entry + 18.0 - 1_800.0, runways[-1], "WINDOW_EDGE")),
-        key=lambda landing: landing.time_s)), 0, days)
     sentence = ClosedLoopRows(first_row=3, start=FIRST, grid=np.array(said, dtype=np.int16),
                               correction=np.zeros((len(said), len(COLUMNS)), dtype=bool), states=states,
                               on_interval=on_interval_rows(rows, every))
     out = {}
     for variant in ("full", "constants"):
-        got = sentence_rows(sentence, flight, geometry, landings, words, interval_s=4.0, split="train", variant=variant)
+        got = sentence_rows(sentence, flight, geometry, words, interval_s=4.0, split="train", variant=variant)
         out[variant] = {name: (hexed(value) if np.asarray(value).dtype.kind == "f" else np.asarray(value).tolist())
                         for name, value in vars(got).items() if name not in ("flight_key", "airport", "split")}
     return out
@@ -229,8 +203,8 @@ def selection_rules() -> dict[str, Any]:
 
 
 def campaign_plan() -> list[list[Any]]:
-    """`prior_campaign.plan` of a fixed formal record, both choices made (configuration B, variant `constants`): each
-    step's name, runner and arguments (the campaign's directory as ``<campaign>``)."""
+    """`prior_campaign.plan` of a fixed formal record, the choice made (configuration C): each step's name, runner and
+    arguments (the campaign's directory as ``<campaign>``)."""
     import tempfile
 
     from ts_transformer.experiments.prior_campaign import SEEDS, plan
@@ -239,8 +213,7 @@ def campaign_plan() -> list[list[Any]]:
               "seeds": list(SEEDS), "smoke": None}
     with tempfile.TemporaryDirectory() as directory:
         campaign = Path(directory)
-        for step, chosen in (("configuration", "B"), ("variant", "constants")):
-            (campaign / f"choice_{step}.json").write_text(json.dumps({"chosen": chosen}), encoding="utf-8")
+        (campaign / "choice_configuration.json").write_text(json.dumps({"chosen": "C"}), encoding="utf-8")
         return [[step.name, step.runner, [str(a).replace(directory, "<campaign>") for a in step.argv]]
                 for step in plan(campaign, record, "cuda")]
 
@@ -256,31 +229,22 @@ def free_generation_draw() -> list[int]:
 
 
 def select_rules() -> dict[str, Any]:
-    """`prior_select`'s rules (§5, D40) on fixed tables of scores, each at an edge: configurations tied in parameters
-    within twice the seed scale (the lower score), a score at exactly twice the seed scale (within), a seed scale of 0
-    (the best alone), and the variant at exactly twice the seed scale (kept `full`) and with a seed scale of 0."""
-    from ts_transformer.experiments.prior_select import arm_name, choose_configuration, choose_variant
+    """`prior_select`'s rule (§5, D40) on fixed tables of scores, each at an edge: a score at exactly twice the seed
+    scale (within), a seed scale of 0 (the best alone)."""
+    from ts_transformer.experiments.prior_select import VARIANT, arm_name, choose_configuration
 
     seeds = (1, 2)
 
-    def table(scores: dict[str, float], parameters: dict[str, int], second: float) -> dict[str, dict[str, Any]]:
-        """Each configuration's arm (variant `full`, the first seed) and configuration A's at the second seed."""
-        out = {arm_name(c, "full", seeds[0]): {"score": v, "parameters": parameters[c]} for c, v in scores.items()}
-        out[arm_name("A", "full", seeds[1])] = {"score": second, "parameters": parameters["A"]}
+    def table(scores: dict[str, float], second: float) -> dict[str, dict[str, Any]]:
+        """Each configuration's arm (the first seed) and configuration A's at the second seed."""
+        parameters = {"A": 100, "C": 300}
+        out = {arm_name(c, VARIANT, seeds[0]): {"score": v, "parameters": parameters[c]} for c, v in scores.items()}
+        out[arm_name("A", VARIANT, seeds[1])] = {"score": second, "parameters": parameters["A"]}
         return out
 
-    parameters = {"A": 100, "B": 200, "C": 300, "D": 100}
-    # scale 0.25: all four within 1.5 (C at exactly it); A and D tie in parameters, D the lower score
-    tie = table({"A": 1.25, "B": 1.0, "C": 1.5, "D": 1.125}, parameters, 1.5)
-    edge = table({"A": 1.5, "B": 1.0, "C": 2.0, "D": 1.75}, parameters, 1.75)       # A at exactly best + 2 · 0.25
-    zero = table({"A": 1.25, "B": 1.0, "C": 1.5, "D": 1.125}, parameters, 1.25)     # scale 0: B alone
-    variant_edge = {**table({"A": 1.5}, parameters, 1.625),                         # scale 0.125: 0.25 is not more
-                    arm_name("A", "constants", seeds[0]): {"score": 1.25, "parameters": 100}}
-    variant_zero = {**table({"A": 1.5}, parameters, 1.5),
-                    arm_name("A", "constants", seeds[0]): {"score": 1.375, "parameters": 100}}
-    return {"tie": choose_configuration(tie, seeds), "edge": choose_configuration(edge, seeds),
-            "zero": choose_configuration(zero, seeds), "variant_edge": choose_variant(variant_edge, "A", seeds),
-            "variant_zero": choose_variant(variant_zero, "A", seeds)}
+    edge = table({"A": 1.5, "C": 1.0}, 1.75)           # scale 0.25: A at exactly best + 2 · 0.25, within: A chosen
+    zero = table({"A": 1.25, "C": 1.0}, 1.25)          # scale 0: C alone
+    return {"edge": choose_configuration(edge, seeds), "zero": choose_configuration(zero, seeds)}
 
 
 def behaviour(words: Words, finals: Sequence[Final], days: DaySplit) -> dict[str, Any]:
@@ -319,7 +283,7 @@ def behaviour(words: Words, finals: Sequence[Final], days: DaySplit) -> dict[str
         with torch.no_grad():
             nll, asked = batch_nll(constants, collate(fixed_sentences(words, len(finals), constants.config.word_values,
                                                                       variant="constants"), cpu))
-        inputs = fixed_inputs(finals[0].geometry, days)
+        inputs = fixed_inputs(finals[0].geometry)
         sentence = fixed_sentence([row[0] for row in said], finals[0].geometry, words, days)
         loop = speaking(model, words, finals, days)
     finally:
