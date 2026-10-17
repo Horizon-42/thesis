@@ -4,6 +4,7 @@ fixture of `test_post_window_loop`)."""
 from __future__ import annotations
 
 import copy
+from collections import Counter
 from dataclasses import replace
 
 import numpy as np
@@ -16,7 +17,7 @@ from ts_transformer.experiments.post_branches import branch_round, same_prefix
 from ts_transformer.experiments.post_window_loop import start_move_of
 from ts_transformer.instructions.words import COLUMNS
 from ts_transformer.post.branches import (
-    STATE_BOUND_M, Group, Sentence, Valued, branch_points, continuation_numbers, first_numbers, samples,
+    STATE_BOUND_M, Group, Sentence, Valued, branch_points, continuation_numbers, first_numbers, landed_numbers, samples,
 )
 from ts_transformer.post.edges import TOKEN_FEATURES
 from ts_transformer.post.loss import one_pass
@@ -372,3 +373,65 @@ def test_an_aircraft_ended_at_its_first_predicted_step_before_a_row_flown_has_it
     loop.left = {}                                        # neither has left the loop (S6)
     assert np.array_equal(loop.states(0), loop.observed[0])
     assert loop.states(1).shape == (5, 6) and np.array_equal(loop.states(1)[3:], [[1.0] * 6, [2.0] * 6])
+
+
+# ---- D221: standard GRPO
+def _sampled(s, model, windows, draws=2, rules=None):
+    return post_branches.sampled_round(model, lambda flights: s["moved_loop"](start_move_of(windows[0])), windows, [0],
+                                       {0: s["stored"]}, s["flights"], s["geometries"], s["finals"], s["words"],
+                                       interval_s=DELTA, variant="full", edges_reference=s["reference"],
+                                       faults={s["geometry"].code: {}}, device=CPU, split="train", draws=draws,
+                                       rules=post_branches.stage_c_rules(1337, 0, DELTA) if rules is None else rules)
+
+
+def test_d221_a_grpo_round_speaks_each_window_from_its_start_and_gives_one_group_of_its_draws(setup):
+    """D221 on the real window (its time limit): draw 0 is branch training's first pass (the first sentence's numbers),
+    draw d each window alone on P49's numbers of draw d; the window's group: its branch point the first predicted step,
+    a sentence a draw in order with that draw's reward; every window spoken again, none differed; the outcomes of every
+    draw counted."""
+    s = setup
+    model = _with_module(s["base"])
+    (window,) = s["windows"]
+    found = _sampled(s, model, [window], draws=3)
+    (first,) = found.first
+    (reference,) = _round(s, model, [window]).first
+    assert np.array_equal(first.words, reference.words) and first.outcome == reference.outcome
+    assert found.spoken_again == [0] and found.differed == []
+    (group,) = found.groups
+    start = s["stored"].rows.start
+    assert (group.window, group.varied, group.branch, len(group.sentences)) == (0, 0, start, 3)
+    outcomes = []
+    for d, sentence in enumerate(group.sentences):
+        (alone,) = _window_loop(s, model, [window]).run([landed_numbers(1337, 0, 0, d)])
+        assert np.array_equal(sentence.rows.targets[start:], alone.words) and sentence.reward == alone.reward
+        assert sentence.until is None                                   # stage C's: its rows end at its event
+        outcomes.append(alone.outcome)
+    assert found.draw_outcomes == dict(Counter(outcomes))
+
+
+def test_d221_a_grpo_groups_draws_take_their_reward_less_the_groups_mean_from_the_first_predicted_step(setup):
+    """D221: the group's advantage is each draw's reward less the mean of its draws, on every row from the first
+    predicted step (none before); its samples go through the loss of C7."""
+    s = setup
+    model = _with_module(s["base"])
+    (window,) = s["windows"]
+    rewards = iter([1.0, 0.0, 0.5])                                   # the window's reward of draws 0, 1, 2
+    rules = replace(post_branches.stage_c_rules(1337, 0, DELTA), reward=lambda results: next(rewards))
+    (group,) = _sampled(s, model, [window], draws=3, rules=rules).groups
+    assert [x.reward for x in group.sentences] == [1.0, 0.0, 0.5] and group.informative
+    batch = samples([group], CPU)
+    start = s["stored"].rows.start
+    assert (~batch.counted[:, :start]).all() and batch.counted[:, start].all()
+    assert torch.allclose(batch.advantage[:, start], torch.tensor([0.5, -0.5, 0.0]))
+    optimizer = torch.optim.AdamW(parameter_groups(model, prior_lr=1e-4, traffic_lr=1e-3))
+    (parts,) = one_pass(model, s["base"], optimizer, [([batch], batch.rows)])
+    assert torch.isfinite(parts.loss)
+
+
+def test_d221_draw_0_takes_the_first_sentences_numbers_and_fewer_than_two_draws_are_refused(setup):
+    rules = post_branches.stage_c_rules(1337, 2, DELTA)
+    assert np.array_equal(rules.draw(3, 0, 0).random(5), rules.first(3, 0).random(5))
+    assert not np.array_equal(rules.draw(3, 0, 1).random(5), rules.draw(3, 0, 2).random(5))
+    assert not np.array_equal(rules.draw(3, 0, 1).random(5), rules.draw(4, 0, 1).random(5))
+    with pytest.raises(ValueError, match="at least two"):
+        _sampled(setup, None, setup["windows"], draws=1)

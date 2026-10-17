@@ -21,7 +21,7 @@ from ts_transformer.experiments.multi_train import (
 from ts_transformer.multi.separation import PAIRS
 from ts_transformer.multi.tokens import PART_FEATURES, TOKENS_SCHEMA
 from ts_transformer.multi.windows import COMPRESSED, REAL_KIND, left_out
-from ts_transformer.post.branches import EQUAL, GROUP_WEIGHTS, MINORITY_SIDE
+from ts_transformer.post.branches import EQUAL, GROUP_WEIGHTS, MINORITY_SIDE, SPREAD
 from ts_transformer.tests.support import INSTRUCTION_STEP_S
 from ts_transformer.tests.test_multi_windows import built  # noqa: F401
 from ts_transformer.tests.test_post_branches import _ahead
@@ -1317,3 +1317,53 @@ def test_a_worker_caps_its_gpu_once_at_its_first_task_and_only_with_a_budget(mon
             assert context.device.type == "cuda"
         assert capped == expected
 
+
+
+def test_d221_stage_ds_method_defaults_to_branch_and_grpo_keeps_the_branch_settings_at_their_defaults(monkeypatch):
+    """D221: `MultiSettings.method` defaults to branch training (a record without it reads so) and is profiled; GRPO
+    refuses a branch setting off its default and fewer than two draws, by name; the group weight `SPREAD` reaches the
+    pass."""
+    assert _multi_settings().method == post_train.BRANCH and "method" in multi_train.PROFILED_SETTINGS
+    record = {"schema": multi_train.MULTI_CAMPAIGN_SCHEMA, "inputs": {"settings": asdict(_multi_settings())}}
+    del record["inputs"]["settings"]["method"]
+    assert multi_train.multi_settings_of(record).method == post_train.BRANCH
+    assert _multi_settings(method=post_train.GRPO).method == post_train.GRPO
+    for changed in ({"branching": "majority"}, {"segment_only": True}, {"branch_every_s": 60.0}, {"continuations": 1}):
+        with pytest.raises(ValueError, match="no branch point"):
+            _multi_settings(method=post_train.GRPO, **changed)
+    with pytest.raises(ValueError, match="none of"):
+        _multi_settings(method=post_train.LANDED_SENTENCES)
+    seen = {}
+    monkeypatch.setattr(multi_train, "train_pass", lambda *args, **kwargs: seen.update(kwargs) or {})
+    multi_train.stage_d().train("model", SimpleNamespace(interval_s=INSTRUCTION_STEP_S), "optimizer", "directory",
+                                _multi_settings(method=post_train.GRPO, group_weight=SPREAD), "rng", part_width=7,
+                                round_=0, companion=None)
+    assert seen["group_weight"] == SPREAD
+
+
+def test_d221_a_grpo_batch_of_stage_d_writes_its_informative_groups_and_records_the_draws_outcomes(setup, tmp_path,
+                                                                                                    monkeypatch):
+    """D221 through stage D's batch speaker: its draws (`post_branches.sampled_round`, with stage D's rules and loop),
+    its informative groups written, and its record: the first pass's ends draw 0's, every window spoken again, the
+    outcomes over all draws, none of the search's keys."""
+    from ts_transformer.experiments import window_behaviour
+
+    s = setup
+    short_round(monkeypatch, s)
+    context = _context(s)
+    settings = _multi_settings(start=_stage_c(s, tmp_path, context), continuations=3, method=post_train.GRPO)
+    window = replace(s["windows"][0], span_s=1.0)
+    monkeypatch.setattr(multi_train, "draw_windows", lambda context, settings, rng: ([window], {"drawn": {REAL_KIND: 1}}))
+    stage = multi_train.stage_d()
+    model = stage.start(context, settings)[0].eval()
+    windows, _ = stage.draw(context, settings, 0)
+    with window_behaviour.captured_rounds() as found:
+        record = stage.speak_batch(model, context, windows, [0], settings, 0, tmp_path, 0)
+    (spoken,) = found
+    assert type(spoken).__name__ == "SampledRound" and len(spoken.groups) == 1
+    (group,) = spoken.groups
+    written = torch.load(tmp_path / "groups_0.pt", weights_only=False)
+    assert [len(g.sentences) for g in written] == [3] * group.informative
+    assert record["groups"] == 1 and record["informative_groups"] == len(written) and record["spoken_again"] == 1
+    assert sum(record["draw_outcomes"].values()) == 3 and sum(record["outcomes"].values()) == 1
+    assert not {"searches", "group_depths_s", "point_values"} & set(record)

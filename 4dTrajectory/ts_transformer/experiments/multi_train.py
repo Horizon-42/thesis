@@ -53,7 +53,11 @@ parts (`stage_d`):
   of its continuations; each search one unit of the pass (`post.branches.Valued`: the first sentence credited by the
   values, the search's groups), the units written in place of the groups; the record holds besides each search's
   values (``point_values``: its span, each point tried the latest first as [depth s, value], and the first sentence's W)
-  and the units written (``valued_units``).
+  and the units written (``valued_units``). ``--method grpo`` (`MultiSettings.method`, D221; ``branch`` the default):
+  standard GRPO in place of the branch groups — every window spoken ``--continuations`` times from its start, each
+  commanded aircraft on its own numbers of the draw (`multi.credit.draw_numbers`), each commanded aircraft one group
+  of its draws with the draws' W (`post_branches.sampled_round`); the branch settings keep their defaults; the record
+  adds the outcomes over all draws (``draw_outcomes``).
 - **The pass** (D219, the user, 2026-10-17; each default the behaviour before it): ``--clip-norm``, each update's
   gradient clipped to that norm (stage C's D168, `post.loss.one_pass`); ``--dual-clip``, the surrogate's dual clip
   (`post.loss.update_step`); each update's row in the round's pass record (``update_rows``, a list a pass: its
@@ -117,11 +121,11 @@ import torch
 from flight_scenarios.procedure_final import DEFAULT_PROCEDURE_ROOT
 
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
-from ts_transformer.experiments.post_branches import Rules, backward_round, branch_round
+from ts_transformer.experiments.post_branches import Rules, backward_round, branch_round, sampled_round
 from ts_transformer.experiments.post_train import (
-    Context, Speakers, Stage, available_memory, batches, cpu_workers_refused, done_rounds, open_campaign, open_context,
-    round_start, run_campaign, save_batch_file, settings_of, source_campaign, speak_device_refused, speak_round,
-    start_checkpoint, start_model, start_of, traffic_model, train_pass, workers_fit,
+    BRANCH, GRPO, Context, Speakers, Stage, available_memory, batches, cpu_workers_refused, done_rounds, open_campaign,
+    open_context, round_start, run_campaign, save_batch_file, settings_of, source_campaign, speak_device_refused,
+    speak_round, start_checkpoint, start_model, start_of, traffic_model, train_pass, workers_fit,
 )
 from ts_transformer.experiments.post_window_loop import (
     LANDED, LOST_SEPARATION, WindowLoop, checked_edges, turns_readout,
@@ -164,7 +168,9 @@ MEASURE_MARGIN = 1.3
 #: D179, D181 (55)) change the words spoken, not the shapes — a worker past its share stops by name.
 PROFILED_SETTINGS = ("per_kind", "spans_s", "c_min", "batch_rows", "continuations", "update_groups", "data_sentences",
                      "branching", "front_attention", "batch_squares", "joint_heads", "search_points", "judged_after_s",
-                     "fine_point", "point_values")
+                     "fine_point", "point_values", "method")
+#: How a round of stage D trains (`MultiSettings.method`): branch groups (D141–D143, D182, D192) or standard GRPO (D221).
+MULTI_METHODS = (BRANCH, GRPO)
 #: The devices of ``--executor-device`` (multi-aircraft control S1). ``speak``: the executor flies on the speaker's
 #: device (the behaviour before S1). ``cpu``: the executor flies on the CPU (`Context.executor_device`).
 EXECUTOR_DEVICES = ("speak", "cpu")
@@ -258,6 +264,11 @@ class MultiSettings:
     #: (`post_branches.backward_round`, `post.branches.Valued`); False, the default: the behaviour before it (a record
     #: without it reads so)
     point_values: bool = False
+    #: D221 (the user, 2026-10-17): how a round trains (`MULTI_METHODS`): `BRANCH`, the default (the behaviour before it;
+    #: a record without it reads so), or `GRPO` (each window spoken `continuations` times from its start, each
+    #: commanded aircraft one group of its draws, `post_branches.sampled_round`), with the branch settings at their
+    #: defaults
+    method: str = BRANCH
 
     def __post_init__(self) -> None:
         if set(self.per_kind) != set(KINDS) or min(self.per_kind.values()) < 0 or not any(self.per_kind.values()):
@@ -312,6 +323,14 @@ class MultiSettings:
             raise ValueError(f"clip_norm {self.clip_norm}: positive, or none (not clipped)")
         if self.dual_clip is not None and not self.dual_clip > 1:
             raise ValueError(f"dual_clip {self.dual_clip}: above 1, or none (no dual clip)")
+        if self.method not in MULTI_METHODS:
+            raise ValueError(f"method {self.method!r} is none of {MULTI_METHODS}")
+        if self.method == GRPO and (self.branching != GRID or self.segment_only or self.branch_every_s != BRANCH_EVERY_S
+                                    or self.continuations < 2):
+            raise ValueError(f"method {GRPO!r} (D221) has no branch point: branching {GRID!r} (the default), no "
+                             f"segment_only, branch_every_s {BRANCH_EVERY_S:g}, and continuations (the draws of a "
+                             f"window) at least 2, not {self.branching!r}, {self.segment_only}, "
+                             f"{self.branch_every_s:g} and {self.continuations}")
         if self.point_values and (self.branching == GRID or self.fine_point or self.group_weight != EQUAL):
             raise ValueError(f"point_values (D220) goes with the backward search ({BACKWARD!r} or {MAJORITY!r}), no fine "
                              f"point and group_weight {EQUAL!r}, not {self.branching!r}, fine_point {self.fine_point} "
@@ -440,22 +459,29 @@ def speak_batch(model: Prior, context: Context, windows: Sequence[Window], place
     a decision point, the continuations flown to the judged tick only and those flown to their window's end, and the
     search's seconds, steps and rows; majority, besides: each group's kind and each majority point's span and depth;
     with `MINORITY_SIDE`, its informative groups' minority sides, in the order written; with `point_values`, D220, its
-    informative units written in place of the groups, each search's values and the units written).
+    informative units written in place of the groups, each search's values and the units written). With `GRPO` (D221)
+    its ``continuations`` draws in place of the two passes (`post_branches.sampled_round`), the first pass's ends draw
+    0's, and besides the outcomes over all draws.
     The majority point needs more than half of the ``continuations`` avoiding (D192: 5 of 8)."""
     train = context.splits["train"]
     batch = [windows[p] for p in places]
     common = dict(interval_s=context.interval_s, variant=context.variant, edges_reference=context.edges_reference,
-                  faults=train["faults"], device=context.device, split="train", continuations=settings.continuations,
+                  faults=train["faults"], device=context.device, split="train",
                   rules=Rules(**credit.rules(settings.seed, round_, context.interval_s, settings.branch_every_s)),
                   loop_options={**loop_options(context, settings.joint), "attention": settings.front_attention},
                   whole_windows=settings.joint)
     data = (model, context.start_loop("train", batch), batch, places, train["sentences"], train["flights"],
             context.geometries, context.finals, context.words)
     majority = settings.continuations // 2 + 1 if settings.branching == MAJORITY else None
-    found = (branch_round(*data, seed=settings.seed, round_=round_, **common) if settings.branching == GRID else
-             backward_round(*data, **common, majority=majority, search_points=settings.search_points,
-                            judged_after_s=settings.judged_after_s, fine_point=settings.fine_point,
-                            common_cut=settings.common_cut, point_values=settings.point_values))
+    if settings.method == GRPO:
+        found = sampled_round(*data, draws=settings.continuations, **common)
+    elif settings.branching == GRID:
+        found = branch_round(*data, seed=settings.seed, round_=round_, continuations=settings.continuations, **common)
+    else:
+        found = backward_round(*data, continuations=settings.continuations, **common, majority=majority,
+                               search_points=settings.search_points, judged_after_s=settings.judged_after_s,
+                               fine_point=settings.fine_point, common_cut=settings.common_cut,
+                               point_values=settings.point_values)
     informative = [g for g in found.groups if g.informative]
     units = [u for u in found.valued if u.informative] if settings.point_values else informative
     save_batch_file(units, directory / f"groups_{k}.pt")
@@ -469,6 +495,8 @@ def speak_batch(model: Prior, context: Context, windows: Sequence[Window], place
                      "majority_depths_s": [[batch[0].span_s, depth] for depth in found.majority_depths_s]}
     if settings.group_weight == MINORITY_SIDE:
         searched |= {"group_minorities": [g.minority for g in informative]}
+    if settings.method == GRPO:
+        searched |= {"draw_outcomes": found.draw_outcomes}
     if settings.point_values:
         searched |= {"valued_units": len(units),
                      "point_values": [[batch[0].span_s, [list(p) for p in points], reward]
@@ -977,6 +1005,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--update-groups", type=int, required=True, help="the branch groups of an update")
     parser.add_argument("--data-sentences", type=int, required=True, help="the data term's sentences of an update")
     parser.add_argument("--select-per-airport", type=int, required=True)
+    parser.add_argument("--method", choices=MULTI_METHODS, default=MultiSettings.method,
+                        help="D221: how a round trains: branch groups (default) or standard GRPO (each window spoken "
+                             "--continuations times from its start, each commanded aircraft one group of its draws)")
     parser.add_argument("--branching", choices=BRANCHINGS, default=GRID,
                         help="D182, D192: the branch points, D143's grid (default) or found back from each event "
                              "with point B (backward) or the majority point (majority)")
@@ -1019,7 +1050,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--data-weight", type=float, default=MultiSettings.data_weight,
                         help="R2: the data term's weight in each update (default: post.loss.DATA_WEIGHT)")
     parser.add_argument("--group-weight", choices=GROUP_WEIGHTS, default=MultiSettings.group_weight,
-                        help="D195: each group's weight in the pass (default: every group's advantages as they are)")
+                        help="D195, D221: each group's weight in the pass (default: every group's advantages as they "
+                             "are; spread: divided by the standard deviation of its rewards, GRPO's)")
     parser.add_argument("--joint-heads", type=int, default=MultiSettings.joint_heads,
                         help="D212: version 2, the heads of the module that reads the other commanded aircraft of a "
                              "window at the same tick (default: none, version 1)")
@@ -1058,7 +1090,8 @@ def settings_from(args: argparse.Namespace, start: dict[str, Any] | None) -> Mul
                          args.traffic_heads, args.branch_every_s, args.segment_only, args.joint_heads,
                          search_points=args.search_points, judged_after_s=args.judged_after_s,
                          fine_point=args.fine_point, common_cut=args.common_cut, clip_norm=args.clip_norm,
-                         dual_clip=args.dual_clip, select_seed=args.select_seed, point_values=args.point_values)
+                         dual_clip=args.dual_clip, select_seed=args.select_seed, point_values=args.point_values,
+                         method=args.method)
 
 
 def main(argv: list[str] | None = None) -> int:

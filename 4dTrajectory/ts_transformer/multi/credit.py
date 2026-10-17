@@ -13,7 +13,9 @@ training (post-training §9 item 6, `experiments.post_branches.Rules`, which `ru
   the window's grid (the loop's ticks). With one commanded aircraft, stage C's points (post-training D37).
 - **The numbers** (§3.3, D142): each commanded aircraft's own stream, from the seed, the round, the window's place in
   the round and the aircraft's place in the window (`first_numbers`); a continuation's from these, the branch point and
-  k (`continuation_numbers`, for the varied aircraft only: the others go on from their own first-sentence streams).
+  k (`continuation_numbers`, for the varied aircraft only: the others go on from their own first-sentence streams);
+  a draw's of standard GRPO (`draw_numbers`, D221: every aircraft's own stream of the draw, draw 0 its first
+  sentence's).
 """
 
 from __future__ import annotations
@@ -87,6 +89,14 @@ def continuation_numbers(seed: int, round_: int, place: int, member: int, tick: 
     return np.random.default_rng([seed, round_, place, member, tick, k])
 
 
+def draw_numbers(seed: int, round_: int, place: int, member: int, draw: int) -> np.random.Generator:
+    """The numbers of commanded aircraft ``member``'s sentence in draw ``draw`` of the window at ``place`` (standard
+    GRPO, D221): draw 0 its first sentence's (`first_numbers`), draw d a stream of its own (its fifth number, 2**30, is
+    no tick of a continuation's)."""
+    return (first_numbers(seed, round_, place, member) if draw == 0
+            else np.random.default_rng([seed, round_, place, member, 1 << 30, draw]))
+
+
 def aircraft_of(loop: Any, rows: Sequence[int], results: Sequence[Any]) -> list[Aircraft]:
     """A window's commanded aircraft (`Aircraft`) from its first sentence: ``loop`` the window loop that spoke it
     (post-training §9 item 5), ``rows`` the window's rows in it, ``results`` their ends (`WindowResult`)."""
@@ -110,4 +120,4 @@ def rules(seed: int, round_: int, interval_s: float, every_s: float = BRANCH_EVE
                 continuation=lambda place, member, v, tick, k: continuation_numbers(seed, round_, place, member, tick, k),
                 reward=lambda results: window_reward([r.reward for r in results]),
                 again=lambda results: spoken_again([r.reward for r in results]),
-                varied=chosen)
+                varied=chosen, draw=lambda place, member, d: draw_numbers(seed, round_, place, member, d))

@@ -451,3 +451,32 @@ def test_a_round_of_version_2_end_to_end(setup, tmp_path, monkeypatch):
     assert record["schema"] == MULTI_CAMPAIGN_SCHEMA_V2 and multi_settings_of(record) == two
     with pytest.raises(ValueError, match="whose settings are"):
         multi_settings_of({**record, "schema": MULTI_CAMPAIGN_SCHEMA})
+
+
+@pytest.mark.parametrize("joins", [JOINS, (0, 30, 60)])
+def test_d221_a_grpo_round_with_whole_windows_gives_each_sentence_its_window(setup, joins):
+    """D221 with D212 (3): with ``whole_windows`` a GRPO round's groups are those without it (window, branch point,
+    aircraft, each sentence's rows, reward and bound), each sentence holding its window's other sentences at their join
+    ticks."""
+    from ts_transformer.experiments.post_branches import Rules, sampled_round
+    from ts_transformer.multi import credit
+    from ts_transformer.tests.test_post_window_loop import DELTA
+
+    s = setup
+    multi, loop_of = _multi(s, joins=joins)
+    parts = loop_of.parts
+    model = _version_2(s["base"], joint_weights=False)
+    data = (model, parts["start"], [multi], [5], parts["sentences"], parts["flights"], s["geometries"], s["finals"],
+            s["words"])
+    common = dict(interval_s=DELTA, variant="full", edges_reference=s["reference"], faults={s["geometry"].code: {}},
+                  device=CPU, split="train", draws=3, rules=Rules(**credit.rules(1337, 0, DELTA)),
+                  loop_options=_options(s))
+    alone, whole = (sampled_round(*data, **common, whole_windows=w) for w in (False, True))
+    assert len(alone.groups) == len(whole.groups) and whole.groups
+    for a, w in zip(alone.groups, whole.groups):
+        assert (a.window, a.branch, a.varied) == (w.window, w.branch, w.varied)
+        assert len(a.sentences) == len(w.sentences)
+        for x, y in zip(a.sentences, w.sentences):
+            assert not x.window and y.join == joins[w.varied]
+            assert [p.join for p in y.window] == [j for m, j in enumerate(joins) if m != w.varied]
+            assert np.array_equal(x.rows.time_s, y.rows.time_s) and (x.reward, x.until) == (y.reward, y.until)

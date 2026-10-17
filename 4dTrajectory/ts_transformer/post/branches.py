@@ -16,7 +16,9 @@ groups gives a sample in each.
 **A group's weight** (D195, the user, 2026-10-11; `GROUP_WEIGHTS`): `EQUAL`, every group's advantages as they are (the
 behaviour before it), or `MINORITY_SIDE`, each group's advantages times its minority side (`Group.minority`: the count
 of its sentences on the smaller side of its mean) divided by the round's mean minority side. A group of one sentence
-against eight then pushes a quarter of a group of four against five; the mean weight of a round's groups is 1.
+against eight then pushes a quarter of a group of four against five; the mean weight of a round's groups is 1. Or
+`SPREAD` (multi-aircraft control D221, the user, 2026-10-17): each group's advantages divided by the standard deviation
+of its rewards (`Group.spread`), GRPO's normalised reward (DeepSeekMath §4.1.2).
 
 **A window of several commanded aircraft** (multi-aircraft control D142, D143, D149; post-training §9 item 9): a group
 names the aircraft it varies (``Group.varied``, its place among the window's commanded aircraft; stage C's: 0, its one
@@ -65,7 +67,8 @@ STATE_BOUND_M = 1e-6
 #: D195: the weights of a group (module docstring)
 EQUAL = "equal"
 MINORITY_SIDE = "minority-side"
-GROUP_WEIGHTS = (EQUAL, MINORITY_SIDE)
+SPREAD = "spread"
+GROUP_WEIGHTS = (EQUAL, MINORITY_SIDE, SPREAD)
 #: a reward closer to its group's mean than this is on neither side of it (`Group.minority`)
 SIDE_TOLERANCE = 1e-9
 
@@ -164,6 +167,12 @@ class Group:
         """Whether its rewards differ (a group whose rewards are all the same gives no sample)."""
         rewards = [s.reward for s in self.sentences]
         return max(rewards) > min(rewards)
+
+    @property
+    def spread(self) -> float:
+        """The standard deviation of its rewards (D221, `SPREAD`: the population's, over its sentences; 0 for a group
+        whose rewards are all the same)."""
+        return float(np.std([s.reward for s in self.sentences]))
 
     @property
     def minority(self) -> int:

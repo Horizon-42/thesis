@@ -9,7 +9,7 @@ import copy as copying
 import numpy as np
 import pytest
 
-from ts_transformer.experiments.post_branches import Rules, branch_round, stage_c_rules
+from ts_transformer.experiments.post_branches import Rules, branch_round, sampled_round, stage_c_rules
 from ts_transformer.experiments.post_window_loop import start_move_of
 from ts_transformer.instructions.artefact import load_candidates
 from ts_transformer.instructions.grammar import column_words
@@ -369,3 +369,80 @@ def test_stage_ds_rules_vary_the_aircraft_of_d143_at_their_points(setup):
     for group in round_.groups:
         assert group.window == 5 and group.first.reward == sum(r.reward for r in first)
         assert group.first.until == (aircraft[group.varied].end - JOINS[group.varied])
+
+
+# ---- D221: standard GRPO
+def _sampled_multi(s, model, multi, parts, rules, draws=2):
+    return sampled_round(model, parts["start"], [multi], [5], parts["sentences"], parts["flights"], s["geometries"],
+                         s["finals"], s["words"], interval_s=DELTA, variant="full", edges_reference=s["reference"],
+                         faults={s["geometry"].code: {}}, device=CPU, split="train", draws=draws, rules=rules)
+
+
+def test_d221_stage_ds_draws_are_each_aircrafts_own_and_draw_0_its_first_sentences():
+    draws = [credit.draw_numbers(1, 2, 3, m, d).random(5) for m in range(2) for d in range(3)]
+    assert np.array_equal(draws[0], credit.first_numbers(1, 2, 3, 0).random(5))
+    assert np.array_equal(draws[3], credit.first_numbers(1, 2, 3, 1).random(5))
+    assert len({tuple(x) for x in draws}) == len(draws)
+    assert not np.array_equal(credit.draw_numbers(1, 2, 3, 0, 1).random(5), credit.draw_numbers(1, 2, 4, 0, 1).random(5))
+
+
+@pytest.mark.parametrize("joins", [(0, 8, 15), (0, 30, 60)])
+def test_d221_a_grpo_round_draws_every_commanded_aircraft_again_and_gives_each_one_group(setup, joins):
+    """D221 on a window of three commanded aircraft: each draw asks every aircraft its numbers of the draw, and draw 0
+    is branch training's first pass; each aircraft one group (its place `varied`, its branch point its first predicted
+    step), a sentence for each draw in which it said a row, with that draw's W (the sum) and its own event of that draw
+    as its bound."""
+    s = setup
+    multi, loop_of = _multi(s, joins=joins)
+    parts = loop_of.parts
+    fields = credit.rules(1337, 0, DELTA)
+    asked = []
+
+    def draw(place, member, d):
+        asked.append((place, member, d))
+        return fields["draw"](place, member, d)
+
+    model = _with_module(s["base"])
+    found = _sampled_multi(s, model, multi, parts, Rules(**{**fields, "draw": draw}), draws=3)
+    assert sorted(asked) == [(5, m, d) for m in range(3) for d in range(3)]
+    reference = branch_round(model, parts["start"], [multi], [5], parts["sentences"], parts["flights"], s["geometries"],
+                             s["finals"], s["words"], interval_s=DELTA, variant="full", edges_reference=s["reference"],
+                             faults={s["geometry"].code: {}}, device=CPU, seed=1337, round_=0, split="train",
+                             continuations=2, rules=Rules(**fields))
+    assert [(r.outcome, r.reward, r.words.tolist()) for r in found.first] == [
+        (r.outcome, r.reward, r.words.tolist()) for r in reference.first]
+    assert found.spoken_again == [5] and found.differed == []
+    expected = {m: [] for m in range(3)}
+    for d in range(3):                                  # each draw alone, on its own numbers
+        loop = loop_of(model)
+        ends = loop.run([fields["draw"](5, m, d) for m in range(3)])
+        start = loop.speaking.start
+        for m in range(3):
+            expected[m].append((sum(r.reward for r in ends), loop.end_step(m),
+                                ends[m].words[:loop.end_step(m) - start].tolist()))     # its words to its event
+    groups = {g.varied: g for g in found.groups}
+    assert sorted(groups) == [0, 1, 2]
+    for m, group in groups.items():
+        assert group.window == 5 and group.branch == start
+        assert [(x.reward, x.until, x.rows.targets[start:x.until].tolist()) for x in group.sentences] == expected[m]
+
+
+def test_d221_an_aircraft_that_says_no_row_in_a_draw_has_no_sentence_there(setup, monkeypatch):
+    """D221: a draw in which a commanded aircraft ends at its first predicted step (its `WindowLoop.end_step` the
+    start; here made so for the third aircraft in every draw) gives it no sentence, so with fewer than two sentences it
+    gives no group; the other aircraft's groups are as before."""
+    from ts_transformer.experiments import post_window_loop
+
+    s = setup
+    multi, loop_of = _multi(s)
+    parts = loop_of.parts
+    rules = Rules(**credit.rules(1337, 0, DELTA))
+    model = _with_module(s["base"])
+    before = _sampled_multi(s, model, multi, parts, rules, draws=2)
+    own = post_window_loop.WindowLoop.end_step
+    monkeypatch.setattr(post_window_loop.WindowLoop, "end_step",
+                        lambda loop, b: int(loop.speaking.start) if int(loop.member_of[b]) == 2 else own(loop, b))
+    after = _sampled_multi(s, model, multi, parts, rules, draws=2)
+    assert sorted(g.varied for g in before.groups) == [0, 1, 2] and sorted(g.varied for g in after.groups) == [0, 1]
+    for a, b in zip(before.groups[:2], after.groups):
+        assert [(x.reward, x.until) for x in a.sentences] == [(x.reward, x.until) for x in b.sentences]

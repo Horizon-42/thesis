@@ -395,7 +395,8 @@ def _rules(continuation, varied_points):
 
     return Rules(first=lambda place, member: np.random.default_rng([1, place, member]), continuation=continuation,
                  reward=lambda results: float(sum(r.reward for r in results)),
-                 again=lambda results: sum(r.reward for r in results) < len(results), varied=varied_points)
+                 again=lambda results: sum(r.reward for r in results) < len(results), varied=varied_points,
+                 draw=lambda place, member, d: np.random.default_rng([1, place, member, 1 << 30, d]))
 
 
 def test_a_continuation_of_a_varied_aircraft_on_its_own_numbers_repeats_the_first_sentence(setup):

@@ -28,12 +28,20 @@ its reward, spoken again below 1, its branch points from its first predicted ste
 commanded aircraft of its window, each one's sentence and join tick read from the same loop (`post.branches.Placed`,
 ``Sentence.window``), for the loss's window samples. Without it (the default) only the varied aircraft's sentences are
 read (D181 (58)).
+
+**Standard GRPO** (multi-aircraft control D221; `sampled_round`): no first and second pass, no branch point. Every
+window of the batch is spoken ``draws`` times from its start, each commanded aircraft of each draw with numbers of its
+own (`Rules.draw`; draw 0 its first sentence's, so draw 0 is the first pass above). Each commanded aircraft of a window
+gives one group: its sentences of the draws, each with its draw's reward of the window (`Rules.reward`), counted from
+its first predicted step up to its event (`post.branches.Sentence.until`); its advantage is the reward less the
+group's mean. A draw in which the aircraft says no row (it ended at its first predicted step) gives it no sentence.
 """
 
 from __future__ import annotations
 
 import copy as copying
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Generator, Mapping, Sequence
@@ -49,7 +57,7 @@ from ts_transformer.instructions.words import COLUMNS, RUNWAY, RUNWAY_GO_AROUND,
 from ts_transformer.multi import backward, credit
 from ts_transformer.post.branches import (
     BRANCH_EVERY_S, CONTINUATIONS, STATE_BOUND_M, Group, Placed, Sentence, Valued, branch_points,
-    continuation_numbers, first_numbers,
+    continuation_numbers, first_numbers, landed_numbers,
 )
 from ts_transformer.post.reward import LANDED
 from ts_transformer.post.scene import Window
@@ -70,6 +78,14 @@ class BranchRound:
 
 
 @dataclass(frozen=True)
+class SampledRound(BranchRound):
+    """One batch of a round by standard GRPO (`sampled_round`, D221): `BranchRound`'s parts (the first pass's ends are
+    draw 0's; every window spoken again, none differed) and the outcomes of every commanded aircraft over all draws."""
+
+    draw_outcomes: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class Rules:
     """A caller's rules of branch training (module docstring), for a window at its place in the round:
 
@@ -81,18 +97,22 @@ class Rules:
     - ``again(results)``: whether the window is spoken again;
     - ``varied(window, loop, rows, results)``: the aircraft it varies (places among its commanded aircraft) and each
       one's branch points (ticks of the window's grid), from the first pass's ``loop``, the window's ``rows`` in it and
-      their ends ``results``."""
+      their ends ``results``;
+    - ``draw(place, member, d)``: the numbers of a commanded aircraft's sentence in draw ``d`` of its window (standard
+      GRPO, D221, `sampled_round`); draw 0's are ``first``'s."""
 
     first: Callable[[int, int], np.random.Generator]
     continuation: Callable[[int, int, int, int, int], np.random.Generator]
     reward: Callable[[Sequence[WindowResult]], float]
     again: Callable[[Sequence[WindowResult]], bool]
     varied: Callable[[Window, WindowLoop, Sequence[int], Sequence[WindowResult]], list[tuple[int, list[int]]]]
+    draw: Callable[[int, int, int], np.random.Generator]
 
 
 def stage_c_rules(seed: int, round_: int, interval_s: float, every_s: float = BRANCH_EVERY_S) -> Rules:
     """Stage C's rules (module docstring; D37, D94): one aircraft, its reward, spoken again below 1, its branch points from
-    its first predicted step to its event, every ``every_s`` (D37's, or the campaign's `Settings.branch_every_s`, P55)."""
+    its first predicted step to its event, every ``every_s`` (D37's, or the campaign's `Settings.branch_every_s`, P55);
+    a draw's numbers those of P49's draws (`landed_numbers`, D221)."""
     def varied(window: Window, loop: WindowLoop, rows: Sequence[int], results: Sequence[WindowResult]
                ) -> list[tuple[int, list[int]]]:
         (b,) = rows
@@ -101,7 +121,7 @@ def stage_c_rules(seed: int, round_: int, interval_s: float, every_s: float = BR
     return Rules(first=lambda place, member: first_numbers(seed, round_, place),
                  continuation=lambda place, member, v, tick, k: continuation_numbers(seed, round_, place, tick, k),
                  reward=lambda results: results[0].reward, again=lambda results: results[0].reward < 1.0,
-                 varied=varied)
+                 varied=varied, draw=lambda place, member, d: landed_numbers(seed, round_, place, d))
 
 
 def same_prefix(a: np.ndarray, b: np.ndarray, rows: int, bound_m: float) -> bool:
@@ -206,6 +226,52 @@ def branch_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop,
     differed = _differed(first, second, again, last, places)
     return BranchRound(results, [g for _, g in groups if g.window not in differed], [places[w] for w in again],
                        differed)
+
+
+def sampled_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop, list[int], dict[int, np.ndarray]]],
+                  windows: Sequence[Window], places: Sequence[int], sentences: Mapping[int, ClosedLoopSentence],
+                  flights: Mapping[int, Mapping[str, Any]], geometries: Mapping[str, AirportGeometry],
+                  finals: Mapping[str, Sequence[Final]], words: Words, *, interval_s: float, variant: str,
+                  edges_reference: Path, faults: Mapping[str, Mapping[str, frozenset[int]]], device: torch.device,
+                  split: str, draws: int, rules: Rules, loop_options: Mapping[str, Any] | None = None,
+                  whole_windows: bool = False) -> SampledRound:
+    """One batch ``windows`` of a round by standard GRPO (module docstring; multi-aircraft control D221), the arguments
+    as `branch_round`'s: the batch spoken ``draws`` times, one loop a draw (a draw's memory is the first pass's), each
+    row on its numbers of the draw (`Rules.draw`); after each draw its sentences read (`WindowLoop.samples`; with
+    ``whole_windows``, each with its window) and its loop freed. The groups are in the order of the windows, then of
+    their commanded aircraft (`Group.varied`; `Group.branch` the first predicted step, `Group.first` the earliest draw
+    with a sentence); an aircraft with fewer than two sentences gives no group."""
+    if draws < 2:
+        raise ValueError(f"{draws} draws: a group of at least two")
+    window_loop, _ = _batch_loops(model, start_loop, windows, places, sentences, flights, geometries, finals, words,
+                                  interval_s=interval_s, variant=variant, edges_reference=edges_reference,
+                                  faults=faults, device=device, rules=rules, loop_options=loop_options)
+    everything = list(range(len(windows)))
+    #: each window's commanded aircraft, each its sentences of the draws in which it said a row
+    said: list[list[list[Sentence]]] = [[[] for _ in w.signal_indices] for w in windows]
+    first: list[WindowResult] = []
+    outcomes: Counter = Counter()
+    start = 0
+    for d in range(draws):
+        loop = window_loop(everything)
+        ends = loop.run([rules.draw(places[int(loop.window_of[b])], int(loop.member_of[b]), d)
+                         for b in range(len(loop.order))])
+        start = int(loop.speaking.start)
+        rows = {b for b in range(len(loop.order)) if loop.end_step(b) > start}        # a row said from its first step
+        made = _read(loop, sorted(rows), split, whole_windows)
+        for w, members in enumerate(loop.members):
+            reward = rules.reward([ends[b] for b in members])
+            for m, b in enumerate(members):
+                if b in rows:
+                    said[w][m].append(Sentence(*made[b], reward, _until(loop, b, len(windows[w].joined)),
+                                               **_placed(loop, b, made, whole_windows)))
+        outcomes.update(end.outcome for end in ends)
+        if d == 0:
+            first = ends
+        del loop, made                          # released before the next draw: one draw's loop alive
+    groups = [Group(places[w], start, own[0], tuple(own[1:]), varied=m)
+              for w in everything for m, own in enumerate(said[w]) if len(own) >= 2]
+    return SampledRound(first, groups, [places[w] for w in everything], [], dict(outcomes))
 
 
 def _batch_loops(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop, list[int], dict[int, np.ndarray]]],

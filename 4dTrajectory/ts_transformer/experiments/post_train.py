@@ -77,7 +77,11 @@ window is spoken one time (`first_numbers`), every sentence a sample, with what 
 model at each row (`speak_value_batch`, `post.value`); V (a copy of the start model with a token part of its own and a
 head, `ValueRun`) gives each row its advantage (GAE) and is trained beside the model; the first `Settings.value_warmup`
 rounds train V alone; V is kept in ``round_<r>/value.pt`` (`post.value.VALUE_SCHEMA`), written before the checkpoint,
-which no reader of a round opens. A START FROM A ROUND (``--start-campaign``, ``--start-round``;
+which no reader of a round opens. STANDARD GRPO (``--method grpo``, multi-aircraft control D221; the user,
+2026-10-17): step 3 speaks every window `Settings.continuations` times from its start
+(`experiments.post_branches.sampled_round`; draw 0 the first sentence, `first_numbers`, draw d P49's `landed_numbers`),
+each window one group of its draws, and the pass is step 4's; no second pass, no branch point. A START FROM A ROUND
+(``--start-campaign``, ``--start-round``;
 `campaign_start`, D162): instead of the base with zero-output traffic modules (D29), the weights of a round of another
 campaign on the same base, its checkpoint's bytes recorded in the settings, with a seed other than its campaign's; a
 new optimizer, and the pull term toward the base either way. A formal campaign does not start from a smoke one.
@@ -114,7 +118,7 @@ from flight_scenarios.procedure_final import DEFAULT_PROCEDURE_ROOT
 
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
 from ts_transformer.autopilot.start import NO_MOVE, Start
-from ts_transformer.experiments.post_branches import branch_round, stage_c_rules
+from ts_transformer.experiments.post_branches import branch_round, sampled_round, stage_c_rules
 from ts_transformer.experiments.post_window_loop import (
     WindowLoop, WindowResult, checked_edges, moved_commanded, start_move_of, turns_readout,
 )
@@ -126,8 +130,8 @@ from ts_transformer.instructions.faults import faulty_flights
 from ts_transformer.instructions.words import Words
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.post.branches import (
-    BRANCH_EVERY_S, CONTINUATIONS, EQUAL, MINORITY_SIDE, Group, Landed, Sentence, Valued, branch_rows, first_numbers,
-    landed_numbers, landed_samples, samples,
+    BRANCH_EVERY_S, CONTINUATIONS, EQUAL, MINORITY_SIDE, SPREAD, Group, Landed, Sentence, Valued,
+    branch_rows, first_numbers, landed_numbers, landed_samples, samples,
 )
 from ts_transformer.post.fault_census import fault_rows
 from ts_transformer.post.loss import (DATA_WEIGHT, LossParts, PassStart, Samples, clipped_step, landed_step, passes,
@@ -155,10 +159,14 @@ from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 CAMPAIGN_SCHEMA = "ts-post-train-v1"
 POST_CHECKPOINT_SCHEMA = "ts-post-checkpoint-v1"
 KINDS = (REAL, INSERTED, LEADER_MOVED, MOVED_START)
-#: How a round trains (`Settings.method`): branch groups and the clipped surrogate (D94), the landed sentences (P49), or
-#: one sentence a window with a value function (D171).
-BRANCH, LANDED_SENTENCES, VALUE = "branch", "landed", "value"
-METHODS = (BRANCH, LANDED_SENTENCES, VALUE)
+#: How a round trains (`Settings.method`): branch groups and the clipped surrogate (D94), the landed sentences (P49),
+#: one sentence a window with a value function (D171), or standard GRPO (multi-aircraft control D221: each window's
+#: draws one group, the clipped surrogate).
+BRANCH, LANDED_SENTENCES, VALUE, GRPO = "branch", "landed", "value", "grpo"
+METHODS = (BRANCH, LANDED_SENTENCES, VALUE, GRPO)
+#: stage C's group weights (`Settings.group_weight`): every group's advantages as they are, or divided by the standard
+#: deviation of its rewards (D221); stage D's minority side (D195) is not one of stage C's
+C_GROUP_WEIGHTS = (EQUAL, SPREAD)
 #: The paths among a campaign's inputs (``campaign.json``), read as this checkout reads them (`inputs_here`, D157).
 INPUT_PATHS = ("prior", "instructions", "executor", "windows", "procedure_root")
 #: The reader's name in the claim of a campaign's val read (prior D119; `post_validation`'s, named here so that a raise
@@ -188,8 +196,9 @@ class Settings:
     #: modules (D29); or a round of another campaign on the same base — ``campaign`` (its directory, repo-relative),
     #: ``round`` and ``checkpoint_sha256`` (the bytes it started from).
     start: dict[str, Any] | None
-    #: How a round trains (`METHODS`): `BRANCH` (D94: branch groups, the clipped surrogate) or `LANDED_SENTENCES`
-    #: (P49: each window spoken ``continuations`` times, its best landed sentence learned; the user, 2026-10-07).
+    #: How a round trains (`METHODS`): `BRANCH` (D94: branch groups, the clipped surrogate), `LANDED_SENTENCES`
+    #: (P49: each window spoken ``continuations`` times, its best landed sentence learned; the user, 2026-10-07),
+    #: `VALUE` (D171) or `GRPO` (D221: each window spoken ``continuations`` times, its draws one group).
     method: str
     #: The seed of the selection readout's windows and random numbers (`selection_windows`, `read_batch`), apart from
     #: the campaign's: a
@@ -234,6 +243,10 @@ class Settings:
     #: number is spoken on the speak device whatever the rule gives it (`batch_kinds`); a resume may change it as the
     #: rule. The default 0: no batch moved (the behaviour before it; a record without it reads so).
     gpu_squares: int = 0
+    #: each group's weight in the pass (`C_GROUP_WEIGHTS`; multi-aircraft control D221, the user, 2026-10-17: `SPREAD`,
+    #: GRPO's division by the rewards' standard deviation), with `BRANCH` or `GRPO`; the default `EQUAL` (the behaviour
+    #: before it; a record without it reads so)
+    group_weight: str = EQUAL
 
     def __post_init__(self) -> None:
         if set(self.per_kind) != set(KINDS) or min(self.per_kind.values()) < 0 or not any(self.per_kind.values()):
@@ -259,6 +272,9 @@ class Settings:
             raise ValueError(f"advantage_centering and value_epochs are the value method's, not {self.method!r}'s")
         if self.value_epochs is not None and not 1 <= self.value_epochs <= self.epochs:
             raise ValueError(f"value_epochs {self.value_epochs}: from 1 to epochs ({self.epochs})")
+        if self.method == GRPO and self.continuations < 2:
+            raise ValueError(f"with method {GRPO!r}: continuations (the draws of a window) at least 2, not "
+                             f"{self.continuations}")
         if self.method == VALUE and not (self.value_lr > 0 and self.value_warmup >= 0 and self.continuations == 1):
             raise ValueError("with method value: value_lr positive, value_warmup at least 0, and continuations 1 (one "
                              "sentence a window, D171)")
@@ -273,6 +289,10 @@ class Settings:
                              f"more, at most its batches on the CPU")
         if self.gpu_squares < 0:
             raise ValueError(f"gpu_squares {self.gpu_squares}: 0 (off) or more")
+        if self.group_weight not in C_GROUP_WEIGHTS or (self.group_weight != EQUAL
+                                                        and self.method not in (BRANCH, GRPO)):
+            raise ValueError(f"group_weight {self.group_weight!r}: one of {C_GROUP_WEIGHTS}, other than {EQUAL!r} with "
+                             f"method {BRANCH!r} or {GRPO!r} only (not {self.method!r})")
 
 
 @dataclass
@@ -458,7 +478,7 @@ STAGE_C = Stage(start_model=lambda context, settings: start_model(context, setti
                 train=lambda model, context, optimizer, directory, settings, rng, *, part_width, round_, companion: train_pass(
                     model, context, optimizer, directory, settings, rng, part_width=part_width,
                     clip_norm=settings.clip_norm, epochs=settings.epochs,
-                    segment_rows=segment_rows_of(settings, context.interval_s)))
+                    segment_rows=segment_rows_of(settings, context.interval_s), group_weight=settings.group_weight))
 #: Stage C's campaign that trains on the landed sentences (P49, `Settings.method` `LANDED_SENTENCES`): stage C's parts,
 #: but its batches spoken `Settings.continuations` times with their best landed sentences kept (`speak_landed_batch`),
 #: and its pass on them (`landed_train_pass`, its memory `landed_pass_memory`).
@@ -475,8 +495,8 @@ STAGE_C_VALUE = replace(STAGE_C, speak_batch=lambda *args: speak_value_batch(*ar
                                                                                                  directory),
                         companion=lambda *args: ValueRun.of(*args),
                         close_round=lambda *args: close_value_round(*args))
-#: The stage of each of stage C's methods (`Settings.method`).
-STAGES_C = {BRANCH: STAGE_C, LANDED_SENTENCES: STAGE_C_LANDED, VALUE: STAGE_C_VALUE}
+#: The stage of each of stage C's methods (`Settings.method`): `GRPO`'s is stage C's (`speak_batch` reads the method).
+STAGES_C = {BRANCH: STAGE_C, LANDED_SENTENCES: STAGE_C_LANDED, VALUE: STAGE_C_VALUE, GRPO: STAGE_C}
 
 
 
@@ -561,24 +581,27 @@ def window_squares(windows: Sequence[Window], places: Sequence[int]) -> int:
 # ---- the speaking
 def speak_batch(model: Prior, context: Context, windows: Sequence[Window], places: Sequence[int], settings: Settings,
                 round_: int, directory: Path, k: int) -> dict[str, Any]:
-    """Batch ``k`` of a round (the windows at ``places``): its two passes (`branch_round`), its informative groups written
-    to ``groups_<k>.pt``, and its record (the counts of its groups and the ends of its first pass)."""
+    """Batch ``k`` of a round (the windows at ``places``): its two passes (`branch_round`; with `GRPO`, D221, its draws,
+    `sampled_round`), its informative groups written to ``groups_<k>.pt``, and its record (the counts of its groups and
+    the ends of its first pass, with `GRPO` draw 0's; with `GRPO` besides, the outcomes over all draws)."""
     train = context.splits["train"]
     batch = [windows[p] for p in places]
-    found = branch_round(model, context.start_loop("train", batch), batch, places, train["sentences"], train["flights"],
-                         context.geometries, context.finals, context.words,
-                         interval_s=context.interval_s, variant=context.variant,
-                         edges_reference=context.edges_reference, faults=train["faults"], device=context.device,
-                         seed=settings.seed, round_=round_, split="train", continuations=settings.continuations,
-                         rules=stage_c_rules(settings.seed, round_, context.interval_s, settings.branch_every_s),
-                         loop_options={"attention": settings.front_attention})
+    common = dict(interval_s=context.interval_s, variant=context.variant, edges_reference=context.edges_reference,
+                  faults=train["faults"], device=context.device, split="train",
+                  rules=stage_c_rules(settings.seed, round_, context.interval_s, settings.branch_every_s),
+                  loop_options={"attention": settings.front_attention})
+    data = (model, context.start_loop("train", batch), batch, places, train["sentences"], train["flights"],
+            context.geometries, context.finals, context.words)
+    found = (sampled_round(*data, draws=settings.continuations, **common) if settings.method == GRPO else
+             branch_round(*data, seed=settings.seed, round_=round_, continuations=settings.continuations, **common))
     informative = [g for g in found.groups if g.informative]
     save_batch_file(informative, directory / f"groups_{k}.pt")
+    drawn = {"draw_outcomes": found.draw_outcomes} if settings.method == GRPO else {}
     return {"groups": len(found.groups), "informative_groups": len(informative),
             "spoken_again": len(found.spoken_again), "differed": list(found.differed),
             "reward_sum": sum(r.reward for r in found.first), "faulty_steps": sum(r.faulty_steps for r in found.first),
             "losses_reading_fault": sum(r.loss_reads_fault for r in found.first),
-            "outcomes": dict(Counter(r.outcome for r in found.first))}
+            "outcomes": dict(Counter(r.outcome for r in found.first)), **drawn}
 
 
 def best_landed(drawn: Sequence[tuple[Sequence[WindowResult], Sequence[tuple[Any, Any, list[np.ndarray]]]]]
@@ -698,7 +721,7 @@ def speak_round(model: Prior, context: Context, windows: Sequence[Window], setti
     kept sentences, P49), here or by ``speakers`` (the same files and records: a batch reads only its windows' own random
     numbers; refused unless they run ``stage``), each closed by its record (`spoken_batch`; ``launch``: this launch's
     time and commit); the batches a launch before spoke read back (`done_batches`, D185); the batches' records summed in
-    batch order: each count, the list of windows that differed, the outcomes."""
+    batch order: each count, the list of windows that differed, the outcomes (each count of outcomes by name)."""
     _require_stage(speakers, stage)
     launch = launch_of() if launch is None else launch
     places = stage.batches(windows, settings)
@@ -723,14 +746,14 @@ def speak_round(model: Prior, context: Context, windows: Sequence[Window], setti
                for k in todo])
     parts = [done[k] if k in done else spoken[todo.index(k)] for k in range(len(places))]
     record: dict[str, Any] = {"batches": len(parts)}
-    outcomes: Counter = Counter()
+    counted: dict[str, Counter] = {"outcomes": Counter()}      # the outcomes (and GRPO's over its draws, D221) by name
     for part in parts:
         for key, value in part.items():
-            if key == "outcomes":
-                outcomes.update(value)
+            if isinstance(value, dict):
+                counted.setdefault(key, Counter()).update(value)
             else:
                 record[key] = record[key] + value if key in record else value
-    return {**record, "windows": len(windows), "outcomes": dict(outcomes)}
+    return {**record, "windows": len(windows), **{key: dict(c) for key, c in counted.items()}}
 
 
 def launch_of() -> dict[str, Any]:
@@ -1495,7 +1518,8 @@ def name_fit(out: Path, fit: dict[str, Any] | None) -> None:
 # ---- the training pass
 def update_pairs(directory: Path, data: Sequence[Any], settings: Settings, rng: np.random.Generator,
                  device: torch.device, *, part_width: int, segment_rows: int | None = None,
-                 minority_mean: float | None = None) -> Iterator[tuple[list[Samples], RowTensors]]:
+                 minority_mean: float | None = None, spread: bool = False
+                 ) -> Iterator[tuple[list[Samples], RowTensors]]:
     """The updates of a round's pass (module docstring, step 4): its written groups, file by file in the order they were
     spoken, each file's groups in an order shuffled by ``rng`` (the round's numbers; D130: an update mixes branch points
     and windows), `Settings.update_groups` at a time (a file's last update may hold fewer; each group a piece of it,
@@ -1504,7 +1528,10 @@ def update_pairs(directory: Path, data: Sequence[Any], settings: Settings, rng: 
     `Settings.data_sentences` sentences of ``data`` drawn by ``rng``. A file is read when its first update is drawn.
     ``part_width``: the stage's token part (`Stage.part_width`). ``minority_mean``: the round's mean minority side
     (`minority_mean`), each group's advantages times its own divided by it (D195, `post.branches.MINORITY_SIDE`); None:
-    every group's as they are (`post.branches.EQUAL`)."""
+    every group's as they are (`post.branches.EQUAL`). ``spread``: each group's advantages divided by its rewards'
+    standard deviation (multi-aircraft control D221, `post.branches.SPREAD`; refused with ``minority_mean``)."""
+    if spread and minority_mean is not None:
+        raise ValueError("one group weight: the minority side's or the spread's")
     for path in sorted(directory.glob("groups_*.pt"), key=lambda p: int(p.stem.split("_")[1])):
         loaded: list[Group | Valued] = torch.load(path, weights_only=False)
         groups = [loaded[int(i)] for i in rng.permutation(len(loaded))]
@@ -1512,7 +1539,8 @@ def update_pairs(directory: Path, data: Sequence[Any], settings: Settings, rng: 
             chosen = rng.choice(len(data), size=min(settings.data_sentences, len(data)), replace=False)
             yield ([piece for group in groups[k:k + settings.update_groups]   # a piece a group (or a window)
                     for piece in samples([group], device, part_width, segment_rows,
-                                         1.0 if minority_mean is None else group.minority / minority_mean).pieces()],
+                                         group.minority / minority_mean if minority_mean is not None
+                                         else 1.0 / group.spread if spread else 1.0).pieces()],
                    collate([data[int(i)] for i in chosen], device))
 
 
@@ -1581,14 +1609,15 @@ def train_pass(model: Prior, context: Context, optimizer: torch.optim.Optimizer,
     ``segment_rows``: each group's rows counted up to the next branch point (P55,
     `segment_rows_of`); None: up to the event. ``data_weight``: the data term's weight (`post.loss.update_step`; stage
     D's `MultiSettings.data_weight`). ``group_weight``: each group's weight (`post.branches.GROUP_WEIGHTS`, D195; stage
-    D's `MultiSettings.group_weight`; `MINORITY_SIDE` reads the batch records' ``group_minorities``). Its means
+    C's `Settings.group_weight`, `C_GROUP_WEIGHTS`, and D's `MultiSettings.group_weight`; `MINORITY_SIDE` reads the batch records'
+    ``group_minorities``; `SPREAD`, D221, each group's rewards). Its means
     (`pass_means`; besides, ``update_rows``: each pass's updates, a row each, `post.loss.update_row`, D219 (4); with
     `MINORITY_SIDE` and a group written, the round's ``minority_mean``), or no update where the round has no
     informative group."""
     mean = minority_mean(directory) if group_weight == MINORITY_SIDE else None
     each = passes(model, context.base, optimizer,
                   [update_pairs(directory, context.data, settings, numbers, context.device, part_width=part_width,
-                                segment_rows=segment_rows, minority_mean=mean)
+                                segment_rows=segment_rows, minority_mean=mean, spread=group_weight == SPREAD)
                    for numbers in pass_orders(rng, epochs)],
                   step=lambda *args: update_step(*args, data_weight=data_weight, dual_clip=dual_clip),
                   clip_norm=clip_norm)
@@ -2014,7 +2043,8 @@ def inputs_here(inputs: Mapping[str, Any]) -> dict[str, Any]:
 #: The settings added after campaigns were recorded, each with its default: the code's behaviour before it (the user's
 #: standing permission, 2026-10-07): a record without one reads as its default, and no record is edited.
 SETTINGS_ADDED = ("clip_norm", "epochs", "segment_only", "branch_every_s", "value_lr", "value_warmup",
-                  "advantage_centering", "value_epochs", "front_attention", "cpu_batches", "cpu_period", "gpu_squares")
+                  "advantage_centering", "value_epochs", "front_attention", "cpu_batches", "cpu_period", "gpu_squares",
+                  "group_weight")
 
 
 #: The settings a resume may change: the rounds (D157, raised only) and the rule of the batches spoken on the CPU
@@ -2286,13 +2316,14 @@ def main(argv: list[str] | None = None) -> int:
         parser.add_argument(f"--windows-{kind.lower()}", type=int, required=True,
                             help=f"the windows of kind {kind} in a round (D100)")
     parser.add_argument("--batch-windows", type=int, required=True, help="the windows flown in one batch")
-    parser.add_argument("--continuations", type=int, default=CONTINUATIONS, help="D94: K")
+    parser.add_argument("--continuations", type=int, default=CONTINUATIONS,
+                        help="D94: K (landed, grpo: the draws of a window)")
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--prior-lr", type=float, required=True)
     parser.add_argument("--traffic-lr", type=float, required=True, help="§2 item 5: the traffic modules' own")
     parser.add_argument("--weight-decay", type=float, required=True)
     parser.add_argument("--update-groups", type=int, required=True,
-                        help="the branch groups of an update (branch), or the kept sentences of an update (landed)")
+                        help="the groups of an update (branch, grpo), or the kept sentences of an update (landed)")
     parser.add_argument("--data-sentences", type=int, required=True, help="the data term's sentences of an update")
     parser.add_argument("--select-per-airport", type=int, required=True)
     parser.add_argument("--traffic-hidden", type=int, required=True)
@@ -2300,8 +2331,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--select-seed", type=int, required=True,
                         help="the seed of the selection readout's windows and numbers (C10's: 1337)")
     parser.add_argument("--method", choices=METHODS, required=True,
-                        help="how a round trains: branch groups (D94), the landed sentences (P49) or a value function "
-                             "(D171)")
+                        help="how a round trains: branch groups (D94), the landed sentences (P49), a value function "
+                             "(D171) or standard GRPO (D221: each window's draws one group)")
     parser.add_argument("--clip-norm", type=float,
                         help="D168: the norm each update's gradient is clipped to (default: not clipped)")
     parser.add_argument("--epochs", type=int, default=Settings.epochs,
@@ -2316,6 +2347,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="D173: the round's mean advantage taken off each counted row (with --method value)")
     parser.add_argument("--value-epochs", type=int,
                         help="D173: V's passes a round, the first ones (default: every pass; with --method value)")
+    parser.add_argument("--group-weight", choices=C_GROUP_WEIGHTS, default=Settings.group_weight,
+                        help="D221: each group's weight in the pass (default: its advantages as they are; spread: "
+                             "divided by the standard deviation of its rewards, GRPO's)")
     parser.add_argument("--front-attention", choices=FRONT_ATTENTIONS, default=Settings.front_attention,
                         help="D190 (2): how a window's copies read the front they hold once (copied: bit for bit; "
                              "merged: no copy)")
@@ -2363,7 +2397,7 @@ def main(argv: list[str] | None = None) -> int:
                             args.traffic_hidden, args.traffic_heads, start, args.method, args.select_seed,
                             args.clip_norm, args.epochs, args.segment_only, args.branch_every_s, args.value_lr,
                             args.value_warmup, args.advantage_centering, args.value_epochs, args.front_attention,
-                            args.cpu_batches, args.cpu_period, args.gpu_squares)
+                            args.cpu_batches, args.cpu_period, args.gpu_squares, args.group_weight)
     except ValueError as refused:                   # a setting refused by name (`Settings`), before anything opens
         parser.error(str(refused))
     speak_device = torch.device(args.speak_device or args.device)

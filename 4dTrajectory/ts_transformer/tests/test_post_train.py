@@ -1941,3 +1941,88 @@ def test_a_pass_gives_its_data_weight_to_each_update(monkeypatch):
                           np.random.default_rng(0), part_width=0, dual_clip=1.5)
     taken["step"](1, 2, 3, 4, 5)
     assert given == {"data_weight": DATA_WEIGHT, "dual_clip": 1.5}
+
+
+def test_d221_stage_cs_grpo_takes_at_least_two_draws_and_no_branch_setting():
+    """D221: GRPO is a method of stage C's (its stage stage C's own: `speak_batch` reads the method), with at least two
+    draws a window and no branch setting off its default."""
+    assert _settings(method=post_train.GRPO).method == post_train.GRPO
+    assert post_train.STAGES_C[post_train.GRPO] is post_train.STAGE_C
+    with pytest.raises(ValueError, match="at least 2"):
+        _settings(method=post_train.GRPO, continuations=1)
+    with pytest.raises(ValueError, match="branch training's"):
+        _settings(method=post_train.GRPO, segment_only=True)
+
+
+def test_d221_a_grpo_round_of_stage_c_end_to_end(setup, tmp_path, monkeypatch):
+    """D221: one round of stage C by GRPO (`short_round`'s window, three draws): its speaking's record (one group, the
+    window spoken again, draw 0's outcomes, the outcomes of every draw) and the round's end (its checkpoint)."""
+    s = setup
+    short_round(monkeypatch, s)
+    settings = _settings(rounds=1, continuations=3, method=post_train.GRPO)
+    out = tmp_path / "campaign"
+    open_campaign(out, {"settings": asdict(settings)}, {"head": "x", "dirty": False}, {})
+    run_campaign(out, settings, _context(s))
+    assert done_rounds(out) == 1
+    speaking = json.loads((out / "round_0" / "round.json").read_text())["speaking"]
+    assert speaking["groups"] == 1 and speaking["spoken_again"] == 1 and speaking["differed"] == []
+    assert sum(speaking["outcomes"].values()) == 1 and sum(speaking["draw_outcomes"].values()) == 3
+
+
+def test_d221_a_rounds_record_sums_each_count_of_outcomes_by_name(tmp_path, monkeypatch):
+    """D221: the round's record sums each batch's counts of outcomes by name (the outcomes, GRPO's outcomes over its
+    draws), the other counts as before."""
+    windows = [SimpleNamespace(span_s=0.0)] * 2
+    stage = SimpleNamespace(batches=lambda windows, settings: [[0], [1]], record=lambda window: {})
+
+    def spoken(stage, model, context, windows, places, settings, round_, directory, k, launch):
+        return {"groups": 1, "outcomes": {"landed": 1}, "draw_outcomes": {"landed": 2, "lost_separation": k}}
+
+    monkeypatch.setattr(post_train, "spoken_batch", spoken)
+    record = speak_round(None, SimpleNamespace(device=CPU), windows, _settings(), 0, tmp_path, stage=stage,
+                         launch={"utc": "", "commit": "", "dirty": False})
+    assert record["groups"] == 2 and record["outcomes"] == {"landed": 2}
+    assert record["draw_outcomes"] == {"landed": 4, "lost_separation": 1}
+
+
+def test_d221_with_the_spread_each_group_of_an_update_is_divided_by_its_rewards_standard_deviation(tmp_path,
+                                                                                                    monkeypatch):
+    """D221 (`post.branches.SPREAD`): a group's advantages divided by the standard deviation of its rewards (GRPO's
+    normalised reward), each group by its own; refused beside the minority side's weight; a setting of stage C's
+    methods with groups."""
+    from ts_transformer.post.branches import MINORITY_SIDE, SPREAD, Group, samples
+    from ts_transformer.tests.test_post_branches import _three_sentences
+
+    first_step, _, sentence = _three_sentences()
+    groups = [Group(0, first_step, sentence(0, 1.0), (sentence(1, 0.0), sentence(2, 0.0))),
+              Group(1, first_step, sentence(0, 2.0), (sentence(1, 0.0), sentence(2, 1.0)))]
+    assert np.isclose(groups[0].spread, np.std([1.0, 0.0, 0.0])) and np.isclose(groups[1].spread, np.std([2.0, 0.0, 1.0]))
+    directory = tmp_path / "round"
+    directory.mkdir()
+    torch.save(groups, directory / "groups_0.pt")
+    monkeypatch.setattr(post_train, "collate", lambda sentences, device: None)
+    rng = np.random.default_rng(0)
+    order = [int(i) for i in np.random.default_rng(0).permutation(2)]
+    updates = list(update_pairs(directory, [0], _settings(update_groups=1), rng, CPU, part_width=0, spread=True))
+    for (pieces, _), g in zip(updates, order):
+        (piece,) = pieces
+        expected = samples([groups[g]], CPU).advantage / groups[g].spread
+        assert torch.allclose(piece.advantage, expected) and not torch.equal(piece.advantage, expected * groups[g].spread)
+    with pytest.raises(ValueError, match="one group weight"):
+        list(update_pairs(directory, [0], _settings(), rng, CPU, part_width=0, minority_mean=1.0, spread=True))
+    assert _settings(method=post_train.GRPO, group_weight=SPREAD).group_weight == SPREAD
+    for wrong in ({"method": post_train.LANDED_SENTENCES, "group_weight": SPREAD}, {"group_weight": MINORITY_SIDE}):
+        with pytest.raises(ValueError, match="group_weight"):
+            _settings(**wrong)
+    given, weights = [], []
+    monkeypatch.setattr(post_train, "update_pairs", lambda *args, **kwargs: given.append(kwargs["spread"]) or [])
+    monkeypatch.setattr(post_train, "passes", lambda model, base, optimizer, each, step, clip_norm: [list(p) for p in each])
+    context = SimpleNamespace(base=None, data=None, device=CPU, interval_s=4.0)
+    for weight in (post_train.EQUAL, SPREAD):
+        post_train.STAGE_C.train(None, context, None, directory, _settings(method=post_train.GRPO, group_weight=weight),
+                                 np.random.default_rng(0), part_width=0, round_=0, companion=None)
+    assert given == [False, True]
+    monkeypatch.setattr(post_train, "train_pass", lambda *args, **kwargs: weights.append(kwargs["group_weight"]) or {})
+    post_train.STAGE_C.train(None, context, None, directory, _settings(group_weight=SPREAD), None, part_width=0,
+                             round_=0, companion=None)
+    assert weights == [SPREAD]
