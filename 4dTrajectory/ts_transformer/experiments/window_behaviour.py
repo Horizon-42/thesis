@@ -126,6 +126,15 @@ def round_digests(found: BranchRound) -> dict[str, Any]:
            "spoken_again": list(found.spoken_again), "differed": list(found.differed)}
     if isinstance(found, BackwardRound):          # its points found backward (D182): their depths and counts
         out["searched"] = [found.depths_s, found.searches, found.found, found.to_event, found.to_end]
+        if found.valued:                          # D220: each search's unit, its first sentence, points and values
+            units = []
+            for unit in found.valued:
+                digest = Digest()
+                digest.add(unit.window, unit.varied, unit.points, unit.values, len(unit.groups))
+                digest.sentence(unit.first.rows, unit.first.permitted, unit.first.tokens)
+                digest.add(unit.first.reward, unit.first.until)
+                units.append(digest.hash.hexdigest())
+            out["valued"] = units
     return out
 
 

@@ -126,7 +126,7 @@ from ts_transformer.instructions.faults import faulty_flights
 from ts_transformer.instructions.words import Words
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.post.branches import (
-    BRANCH_EVERY_S, CONTINUATIONS, EQUAL, MINORITY_SIDE, Group, Landed, Sentence, branch_rows, first_numbers,
+    BRANCH_EVERY_S, CONTINUATIONS, EQUAL, MINORITY_SIDE, Group, Landed, Sentence, Valued, branch_rows, first_numbers,
     landed_numbers, landed_samples, samples,
 )
 from ts_transformer.post.fault_census import fault_rows
@@ -1499,13 +1499,14 @@ def update_pairs(directory: Path, data: Sequence[Any], settings: Settings, rng: 
     """The updates of a round's pass (module docstring, step 4): its written groups, file by file in the order they were
     spoken, each file's groups in an order shuffled by ``rng`` (the round's numbers; D130: an update mixes branch points
     and windows), `Settings.update_groups` at a time (a file's last update may hold fewer; each group a piece of it,
-    `post.loss.update_step`: its memory a group's; of window samples each window, `Samples.pieces`), each paired with
+    `post.loss.update_step`: its memory a group's; of window samples each window, `Samples.pieces`; a stage D search's
+    unit with the points' values, `post.branches.Valued`, D220, is an item as a group is), each paired with
     `Settings.data_sentences` sentences of ``data`` drawn by ``rng``. A file is read when its first update is drawn.
     ``part_width``: the stage's token part (`Stage.part_width`). ``minority_mean``: the round's mean minority side
     (`minority_mean`), each group's advantages times its own divided by it (D195, `post.branches.MINORITY_SIDE`); None:
     every group's as they are (`post.branches.EQUAL`)."""
     for path in sorted(directory.glob("groups_*.pt"), key=lambda p: int(p.stem.split("_")[1])):
-        loaded: list[Group] = torch.load(path, weights_only=False)
+        loaded: list[Group | Valued] = torch.load(path, weights_only=False)
         groups = [loaded[int(i)] for i in rng.permutation(len(loaded))]
         for k in range(0, len(groups), settings.update_groups):
             chosen = rng.choice(len(data), size=min(settings.data_sentences, len(data)), replace=False)

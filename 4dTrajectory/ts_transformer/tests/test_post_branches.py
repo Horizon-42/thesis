@@ -16,7 +16,7 @@ from ts_transformer.experiments.post_branches import branch_round, same_prefix
 from ts_transformer.experiments.post_window_loop import start_move_of
 from ts_transformer.instructions.words import COLUMNS
 from ts_transformer.post.branches import (
-    STATE_BOUND_M, Group, Sentence, branch_points, continuation_numbers, first_numbers, samples,
+    STATE_BOUND_M, Group, Sentence, Valued, branch_points, continuation_numbers, first_numbers, samples,
 )
 from ts_transformer.post.edges import TOKEN_FEATURES
 from ts_transformer.post.loss import one_pass
@@ -267,6 +267,75 @@ def test_segment_credit_ends_at_the_varied_aircrafts_next_branch_point_where_it_
     assert cut[3][1, FIRST + 12:FIRST + 17].all() and not cut[3][1, FIRST + 17:].any()  # the last: its segment
     unbounded = [samples([g], CPU).counted for g in groups]                   # no segment credit: to the event
     assert [int(u[0].sum()) for u in unbounded] == [LENGTH - b for b in points]
+
+
+def _three_sentences(seed=4):
+    """Three sentences of `test_post_loss`'s words, every row from its first predicted step said, and a builder of a
+    `Sentence` of one of them with a reward and a bound."""
+    from ts_transformer.tests.test_post_loss import FIRST, LENGTH, WORDS, _base, _spoken, _trained
+    from ts_transformer.tests.support import prior_sentence
+
+    rng = np.random.default_rng(seed)
+    rows = [prior_sentence(rng, WORDS, candidates=2, rows=LENGTH, first_step=FIRST) for _ in range(3)]
+    _, permitted, _, _ = _spoken(_trained(_base()))
+    tokens = [np.zeros((0, len(TOKEN_FEATURES)), dtype=np.float32)] * LENGTH
+
+    def sentence(i, reward, until=None):
+        return Sentence(rows[i], permitted.select([i]), tokens, reward, until)
+
+    return FIRST, LENGTH, sentence
+
+
+def test_d220_a_valued_unit_credits_its_first_sentence_segment_by_segment_and_its_continuations_by_their_group():
+    """D220: a search's unit gives its first sentence once, its advantage row by row — 0 and not counted before the
+    earliest point, the next point's value less this one's between two points, its W less the latest point's value from
+    it on, up to its bound — and its group's continuations with the group's advantage (W_k less the mean of the group,
+    the first sentence in the mean), from the group's point. A group alone gives what it gave before, bit for bit."""
+    first_step, length, sentence = _three_sentences()
+    bound = length - 2
+    points, values = (first_step + 2, first_step + 7, first_step + 12), (0.25, 0.75, 0.5)
+    group = Group(0, points[-1], sentence(0, 1.0, bound), (sentence(1, 2.0, bound), sentence(2, 0.0, bound)))
+    unit = Valued(0, 0, sentence(0, 1.0, bound), points, values, (group,))
+    expected = np.zeros(length)
+    expected[points[0]:points[1]], expected[points[1]:points[2]], expected[points[2]:] = 0.5, -0.25, 0.5
+    assert np.array_equal(unit.advantages(length), expected) and unit.informative
+    out = samples([unit], CPU)
+    assert out.advantage.shape == (3, length)
+    counted = out.counted
+    assert not counted[0, :points[0]].any() and counted[0, points[0]:bound].all() and not counted[0, bound:].any()
+    assert torch.equal(out.advantage[0], torch.as_tensor(expected, dtype=torch.float32) * counted[0])
+    for k, advantage in ((1, 1.0), (2, -1.0)):                 # the group's mean (1 + 2 + 0) / 3: its first included
+        assert not counted[k, :points[-1]].any() and counted[k, points[-1]:bound].all()
+        assert torch.equal(out.advantage[k], advantage * counted[k].to(torch.float32))
+    from ts_transformer.experiments.post_profile import group_size
+
+    assert unit.sentences == (unit.first, *group.continuations)          # what the pass's measure reads
+    assert group_size(unit) == (length, 1) and len(unit.sentences) == out.advantage.shape[0]
+    alone = samples([group], CPU)
+    before = torch.tensor(group.advantages(), dtype=torch.float32)[:, None] * alone.counted   # the code before D220
+    assert torch.equal(alone.advantage.view(torch.int32), before.view(torch.int32))
+    assert torch.equal(samples([group], CPU, scale=0.5).advantage.view(torch.int32),
+                       (torch.tensor(group.advantages() * 0.5, dtype=torch.float32)[:, None]
+                        * alone.counted).view(torch.int32))
+
+
+def test_d220_a_valued_unit_without_a_difference_gives_no_sample_and_is_refused_with_segments_or_unordered_points():
+    """D220: a unit whose values and W are all the same and whose groups are not informative gives no sample (its first
+    sentence's advantage is 0 on every row); a unit has no segment credit (P55); its points are increasing, each with
+    a value."""
+    first_step, length, sentence = _three_sentences()
+    flat = Group(0, first_step + 7, sentence(0, 0.5), (sentence(1, 0.5), sentence(2, 0.5)))
+    unit = Valued(0, 0, sentence(0, 0.5), (first_step, first_step + 7), (0.5, 0.5), (flat,))
+    assert not unit.informative and not unit.advantages(length).any()
+    with pytest.raises(ValueError, match="no informative group"):
+        samples([unit], CPU)
+    alone = Valued(0, 0, sentence(0, 1.0), (first_step,), (0.5,))     # a search with no decision point: no group
+    assert alone.informative and samples([alone], CPU).advantage.shape == (1, length)
+    with pytest.raises(ValueError, match="no segment"):
+        samples([alone], CPU, segment_rows=5)
+    for points, values in (((first_step + 7, first_step), (0.5, 0.5)), ((first_step,), (0.5, 0.5)), ((), ())):
+        with pytest.raises(ValueError, match="increasing, with a value each"):
+            Valued(0, 0, sentence(0, 1.0), points, values)
 
 
 def test_a_groups_next_branch_point_is_its_aircrafts_next_point(setup):

@@ -263,6 +263,32 @@ def test_d217_the_search_settings_default_to_d182_go_with_the_backward_search_an
     assert (given.search_points, given.judged_after_s, given.fine_point, given.common_cut) == (10, 64.0, False, True)
 
 
+def test_d220_the_points_values_default_off_go_with_the_backward_search_alone_and_parse():
+    """D220: `MultiSettings.point_values` defaults to off (a record without it reads so), goes with a backward search
+    without the fine point and with equal group weights only (refused by name otherwise), is profiled, and the runner's
+    flag sets it."""
+    settings = _multi_settings(branching="majority", fine_point=False)
+    assert settings.point_values is False
+    recorded = asdict(settings)
+    del recorded["point_values"]
+    assert MultiSettings(**recorded) == settings
+    assert replace(settings, point_values=True).point_values
+    for wrong in ({"branching": "grid", "fine_point": True}, {"fine_point": True},
+                  {"group_weight": MINORITY_SIDE}):
+        with pytest.raises(ValueError, match=r"point_values \(D220\) goes with the backward search"):
+            replace(settings, point_values=True, **wrong)
+    assert "point_values" in multi_train.PROFILED_SETTINGS
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    multi_train.add_arguments(parser)
+    required = ["--prior", "p", "--instructions", "i", "--executor", "e", "--windows", "w", "--rounds", "1",
+                "--windows-real", "1", "--windows-compressed", "0", "--spans-s", "1", "--c-min", "0.6",
+                "--batch-rows", "2", "--seed", "1", "--prior-lr", "1e-4", "--traffic-lr", "1e-3",
+                "--weight-decay", "0", "--update-groups", "1", "--data-sentences", "1", "--select-per-airport", "1",
+                "--branching", "majority", "--no-fine-point"]
+    assert not multi_train.settings_from(parser.parse_args(required), settings.start).point_values
+    assert multi_train.settings_from(parser.parse_args(required + ["--point-values"]), settings.start).point_values
+
+
 def test_a_start_from_the_base_takes_its_own_traffic_shape_a_start_from_a_round_its_campaigns():
     """D200: `MultiSettings.start` None (the base) goes with a positive traffic shape, a start from a round of stage C
     with none (its campaign's shape, D164; a record without the fields reads so); the runner's `start_from` gives None

@@ -48,7 +48,12 @@ parts (`stage_d`):
   (`post.branches.GROUP_WEIGHTS`), `EQUAL` the default; with `MINORITY_SIDE` each batch's record holds its groups'
   minority sides (``group_minorities``), from which the pass takes the round's mean. ``--branch-every-s`` and
   ``--segment-only`` (D200, with `GRID` only): the grid's interval (D143's 120 s the default), and a group's advantage
-  only up to the varied aircraft's next branch point (stage C's P55; default: up to its event).
+  only up to the varied aircraft's next branch point (stage C's P55; default: up to its event). ``--point-values``
+  (D220, with the backward search and no fine point): every point tried flown to its window's end, its value the mean W
+  of its continuations; each search one unit of the pass (`post.branches.Valued`: the first sentence credited by the
+  values, the search's groups), the units written in place of the groups; the record holds besides each search's
+  values (``point_values``: its span, each point tried the latest first as [depth s, value], and the first sentence's W)
+  and the units written (``valued_units``).
 - **The pass** (D219, the user, 2026-10-17; each default the behaviour before it): ``--clip-norm``, each update's
   gradient clipped to that norm (stage C's D168, `post.loss.one_pass`); ``--dual-clip``, the surrogate's dual clip
   (`post.loss.update_step`); each update's row in the round's pass record (``update_rows``, a list a pass: its
@@ -122,7 +127,7 @@ from ts_transformer.experiments.post_window_loop import (
     LANDED, LOST_SEPARATION, WindowLoop, checked_edges, turns_readout,
 )
 from ts_transformer.multi import credit
-from ts_transformer.multi.backward import AFTER_S, BRANCHINGS, GRID, MAJORITY, POINTS
+from ts_transformer.multi.backward import AFTER_S, BACKWARD, BRANCHINGS, GRID, MAJORITY, POINTS
 from ts_transformer.multi.census import WindowCount, loop_positions, window_losses
 from ts_transformer.multi.joint import JointConfig, add_joint_attention
 from ts_transformer.multi.separation import PAIRS, Answering
@@ -159,7 +164,7 @@ MEASURE_MARGIN = 1.3
 #: D179, D181 (55)) change the words spoken, not the shapes — a worker past its share stops by name.
 PROFILED_SETTINGS = ("per_kind", "spans_s", "c_min", "batch_rows", "continuations", "update_groups", "data_sentences",
                      "branching", "front_attention", "batch_squares", "joint_heads", "search_points", "judged_after_s",
-                     "fine_point")
+                     "fine_point", "point_values")
 #: The devices of ``--executor-device`` (multi-aircraft control S1). ``speak``: the executor flies on the speaker's
 #: device (the behaviour before S1). ``cpu``: the executor flies on the CPU (`Context.executor_device`).
 EXECUTOR_DEVICES = ("speak", "cpu")
@@ -248,6 +253,11 @@ class MultiSettings:
     clip_norm: float | None = None
     dual_clip: float | None = None
     select_seed: int | None = None
+    #: D220 (the user, 2026-10-17), with `BACKWARD` / `MAJORITY`, no fine point and `EQUAL` only: every point tried
+    #: flown to its window's end, its value the mean W of its continuations, the first sentence credited by the values
+    #: (`post_branches.backward_round`, `post.branches.Valued`); False, the default: the behaviour before it (a record
+    #: without it reads so)
+    point_values: bool = False
 
     def __post_init__(self) -> None:
         if set(self.per_kind) != set(KINDS) or min(self.per_kind.values()) < 0 or not any(self.per_kind.values()):
@@ -302,6 +312,10 @@ class MultiSettings:
             raise ValueError(f"clip_norm {self.clip_norm}: positive, or none (not clipped)")
         if self.dual_clip is not None and not self.dual_clip > 1:
             raise ValueError(f"dual_clip {self.dual_clip}: above 1, or none (no dual clip)")
+        if self.point_values and (self.branching == GRID or self.fine_point or self.group_weight != EQUAL):
+            raise ValueError(f"point_values (D220) goes with the backward search ({BACKWARD!r} or {MAJORITY!r}), no fine "
+                             f"point and group_weight {EQUAL!r}, not {self.branching!r}, fine_point {self.fine_point} "
+                             f"and {self.group_weight!r}")
 
     @property
     def readout_seed(self) -> int:
@@ -425,7 +439,8 @@ def speak_batch(model: Prior, context: Context, windows: Sequence[Window], place
     sums, of every commanded aircraft; backward, besides: each group's span and depth, the searches and those that found
     a decision point, the continuations flown to the judged tick only and those flown to their window's end, and the
     search's seconds, steps and rows; majority, besides: each group's kind and each majority point's span and depth;
-    with `MINORITY_SIDE`, its informative groups' minority sides, in the order written).
+    with `MINORITY_SIDE`, its informative groups' minority sides, in the order written; with `point_values`, D220, its
+    informative units written in place of the groups, each search's values and the units written).
     The majority point needs more than half of the ``continuations`` avoiding (D192: 5 of 8)."""
     train = context.splits["train"]
     batch = [windows[p] for p in places]
@@ -440,9 +455,10 @@ def speak_batch(model: Prior, context: Context, windows: Sequence[Window], place
     found = (branch_round(*data, seed=settings.seed, round_=round_, **common) if settings.branching == GRID else
              backward_round(*data, **common, majority=majority, search_points=settings.search_points,
                             judged_after_s=settings.judged_after_s, fine_point=settings.fine_point,
-                            common_cut=settings.common_cut))
+                            common_cut=settings.common_cut, point_values=settings.point_values))
     informative = [g for g in found.groups if g.informative]
-    save_batch_file(informative, directory / f"groups_{k}.pt")
+    units = [u for u in found.valued if u.informative] if settings.point_values else informative
+    save_batch_file(units, directory / f"groups_{k}.pt")
     anchors = {w.signal_index for w in batch}              # a window's count is in each of its aircraft's ends
     searched = {} if settings.branching == GRID else {
         "group_depths_s": [[batch[0].span_s, depth] for depth in found.depths_s], "searches": found.searches,
@@ -453,6 +469,10 @@ def speak_batch(model: Prior, context: Context, windows: Sequence[Window], place
                      "majority_depths_s": [[batch[0].span_s, depth] for depth in found.majority_depths_s]}
     if settings.group_weight == MINORITY_SIDE:
         searched |= {"group_minorities": [g.minority for g in informative]}
+    if settings.point_values:
+        searched |= {"valued_units": len(units),
+                     "point_values": [[batch[0].span_s, [list(p) for p in points], reward]
+                                      for points, reward in found.values]}
     return {"groups": len(found.groups), "informative_groups": len(informative),
             "spoken_again": len(found.spoken_again), "differed": list(found.differed),
             "reward_sum": sum(r.reward for r in found.first),
@@ -973,6 +993,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--common-cut", action="store_true",
                         help="D217: every sentence of a group counted only up to the judged tick (default: each up to "
                              "its own event)")
+    parser.add_argument("--point-values", action="store_true",
+                        help="D220: every point tried flown to its window's end, the first sentence credited by the "
+                             "points' values (default: off)")
     parser.add_argument("--clip-norm", type=float, default=MultiSettings.clip_norm,
                         help="D219: each update's gradient clipped to this norm (stage C's D168; default: not clipped)")
     parser.add_argument("--dual-clip", type=float, default=MultiSettings.dual_clip,
@@ -1035,7 +1058,7 @@ def settings_from(args: argparse.Namespace, start: dict[str, Any] | None) -> Mul
                          args.traffic_heads, args.branch_every_s, args.segment_only, args.joint_heads,
                          search_points=args.search_points, judged_after_s=args.judged_after_s,
                          fine_point=args.fine_point, common_cut=args.common_cut, clip_norm=args.clip_norm,
-                         dual_clip=args.dual_clip, select_seed=args.select_seed)
+                         dual_clip=args.dual_clip, select_seed=args.select_seed, point_values=args.point_values)
 
 
 def main(argv: list[str] | None = None) -> int:

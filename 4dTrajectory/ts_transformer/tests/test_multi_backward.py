@@ -250,6 +250,47 @@ def test_d217_a_round_without_the_fine_point_judges_at_64_s_and_cuts_every_sente
     assert [sentence.until for sentence in alone.sentences] == [10_000] * 3
 
 
+def test_d220_every_point_tried_is_flown_to_its_end_and_valued_and_the_search_gives_one_unit(setup, monkeypatch):
+    """D220 on the synthetic window with the judgement replaced (the continuations avoid from the third point back on):
+    with ``point_values`` the search tries and chooses the points it chooses without it and makes the same group; every
+    point tried is flown to its window's end (counted so) and valued, the decision point by its group's continuations;
+    the search gives one unit: its first sentence (the group's, with the window's W), the points tried in its own rows,
+    increasing, their values and the group. Without it no unit is made. A fine point is refused by name."""
+    s = setup
+    model = _with_module(s["base"])
+    rules = Rules(**credit.rules(1337, 0, DELTA))
+    reached, events = [], {}
+
+    def judged(loop, own, v, happened, point):
+        events["event"] = happened
+        reached.append(point)
+        return [Trial(point <= happened.tick - 3 * STEP, False) for _ in own]
+
+    monkeypatch.setattr(post_branches, "_trials", judged)
+    searched = dict(search_points=10, judged_after_s=64.0, fine_point=False)
+    plain = _backward(s, model, rules, **searched)
+    tried_plain, reached = reached, []
+    found = _backward(s, model, rules, **searched, point_values=True)
+    happened = events["event"]
+    decision = happened.tick - 3 * STEP
+    assert reached == tried_plain == [happened.tick - STEP, happened.tick - 2 * STEP, decision]
+    assert plain.valued == plain.values == []
+    (group,), (alone,) = found.groups, plain.groups
+    assert (group.branch, group.varied) == (alone.branch, alone.varied) == (decision, 0)
+    assert [c.reward for c in group.continuations] == [c.reward for c in alone.continuations]
+    assert (found.to_event, found.to_end) == (0, 3 * 2) and (plain.to_event, plain.to_end) == (2 * 2, 2)
+    (unit,) = found.valued
+    assert unit.points == (decision, happened.tick - 2 * STEP, happened.tick - STEP)     # the window's join tick is 0
+    assert unit.groups == (group,) and unit.first.reward == group.first.reward and unit.varied == 0
+    assert unit.values[0] == np.mean([c.reward for c in group.continuations])
+    assert all(0.0 <= v <= 1.0 for v in unit.values)                 # one aircraft: W in [0, 1]
+    (values, reward), = found.values
+    assert [depth for depth, _ in values] == [32.0, 64.0, 96.0] and [v for _, v in values] == list(unit.values[::-1])
+    assert reward == unit.first.reward
+    with pytest.raises(ValueError, match="no fine point"):
+        _backward(s, model, rules, search_points=10, point_values=True)
+
+
 def test_a_round_found_backward_judges_its_continuations_by_what_they_did(setup):
     """The real judgement on the synthetic window: each group's point is a candidate point or a fine point, its depth
     the seconds to the event; the counts add up."""
@@ -592,6 +633,42 @@ def test_stage_ds_batch_record_holds_the_searches_found_backward_only(setup, tmp
     assert len(majority["majority_depths_s"]) <= majority["searches_found"]
     assert all(span == 1.0 for span, _ in majority["majority_depths_s"])
     assert post_branches.branch_round is multi_train.branch_round and multi_train.backward_round is backward_round
+
+
+def test_d220_a_batch_with_the_points_values_writes_its_units_and_records_each_searchs_values(setup, tmp_path,
+                                                                                               monkeypatch):
+    """D220: a batch of stage D with ``point_values`` writes its informative units (`post.branches.Valued`) in place of
+    its groups, and records besides the backward search's keys the units written and each search's values (its span,
+    each point tried the latest first as [depth s, value], the first sentence's W), those of the round's units."""
+    from dataclasses import replace
+
+    from ts_transformer.experiments import multi_train, window_behaviour
+    from ts_transformer.multi.windows import REAL_KIND
+    from ts_transformer.tests.test_multi_train import _multi_settings, _stage_c
+    from ts_transformer.tests.test_post_train import _context, short_round
+
+    s = setup
+    short_round(monkeypatch, s)
+    context = _context(s)
+    settings = _multi_settings(start=_stage_c(s, tmp_path, context), continuations=2, branching=backward.MAJORITY,
+                               search_points=10, judged_after_s=64.0, fine_point=False, point_values=True)
+    (window,) = s["windows"]
+    window = replace(window, span_s=1.0)
+    monkeypatch.setattr(multi_train, "draw_windows", lambda context, settings, rng: ([window], {"drawn": {REAL_KIND: 1}}))
+    stage = multi_train.stage_d()
+    model = stage.start(context, settings)[0].eval()
+    windows, _ = stage.draw(context, settings, 0)
+    with window_behaviour.captured_rounds() as found:
+        record = stage.speak_batch(model, context, windows, [0], settings, 0, tmp_path, 0)
+    (spoken,) = found
+    (unit,) = spoken.valued
+    written = torch.load(tmp_path / "groups_0.pt", weights_only=False)
+    assert [(u.points, u.values) for u in written] == [(unit.points, unit.values)] * unit.informative
+    assert record["valued_units"] == len(written) and record["searches"] == len(record["point_values"]) == 1
+    ((span, values, reward),) = record["point_values"]
+    assert span == 1.0 and [v for _, v in values] == list(unit.values[::-1]) and reward == unit.first.reward
+    assert [depth for depth, _ in values] == [32.0 * (j + 1) for j in range(len(values))]       # the latest first
+    assert record["continuations_to_event"] == 0 and record["continuations_to_end"] == 2 * len(values)
 
 
 def test_the_searches_of_a_batch_step_together_and_find_what_each_finds_alone(setup, monkeypatch):

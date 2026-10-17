@@ -16,7 +16,7 @@ import torch
 from ts_transformer.instructions.words import COLUMNS
 from ts_transformer.multi.joint import JointAttention, JointConfig, add_joint_attention, joint_modules
 from ts_transformer.multi.tokens import TOKENS_SCHEMA, TokenPart
-from ts_transformer.post.branches import Group, Placed, Sentence, samples
+from ts_transformer.post.branches import Group, Placed, Sentence, Valued, samples
 from ts_transformer.post.edges import TOKEN_FEATURES
 from ts_transformer.post.loss import Samples, base_log_probability
 from ts_transformer.post.traffic_attention import Traffic, add_token_part, parameter_groups, traffic_of
@@ -268,6 +268,30 @@ def test_window_samples_count_only_their_own_rows_and_keep_whole_windows(setup):
     with pytest.raises(ValueError, match="every window sample counts some rows"):
         Samples(window.rows, window.permitted, window.traffic, window.advantage,
                 window.counted & torch.tensor([True, False, False, False, False, False])[:, None])
+
+
+def test_d220_a_valued_window_sample_carries_its_advantage_row_by_row_at_its_join_tick(setup):
+    """D220 with window samples: the unit's first sentence counts its own rows from its earliest point (moved to the
+    window's ticks by its join tick), its advantage on each the segment's, 0 on the rows before its join tick and on
+    its window's other sentences; its group's continuation the group's advantage. A group alone gives the window
+    samples of before, bit for bit."""
+    s = setup
+    _, loop_of = _multi(s)
+    loop = _flown(loop_of(_version_2(s["base"], joint_weights=False), **_options(s)), _numbers(len(JOINS)))
+    group = _window_group(loop, 1)                                # rewards 1 (the first sentence) and 0
+    start, join = loop.speaking.start, JOINS[1]
+    unit = Valued(0, 1, group.first, (start, start + 3), (0.25, 0.75), (group,))
+    window = samples([unit], CPU, TokenPart.width)
+    assert window.traffic.windows.tolist() == [[0, 1, 2], [3, 4, 5]]
+    counted, advantage = window.counted, window.advantage
+    assert not counted[0, :join + start].any() and counted[0, join + start:].any()
+    assert torch.equal(advantage[0, join + start:join + start + 3], 0.5 * counted[0, join + start:join + start + 3])
+    assert torch.equal(advantage[0, join + start + 3:], 0.25 * counted[0, join + start + 3:])
+    assert not advantage[0, :join + start].any() and not advantage[[1, 2, 4, 5]].any()
+    assert torch.equal(advantage[3], -0.5 * counted[3].to(torch.float32))       # 0 less the mean of 1 and 0
+    alone = samples([group], CPU, TokenPart.width)
+    before = torch.tensor([0.5, 0, 0, -0.5, 0, 0], dtype=torch.float32)[:, None] * alone.counted   # before D220
+    assert torch.equal(alone.advantage.view(torch.int32), before.view(torch.int32))
 
 
 def test_the_base_reads_only_the_counted_sentences_of_window_samples(setup):

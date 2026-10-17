@@ -1658,7 +1658,9 @@ checkpoint.
   trained (a new seed, the same `--joint-heads`). D219 (each default the behaviour before it): `--clip-norm` (each
   update's gradient norm), `--dual-clip` (c > 1, the surrogate's dual clip), `--select-seed` (the readout's windows and
   numbers, so that campaigns of other seeds read the same windows); each update's row in `round.json`'s
-  `pass.update_rows`.
+  `pass.update_rows`. D220: `--point-values` (with `--branching backward`/`majority`, `--no-fine-point` and
+  `--group-weight equal` only; profiled): every point tried flown to its window's end, the first sentence credited by
+  the points' values, one unit a search in `groups_<k>.pt`; a batch's record adds `valued_units` and `point_values`.
 - A clean tree unless `--smoke`; formal runs from a detached run worktree (D163).
 - Writes `campaign.json` (`ts-post-train-v1`) and, for each round, `round.json` and `checkpoint.pt`
   (`ts-post-checkpoint-v1`).

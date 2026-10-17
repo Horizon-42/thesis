@@ -189,6 +189,28 @@ def test_the_pass_reads_the_groups_file_by_file_a_few_at_a_time(setup, tmp_path)
     assert twice["loss"] == pytest.approx(np.mean([p["loss"] for p in twice["passes"]]))
 
 
+def test_d220_the_pass_reads_a_search_unit_as_one_item_of_an_update(tmp_path, monkeypatch):
+    """D220: a groups file of stage D's search units (`post.branches.Valued`) gives updates of `update_groups` units,
+    each unit one piece of its first sentence and its group's continuations, as `samples` makes it."""
+    from ts_transformer.post.branches import Group, Valued, samples
+    from ts_transformer.tests.test_post_branches import _three_sentences
+
+    first_step, length, sentence = _three_sentences()
+    group = Group(0, first_step + 7, sentence(0, 1.0), (sentence(1, 2.0), sentence(2, 0.0)))
+    units = [Valued(w, 0, sentence(0, 1.0), (first_step, first_step + 7), (0.25, 0.5), (group,)) for w in range(3)]
+    directory = tmp_path / "round"
+    directory.mkdir()
+    torch.save(units, directory / "groups_0.pt")
+    monkeypatch.setattr(post_train, "collate", lambda sentences, device: None)
+    updates = list(update_pairs(directory, [0], _settings(update_groups=2), np.random.default_rng(0), CPU,
+                                part_width=0))
+    assert [len(pieces) for pieces, _ in updates] == [2, 1]
+    for pieces, _ in updates:
+        for piece in pieces:
+            assert piece.advantage.shape == (3, length)
+            assert torch.equal(piece.advantage, samples([units[0]], CPU).advantage)
+
+
 def test_the_pass_shuffles_each_file_s_groups_by_the_round_s_numbers(tmp_path, monkeypatch):
     """D130: each file's groups in an order drawn by the round's numbers, the files still in the order spoken; the same
     numbers give the same order."""
