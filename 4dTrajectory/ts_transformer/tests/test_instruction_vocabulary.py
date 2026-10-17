@@ -82,6 +82,9 @@ def test_from_dict_refuses_a_missing_or_an_extra_key_and_another_reading_rule():
     ({"heading_step_deg": 7.0}, "does not divide 360"),
     ({"heading_lead_s": 3.0}, "not a whole number of steps"),
     ({"heading_lead_s": -2.0}, "not a whole number of steps"),
+    ({"angle_lead_s": 3.0}, "not a whole number of steps"),
+    ({"angle_lead_s": -2.0}, "not a whole number of steps"),
+    ({"speed_lead_s": 5.0}, "not a whole number of steps"),
     ({"descent_angle_edges_deg": [-0.5, 3.0, 2.6, 3.7, 10.0]}, "edges must increase"),
     ({"descent_angle_centres_deg": [0.8, 2.1, 3.0, 11.0]}, "inside its class"),
 ])
@@ -798,25 +801,31 @@ def test_the_spec_takes_the_chosen_row_of_the_rounding_candidates_and_refuses_an
         measure.candidate_values(candidates, "0.2")
 
 
-def test_the_spec_runner_measures_only_with_a_candidate_a_grid_and_h_final_and_keeps_a_spec_only_without(tmp_path, capsys):
-    """D15, D56, D58, D66: measuring needs the user's choices of the angles, the grid and H_final; --spec-from keeps a
-    spec and takes none — refused before any file is read; a name that is no row is refused."""
+def test_the_spec_runner_measures_only_with_a_candidate_a_grid_h_final_and_the_leads_and_keeps_a_spec_only_without(
+        tmp_path, capsys):
+    """D15, D56, D58, D66, executor design D7: measuring needs the user's choices of the angles, the grid, H_final and
+    the angle lead; --spec-from keeps a spec and takes none — refused before any file is read; a name that is no row is
+    refused."""
     from ts_transformer.experiments import instruction_spec
 
-    h_final = ["--closed-loop-final-vertical-m", "10"]
+    h_final, lead = ["--closed-loop-final-vertical-m", "10"], ["--angle-lead-s", "4", "--speed-lead-s", "4"]
     for argv in ([], ["--candidate", "0.25"], ["--grid", "fitted"], ["--candidate", "0.25", "--grid", "d22"], h_final,
-                 ["--candidate", "0.25", *h_final],
-                 ["--candidate", "0.25", "--grid", "d22", *h_final, "--spec-from", str(tmp_path / "other")],
+                 ["--candidate", "0.25", *h_final], ["--candidate", "0.25", "--grid", "d22", *h_final], lead,
+                 ["--candidate", "0.25", "--grid", "d22", *h_final, *lead, "--spec-from", str(tmp_path / "other")],
                  [*h_final, "--spec-from", str(tmp_path / "other")]):
         with pytest.raises(SystemExit):
             instruction_spec.main(["--dir", str(tmp_path / "new"), *argv])
-        assert "measuring needs --candidate, --grid and --closed-loop-final-vertical-m" in capsys.readouterr().err
-    for value in ("15.5", "0", "nan"):                    # the spec's own rule, before any file is read
+        assert ("measuring needs --candidate, --grid, --closed-loop-final-vertical-m, --angle-lead-s and --speed-lead-s"
+                in capsys.readouterr().err)
+    for value, angle_s, speed_s in (("15.5", "4", "4"), ("0", "4", "4"), ("nan", "4", "4"), ("10", "3", "4"),
+                                    ("10", "-2", "4"), ("10", "4", "3")):   # the spec's own rules
         with pytest.raises(SystemExit):
             instruction_spec.main(["--dir", str(tmp_path / "new"), "--candidate", "0.25", "--grid", "d22",
-                                   "--closed-loop-final-vertical-m", value])
-        assert "--closed-loop-final-vertical-m:" in capsys.readouterr().err
-    for argv in (["--candidate", "0.2", "--grid", "d22", *h_final], ["--candidate", "0.25", "--grid", "d21", *h_final]):
+                                   "--closed-loop-final-vertical-m", value, "--angle-lead-s", angle_s,
+                                   "--speed-lead-s", speed_s])
+        assert "--closed-loop-final-vertical-m / --angle-lead-s / --speed-lead-s:" in capsys.readouterr().err
+    for argv in (["--candidate", "0.2", "--grid", "d22", *h_final, *lead],
+                 ["--candidate", "0.25", "--grid", "d21", *h_final, *lead]):
         with pytest.raises(SystemExit):
             instruction_spec.main(["--dir", str(tmp_path / "new"), *argv])
         assert "invalid choice" in capsys.readouterr().err

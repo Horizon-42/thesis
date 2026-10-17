@@ -58,8 +58,9 @@ import {
 export const TRAINING_PRIOR_INDEX_SCHEMA = "aeroviz-training-prior-index-v3";
 /** MIRROR of `INDEX_FILE`: an index of its own beside stage A's `index_v5.json`, which this reader never reads. */
 export const TRAINING_PRIOR_INDEX_FILE = "index_prior_v3.json";
-/** MIRROR of `SAMPLE_SCHEMA`: a prior set's sample (v3: each prior sentence's track written unrounded, D127). */
-export const TRAINING_PRIOR_SAMPLE_SCHEMA = "aeroviz-training-prior-sample-v4";
+/** MIRROR of `SAMPLE_SCHEMA`: a prior set's sample (v3: each prior sentence's track written unrounded, D127; v5: the
+ *  vocabulary's `angleLeadS` and `speedLeadS`, a tube's and a speed span's `firstRow`, executor design D7, D8). */
+export const TRAINING_PRIOR_SAMPLE_SCHEMA = "aeroviz-training-prior-sample-v5";
 /** MIRROR of `SET_KIND`: the flights of one free-generation readout. */
 export const TRAINING_PRIOR_SET_KIND = "prior-free-generation";
 /** MIRROR of the procedure masks' columns (`prior.procedure.ProcedureMasks.columns`, by `COLUMNS` name): the blocked words are

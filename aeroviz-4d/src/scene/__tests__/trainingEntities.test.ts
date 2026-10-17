@@ -91,9 +91,9 @@ describe("the coordinates", () => {
     const reading = trainingReadingOf(flight, stepS, null);
     const tube = reading.envelopes!.altitude[0];
     const wall = trainingTubeWall(reading.judged, tube, flight.haeMinusMslM);
-    expect(wall.minimumHeights).toHaveLength(tube.endRow - tube.row);
+    expect(wall.minimumHeights).toHaveLength(tube.endRow - tube.firstRow);
     expect(wall.minimumHeights[0]).toBeCloseTo(tube.lowMslM[0] + flight.haeMinusMslM, 6);
-    expect(wall.positions.slice(0, 2)).toEqual([reading.judged.lon[tube.row], reading.judged.lat[tube.row]]);
+    expect(wall.positions.slice(0, 2)).toEqual([reading.judged.lon[tube.firstRow], reading.judged.lat[tube.firstRow]]);
   });
 });
 

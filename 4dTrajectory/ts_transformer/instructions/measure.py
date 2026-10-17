@@ -157,10 +157,13 @@ class MeasuredValues:
         return data
 
 
-def build_spec(measured: MeasuredValues, *, closed_loop_final_vertical_m: float) -> VocabularySpec:
-    """The spec of the measured values, the values fixed by choice and the user's H_final (D66: measured by A24, not
-    here; `instruction_spec --closed-loop-final-vertical-m`)."""
-    return VocabularySpec(**SUGGESTED, **asdict(measured), closed_loop_final_vertical_m=closed_loop_final_vertical_m)
+def build_spec(measured: MeasuredValues, *, closed_loop_final_vertical_m: float, angle_lead_s: float,
+               speed_lead_s: float) -> VocabularySpec:
+    """The spec of the measured values, the values fixed by choice, the user's H_final (D66: measured by A24, not
+    here; `instruction_spec --closed-loop-final-vertical-m`) and the user's angle and speed leads L_γ and L_v (executor
+    design D7, D8, V12: measured by their own reading, not here; `instruction_spec --angle-lead-s --speed-lead-s`)."""
+    return VocabularySpec(**SUGGESTED, **asdict(measured), closed_loop_final_vertical_m=closed_loop_final_vertical_m,
+                          angle_lead_s=angle_lead_s, speed_lead_s=speed_lead_s)
 
 
 def provisional_spec() -> VocabularySpec:
@@ -175,7 +178,8 @@ def provisional_spec() -> VocabularySpec:
         descent_angle_edges_deg=(DESCENT_FLOOR_DEG, 2.0, 2.75, 3.5, DESCENT_CEILING_DEG),
         descent_angle_centres_deg=(1.5, 2.4, 3.1, 4.0),
         climb_angle_centre_deg=3.0, speed_accel_max_mps2=2.0, **D22_GRID,
-    ), closed_loop_final_vertical_m=SUGGESTED["closed_loop_vertical_m"])     # no closed loop reads it
+    ), closed_loop_final_vertical_m=SUGGESTED["closed_loop_vertical_m"],     # no closed loop reads it
+       angle_lead_s=0.0, speed_lead_s=0.0)     # what the passes measure (pieces, angles, levels) does not move with a lead
 
 
 def _free_holds(track: np.ndarray, min_rows: int, half_range_deg: float) -> list[tuple[int, int]]:

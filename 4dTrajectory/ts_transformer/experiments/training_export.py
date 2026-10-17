@@ -61,7 +61,7 @@ from ts_transformer.instructions.readout import KINDS, STRATA as READOUT_STRATA
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import READING_RULE, SPEC_SCHEMA, VocabularySpec
 from ts_transformer.instructions.words import (
-    ALTITUDE, ANGLE, ANGLE_LEVEL, COLUMNS, HEADING, RUNWAY, RUNWAY_GO_AROUND, SPEED, UNCHANGED, Words,
+    ALTITUDE, ANGLE, ANGLE_LEVEL, COLUMNS, HEADING, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words,
 )
 from ts_transformer.io_utils import file_sha256
 from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
@@ -101,13 +101,12 @@ def envelopes(instructions: list[Instruction], track_deg: np.ndarray, distance_m
     rows = len(track_deg)
     heading = [(word.row, float(word.info["target_deg"])) for word in instructions if word.column == HEADING]
     height = np.asarray(altitude_msl_m) - geometry.elevation_m
-    tubes = [files.tube_payload(word.row, end, words.altitude_level_m(word.value), low, high, geometry.elevation_m, check)
-             for (word, end, low, high), check in zip(tube_bounds(instructions, distance_m, height, spec, words),
+    tubes = [files.tube_payload(word.row, first, end, words.altitude_level_m(word.value), low, high, geometry.elevation_m,
+                                check)
+             for (word, first, end, low, high), check in zip(tube_bounds(instructions, distance_m, height, spec, words),
                                                       tube_checks(instructions, distance_m, height, spec, words))]
-    speeds = [item for item in instructions if item.column == SPEED and words.speed_mps(item.value) is not None]
-    spans = [files.speed_payload(check, words.speed_mps(word.value), spec.speed_tolerance_mps)
-             for word, check in zip(sorted(speeds, key=lambda item: item.row),
-                                    span_checks(instructions, ground_speed_mps, spec, words))]
+    spans = [files.speed_payload(check, check["target_mps"], spec.speed_tolerance_mps)
+             for check in span_checks(instructions, ground_speed_mps, spec, words)]
     return {"heading": files.heading_bands(track_deg, heading, spec.rows_exact(spec.heading_lead_s), rows,
                                            spec.heading_tolerance_deg),
             "altitude": tubes, "speed": spans}
@@ -286,7 +285,8 @@ def vocabulary_block(spec: VocabularySpec, words: Words) -> dict[str, Any]:
         return "climb" if index == words.angle_climb else f"descent {index}"
 
     return {"readingRule": READING_RULE, "columns": list(COLUMNS), "stepS": spec.step_s,
-            "headingStepDeg": spec.heading_step_deg, "headingLeadS": spec.heading_lead_s,
+            "headingStepDeg": spec.heading_step_deg, "headingLeadS": spec.heading_lead_s, "angleLeadS": spec.angle_lead_s,
+            "speedLeadS": spec.speed_lead_s,
             "headingToleranceDeg": spec.heading_tolerance_deg,
             "altitudeLevelsM": files.rounded(words.altitude_levels, 1),
             "altitudeTolerancesM": files.rounded(words.altitude_tolerances, 1), "noLevelOff": words.altitude_no_level_off,

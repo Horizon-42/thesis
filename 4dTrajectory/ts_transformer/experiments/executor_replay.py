@@ -78,7 +78,10 @@ HORIZON = "sentence"
 #: row interval, the sentences with a go-around apart, no gate.
 #: v8 (A29, D73): the checks the run ran before its work (``checks``: the labeller's, the executor's and, for closed-loop
 #: sentences, the closed loop's largest differences), as information.
-REPLAY_SCHEMA = "ts-executor-replay-v8"
+#: v9 (executor design draft 5): the first-principles executor's parameters; a record's controls are the actuators flown,
+#: at each cycle's start (the commands that produced the states are the record's ``commands``; the controls, held per
+#: cycle, do not re-roll the track under the point-mass model).
+REPLAY_SCHEMA = "ts-executor-replay-v9"
 #: A closed-loop flight that goes farther than this from its observed path, laterally, LEFT the path: a reading of the
 #: A9 smoke build (vocabulary §9.7) that A10 compares against (§12.1 A10), not a criterion (D7).
 LEFT_THE_PATH_M = 300.0
@@ -91,15 +94,16 @@ def executor_forecast(flown: Flown, index: int, verdict: Outcome | Verdict, inpu
                       series: FlightSeries, *, anchor: int = 0) -> Forecast:
     """Flight ``index``'s flown track as a control-path forecast from the series row ``anchor`` it was flown from (a
     replay: row 0; free generation: the first predicted step): the states at every cycle to the one its outcome is
-    read at (before it, for a dynamics failure: no state of the failure enters the record), the schedule in the
-    plant's contract, and its newtons resolved by that contract's own law."""
+    read at (before it, for a dynamics failure: no state of the failure enters the record), the commands sent, and the
+    newtons of what the actuators flew (the plant's lag, `Flown.actuators`) resolved by the contract's own law."""
     end = verdict.end_row - 1 if verdict.outcome == "dynamics_failure" else verdict.end_row
     dt = flown.cycle_s
     states = flown.states[index, : end + 1]
     commands = flown.commands[index, :end]
     contract = EXECUTOR_DYNAMICS.control_thrust_parameterization
     newtons = control_contract(contract).law.geodetic_controls(
-        states[:-1].unsqueeze(0), commands.unsqueeze(0), max_thrust_n=inputs.max_thrust_n[index: index + 1],
+        states[:-1].unsqueeze(0), flown.actuators[index, :end].unsqueeze(0),
+        max_thrust_n=inputs.max_thrust_n[index: index + 1],
         initial_geodetic_states=states[:1], aero_params=inputs.aero_params[index: index + 1])[0]
     offsets = np.arange(1, end + 1) * dt
     geodetic = states[1:].cpu().numpy().astype(np.float64)

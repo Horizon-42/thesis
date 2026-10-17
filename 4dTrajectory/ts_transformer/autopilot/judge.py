@@ -82,8 +82,8 @@ EVENT_ORDER = ("dynamics_failure", "ground_contact", "crossed_too_high", "crosse
                "landed", "crossed_other_runway")
 CROSSINGS = ("landed", "unstable_at_minimums", "crossed_too_high", "crossed_off_runway", "crossed_other_runway")
 #: Which wanted rate (track, path angle, speed) a limit costs.
-LIMIT_RATE = {"bank_cap": 0, "bank_rate": 0, "load_factor": 1, "path_rate_limited": 1, "stall_floor": 2,
-              "thrust_max": 2, "thrust_min": 2, "stall": 2}
+LIMIT_RATE = {"bank_cap": 0, "bank_rate": 0, "load_factor": 1, "stall_floor": 2, "thrust_max": 2, "thrust_min": 2,
+              "stall": 2}
 assert set(LIMIT_RATE) == set(LIMITS)
 
 

@@ -11,8 +11,8 @@ three ways (`WAYS`):
     ground speed is the observed one, and moved within the cycle to the observed one at its end in place of the speed
     law (Claude's reading of "its airspeed set to the observed ground speed at every cycle": the same ground speed, not
     the same airspeed — they differ by cos γ — and no speed word pulling it away inside a cycle);
-(b) ``executor_no_stopping`` — as (a), with the stopping-rate limit of the heading law lifted (`NoStoppingLateral`: the
-    error over the time left of the lead, up to the vocabulary's largest turn rate);
+(b) ``executor_no_stopping`` — as (a), with the stopping bank of the inverse lifted (`NoStoppingLateral`: the heading
+    error handed to the stop as unbounded, so only the bank limit and the roll rate bound the turn);
 (c) ``exact_words`` — the exact model of the heading words (vocabulary §9.6, `exact_positions`): each word's track reached the
     lead after the word, linearly in time from the track there (a later word measured from the word before it, as the
     executor measures it; the first the shorter way from the observed track at row 0), at the observed ground speed,
@@ -103,15 +103,12 @@ def observed_speed_mps(signals: FlightSignals, cycles: int, cycle_s: float) -> n
 
 
 class NoStoppingLateral(Lateral):
-    """The heading law of §5.4 without its stopping-rate limit (way (b)): the error over the time left until the lead
-    runs out (floored at 2Δt), up to the vocabulary's largest turn rate."""
+    """The heading law without the inverse's stopping bank (way (b)): the track rate as the law gives it, the error handed
+    to the stop as unbounded (its sign kept), so the stop never binds."""
 
     def rate(self, state, relative_deg, issued, runway, runways, time_s, *, fresh=None):  # type: ignore[override]
-        course = runways.pointed(runway)[2]
-        error = self.word_error(state, relative_deg, issued, course, time_s, fresh)
-        to_go = self.heard_s + self.spec.heading_lead_s - time_s
-        rate = (error / to_go.clamp(min=2.0 * self.params.cycle_s)).abs()
-        return torch.sign(error) * rate.clamp(max=self.spec.turn_rate_max_deg_s)
+        rate, error = super().rate(state, relative_deg, issued, runway, runways, time_s, fresh=fresh)
+        return rate, torch.where(error == 0.0, error, torch.copysign(torch.full_like(error, math.inf), error))
 
 
 class ObservedSpeedLaw(Speed):
@@ -119,13 +116,13 @@ class ObservedSpeedLaw(Speed):
     the cycle's start to the observed one at its end (``ground_speed_mps`` ``[B, cycles + 1]``); the cycle counted by
     the executor (``cycle``, set before each cycle). The thrust box still binds (and is recorded)."""
 
-    def __init__(self, approach_ias_mps: torch.Tensor, spec: VocabularySpec, ground_speed_mps: torch.Tensor,
-                 cycle_s: float) -> None:
-        super().__init__(approach_ias_mps, spec)
-        self.ground_speed_mps, self.cycle_s, self.cycle = ground_speed_mps, cycle_s, 0
+    def __init__(self, approach_ias_mps: torch.Tensor, params: ExecutorParams, spec: VocabularySpec,
+                 ground_speed_mps: torch.Tensor) -> None:
+        super().__init__(approach_ias_mps, params, spec)
+        self.ground_speed_mps, self.cycle = ground_speed_mps, 0
 
-    def rate(self, state, speed_mps, unspecified, go_around, load_factor, aero_params,  # type: ignore[override]
-             straight_m):
+    def rate(self, state, speed_mps, unspecified, go_around, issued, time_s, load_factor,  # type: ignore[override]
+             aero_params):
         k = min(self.cycle, self.ground_speed_mps.shape[1] - 2)
         accel = (self.ground_speed_mps[:, k + 1] - self.ground_speed_mps[:, k]) / (self.cycle_s * torch.cos(
             state.gamma_rad))
@@ -141,7 +138,7 @@ class ObservedSpeedExecutor(Executor):
     def __init__(self, *args: Any, ground_speed_mps: torch.Tensor, stopping: bool, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.ground_speed_mps = ground_speed_mps
-        self.speed = ObservedSpeedLaw(self.speed.approach_ias_mps, self.words.spec, ground_speed_mps, self.params.cycle_s)
+        self.speed = ObservedSpeedLaw(self.speed.approach_ias_mps, self.params, self.words.spec, ground_speed_mps)
         if not stopping:
             self.lateral = NoStoppingLateral(len(ground_speed_mps), self.params, self.words.spec, ground_speed_mps.device)
 

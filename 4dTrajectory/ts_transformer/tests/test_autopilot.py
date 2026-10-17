@@ -156,54 +156,80 @@ def _state(track_deg: float, gamma_deg: float, speed: float = 100.0, height: flo
     return [35.05, -78.05, height, speed, math.radians(90.0 - track_deg), math.radians(gamma_deg), 62000.0]
 
 
-def _fly(inputs, charts, track_rate, gamma_rate, accel, previous_bank=None, *, bank_cap_deg=30.0,
-         bank_rate_deg_s=1000.0):
-    k0 = read_state(inputs.initial_state, charts)
-    rows = len(inputs.initial_state)
-    previous = torch.zeros(rows, dtype=F64) if previous_bank is None else previous_bank
+def test_the_observer_is_the_plants_actuators_and_the_dead_beat_command_reaches_its_value():
+    """§4.2–§4.3 (T1, T2): the observer's exact lag law and the plant's RK4 (0.5 s steps) agree, and a dead-beat command
+    brings an actuator to its wanted value at the cycle's end."""
+    params = _params()
+    inputs, charts = _a320([_state(45.0, -3.0, 75.0, 900.0)] * 3)
+    plant = Plant(inputs, params)
+    decay = inverse.decays(params, inputs.initial_state)
+    rng = np.random.default_rng(3)
+    state, actual = inputs.initial_state, torch.tensor([[0.3, 0.0, 1.0]] * 3, dtype=F64)
+    observed = actual.clone()
+    for _ in range(6):
+        wanted = torch.tensor(np.column_stack((rng.uniform(0.0, 0.6, 3), rng.uniform(-0.3, 0.3, 3),
+                                               rng.uniform(0.9, 1.2, 3))), dtype=F64)
+        command = inverse.steer(wanted, observed, decay)
+        observed = inverse.observe(observed, command, decay)
+        assert observed.numpy() == pytest.approx(wanted.numpy(), abs=1e-12)          # dead-beat, exactly
+        state, actual = plant.step(state, actual, command, params.cycle_s)
+        assert actual.numpy() == pytest.approx(observed.numpy(), abs=5e-4)    # RK4 (0.5 s) against the exact law
 
-    def column(value):
-        return torch.as_tensor(value, dtype=F64).expand(rows).clone()
 
-    att = inverse.attitude(k0, column(track_rate), column(gamma_rate), previous,
-                           bank_cap_rad=math.radians(bank_cap_deg), bank_rate_rad_s=math.radians(bank_rate_deg_s),
-                           cycle_s=1.0)
-    thr = inverse.thrust(k0, column(accel), att.load_factor, inputs.aero_params, inputs.max_thrust_n)
-    command = torch.stack((thr.fraction, att.bank_rad, att.load_factor), dim=1)
-    k1 = read_state(Plant(inputs).step(inputs.initial_state, command, 1.0), charts)
-    rates = (wrap180(k1.track_deg - k0.track_deg), k1.gamma_rad - k0.gamma_rad, k1.speed_mps - k0.speed_mps)
-    return att, thr, rates
+def test_the_load_factor_and_the_thrust_are_the_exact_inverse_of_the_point_mass_equations():
+    """§7.5 (T5), §8.3 (T4): n* at the cycle's mean bank gives γ̇*; x* at n* gives V̇* (the dynamics' own drag)."""
+    from aerodynamic_model.torch_dynamics import GRAVITY_MPS2, FlightCondition, flight_aerodynamics, isa_density
 
-
-def test_the_inverse_flies_the_rates_it_was_asked_for():
-    inputs, charts = _a320([_state(45.0, 0.0), _state(45.0, -3.0), _state(300.0, -3.0, 80.0, 900.0),
-                            _state(10.0, 2.0, 120.0)])
-    asked_track = torch.tensor([2.0, -2.5, 1.5, 0.0], dtype=F64)
-    asked_gamma = torch.tensor([0.0, math.radians(0.3), math.radians(-0.2), 0.0], dtype=F64)
-    asked_accel = torch.tensor([-0.3, -0.2, 0.0, 0.4], dtype=F64)
-    att, thr, (track, gamma, speed) = _fly(inputs, charts, asked_track, asked_gamma, asked_accel)
-    assert not any(bool(b.any()) for b in (*att.binds.values(), *thr.binds.values()))
-    assert track.numpy() == pytest.approx(asked_track.numpy(), rel=0.02, abs=0.01)
-    assert gamma.numpy() == pytest.approx(asked_gamma.numpy(), rel=0.05, abs=math.radians(0.01))
-    hold = 9.81 * np.abs(asked_gamma.numpy()) * 1.0 / 2.0
-    assert np.all(np.abs(speed.numpy() - asked_accel.numpy()) <= hold + 0.005)
-    assert float(att.bank_rad[0]) < 0.0 < float(att.bank_rad[1])
+    params = _params()
+    inputs, charts = _a320([_state(45.0, 0.0), _state(45.0, -3.0), _state(300.0, -3.0, 80.0, 900.0)])
+    now = read_state(inputs.initial_state, charts)
+    decay = inverse.decays(params, inputs.initial_state)
+    gamma_rate = torch.tensor([0.0, math.radians(0.4), math.radians(-0.3)], dtype=F64)
+    bank_mean = torch.tensor([0.2, -0.1, 0.0], dtype=F64)
+    ceiling = inverse.load_ceiling(now, torch.tensor([[0.3, 0.0, 1.0]] * 3, dtype=F64), inputs.aero_params,
+                                   inputs.max_thrust_n, params.cycle_s)
+    load = inverse.load(now, gamma_rate, bank_mean, torch.ones(3, dtype=F64), ceiling, decay[2])
+    assert not load.binds["load_factor"].any()
+    rebuilt = GRAVITY_MPS2 / now.speed_mps * (load.wanted * torch.cos(bank_mean) - torch.cos(now.gamma_rad))
+    assert rebuilt.numpy() == pytest.approx(gamma_rate.numpy(), abs=1e-12)
+    accel = torch.tensor([-0.3, 0.0, 0.4], dtype=F64)
+    fraction = inverse.thrust_fraction(now, accel, load.wanted, inputs.aero_params, inputs.max_thrust_n)
+    condition = FlightCondition(speed_mps=now.speed_mps, sin_gamma=torch.sin(now.gamma_rad), mass_kg=now.mass_kg,
+                                density=isa_density(now.height_m))
+    drag = flight_aerodynamics(condition, load.wanted, inputs.aero_params).drag_n
+    rebuilt = (fraction * inputs.max_thrust_n - drag) / now.mass_kg - GRAVITY_MPS2 * torch.sin(now.gamma_rad)
+    assert rebuilt.numpy() == pytest.approx(accel.numpy(), abs=1e-9)
 
 
 def test_each_limit_binds_on_the_quantity_it_bounds():
-    inputs, charts = _a320([_state(90.0, 0.0)] * 4)
-    att, _, (track, gamma, _) = _fly(inputs, charts, 10.0, 0.0, 0.0, bank_cap_deg=25.0)
-    assert att.binds["bank_cap"].all() and float(att.bank_rad[0]) == pytest.approx(-math.radians(25.0))
-    capped_rate = math.degrees(9.81 * math.tan(math.radians(25.0)) / 100.0)
-    assert float(track[0]) == pytest.approx(capped_rate, rel=0.02) and abs(float(gamma[0])) < math.radians(0.02)
-    att, _, _ = _fly(inputs, charts, 3.0, 0.0, 0.0, torch.zeros(4, dtype=F64), bank_rate_deg_s=2.0)
-    assert att.binds["bank_rate"].all() and float(att.bank_rad[0]) == pytest.approx(-math.radians(2.0))
-    att, _, _ = _fly(inputs, charts, 0.0, math.radians(20.0), 0.0)
-    assert att.binds["load_factor"].all() and float(att.load_factor[0]) == inverse.LOAD_FACTOR_MAX
-    _, thr, _ = _fly(inputs, charts, 0.0, 0.0, 6.0)
-    assert thr.binds["thrust_max"].all() and float(thr.fraction[0]) == pytest.approx(1.0)
-    _, thr, _ = _fly(inputs, charts, 0.0, 0.0, -8.0)
-    assert thr.binds["thrust_min"].all() and not thr.binds["stall"].any()
+    """§6.4 (T9): the bank within φ_phys = min(arccos(cos γ / n_up), the envelope's 45°), rolled at no more than p; the
+    load factor in the band and under the stall; the thrust in its box."""
+    params = _params()
+    inputs, charts = _a320([_state(90.0, 0.0), _state(90.0, 0.0, 62.0), _state(90.0, 0.0)])
+    now = read_state(inputs.initial_state, charts)
+    decay = inverse.decays(params, inputs.initial_state)
+    ceiling = inverse.load_ceiling(now, torch.tensor([[math.nan, 0.0, 1.0]] * 3, dtype=F64), inputs.aero_params,
+                                   inputs.max_thrust_n, params.cycle_s)            # the first cycle: the speed held
+    limit = inverse.bank_limit_rad(now, ceiling)
+    assert float(limit[0]) == pytest.approx(inverse.BANK_MAX_RAD)                      # fast: the envelope binds
+    assert float(ceiling[1]) < 1.0 / math.cos(inverse.BANK_MAX_RAD)                     # slow: the stall binds
+    assert float(limit[1]) == pytest.approx(math.acos(1.0 / float(ceiling[1])))
+    big_error = torch.full((3,), 90.0, dtype=F64)
+    bank = inverse.bank(now, torch.full((3,), 20.0, dtype=F64), big_error, torch.zeros(3, dtype=F64), limit, params,
+                        decay[1])
+    assert bank.binds["bank_cap"].all() and bank.binds["bank_rate"].all()
+    roll = math.radians(params.bank_rate_deg_s)
+    assert bank.command.numpy() == pytest.approx(-roll * params.bank_time_constant_s * np.ones(3))
+    held = inverse.bank(now, torch.full((3,), 20.0, dtype=F64), big_error, -limit, limit, params, decay[1])
+    assert held.command.numpy() == pytest.approx(-limit.numpy())                       # never past φ_phys
+    load = inverse.load(now, torch.full((3,), math.radians(20.0), dtype=F64), torch.zeros(3, dtype=F64),
+                        torch.ones(3, dtype=F64), ceiling, decay[2])
+    assert load.binds["load_factor"].all()
+    assert load.wanted.numpy() == pytest.approx(torch.minimum(ceiling, torch.full_like(ceiling, 2.0)).numpy())
+    thrust = inverse.thrust(torch.tensor([1.4, -0.5, 0.5], dtype=F64), torch.full((3,), 0.5, dtype=F64), decay[0])
+    assert thrust.binds["thrust_max"].tolist() == [True, False, False]
+    assert thrust.binds["thrust_min"].tolist() == [False, True, False]
+    assert thrust.wanted.tolist() == pytest.approx([1.0, -0.2, 0.5])
 
 
 # ---- the parameters
@@ -211,8 +237,9 @@ def _params(**changes):
     from ts_transformer.autopilot.params import ExecutorParams
     from ts_transformer.experiments.executor_spec import ROLL_RATE_DEG_S
 
-    base = ExecutorParams(cycle_s=1.0, bank_rate_deg_s=ROLL_RATE_DEG_S, path_time_constant_s=2.0, path_rate_factor=2.0,
-                          timeout_factor=1.5, start_rule="trailing-fit-8s")
+    base = ExecutorParams(cycle_s=1.0, bank_rate_deg_s=ROLL_RATE_DEG_S, thrust_time_constant_s=1.5,
+                          bank_time_constant_s=2.0, load_time_constant_s=0.8, timeout_factor=1.5,
+                          start_rule="trailing-fit-8s")
     return replace(base, **changes)
 
 
@@ -220,9 +247,9 @@ def test_the_parameters_are_checked_against_the_designs_constraints():
     one, params = spec(), _params()
     params.check(one, 2.0)
     params.check(one, 8.0)
-    for change, message in ((dict(path_time_constant_s=1.0), "under 2 Δt"),
+    for change, message in ((dict(load_time_constant_s=0.1), "2.785"),        # the plant's integrator cannot hold it
                             (dict(timeout_factor=0.0), "positive"),
-                            (dict(path_rate_factor=0.0), "positive"),
+                            (dict(bank_time_constant_s=0.0), "positive"),
                             (dict(cycle_s=math.nan), "finite"),
                             (dict(bank_rate_deg_s=math.nan), "finite"),
                             (dict(start_rule="fit-4s"), "start rule 'fit-4s' is none of")):
@@ -249,18 +276,27 @@ def test_the_lateral_relative_mirrors_the_labellers():
     assert ours[2].numpy() == pytest.approx(ref.track_minus_course_deg)
 
 
-def test_a_heading_word_is_flown_to_arrive_when_its_lead_runs_out_no_faster_than_the_bank_can_stop():
+def test_a_heading_word_is_flown_to_arrive_when_its_lead_runs_out_and_the_bank_stops_it_exactly():
+    """§6.2: the error over the time left, at least one cycle; §6.3 (T3): rolled out from φ at p_mean the track turns
+    −g ln(cos φ) / (V p_mean) further — the stopping bank turns exactly the error left."""
     from aerodynamic_model.torch_dynamics import GRAVITY_MPS2
-    from ts_transformer.autopilot.lateral import stopping_rate_deg_s, word_rate
+    from ts_transformer.autopilot.inverse import decays, stop_bank_rad
+    from ts_transformer.autopilot.lateral import word_rate
 
-    params, one = _params(), spec()
+    params = _params()
     error = torch.tensor([6.0, 6.0, 6.0, 20.0, -6.0], dtype=F64)
-    to_go = torch.tensor([4.0, 3.0, -5.0, 4.0, 1.0], dtype=F64)
-    speed = torch.full((5,), 140.0, dtype=F64)
-    stop = float(stopping_rate_deg_s(torch.tensor([6.0], dtype=F64), torch.tensor([140.0], dtype=F64), params))
-    assert stop == pytest.approx(math.degrees(math.sqrt(2 * GRAVITY_MPS2 * math.radians(params.bank_rate_deg_s) / 140.0
-                                                        * math.radians(6.0))))
-    assert word_rate(error, to_go, speed, params, one).tolist() == pytest.approx([1.5, 2.0, stop, 3.5, -stop])
+    to_go = torch.tensor([4.0, 3.0, -5.0, 4.0, 0.5], dtype=F64)
+    assert word_rate(error, to_go, params).tolist() == pytest.approx([1.5, 2.0, 6.0, 5.0, -6.0])
+    decay_bank = decays(params, error)[1]
+    speed = torch.full((1,), 70.0, dtype=F64)
+    stop = stop_bank_rad(torch.tensor([10.0], dtype=F64), torch.zeros(1, dtype=F64), speed, params, decay_bank)
+    p_mean = math.radians(params.bank_rate_deg_s) * params.bank_time_constant_s * (1 - float(decay_bank))
+    # integrate the roll-out at the constant mean rate: the track turns the 10° left
+    phi, turned, dt = float(stop), 0.0, 1e-4
+    while phi > 0.0:
+        turned += GRAVITY_MPS2 * math.tan(phi) / 70.0 * dt
+        phi -= p_mean * dt
+    assert math.degrees(turned) == pytest.approx(10.0, rel=1e-3)
 
 
 def _lateral_state(track_deg: float, n_m: float = 0.0):
@@ -402,14 +438,16 @@ def test_a_downwind_base_final_sentence_is_flown_onto_the_final_by_its_words_and
     """D2, D3: the words alone — the turn onto the final said word by word, the final held by class 0, the descent by
     "no level-off" at the class's angle — bring the aircraft to the runway, said on the sentence's own rows (the speed
     words' steps carry the observed changes of speed, D43); the DA check passes and every word is inside its envelope.
-    Nothing captures (no such mode exists). The turns leave the flown aircraft 90-odd metres right of the line: inside
+    Nothing captures (no such mode exists). The turns leave the flown aircraft about 106 metres right of the line: inside
     the FAS cone, the offset the closed loop corrects."""
     from ts_transformer.autopilot.executor import MODES
 
     signals, _ = _downwind()
     flown, verdict, reading = _fly_sentence(signals)
     assert verdict.outcome == "landed" and verdict.flew_the_sentence
-    assert verdict.crossing["cross_m"] == pytest.approx(93.0, abs=10.0)    # the turns' offset, pinned (a change shows)
+    # the turns' offset, pinned (a change shows): 93 m under the executor before executor design draft 5, 106 m since
+    # (the lag plant, the observer and the stopping bank; still inside the FAS cone, 116 m here)
+    assert verdict.crossing["cross_m"] == pytest.approx(106.0, abs=10.0)
     assert 0.0 < verdict.crossing["height_m"] < 100.0
     assert verdict.crossing["decision"]["passed"]
     # against the runway's real 15 m TCH the open-loop drift fails the DA check (D38): the closed loop's to correct
@@ -418,16 +456,18 @@ def test_a_downwind_base_final_sentence_is_flown_onto_the_final_by_its_words_and
     real = outcome_of(flown, 0, instruction_airport(), spec())
     assert real.outcome == "unstable_at_minimums" and real.crossing["decision"]["above_glidepath_m"] > 22.0
     assert set(MODES) == {"go_around", "level_captured"}
-    # the 5 m/s steps at the test spec's a_max (2.5 m/s²) slow faster than an A320's clean drag and thrust floor allow:
-    # the thrust floor binds and is counted (D43), nothing else does
+    # the 5 m/s steps, asked in one cycle at no lead (§8.2), slow faster than an A320's clean drag and thrust floor allow:
+    # the thrust floor binds and is counted; no stall, no full thrust, the load factor's box at most at a push-over's
+    # first cycle (a dead-beat command the box cuts, §4.3)
     assert verdict.limits["thrust_min"]["cycles"] > 0
-    assert not any(verdict.limits[name]["cycles"] for name in ("thrust_max", "stall", "load_factor"))
+    assert not any(verdict.limits[name]["cycles"] for name in ("thrust_max", "stall"))
+    assert verdict.limits["load_factor"]["cycles"] <= 2
     assert all(h["inside"] == h["rows"] for h in verdict.words["heading"] if h["rows"])
 
 
 def test_class_0_holds_the_course_and_keeps_the_offset_the_turn_left():
     """§3.3: "a word of class 0 gives no lateral correction. The aircraft keeps its lateral offset until the model says
-    a word of ±5°" — on its own rows the executor's turn onto the final ends 90-odd metres right of the line, and it
+    a word of ±5°" — on its own rows the executor's turn onto the final ends about 106 metres right of the line, and it
     stays there to the threshold, where it crosses at that offset: no law brings it back (D2, D3)."""
     from ts_transformer.autopilot.judge import flown_track
     from ts_transformer.instructions.airport import relative_to_runway
@@ -500,7 +540,7 @@ def test_a_turn_said_word_by_word_is_flown_without_levelling():
     flown, verdict, reading = _fly_sentence(signals)
     turn = [i for i in reading.instructions if i.column == HEADING and 0 < i.row < 80]
     assert len(turn) > 25
-    bank = flown.commands[0, :, 1].numpy()
+    bank = flown.actuators[0, 1:, 1].numpy()                    # the bank flown (the commands lead it, §4.4)
     heard = flown.sentence_s[0].numpy()
     first, last = (int(np.searchsorted(heard, row * 2.0)) for row in (turn[0].row, turn[-1].row))
     assert (bank[first + 8: last] < -math.radians(5.0)).all()
@@ -523,6 +563,83 @@ def test_descents_level_off_at_their_targets_inside_the_tubes():
     targets = [i for i in reading.instructions if i.column == ALTITUDE]
     assert len(targets) == 3 and len(verdict.words["vertical"]) == 3
     assert all(word["contained"] for word in verdict.words["vertical"])
+
+
+def test_a_level_off_stops_at_its_level_without_passing_it_and_is_captured():
+    """§7.3 (T8): a descent at each class's angle to a level stops at the level's height (T + E MSL), passing it below by
+    at most 0.25 m (measured 0.05–0.19 m: the stop decided once a cycle), and holds it without ringing, the level
+    captured once the stop begins; the actual load factor stays within the physical limit."""
+    from ts_transformer.autopilot.executor import fly
+    from ts_transformer.autopilot.lateral import Runways
+
+    words, params = Words(spec()), _params()
+    geometry = _end_airport()
+    level_m = 600.0
+    for angle_class in range(1, words.n_descent + 1):
+        inputs, approach, grid, _ = _east_flight(geometry, 75.0, e_m=-40000.0, height_m=1000.0)
+        grid[0, ALTITUDE], grid[0, ANGLE] = words.altitude_index(level_m), angle_class
+        runways = Runways.of([geometry], words.spec, dtype=F64, device=CPU)
+        charts = AirportCharts.of([geometry], dtype=F64, device=CPU)
+        flown = fly(inputs, Sentences([grid], words, step_s=2.0, device=CPU), runways, charts,
+                    torch.tensor([approach], dtype=F64), params, words, time_limit_s=torch.tensor([400.0], dtype=F64),
+                    reserve_s=0.0)
+        height = flown.states[0, :, 2].numpy() - geometry.elevation_m
+        captured = flown.modes["level_captured"][0].numpy()
+        assert height.min() >= level_m - 0.25, angle_class                  # the sampled stop's overshoot
+        assert captured.any() and captured[int(np.argmax(captured)):].all()
+        assert abs(height[-1] - level_m) < 0.05 and np.ptp(height[-50:]) < 0.05    # held, no ringing
+        assert flown.actuators[0, :, 2].max() <= 2.0 + 1e-9
+    # a climb to a level stops at it from below (the push to n_min)
+    inputs, approach, grid, _ = _east_flight(geometry, 75.0, e_m=-40000.0, height_m=geometry.elevation_m + 300.0)
+    grid[0, ALTITUDE], grid[0, ANGLE] = words.altitude_index(level_m), words.angle_climb
+    flown = fly(inputs, Sentences([grid], words, step_s=2.0, device=CPU), Runways.of([geometry], words.spec, dtype=F64,
+                                                                                         device=CPU),
+                AirportCharts.of([geometry], dtype=F64, device=CPU), torch.tensor([approach], dtype=F64), params, words,
+                time_limit_s=torch.tensor([600.0], dtype=F64), reserve_s=0.0)
+    height = flown.states[0, :, 2].numpy() - geometry.elevation_m
+    assert height.max() <= level_m + 0.25 and abs(height[-1] - level_m) < 0.05
+    assert flown.modes["level_captured"][0].numpy().any()
+
+
+def test_the_closed_form_stop_is_conservative_against_the_lag_model_integrated():
+    """§7.3 (T7): the height a stop at the physical limit takes, integrated through the load factor's lag, is never more
+    than the closed form allows — the stop angle for that height is at most the angle it was flown from — and the closed
+    form's slack is under 2 m beside the cycle it adds on purpose, V Δt sin γ (without the cycle measured 0.6–1.9 m at
+    1.5–4.5°, n_up 1.3 and 2: the stop starts that much early)."""
+    from aerodynamic_model.torch_dynamics import GRAVITY_MPS2
+    from ts_transformer.autopilot.vertical import stop_angle_rad
+
+    tau, speed = 0.8, 70.0
+    for degrees in (1.25, 3.0):                                   # a climb stopped by pushing to n_min
+        gamma, load, gain, dt = math.radians(degrees), 1.0, 0.0, 1e-3
+        while gamma > 0.0:
+            load += (inverse.LOAD_FACTOR_MIN - load) / tau * dt
+            gamma += GRAVITY_MPS2 * (load - math.cos(gamma)) / speed * dt
+            gain += speed * math.sin(max(gamma, 0.0)) * dt
+
+        def pushed(left_m, degrees=degrees):
+            return float(stop_angle_rad(torch.tensor([left_m], dtype=F64), torch.tensor([speed], dtype=F64),
+                                        torch.tensor([math.radians(degrees)], dtype=F64), torch.tensor([True]),
+                                        torch.zeros(1, dtype=F64), torch.ones(1, dtype=F64),
+                                        torch.tensor([2.0], dtype=F64), tau, 1.0))
+
+        cycle_m = speed * 1.0 * math.sin(math.radians(degrees))
+        assert pushed(gain) <= math.radians(degrees) <= pushed(gain + 2.0 + cycle_m), degrees
+    for ceiling in (2.0, 1.3):
+        for degrees in (1.5, 3.0, 4.5):
+            gamma, load, sink, dt = math.radians(degrees), 1.0, 0.0, 1e-3
+            while gamma > 0.0:                                    # a descent (γ < 0 flown) stopped by pulling
+                load += (ceiling - load) / tau * dt
+                gamma -= GRAVITY_MPS2 * (load - math.cos(gamma)) / speed * dt
+                sink += speed * math.sin(max(gamma, 0.0)) * dt
+            def angle(left_m):
+                return float(stop_angle_rad(torch.tensor([left_m], dtype=F64), torch.tensor([speed], dtype=F64),
+                                            torch.tensor([-math.radians(degrees)], dtype=F64), torch.tensor([False]),
+                                            torch.zeros(1, dtype=F64), torch.ones(1, dtype=F64),
+                                            torch.tensor([ceiling], dtype=F64), tau, 1.0))
+
+            cycle_m = speed * 1.0 * math.sin(math.radians(degrees))
+            assert angle(sink) <= math.radians(degrees) <= angle(sink + 2.0 + cycle_m), (ceiling, degrees)
 
 
 def test_the_outcome_alone_is_the_verdict_s_first_layer():
@@ -558,8 +675,6 @@ def test_the_flight_meets_the_ground_when_told_below_the_threshold():
     below[2:, ANGLE] = UNCHANGED
     _, grounded, _ = _fly_sentence(signals, below)
     assert grounded.outcome == "ground_contact"
-    limited = grounded.limits["path_rate_limited"]
-    assert limited["cycles"] > 0 and limited["wanted_minus_given"] > 1e-4
 
 
 # ---- the go-around (§3.2, §5.4–§5.6, D10, D27, D28)
@@ -920,43 +1035,45 @@ def test_the_word_count_leaves_out_the_words_the_judge_did_not_judge():
 
 
 # ---- speed
-def test_a_speed_word_is_flown_at_a_max_both_ways_and_unspecified_at_its_own_pace():
-    """§5.6 (D43): a speed word is a step, flown at a_max both ways into the last band's exponential approach; under a
-    go-around a speed word too; "unspecified" under G holds the airspeed it was heard at, back up at a_U."""
+def test_a_speed_word_is_flown_to_arrive_when_its_lead_runs_out():
+    """§8.2 (R5.5, D8, T10): a speed word is reached L_v after it is heard, the change spread over the time left, at least
+    one cycle; "unspecified" is the type's speed raised by √n and flown as a true airspeed, at least the stall (D3);
+    under G it holds the airspeed heard at the go-around; a new word restarts the clock."""
+    from aerodynamic_model.torch_dynamics import GRAVITY_MPS2, ISA_RHO0_KG_M3, isa_density
     from ts_transformer.autopilot.frame import Kinematics
-    from ts_transformer.autopilot.speed import Speed, speed_change_mps2
+    from ts_transformer.autopilot.speed import Speed
 
-    one = spec()
-    speed = Speed(torch.tensor([65.0], dtype=F64), one)
+    one, params = spec(speed_lead_s=6.0), _params()
+    speed = Speed(torch.tensor([65.0], dtype=F64), params, one)
     state = Kinematics(*(torch.tensor([v], dtype=F64) for v in (0.0, 0.0, 100.0, 90.0, 90.0, 0.0, 90.0, 60000.0)))
     aero = torch.tensor([[122.6, 2.5, 0.02, 0.04, 0.9, 0.2]], dtype=F64)
 
-    def rate(word_mps, go_around=False, unspecified=False):
-        return float(speed.rate(state, torch.tensor([word_mps], dtype=F64), torch.tensor([unspecified]),
-                                torch.tensor([go_around]), torch.ones(1, dtype=F64), aero,
-                                torch.tensor([50_000.0], dtype=F64))[0][0])
+    def rate(word_mps, issued, time_s, go_around=False, unspecified=False, load=1.0, at=state):
+        return float(speed.rate(at, torch.tensor([word_mps], dtype=F64), torch.tensor([unspecified]),
+                                torch.tensor([go_around]), torch.tensor([issued]), time_s,
+                                torch.tensor([load], dtype=F64), aero)[0][0])
 
-    a_max = one.speed_accel_max_mps2
-    assert rate(85.0) == pytest.approx(-a_max) and rate(95.0) == pytest.approx(a_max)
-    assert rate(70.0) == pytest.approx(-a_max) and rate(110.0) == pytest.approx(a_max)   # several steps away: a_max
-    assert rate(88.0) == pytest.approx(-2.0 * a_max / one.speed_tolerance_mps)     # inside the last band: exponential
-    assert rate(85.0, go_around=True) == pytest.approx(-a_max) and rate(60.0, go_around=True) == pytest.approx(-a_max)
+    assert rate(84.0, 1, 0.0) == pytest.approx(-6.0 / 6.0)               # heard now: 6 m/s over the 6 s lead
+    assert rate(84.0, 1, 3.0) == pytest.approx(-6.0 / 3.0)               # half the lead left
+    assert rate(84.0, 1, 9.0) == pytest.approx(-6.0 / params.cycle_s)    # past it: one cycle
+    density = float(isa_density(torch.tensor(100.0, dtype=F64)))
+    own = 65.0 * math.sqrt(1.3) * math.sqrt(ISA_RHO0_KG_M3 / density)
+    assert rate(math.nan, 2, 10.0, unspecified=True, load=1.3) == pytest.approx((own - 90.0) / 6.0)
     speed.hear_go_around(torch.tensor([True]), state)
-    assert rate(math.nan, go_around=True, unspecified=True) == pytest.approx(0.0)
     slower = Kinematics(*(torch.tensor([v], dtype=F64) for v in (0.0, 0.0, 100.0, 80.0, 90.0, 0.0, 80.0, 60000.0)))
-    assert float(speed.rate(slower, torch.tensor([math.nan], dtype=F64), torch.tensor([True]), torch.tensor([True]),
-                            torch.ones(1, dtype=F64), aero, torch.tensor([50_000.0], dtype=F64))[0][0]) == \
-        pytest.approx(speed_change_mps2(one))                                # back up to the held 90 m/s at a_U
+    assert rate(math.nan, 2, 30.0, go_around=True, unspecified=True, at=slower) == pytest.approx(10.0)   # back to 90
+    stall = math.sqrt(2.0 * 60000.0 * GRAVITY_MPS2 / (density * 122.6 * 2.5))
+    accel, wanted, modes = speed.rate(state, torch.tensor([30.0], dtype=F64), torch.tensor([False]),
+                                      torch.tensor([False]), torch.tensor([3]), 40.0, torch.ones(1, dtype=F64), aero)
+    assert bool(modes["stall_floor"]) and float(accel) == pytest.approx((stall - 90.0) / 6.0, rel=1e-3)
+    assert float(wanted) == pytest.approx((30.0 - 90.0) / 6.0)
 
 
-def test_a_speed_step_is_made_in_seconds_and_the_thrust_limit_binds_where_the_aircraft_cannot_slow_at_a_max():
-    """D43: a step of 5 m/s down, then back up, on the downwind: the law asks a_max and the step is made in seconds, not
-    the 20 s of a_U; an A320's clean drag and its thrust floor cannot slow it at a_max, and the replay sees the thrust
-    limit bind on those cycles."""
+def test_a_speed_step_is_flown_at_the_thrust_box_where_the_aircraft_cannot_slow_in_one_cycle():
+    """§8.2: a step of 5 m/s down, then back up, on the downwind, with no lead: the law asks the step in one cycle; an
+    A320's clean drag and its thrust floor cannot make it, the thrust box binds, and the step is made in seconds."""
     from ts_transformer.instructions.labeller.interval import in_force
 
-    words = Words(spec())
-    a_max = words.spec.speed_accel_max_mps2
     signals, reading = _downwind()
     grid = reading.words[:60].copy()
     held = int(in_force(grid)[10, SPEED])
@@ -964,30 +1081,11 @@ def test_a_speed_step_is_made_in_seconds_and_the_thrust_limit_binds_where_the_ai
     grid[10, SPEED], grid[30, SPEED] = held - 1, held
     flown, _, _ = _fly_sentence(signals, grid)
     airspeed = flown.states[0, :, 3].numpy()
-    wanted, rate = flown.wanted[0, :, 2].numpy(), np.diff(airspeed)
-    assert wanted[20] == pytest.approx(-a_max) and wanted[60] == pytest.approx(a_max)     # rows 10 and 30
+    wanted = flown.wanted[0, :, 2].numpy()
+    assert wanted[20] < -4.0 and wanted[60] > 4.0                                     # rows 10 and 30: one cycle
+    assert flown.limits["thrust_min"][0, 20].item() and flown.limits["thrust_max"][0, 60].item()
     start = airspeed[20]
-    assert abs(airspeed[20 + 12] - (start - 5.0)) < 1.0                  # 5 m/s down within 12 s
-    short = (wanted[20:30] <= -a_max + 1e-9) & (rate[20:30] > -a_max + 0.05)
-    assert short.any() and flown.limits["thrust_min"][0, 20:30].numpy()[short].all()
-
-
-def test_the_pilots_own_speed_is_reached_by_the_threshold():
-    from ts_transformer.autopilot.frame import Kinematics
-    from ts_transformer.autopilot.speed import Speed, speed_change_mps2
-
-    one = spec()
-    speed = Speed(torch.tensor([65.0], dtype=F64), one)
-    state = Kinematics(*(torch.tensor([v], dtype=F64) for v in (0.0, 0.0, 100.0, 90.0, 90.0, 0.0, 90.0, 60000.0)))
-    aero = torch.tensor([[122.6, 2.5, 0.02, 0.04, 0.9, 0.2]], dtype=F64)
-
-    def rate(straight_m):
-        return float(speed.rate(state, torch.tensor([float("nan")], dtype=F64), torch.tensor([True]),
-                                torch.tensor([False]), torch.ones(1, dtype=F64), aero,
-                                torch.tensor([straight_m], dtype=F64))[0][0])
-
-    far, near = rate(50_000.0), rate(3_000.0)
-    assert far == pytest.approx(-speed_change_mps2(one)) and -one.speed_accel_max_mps2 <= near < far
+    assert abs(airspeed[20 + 15] - (start - 5.0)) < 1.0                               # 5 m/s down within 15 s
 
 
 # ---- multi-aircraft batches and the single flight
@@ -1054,11 +1152,12 @@ def test_words_spoken_to_a_multi_aircraft_batch_count_from_each_flights_first_st
     assert said.shape == (2, 3, len(COLUMNS)) and (said[1, 1:] == UNCHANGED).all() and (said[1, 0] == 0).all()
 
 
-@pytest.mark.parametrize("thrust_share", [1.0, 0.3, 0.2])
+@pytest.mark.parametrize("thrust_share", [1.0, 0.32, 0.2])
 def test_the_single_flight_executor_flies_what_the_batch_flies(thrust_share):
     """§12.4: `autopilot.single` mirrors the batch's cycle — a go-around, a runway word and "no level-off" included —
-    to round-off; with all of the A320's thrust, 30 % and 20 % of it, the go-around angle is 3°, between its limits and
-    1.885° (D28)."""
+    to round-off; with all of the A320's thrust, 32 % and 20 % of it, the go-around angle 15 s after the go-around is 3°,
+    between its limits and 1.885° (D28; with 20 % the climb then trades the airspeed it cannot hold until the stall
+    stops it — the speed law has only the thrust, §8.2)."""
     from ts_transformer.autopilot import single
     from ts_transformer.autopilot.executor import GO_AROUND_EXTRA_S, fly
     from ts_transformer.autopilot.vertical import GO_AROUND_MAX_RAD, GO_AROUND_MIN_RAD
@@ -1074,7 +1173,7 @@ def test_the_single_flight_executor_flies_what_the_batch_flies(thrust_share):
     limit = len(grid) * 2.0 * params.timeout_factor
     batch = fly(inputs, Sentences([grid], words, step_s=2.0, device=CPU), runways, charts,
                 approach, params, words, time_limit_s=torch.tensor([limit], dtype=F64), reserve_s=GO_AROUND_EXTRA_S)
-    climb = float(batch.states[0, go * 2 + 30, 5])
+    climb = float(batch.states[0, go * 2 + 15, 5])
     expected = {1.0: GO_AROUND_MAX_RAD, 0.2: GO_AROUND_MIN_RAD}
     if thrust_share in expected:
         assert climb == pytest.approx(expected[thrust_share], abs=2e-3)
@@ -1601,17 +1700,20 @@ def test_a_copy_of_a_staggered_batch_flies_as_its_originals():
 
 
 def test_the_bank_starts_level_and_moves_at_the_roll_rate_from_the_first_cycle():
-    """D84: the bank starts at 0 and its limit and roll rate hold from the first cycle — a heading word 90° right at the
-    first row banks by at most p · Δt in each cycle, the first included, in the three ways to fly."""
-    from ts_transformer.experiments.executor_spec import ROLL_RATE_DEG_S
-
+    """D84, §4.4: the bank starts at 0 and its limit and roll rate hold from the first cycle — a heading word 90° right at
+    the first row rolls the ACTUAL bank (the plant's actuator) at most p in each cycle, the first included, at once, in
+    the three ways to fly; the commands lead it by τ_φ ρ."""
+    params = _params()
     geometry = _end_airport()
     inputs, approach, grid, words = _east_flight(geometry, 75.0, e_m=-21500.0, height_m=1500.0)
     grid[0, HEADING] = words.heading_class(180.0, 90.0)                       # turn right to south
+    roll = math.radians(params.bank_rate_deg_s)
+    first = roll * params.bank_time_constant_s * (1.0 - math.exp(-params.cycle_s / params.bank_time_constant_s))
     for way, (_, flown) in _three_ways(geometry, inputs, approach, grid, words, limit_s=30.0).items():
-        bank = np.concatenate(([0.0], flown.commands[0, :20, 1].numpy()))
-        assert np.abs(np.diff(bank)).max() <= math.radians(ROLL_RATE_DEG_S) * 1.0 + 1e-12, way
-        assert abs(bank[1]) == pytest.approx(math.radians(ROLL_RATE_DEG_S)), way             # it does roll at once
+        bank = flown.actuators[0, :21, 1].numpy()
+        assert bank[0] == 0.0
+        assert np.abs(np.diff(bank)).max() <= roll * params.cycle_s + 1e-3, way           # RK4 against the exact lag
+        assert abs(bank[1]) == pytest.approx(first, rel=1e-3), way                        # it does roll at once
 
 
 def test_the_executor_inputs_hold_the_airport_s_chart_not_the_landed_runway(monkeypatch):
@@ -1673,8 +1775,8 @@ def test_the_behaviour_check_refuses_a_law_that_reads_a_vertical_path(monkeypatc
         return runways
 
     def reads_the_tch(self, state, relative_deg, issued, runway, runways, time_s, *, fresh=None):
-        rate = original_rate(self, state, relative_deg, issued, runway, runways, time_s, fresh=fresh)
-        return rate + 1e-3 * runways.tch.gather(1, runway[:, None])[:, 0]
+        rate, error = original_rate(self, state, relative_deg, issued, runway, runways, time_s, fresh=fresh)
+        return rate + 1e-3 * runways.tch.gather(1, runway[:, None])[:, 0], error
 
     monkeypatch.setattr(lateral.Runways, "of", classmethod(of))
     monkeypatch.setattr(lateral.Lateral, "rate", reads_the_tch)
@@ -1692,8 +1794,8 @@ def test_the_behaviour_check_refuses_a_law_that_reads_a_vertical_path(monkeypatc
         self.lateral.frame = inputs.frame_params                      # the law's own copy of the frame
 
     def reads_the_frame(self, state, relative_deg, issued, runway, runways, time_s, *, fresh=None):
-        rate = original_rate(self, state, relative_deg, issued, runway, runways, time_s, fresh=fresh)
-        return rate + 1e-3 * self.frame[:, 2]                         # the chart origin's height
+        rate, error = original_rate(self, state, relative_deg, issued, runway, runways, time_s, fresh=fresh)
+        return rate + 1e-3 * self.frame[:, 2], error                  # the chart origin's height
 
     monkeypatch.setattr(lateral.Runways, "of", classmethod(original_of))
     monkeypatch.setattr(executor_module.Executor, "__init__", init)

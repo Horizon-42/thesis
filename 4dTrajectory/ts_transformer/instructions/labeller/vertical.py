@@ -21,18 +21,34 @@ climbing run, or a step up — still under way at its lowest point (`climb_after
 is said at, its level word and its climb word in that row. An approach ends there, so the descent run straight before
 that climb is the last descent that reaches the end of its approach and says "no level-off", as the last run before
 the threshold does.
+
+THE ANGLE LEAD L_γ (`angle_lead_s`; executor design §17, D7). An angle word says the class the path angle has L_γ
+later, as a heading word says the track L later: every angle word is said L_γ before the row where its piece begins,
+and the altitude word said with it (a run's or a step's) moves with it, so a descent's target and its angle are heard
+together. The shift is one number of rows for every word, so the words keep their order; a word that would fall before
+row 0 is said at row 0, and of several words of one column there, the last stands (row 0 says the class in force L_γ
+later). The go-around row is its climb's row, so it moves with it. The tube of a word starts where its words arrive,
+L_γ after they are said (`tube_bounds`).
+
+THE LAST ANGLE WORD (instruction-v8; executor design §17, Q4, D10). The last piece of the last descent — the one that
+runs to the end of the track — is read not at its own fitted angle but at the path angle of the final straight-in line
+(`read.final_path_angle_deg`: `final_approach.fit_projected_segment`, the line the harvest extrapolates an observed
+crossing with, 5000–300 m before the threshold). The executor holds the last word past the end of the track to the
+threshold, where the evaluation judges the height, and a track's last few hundred metres often flatten: the last word
+was shallower than 2.75° on 1 flight in 8. A track whose last descent has no such line is refused; the descents that
+end at a go-around are read at their own angles.
 """
 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import numpy as np
 
 from ts_transformer.instructions import envelope
-from ts_transformer.instructions.labeller.records import Instruction, Refused
+from ts_transformer.instructions.labeller.records import Instruction, Refused, said_earlier
 from ts_transformer.instructions.piecewise import fit_pieces
 from ts_transformer.instructions.spec import VocabularySpec
 from ts_transformer.instructions.words import ALTITUDE, ANGLE, ANGLE_LEVEL, Words
@@ -62,8 +78,12 @@ class VerticalPiece:
 class VerticalReading:
     instructions: list[Instruction]
     pieces: list[VerticalPiece]
-    #: Each go-around's row, in the order of the lowest points given (module docstring).
+    #: Each go-around's row, where its climb words and "go-around" are said, in the order of the lowest points given
+    #: (module docstring; L_γ before the row its climb is read at)
     go_around_rows: list[int]
+    #: Each go-around's row as its climb is read (the climb's first row): where one approach ends and the next one's
+    #: rows begin, whatever the leads (`read.read_flight`)
+    go_around_read_rows: list[int]
 
 
 def vertical_pieces(distance: np.ndarray, altitude: np.ndarray, spec: VocabularySpec, words: Words) -> list[VerticalPiece]:
@@ -135,9 +155,10 @@ def climb_after(groups: list[list[VerticalPiece]], point: int, before: int, spec
 
 
 def read_vertical(distance: np.ndarray, altitude: np.ndarray, spec: VocabularySpec, words: Words,
-                  go_around_points: list[int]) -> VerticalReading:
-    """The altitude and angle words; ``go_around_points`` each go-around's lowest point, in row order (module
-    docstring)."""
+                  go_around_points: list[int], final_angle_deg: float | None) -> VerticalReading:
+    """The altitude and angle words; ``go_around_points`` each go-around's lowest point, in row order;
+    ``final_angle_deg`` the path angle of the final straight-in line, the last piece's angle, None where the track has
+    no such line (module docstring)."""
     pieces = vertical_pieces(distance, altitude, spec, words)
     groups = _runs(pieces, spec)
     bounds = [*go_around_points[1:], len(altitude)]
@@ -145,7 +166,7 @@ def read_vertical(distance: np.ndarray, altitude: np.ndarray, spec: VocabularySp
     # the last descent of each approach that ends at a go-around row: the run straight before its climb
     final_descents = {position - 1 for position in climbs
                       if position and groups[position - 1][0].kind == MOVE and groups[position - 1][0].descending(spec)}
-    reading = VerticalReading(instructions=[], pieces=pieces, go_around_rows=[])
+    reading = VerticalReading(instructions=[], pieces=pieces, go_around_rows=[], go_around_read_rows=[])
     in_force_angle: int | None = None
     in_force_altitude: int | None = None
     for position, group in enumerate(groups):
@@ -194,23 +215,32 @@ def read_vertical(distance: np.ndarray, altitude: np.ndarray, spec: VocabularySp
         reading.instructions.append(Instruction(ALTITUDE, target_index, first.start, kind, {"level_m": target_m}))
         in_force_altitude = target_index
         for piece in group:
+            angle = piece.angle_deg
+            if following is None and piece is group[-1]:      # the last angle word (module docstring)
+                if final_angle_deg is None:
+                    raise Refused("no final straight-in line",
+                                  f"the last descent from row {piece.start} has no line 5000–300 m before the threshold")
+                angle = final_angle_deg
             try:
-                angle_class = words.angle_index(piece.angle_deg)
+                angle_class = words.angle_index(angle)
             except ValueError as error:
                 raise Refused("path angle out of range", str(error)) from None
             if angle_class != in_force_angle:
                 reading.instructions.append(Instruction(
-                    ANGLE, angle_class, piece.start, "initial" if piece.start == 0 else "angle",
-                    {"angle_deg": piece.angle_deg}))
+                    ANGLE, angle_class, piece.start, "initial" if piece.start == 0 else "angle", {"angle_deg": angle}))
                 in_force_angle = angle_class
+    lead = spec.rows_exact(spec.angle_lead_s)
+    reading.instructions = said_earlier(reading.instructions, lead)
     for position in climbs:
-        row = _climb_start(groups, position, spec)[0]
+        read_row = _climb_start(groups, position, spec)[0]
+        row = max(read_row - lead, 0)
         said = [item for item in reading.instructions if item.row == row]
         level = any(item.column == ALTITUDE for item in said)
         climb = any(item.column == ANGLE and item.value == words.angle_climb for item in said)
         if not (level and climb):
             raise Refused("go-around without a climb word", f"the climb at row {row} says no level and climb there")
         reading.go_around_rows.append(row)
+        reading.go_around_read_rows.append(read_row)
     return reading
 
 
@@ -238,16 +268,25 @@ def _step(previous: VerticalPiece, level: VerticalPiece, distance: np.ndarray, a
 
 
 def tube_bounds(instructions: list[Instruction], distance: np.ndarray, altitude: np.ndarray,
-                spec: VocabularySpec, words: Words) -> list[tuple[Instruction, int, np.ndarray, np.ndarray]]:
-    """Each altitude word's tube, row by row: ``(word, end, lower, upper)`` over rows
-    ``word.row..end-1``, re-anchored at every angle word inside the span (the angle in force at the
-    word's own row anchors its start), its margin the word's own (`Words.altitude_tolerance_m`). The
-    one reading of §3.4's tube: the labeller's checks and the judge read it from here."""
-    altitude_words = sorted((i for i in instructions if i.column == ALTITUDE), key=lambda item: item.row)
-    angle_words = sorted((i for i in instructions if i.column == ANGLE), key=lambda item: item.row)
-    ends = [item.row for item in altitude_words[1:]] + [len(altitude)]
+                spec: VocabularySpec, words: Words) -> list[tuple[Instruction, int, int, np.ndarray, np.ndarray]]:
+    """Each altitude word's tube, row by row: ``(word, first, end, lower, upper)`` over rows ``first..end-1`` — from
+    where the word arrives, ``angle_lead_s`` after it is said (module docstring), to where the next one does —
+    re-anchored at every angle word arriving inside the span (the angle in force where the word arrives anchors its
+    start), its margin the word's own (`Words.altitude_tolerance_m`). A word that arrives past the last row has no tube.
+    The one reading of §3.4's tube: the labeller's checks and the judge read it from here."""
+    lead, last = spec.rows_exact(spec.angle_lead_s), len(altitude)
+
+    def arrived(item: Instruction) -> Instruction:
+        return replace(item, row=min(item.row + lead, last))
+
+    said = sorted((i for i in instructions if i.column == ALTITUDE), key=lambda item: item.row)
+    altitude_words = [arrived(item) for item in said]
+    angle_words = sorted((arrived(i) for i in instructions if i.column == ANGLE), key=lambda item: item.row)
+    ends = [item.row for item in altitude_words[1:]] + [last]
     tubes = []
-    for word, end in zip(altitude_words, ends):
+    for told, word, end in zip(said, altitude_words, ends):
+        if word.row >= end:
+            continue
         target, tolerance = words.altitude_level_m(word.value), words.altitude_tolerance_m(word.value)
         anchors = [a for a in angle_words if word.row <= a.row < end]
         before = [a for a in angle_words if a.row < word.row]
@@ -264,7 +303,7 @@ def tube_bounds(instructions: list[Instruction], distance: np.ndarray, altitude:
                                                    target, words.angle_bounds(anchor.value), tolerance)
                 lows.append(low)
                 highs.append(high)
-        tubes.append((word, end, np.concatenate(lows), np.concatenate(highs)))
+        tubes.append((told, word.row, end, np.concatenate(lows), np.concatenate(highs)))
     return tubes
 
 
@@ -273,9 +312,10 @@ def tube_checks(instructions: list[Instruction], distance: np.ndarray, altitude:
     """Each altitude word's span, checked against its tube (`tube_bounds`). Run on the assembled
     sentence, so a word the assembly dropped is not judged."""
     results = []
-    for word, end, low, high in tube_bounds(instructions, distance, altitude, spec, words):
-        span = altitude[word.row: end]
+    for word, first, end, low, high in tube_bounds(instructions, distance, altitude, spec, words):
+        span = altitude[first: end]
         inside = int(np.count_nonzero((span >= low) & (span <= high)))
-        results.append({"row": word.row, "rows": end - word.row, "inside": inside, "contained": inside == end - word.row,
+        results.append({"row": word.row, "first_row": first, "rows": end - first, "inside": inside,
+                        "contained": inside == end - first,
                         "level_m": words.altitude_level_m(word.value), "tube_width_end_m": float(high[-1] - low[-1])})
     return results

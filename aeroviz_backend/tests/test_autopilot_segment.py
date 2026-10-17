@@ -504,7 +504,7 @@ class ExecutorDifferenceTest(unittest.TestCase):
             answer = same.fly(self.request(same, sample))
             self.assertLessEqual(max(answer["stored"]["horizontalM"], answer["stored"]["verticalM"]), STATE_BOUND_M)
             for change in ({"bank_rate_deg_s": one.params.bank_rate_deg_s / 2.0},
-                           {"path_time_constant_s": one.params.path_time_constant_s * 2.0}):
+                           {"load_time_constant_s": one.params.load_time_constant_s * 2.0}):
                 with self.subTest(change=change):
                     drifted = self.served(one, replace(one.params, **change))(splits=training_files.SPLITS,
                                                                               airports_root=Path(name))

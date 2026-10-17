@@ -58,6 +58,7 @@ from final_approach.fit import (
     SegmentFit,
     fit_final_segment,
     fit_line,
+    fit_projected_segment,
 )
 from final_approach.frame import (
     Projected,
@@ -72,6 +73,7 @@ __all__ = [
     "LineFit",
     "SegmentFit",
     "fit_final_segment",
+    "fit_projected_segment",
     "fit_line",
     "bracket_fraction",
     "interpolate_channels",

@@ -69,7 +69,8 @@ from ts_transformer.repo_layout import git_state, repo_relative
 #: v4 (A29, D73): no digest of the executor's code or of this checker.
 #: v5 (A32): the train flights with a labelled go-around added (§7.2 #3); the frame at the airport reference (D81).
 #: v6 (A33): the bounds recorded with the reference are each way's (`STATE_BOUNDS_M`; the moved way's own horizontal one).
-REFERENCE_SCHEMA = "ts-executor-conformance-reference-v6"
+#: v7 (executor design draft 5): the limits of the first-principles executor (no ``path_rate_limited``).
+REFERENCE_SCHEMA = "ts-executor-conformance-reference-v7"
 #: The reference's flights: the replay gate's draw on the training days, every airport alike, and up to
 #: `GO_AROUND_PER_AIRPORT` more of each airport with a labelled go-around, so that the go-around climb and the held
 #: airspeed are flown (vocabulary §7.2 #3).

@@ -35,7 +35,7 @@ A320_IAS = approach_speed_ias_mps("A320", 62000.0)
 def _params():
     from ts_transformer.experiments.executor_spec import ROLL_RATE_DEG_S
 
-    return ExecutorParams(cycle_s=1.0, bank_rate_deg_s=ROLL_RATE_DEG_S, path_time_constant_s=2.0, path_rate_factor=2.0,
+    return ExecutorParams(cycle_s=1.0, bank_rate_deg_s=ROLL_RATE_DEG_S, thrust_time_constant_s=1.5, bank_time_constant_s=2.0, load_time_constant_s=0.8,
                           timeout_factor=1.5, start_rule="trailing-fit-8s")
 
 

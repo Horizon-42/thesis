@@ -30,7 +30,7 @@ export default function ReadbackAltitude({ m, onCursorChange, onColumnChange }: 
 }) {
   const { observed, flown, judged, yAltitude, designated, decision } = m;
   const bottom = PLOT_TOP + PLOT_H;
-  const tube = m.envelopes?.altitude.find((item) => m.envelopeTimeS(item.row) <= m.cursorS && m.cursorS < m.envelopeTimeS(item.endRow)) ?? null;
+  const tube = m.envelopes?.altitude.find((item) => m.envelopeTimeS(item.firstRow) <= m.cursorS && m.cursorS < m.envelopeTimeS(item.endRow)) ?? null;
   const pick = (x: number) => onCursorChange(m.timeAtX(x));
   const angleRuns = sentenceColumnRuns(m.reading, "angle");
   // an angle label only where it clears the last one
@@ -46,7 +46,7 @@ export default function ReadbackAltitude({ m, onCursorChange, onColumnChange }: 
       caption={`altitude — geometric MSL (m) · in force: ${m.label("altitude")} above E, angle ${m.label("angle")}` +
         (tube === null ? "" : ` · this tube: ${tube.inside}/${tube.rows} rows inside ${checkMark(tube.contained)}`)}>
       {m.tubes.map((item, index) => {
-        const times = item.lowMslM.map((_, offset) => m.xTime(m.envelopeTimeS(item.row + offset)));
+        const times = item.lowMslM.map((_, offset) => m.xTime(m.envelopeTimeS(item.firstRow + offset)));
         const selected = m.focused("altitude", index);
         return (
           <polygon key={`tube-${index}`} className="training-readback-tube"

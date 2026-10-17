@@ -121,9 +121,10 @@ def test_a_heading_band_is_the_judges_rows_and_verdicts():
 
 
 def test_a_tube_is_written_in_msl_beside_its_level_above_the_airport():
-    tube = files.tube_payload(4, 9, 600.0, np.array([550.0, 560.0]), np.array([640.0, 650.0]), 60.0,
+    tube = files.tube_payload(4, 7, 9, 600.0, np.array([550.0, 560.0]), np.array([640.0, 650.0]), 60.0,
                               {"rows": 5, "inside": 4, "contained": False})
-    assert tube == {"row": 4, "endRow": 9, "levelM": 600.0, "lowMslM": [610.0, 620.0], "highMslM": [700.0, 710.0],
+    assert tube == {"row": 4, "firstRow": 7, "endRow": 9, "levelM": 600.0, "lowMslM": [610.0, 620.0],
+                    "highMslM": [700.0, 710.0],
                     "rows": 5, "inside": 4, "contained": False}
     assert files.nullable([1.04, float("nan")], 1) == [1.0, None]
 
@@ -489,7 +490,13 @@ def test_the_flown_block_of_every_stage_is_its_earlier_one_with_the_envelopes():
         block["track"] = {key: [round(v, EARLIER_TRACK_DIGITS[key]) for v in value] if key in EARLIER_TRACK_DIGITS
                           else value for key, value in block["track"].items()}
         assert _digest(block) == EARLIER_BLOCKS["A"][interval], interval
-        assert _digest(replayed["envelopes"]) == EARLIER_BLOCKS["A envelopes"][interval], interval
+        # the envelopes before the leads (D7, D8), apart from the first row each tube and span now names (its said row
+        # at no lead)
+        envelopes = replayed["envelopes"]
+        assert all(item["firstRow"] == item["row"] for item in [*envelopes["altitude"], *envelopes["speed"]])
+        earlier = {**envelopes, **{column: [{key: value for key, value in item.items() if key != "firstRow"}
+                                            for item in envelopes[column]] for column in ("altitude", "speed")}}
+        assert _digest(earlier) == EARLIER_BLOCKS["A envelopes"][interval], interval
     b = json.loads((fixtures / "stage_b" / "fixture_set" / "sample.json").read_text(encoding="utf-8"))
     c = json.loads((fixtures / "stage_c" / "fixture-windows" / "sample.json").read_text(encoding="utf-8"))
     for stage, sentences in (("B", [s for f in b["flights"] for s in f["prior"]]),

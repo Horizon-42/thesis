@@ -1,17 +1,16 @@
-"""The executor's own parameters (executor design §10), and the constraints the design derives them under.
+"""The executor's own parameters (executor design §9), and the constraints the design derives them under.
 
-Every parameter here is the executor's or its judge's; what the vocabulary already fixes (tolerances, the lined-up
-angle, the classes' angles, the speed band, the turn rates and the bank limit, the lead) is read from the
-`VocabularySpec`, never restated. Every value here is the roll rate the procedure standards cite or one of the
-design's fixed choices (the runner's constants); the decision-altitude check's bounds are no parameter (vocabulary §5.8,
-D38: one definition with the evaluation module) — the executor takes nothing from data (the user's rule, 2026-09-24); this container only checks that a set of values is
-one the laws can fly:
+Every parameter here is the executor's or its judge's; what the vocabulary already fixes (the classes' angles, the leads,
+the tolerances) is read from the `VocabularySpec`, never restated. Every value here is the roll rate the user decided
+(D2), an assumed actuator time constant (§9.2: not identified from data, the acceptance runs over the literature's range)
+or one of the design's fixed choices (the runner's constants); the decision-altitude check's bounds are no parameter
+(vocabulary §5.8, D38: one definition with the evaluation module) — the executor takes nothing from data (the user's rule,
+2026-09-24); this container only checks that a set of values is one the laws can fly:
 
 - every rate, factor, time constant and period finite and positive (first: the other checks divide by them);
 - the sentence's row interval (the data's step, or a coarser Δ, vocabulary §4.8) a whole number of cycles (the executor
   hears a row's words on the cycle that starts it);
-- ``τ_γ ≥ 2 Δt`` (the vocabulary's bank limit is checked against the grader's where it is flown,
-  `inverse.attitude`);
+- the plant's integrator stable at every time constant (`plant.executor_dynamics`: the lag model's own check, C16);
 - the start rule one of `START_RULES` (D77).
 
 THE START RULE (vocabulary D77): how the executor's start state takes its airspeed, track and path angle from the
@@ -39,22 +38,28 @@ FORMAL_START_RULES = ("displacement-2s", "trailing-fit-8s", "trailing-fit-15s")
 
 @dataclass(frozen=True)
 class ExecutorParams:
-    cycle_s: float                 # Δt, the control period
-    bank_rate_deg_s: float         # p, how fast the bank moves
-    path_time_constant_s: float    # τ_γ, the path-angle inner loop
-    path_rate_factor: float        # γ̇_max as a multiple of the tube's lower bound (§5.1)
-    timeout_factor: float          # the flight's own remaining time × this (§8.3)
-    start_rule: str                # how the start state reads the observed rows before it (D77, `START_RULES`)
+    cycle_s: float                    # Δt, the control period
+    bank_rate_deg_s: float            # p, the largest rate the actual bank is rolled at (§4.4, D2)
+    thrust_time_constant_s: float     # τ_x, the thrust actuator's first-order lag (§2.2; assumed, §9.2)
+    bank_time_constant_s: float       # τ_φ
+    load_time_constant_s: float       # τ_n
+    timeout_factor: float             # the flight's own remaining time × this (§8.3)
+    start_rule: str                   # how the start state reads the observed rows before it (D77, `START_RULES`)
+
+    @property
+    def time_constants_s(self) -> tuple[float, float, float]:
+        """``(τ_x, τ_φ, τ_n)``, in the order of the commands (thrust fraction, bank, load factor)."""
+        return self.thrust_time_constant_s, self.bank_time_constant_s, self.load_time_constant_s
 
     def check(self, spec: VocabularySpec, row_interval_s: float) -> None:
-        positive = (self.cycle_s, self.bank_rate_deg_s, self.path_time_constant_s, self.path_rate_factor,
-                    self.timeout_factor)
+        from ts_transformer.autopilot.plant import executor_dynamics
+
+        positive = (self.cycle_s, self.bank_rate_deg_s, *self.time_constants_s, self.timeout_factor)
         if not all(math.isfinite(value) and value > 0.0 for value in positive):
             raise ValueError("every rate, factor, time constant and period must be finite and positive")
         for name, seconds in (("step", spec.step_s), ("row interval", row_interval_s)):
             if abs(seconds / self.cycle_s - round(seconds / self.cycle_s)) > 1e-9:
                 raise ValueError(f"the sentence's {name} {seconds:g} s is not a whole number of {self.cycle_s:g} s cycles")
-        if self.path_time_constant_s < 2.0 * self.cycle_s:
-            raise ValueError(f"τ_γ {self.path_time_constant_s:g} s is under 2 Δt")
+        executor_dynamics(self)          # the lag model refuses a time constant its integrator cannot hold (C16)
         if self.start_rule not in START_RULES:
             raise ValueError(f"start rule {self.start_rule!r} is none of {tuple(START_RULES)}")
