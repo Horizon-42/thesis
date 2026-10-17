@@ -32,11 +32,16 @@ def _checked(context, settings, stage):
     assert once == behaviour(context, settings, stage, model, 0, None, 1)
     assert list(once["batches"]) == ["0"] and once["batches"]["0"]["groups"] and list(once["readout"]) == ["0"]
     seeds = {"seed": settings.seed + 1, **({"select_seed": settings.select_seed + 1}
-                                          if hasattr(settings, "select_seed") else {})}
+                                          if isinstance(settings, post_train.Settings) else {})}
     moved = behaviour(context, replace(settings, **seeds), stage, model, 0, None, 1)       # other numbers
     assert differences(_record(once), _record(once)) == []
     named = differences(_record(once), _record(moved))
     assert "readout window 0" in named and any(n.startswith("batch 0: ") for n in named)
+    if isinstance(settings, multi_train.MultiSettings):    # D219 (3): the readout's seed held, the training's moved
+        held = behaviour(context, replace(settings, seed=settings.seed + 1, select_seed=settings.seed), stage, model, 0,
+                         None, 1)
+        named = differences(_record(once), _record(held))
+        assert not any(n.startswith("readout") for n in named) and any(n.startswith("batch 0: ") for n in named)
     with pytest.raises(ValueError, match="other inputs"):
         differences(_record(once), _record(once, model_round=1))
     return once

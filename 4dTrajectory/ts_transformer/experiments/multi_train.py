@@ -49,9 +49,15 @@ parts (`stage_d`):
   minority sides (``group_minorities``), from which the pass takes the round's mean. ``--branch-every-s`` and
   ``--segment-only`` (D200, with `GRID` only): the grid's interval (D143's 120 s the default), and a group's advantage
   only up to the varied aircraft's next branch point (stage C's P55; default: up to its event).
+- **The pass** (D219, the user, 2026-10-17; each default the behaviour before it): ``--clip-norm``, each update's
+  gradient clipped to that norm (stage C's D168, `post.loss.one_pass`); ``--dual-clip``, the surrogate's dual clip
+  (`post.loss.update_step`); each update's row in the round's pass record (``update_rows``, a list a pass: its
+  gradient's norm, its words, surrogate and pull, its largest ratio, gradient weight r·|A| and |A|, and the words the
+  dual clip held; `post.loss.update_row`).
 - **The selection readout** (§5 item 2, `selection_windows`, `read_batch`, `selection_readout`): at most
   ``select_per_airport`` real windows of each span of each airport of the select days, their anchors in an order drawn
-  once with the seed (D146's rule), the first pass only, each aircraft with its own numbers (the same every round). By
+  once with the readout's seed (D146's rule; `MultiSettings.readout_seed`: ``--select-seed``, D219 (3), or the seed),
+  the first pass only, each aircraft with its own numbers of that seed (the same every round). By
   airport, span and kind (each with its ``all``): the
   windows, the commanded aircraft, W per aircraft (``reward_mean``) and per window, the outcomes, the go-arounds, the
   silent aircraft, the rows of the speed-word mask, the faulty points (post-training D114), and the losses of
@@ -235,6 +241,13 @@ class MultiSettings:
     judged_after_s: float = AFTER_S
     fine_point: bool = True
     common_cut: bool = False
+    #: D219 (the user, 2026-10-17), each default the behaviour before it (a record without it reads so): each update's
+    #: gradient clipped to this norm (stage C's D168, `post.loss.one_pass`; None: not clipped); the surrogate's dual
+    #: clip c > 1 (`post.loss.update_step`; None: none); the seed of the readout's windows and numbers, in place of
+    #: `seed` (`readout_seed`; stage C's `post_train.Settings.select_seed`; None: `seed`)
+    clip_norm: float | None = None
+    dual_clip: float | None = None
+    select_seed: int | None = None
 
     def __post_init__(self) -> None:
         if set(self.per_kind) != set(KINDS) or min(self.per_kind.values()) < 0 or not any(self.per_kind.values()):
@@ -285,6 +298,16 @@ class MultiSettings:
             raise ValueError(f"gpu_squares {self.gpu_squares}: 0 (off) or more")
         if self.joint_heads is not None and self.joint_heads <= 0:
             raise ValueError(f"joint_heads {self.joint_heads}: positive (version 2), or none (version 1)")
+        if self.clip_norm is not None and not self.clip_norm > 0:
+            raise ValueError(f"clip_norm {self.clip_norm}: positive, or none (not clipped)")
+        if self.dual_clip is not None and not self.dual_clip > 1:
+            raise ValueError(f"dual_clip {self.dual_clip}: above 1, or none (no dual clip)")
+
+    @property
+    def readout_seed(self) -> int:
+        """The seed of the selection readout's windows and numbers (`selection_windows`, `read_batch`; D219 (3)):
+        `select_seed`, or `seed` where it is None."""
+        return self.seed if self.select_seed is None else self.select_seed
 
     @property
     def joint(self) -> bool:
@@ -447,10 +470,11 @@ def readout_numbers(seed: int, place: int, member: int, draw: int = 0) -> np.ran
 
 def selection_windows(context: Context, settings: MultiSettings, split: str = "select") -> list[Window]:
     """The readout's windows (module docstring): of each airport, its anchors of ``split`` in an order drawn once with
-    the seed; of each span, each anchor's real window of that span in that order kept unless it is left out (D146), up
-    to ``select_per_airport``; by airport, then span, in the order of the anchors."""
+    the readout's seed (`MultiSettings.readout_seed`); of each span, each anchor's real window of that span in that order
+    kept unless it is left out (D146), up to ``select_per_airport``; by airport, then span, in the order of the
+    anchors."""
     anchors = Anchors(context.splits[split]["windows"])
-    rng = np.random.default_rng([settings.seed, 1 << 31])
+    rng = np.random.default_rng([settings.readout_seed, 1 << 31])
     separations, step_s = context.separations, context.words.spec.step_s
     out = []
     for code in sorted(anchors.by_airport):
@@ -471,9 +495,9 @@ def read_batch(model: Prior, context: Context, windows: Sequence[Window], places
                settings: MultiSettings, split: str, draw: int = 0
                ) -> list[tuple[list[Any], dict[str, int], int, dict[str, Any]]]:
     """A batch of the readout (the windows at ``places``): their first pass under stage D's loop, each aircraft with its
-    own numbers (`readout_numbers` of ``draw``); for each window, its aircraft's ends (`WindowResult`, in the window's
-    order), its steps with a loss of each pair and its steps judged (the states flown judged again, module docstring),
-    and the time its aircraft took (`window_timing`)."""
+    own numbers (`readout_numbers` of the readout's seed and ``draw``); for each window, its aircraft's ends
+    (`WindowResult`, in the window's order), its steps with a loss of each pair and its steps judged (the states flown
+    judged again, module docstring), and the time its aircraft took (`window_timing`)."""
     data = context.splits[split]
     batch = [windows[p] for p in places]
     loop, order, observed = context.start_loop(split, batch)(sorted(i for w in batch for i in w.signal_indices))
@@ -481,7 +505,8 @@ def read_batch(model: Prior, context: Context, windows: Sequence[Window], places
                              context.finals, context.words, interval_s=context.interval_s,
                              variant=context.variant, edges_reference=context.edges_reference, faults=data["faults"],
                              observed=observed, device=context.device, **loop_options(context, settings.joint))
-    numbers = [readout_numbers(settings.seed, places[int(window_loop.window_of[b])], int(window_loop.member_of[b]),
+    numbers = [readout_numbers(settings.readout_seed, places[int(window_loop.window_of[b])],
+                               int(window_loop.member_of[b]),
                                draw) for b in range(len(window_loop.order))]
     results = window_loop.run(numbers)
     out = []
@@ -897,8 +922,9 @@ def stage_d() -> Stage:
                  part_width=TokenPart.width, batches=span_batches,
                  train=lambda model, context, optimizer, directory, settings, rng, *, part_width, round_, companion:
                  train_pass(model, context, optimizer, directory, settings, rng, part_width=part_width,
-                            segment_rows=segment_rows_of(settings, context.interval_s),
-                            data_weight=settings.data_weight, group_weight=settings.group_weight))
+                            clip_norm=settings.clip_norm, segment_rows=segment_rows_of(settings, context.interval_s),
+                            data_weight=settings.data_weight, group_weight=settings.group_weight,
+                            dual_clip=settings.dual_clip))
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -947,6 +973,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--common-cut", action="store_true",
                         help="D217: every sentence of a group counted only up to the judged tick (default: each up to "
                              "its own event)")
+    parser.add_argument("--clip-norm", type=float, default=MultiSettings.clip_norm,
+                        help="D219: each update's gradient clipped to this norm (stage C's D168; default: not clipped)")
+    parser.add_argument("--dual-clip", type=float, default=MultiSettings.dual_clip,
+                        help="D219: the surrogate's dual clip c > 1: a word of a negative advantage adds at most -c*A "
+                             "(default: none)")
+    parser.add_argument("--select-seed", type=int, default=MultiSettings.select_seed,
+                        help="D219: the seed of the selection readout's windows and numbers (default: --seed), so that "
+                             "campaigns of other seeds read the same windows")
     parser.add_argument("--front-attention", choices=FRONT_ATTENTIONS, default=COPIED,
                         help="D190 (2): how a window's copies read the front they hold once (copied: bit for bit; "
                              "merged: no copy)")
@@ -1000,7 +1034,8 @@ def settings_from(args: argparse.Namespace, start: dict[str, Any] | None) -> Mul
                          args.group_weight, args.batch_squares, args.gpu_squares, args.traffic_hidden,
                          args.traffic_heads, args.branch_every_s, args.segment_only, args.joint_heads,
                          search_points=args.search_points, judged_after_s=args.judged_after_s,
-                         fine_point=args.fine_point, common_cut=args.common_cut)
+                         fine_point=args.fine_point, common_cut=args.common_cut, clip_norm=args.clip_norm,
+                         dual_clip=args.dual_clip, select_seed=args.select_seed)
 
 
 def main(argv: list[str] | None = None) -> int:

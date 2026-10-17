@@ -237,7 +237,8 @@ def test_stage_d_s_positions_and_listed_parts_are_the_readout_s(tmp_path, monkey
 
     monkeypatch.setattr(multi_export, "flown_positions", capture("export"))
     monkeypatch.setattr(census, "flown_positions", capture("readout"))       # the readout's, through `loop_positions`
-    settings = SimpleNamespace(spans_s=[window.span_s], batch_rows=[2], batch_squares=[], seed=2027, select_per_airport=1)
+    settings = SimpleNamespace(spans_s=[window.span_s], batch_rows=[2], batch_squares=[], seed=2027, readout_seed=2027,
+                               select_per_airport=1)
     flying = multi_export.stage_d_flying(two, settings, multi_export.STAGE_D.readout_numbers(settings))
     flown_ends = []
     end = flying.end
@@ -272,8 +273,12 @@ def test_stage_d_s_positions_and_listed_parts_are_the_readout_s(tmp_path, monkey
     ours_numbers = multi_export.STAGE_D.readout_numbers(settings)(3, 1).random(4)
     assert ours_numbers.tolist() == multi_train.readout_numbers(2027, 3, 1).random(4).tolist()
     assert tuple(multi_export.STAGE_D.identity(window)) == IDENTITY_FIELDS["D"]
-    assert tuple(multi_export.STAGE_D.selection_fields(SimpleNamespace(seed=2027, select_per_airport=1,
+    assert tuple(multi_export.STAGE_D.selection_fields(SimpleNamespace(readout_seed=2027, select_per_airport=1,
                                                                        spans_s=[300.0]))) == SELECTION_FIELDS["D"]
+    shifted = SimpleNamespace(**{**vars(settings), "readout_seed": 7})         # D219 (3): the readout's seed draws
+    assert (multi_export.STAGE_D.readout_numbers(shifted)(3, 1).random(4).tolist()
+            == multi_train.readout_numbers(7, 3, 1).random(4).tolist())
+    assert multi_export.STAGE_D.selection_fields(shifted)["select_seed"] == 7
     assert tuple(export.STAGE_C.identity(window)) == IDENTITY_FIELDS["C"]
     assert tuple(export.STAGE_C.selection_fields(SimpleNamespace(select_seed=7, select_per_airport=1))) == \
         SELECTION_FIELDS["C"]

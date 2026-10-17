@@ -105,7 +105,8 @@ def test_the_data_weight_defaults_to_the_code_before_it_and_reaches_the_pass(mon
     monkeypatch.setattr(multi_train, "train_pass", lambda *args, **kwargs: seen.update(kwargs) or {})
     multi_train.stage_d().train("model", SimpleNamespace(interval_s=INSTRUCTION_STEP_S), "optimizer", "directory",
                                 _multi_settings(data_weight=0.25), "rng", part_width=7, round_=0, companion=None)
-    assert seen == {"part_width": 7, "segment_rows": None, "data_weight": 0.25, "group_weight": EQUAL}
+    assert seen == {"part_width": 7, "clip_norm": None, "segment_rows": None, "data_weight": 0.25,
+                    "group_weight": EQUAL, "dual_clip": None}
 
 
 def test_the_batch_bounds_default_to_the_code_before_them_and_are_refused_out_of_range():
@@ -192,6 +193,41 @@ def _speak_context():
                            start_loop=lambda split, batch: None, geometries={}, finals={}, words=None,
                            interval_s=INSTRUCTION_STEP_S, variant="full", edges_reference=None,
                            device=torch.device("cpu"))
+
+
+def test_d219_the_pass_settings_and_the_readout_seed_default_to_the_code_before_them_and_parse(monkeypatch):
+    """D219: `MultiSettings.clip_norm`, `dual_clip` and `select_seed` default to None (a record without them reads so),
+    the readout's seed is then the seed; out of range they are refused; the runner's flags set them; stage D's pass
+    gives the clip and the dual clip to `post_train.train_pass`."""
+    settings = _multi_settings()
+    assert (settings.clip_norm, settings.dual_clip, settings.select_seed) == (None, None, None)
+    assert settings.readout_seed == settings.seed == 2024
+    assert replace(settings, select_seed=7).readout_seed == 7
+    recorded = asdict(settings)
+    for key in ("clip_norm", "dual_clip", "select_seed"):
+        del recorded[key]
+    assert MultiSettings(**recorded) == settings
+    for wrong, name in (({"clip_norm": 0.0}, "clip_norm"), ({"clip_norm": -1.0}, "clip_norm"),
+                        ({"dual_clip": 1.0}, "dual_clip"), ({"dual_clip": 0.5}, "dual_clip")):
+        with pytest.raises(ValueError, match=name):
+            _multi_settings(**wrong)
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    multi_train.add_arguments(parser)
+    required = ["--prior", "p", "--instructions", "i", "--executor", "e", "--windows", "w", "--rounds", "1",
+                "--windows-real", "1", "--windows-compressed", "0", "--spans-s", "1", "--c-min", "0.6",
+                "--batch-rows", "2", "--seed", "1", "--prior-lr", "1e-4", "--traffic-lr", "1e-3",
+                "--weight-decay", "0", "--update-groups", "1", "--data-sentences", "1", "--select-per-airport", "1"]
+    plain = multi_train.settings_from(parser.parse_args(required), settings.start)
+    assert (plain.clip_norm, plain.dual_clip, plain.select_seed, plain.readout_seed) == (None, None, None, 1)
+    given = multi_train.settings_from(parser.parse_args(required + ["--clip-norm", "20", "--dual-clip", "3",
+                                                                    "--select-seed", "2035"]), settings.start)
+    assert (given.clip_norm, given.dual_clip, given.select_seed, given.readout_seed) == (20.0, 3.0, 2035, 2035)
+    seen = {}
+    monkeypatch.setattr(multi_train, "train_pass", lambda *args, **kwargs: seen.update(kwargs) or {})
+    multi_train.stage_d().train("model", SimpleNamespace(interval_s=INSTRUCTION_STEP_S), "optimizer", "directory",
+                                _multi_settings(clip_norm=20.0, dual_clip=3.0), "rng", part_width=7, round_=0,
+                                companion=None)
+    assert (seen["clip_norm"], seen["dual_clip"]) == (20.0, 3.0)
 
 
 def test_d217_the_search_settings_default_to_d182_go_with_the_backward_search_and_parse():
@@ -368,6 +404,11 @@ def test_the_select_windows_are_drawn_once_per_airport_and_span_and_never_left_o
     assert all(kind_of(w) == REAL_KIND for w in first)
     assert [w.span_s for w in selection_windows(context, _multi_settings(spans_s=[130.0, 300.0],
                                                                          select_per_airport=10))] == [130.0] * 4 + [300.0] * 4
+    # D219 (3): the readout's seed draws them — another seed with the same select seed, the same windows
+    own = [window_record(w) for w in selection_windows(context, _multi_settings(spans_s=[130.0, 300.0], seed=7,
+                                                                                 select_per_airport=2))]
+    assert [window_record(w) for w in selection_windows(context, _multi_settings(
+        spans_s=[130.0, 300.0], seed=8, select_seed=7, select_per_airport=2))] == own
 
 
 def test_the_readout_sums_each_span_and_kind_with_their_all(built):

@@ -1655,7 +1655,10 @@ checkpoint.
   `--branching backward`/`majority` only; each default D182's): `--search-points` (candidate points at most),
   `--judged-after-s`, `--fine-point`/`--no-fine-point`, `--common-cut` (every sentence of a group counted up to the
   event + the judged span). D218: `--start-campaign` may name a campaign of stage D; its round starts the new one as
-  trained (a new seed, the same `--joint-heads`).
+  trained (a new seed, the same `--joint-heads`). D219 (each default the behaviour before it): `--clip-norm` (each
+  update's gradient norm), `--dual-clip` (c > 1, the surrogate's dual clip), `--select-seed` (the readout's windows and
+  numbers, so that campaigns of other seeds read the same windows); each update's row in `round.json`'s
+  `pass.update_rows`.
 - A clean tree unless `--smoke`; formal runs from a detached run worktree (D163).
 - Writes `campaign.json` (`ts-post-train-v1`) and, for each round, `round.json` and `checkpoint.pt`
   (`ts-post-checkpoint-v1`).

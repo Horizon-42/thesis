@@ -131,7 +131,7 @@ from ts_transformer.post.branches import (
 )
 from ts_transformer.post.fault_census import fault_rows
 from ts_transformer.post.loss import (DATA_WEIGHT, LossParts, PassStart, Samples, clipped_step, landed_step, passes,
-                                      stacked, update_step)
+                                      stacked, update_row, update_step)
 from ts_transformer.post.value import (
     VALUE_FEATURES, VALUE_SCHEMA, Value, ValueBatch, ValueSample, advantages, time_left, value_batch, value_loss,
     value_part,
@@ -1569,25 +1569,30 @@ def minority_mean(directory: Path) -> float | None:
 
 def train_pass(model: Prior, context: Context, optimizer: torch.optim.Optimizer, directory: Path, settings: Settings,
                rng: np.random.Generator, *, part_width: int, clip_norm: float | None = None, epochs: int = 1,
-               segment_rows: int | None = None, data_weight: float = DATA_WEIGHT, group_weight: str = EQUAL
-               ) -> dict[str, Any]:
+               segment_rows: int | None = None, data_weight: float = DATA_WEIGHT, group_weight: str = EQUAL,
+               dual_clip: float | None = None) -> dict[str, Any]:
     """Step 4 of a round: ``epochs`` passes (`post.loss.passes`: the model at the first's start is the one that spoke
     the groups, every pass's ratio against it; D169) over `update_pairs` (``part_width``: the stage's token part), each
     in its own order (`pass_orders`), each update's gradient clipped to ``clip_norm`` (D168). Stage C's
-    `Settings.clip_norm` and `Settings.epochs` (`STAGE_C`); None and 1 — not clipped, one pass — for a stage whose
-    settings do not name them. ``segment_rows``: each group's rows counted up to the next branch point (P55,
+    `Settings.clip_norm` and `Settings.epochs` (`STAGE_C`), stage D's `MultiSettings.clip_norm` (multi-aircraft control
+    D219 (1)); None and 1 — not clipped, one pass — for a stage whose settings do not name them. ``dual_clip``: the
+    surrogate's dual clip (`post.loss.update_step`; stage D's `MultiSettings.dual_clip`, D219 (2); None: none).
+    ``segment_rows``: each group's rows counted up to the next branch point (P55,
     `segment_rows_of`); None: up to the event. ``data_weight``: the data term's weight (`post.loss.update_step`; stage
     D's `MultiSettings.data_weight`). ``group_weight``: each group's weight (`post.branches.GROUP_WEIGHTS`, D195; stage
     D's `MultiSettings.group_weight`; `MINORITY_SIDE` reads the batch records' ``group_minorities``). Its means
-    (`pass_means`; with `MINORITY_SIDE` and a group written, besides, the round's ``minority_mean``), or no update where
-    the round has no informative group."""
+    (`pass_means`; besides, ``update_rows``: each pass's updates, a row each, `post.loss.update_row`, D219 (4); with
+    `MINORITY_SIDE` and a group written, the round's ``minority_mean``), or no update where the round has no
+    informative group."""
     mean = minority_mean(directory) if group_weight == MINORITY_SIDE else None
     each = passes(model, context.base, optimizer,
                   [update_pairs(directory, context.data, settings, numbers, context.device, part_width=part_width,
                                 segment_rows=segment_rows, minority_mean=mean)
                    for numbers in pass_orders(rng, epochs)],
-                  step=lambda *args: update_step(*args, data_weight=data_weight), clip_norm=clip_norm)
-    return pass_means(each) | ({} if mean is None else {"minority_mean": mean})
+                  step=lambda *args: update_step(*args, data_weight=data_weight, dual_clip=dual_clip),
+                  clip_norm=clip_norm)
+    return (pass_means(each) | {"update_rows": [[update_row(part) for part in parts] for parts in each]}
+            | ({} if mean is None else {"minority_mean": mean}))
 
 
 def landed_train_pass(model: Prior, context: Context, optimizer: torch.optim.Optimizer, directory: Path,

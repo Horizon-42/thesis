@@ -4,8 +4,8 @@ stage C's set format (`post_training_export`, one format for both stages), liste
 (``training/index_multi_v2.json``).
 
 WHICH WINDOWS. A window list's (``--windows``, post-training D176 (3): each window flown with its readout's numbers,
-`multi_train.readout_numbers` of the campaign's seed and its readout place), or the campaign's readout windows of
-``--split`` (`multi_train.selection_windows`: of each airport, its real
+`multi_train.readout_numbers` of the campaign's readout seed, `MultiSettings.readout_seed`, and its readout place), or
+the campaign's readout windows of ``--split`` (`multi_train.selection_windows`: of each airport, its real
 windows of each span, D166 (33)), and of each airport ``--per-airport`` of them drawn once with ``--seed``. Every round
 flies the same windows with the same numbers — `multi_train.readout_numbers` of ``--seed``, the window's place in the
 set and the aircraft's in the window (as stage C's sets: not the readout's own places) — so the rounds stand side by
@@ -125,13 +125,14 @@ STAGE_D = StageExport(
                                                      else round_model(context, settings, campaign, int(r))),
     flying=stage_d_flying,
     drawn_numbers=lambda settings, seed: lambda place, member: readout_numbers(seed, place, member),
-    # the readout's numbers of each aircraft (`multi_train.read_batch`, D166 (34)): the campaign's seed, the place
-    readout_numbers=lambda settings: lambda place, member: readout_numbers(settings.seed, place, member),
+    # the readout's numbers of each aircraft (`multi_train.read_batch`, D166 (34)): the campaign's readout seed (D219
+    # (3)), the place
+    readout_numbers=lambda settings: lambda place, member: readout_numbers(settings.readout_seed, place, member),
     selection=lambda context, settings: selection_windows(context, settings, "select"),
     identity=partial(identity_of, "D"),                     # what a stage D window list writes
     # the seed that orders the readout's windows and draws their numbers (`multi_train.selection_windows`)
-    selection_fields=lambda settings: {"select_seed": settings.seed, "per_airport": settings.select_per_airport,
-                                       "spans_s": list(settings.spans_s)},
+    selection_fields=lambda settings: {"select_seed": settings.readout_seed,
+                                       "per_airport": settings.select_per_airport, "spans_s": list(settings.spans_s)},
     drawn_from="a seeded draw of the airport's readout windows (real, of every span: D166 (33))")
 
 

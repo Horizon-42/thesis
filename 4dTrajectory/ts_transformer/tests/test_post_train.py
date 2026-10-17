@@ -24,6 +24,7 @@ from ts_transformer.experiments.post_train import (
 from ts_transformer.autopilot.start import Start, start_moved
 from ts_transformer.instructions.artefact import closed_loop_sentences
 from ts_transformer.post.branches import EQUAL, MINORITY_SIDE, continuation_numbers, first_numbers
+from ts_transformer.post.loss import DATA_WEIGHT
 from ts_transformer.post.scene import INSERTED, LEADER_MOVED, MOVED_START, NO_START_MOVE, REAL
 from ts_transformer.prior.checkpoint import claim_validation_read
 from ts_transformer.prior.source import ArtefactSource
@@ -179,7 +180,10 @@ def test_the_pass_reads_the_groups_file_by_file_a_few_at_a_time(setup, tmp_path)
     empty = tmp_path / "empty"
     empty.mkdir()
     assert train_pass(model, context, optimizer, empty, settings, np.random.default_rng(0), part_width=0) == {
-        "updates": 0, "passes": [{"updates": 0}]}
+        "updates": 0, "passes": [{"updates": 0}], "update_rows": [[]]}
+    (rows,) = passed["update_rows"]                                # D219 (4): a row an update
+    assert len(rows) == 3 and sum(r["words"] for r in rows) == passed["words"]
+    assert all(r["grad_norm"] > 0 and r["ratio_max"] > 0 and r["dual_clipped"] == 0 for r in rows)
     twice = train_pass(model, context, optimizer, directory, settings, np.random.default_rng(0), part_width=0, epochs=2)
     assert twice["updates"] == 6 and [p["updates"] for p in twice["passes"]] == [3, 3]      # D169: each pass's means
     assert twice["loss"] == pytest.approx(np.mean([p["loss"] for p in twice["passes"]]))
@@ -1527,12 +1531,13 @@ def test_stage_c_s_pass_clips_and_passes_as_its_settings_say(monkeypatch):
         here = replace(settings, method=post_train.LANDED_SENTENCES, segment_only=False,
                        branch_every_s=120.0) if landed else settings
         assert stage.train(None, context, None, None, here, rng, part_width=0, round_=0, companion=None) == {
-            "updates": 0, "passes": [{"updates": 0}, {"updates": 0}]}
+            "updates": 0, "passes": [{"updates": 0}, {"updates": 0}],
+            **({} if landed else {"update_rows": [[], []]})}                   # D219 (4): a branch pass's rows
         assert numbers[-2] is rng and numbers[-1] is not rng
     stage_d().train(None, context, None, None, SimpleNamespace(data_weight=1.0, group_weight=EQUAL, segment_only=False,
-                                                               branch_every_s=120.0),
+                                                               branch_every_s=120.0, clip_norm=2.0, dual_clip=None),
                     np.random.default_rng(0), part_width=0, round_=0, companion=None)
-    assert seen == [(0.5, 2), (0.5, 2), (None, 1)]
+    assert seen == [(0.5, 2), (0.5, 2), (2.0, 1)]                        # stage D's clip: its own setting (D219 (1))
     assert segments == [15, 15, None]          # D170: 60 s in 4 s rows, stage C's branch pass only; stage D's none
 
 
@@ -1909,4 +1914,8 @@ def test_a_pass_gives_its_data_weight_to_each_update(monkeypatch):
     post_train.train_pass(None, SimpleNamespace(base=None, data=None, device=None), None, None, None,
                           np.random.default_rng(0), part_width=0, data_weight=0.25)
     taken["step"](1, 2, 3, 4, 5)
-    assert given == {"data_weight": 0.25}
+    assert given == {"data_weight": 0.25, "dual_clip": None}
+    post_train.train_pass(None, SimpleNamespace(base=None, data=None, device=None), None, None, None,  # D219 (2)
+                          np.random.default_rng(0), part_width=0, dual_clip=1.5)
+    taken["step"](1, 2, 3, 4, 5)
+    assert given == {"data_weight": DATA_WEIGHT, "dual_clip": 1.5}
